@@ -83,18 +83,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
             {
                 _logger.Warning($"Config fetch authentication failed: {ex.Message}");
 
-                // Auth failure → use distress channel (pre-auth, works without cert)
-                if (_distressReporter != null)
-                {
-                    _ = _distressReporter.TrySendAsync(
-                        DistressErrorType.ConfigFetchDenied,
-                        ex.Message,
-                        httpStatusCode: ex.StatusCode);
-                }
-
-                // Feed the central auth-failure tracker so the agent can shut down cleanly
-                // after MaxAuthFailures / AuthFailureTimeoutMinutes is exceeded, instead of
-                // hammering the backend forever when the device certificate is revoked.
+                // V1 parity — AuthFailureTracker is the single dispatch point for auth-failure
+                // distress signals (see HandleAuthFailure in EventUploadOrchestrator). It sends
+                // the first-failure report via its constructor-injected DistressReporter with
+                // the correct DistressErrorType per status code (401 → AuthCertificateRejected,
+                // 403 → DeviceNotRegistered) and suppresses duplicates on subsequent failures.
                 _authFailureTracker?.RecordFailure(ex.StatusCode, "agent/config");
             }
             catch (Exception ex)

@@ -16,6 +16,8 @@ using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
+using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
@@ -206,12 +208,19 @@ namespace AutopilotMonitor.Agent.V2
             // set by --install, no session.id yet) as a ghost restart and trigger
             // ExecuteSelfDestruct before the remote-config fetch, deleting the ProgramData
             // directory on every fresh deployment.
+            var sessionPersistence = new SessionIdPersistence(dataDirectory);
             if (args.Contains("--new-session"))
             {
-                new SessionIdPersistence(dataDirectory).Delete(logger);
+                sessionPersistence.Delete(logger);
                 logger.Info("--new-session: cleared persisted SessionId.");
             }
-            agentConfig.SessionId = new SessionIdPersistence(dataDirectory).GetOrCreate(logger);
+            // Snapshot the WhiteGlove-resume state BEFORE GetOrCreate: on Part-2 resume we want
+            // to emit the whiteglove_resumed event AFTER orchestrator.Start. Reading the marker
+            // up front avoids racing any downstream clear. V1 parity — the Part-2 detection is
+            // marker-based, and the agent announces resume on the session timeline so that
+            // dashboards can correlate the session's two boots.
+            var isWhiteGloveResume = sessionPersistence.IsWhiteGloveResume();
+            agentConfig.SessionId = sessionPersistence.GetOrCreate(logger);
 
             // Build a cleanup-service factory used by guards: instantiated lazily and with the
             // current agentConfig so command-line overrides (e.g. --no-cleanup) take effect.
@@ -310,11 +319,14 @@ namespace AutopilotMonitor.Agent.V2
             // defaults on AgentConfiguration; UpdateLimits is called after RemoteConfigMerger.Merge
             // so tenant-policy overrides take effect. ThresholdExceeded is wired below, once the
             // shutdown signal is available, to trigger a clean agent exit when the limit is hit.
+            // V1 parity — the distress reporter is plumbed in at construction so the tracker is
+            // the single dispatch point for auth-failure distress (first failure only).
             var authFailureTracker = new AuthFailureTracker(
                 maxFailures: agentConfig.MaxAuthFailures,
                 timeoutMinutes: agentConfig.AuthFailureTimeoutMinutes,
                 clock: SystemClock.Instance,
-                logger: logger);
+                logger: logger,
+                distressReporter: distressReporter);
 
             var remoteConfigService = new RemoteConfigService(
                 backendApiClient, agentConfig.TenantId, logger, emergencyReporter, distressReporter, authFailureTracker);
@@ -323,8 +335,10 @@ namespace AutopilotMonitor.Agent.V2
             // Project remote tenant-controlled knobs onto the runtime AgentConfiguration so that
             // downstream consumers (CleanupService, SummaryDialogLauncher, StartupEnvironmentProbes,
             // DiagnosticsPackageService, EnrollmentTerminationHandler, the logger, the watchdog)
-            // actually respect the tenant admin settings. CLI flags stay authoritative over remote.
-            RemoteConfigMerger.Merge(agentConfig, remoteConfig, args);
+            // actually respect the tenant admin settings. V1 parity — remote wins
+            // unconditionally for every knob that has a 1:1 mapping. CLI flags seed the initial
+            // AgentConfiguration in BuildAgentConfiguration and then yield to tenant policy.
+            var configMergeResult = RemoteConfigMerger.Merge(agentConfig, remoteConfig, logger);
 
             // Refresh tracker ceilings with the tenant-specific values we just merged in.
             authFailureTracker.UpdateLimits(agentConfig.MaxAuthFailures, agentConfig.AuthFailureTimeoutMinutes);
@@ -338,10 +352,32 @@ namespace AutopilotMonitor.Agent.V2
                 SelfUpdater.BackendExpectedSha256 = remoteConfig.LatestAgentSha256;
 
             // Post-config binary-integrity check: verify the running EXE's SHA-256 against the
-            // value advertised by the backend. Mismatch does not terminate (SelfUpdater's own
-            // hash-based trigger covers the "wrong EXE" case at next startup) — we just emit an
-            // IntegrityCheckFailed error report so operators see the drift.
-            var integrityResult = BinaryIntegrityVerifier.Check(remoteConfig.LatestAgentExeSha256, logger);
+            // value advertised by the backend. V1 parity — on mismatch we (a) emit an
+            // IntegrityCheckFailed emergency report and (b) fire the runtime self-update trigger
+            // so the agent auto-heals (SelfUpdater.CheckAndApplyUpdateAsync force-update path).
+            // The trigger is single-shot per process (Interlocked guard inside the verifier).
+            var agentDirForTrigger = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty;
+            Func<string, bool, Task> runtimeSelfUpdateTrigger = (zipHash, downgrade) =>
+            {
+                if (!string.IsNullOrEmpty(zipHash))
+                    SelfUpdater.BackendExpectedSha256 = zipHash;
+
+                return SelfUpdater.CheckAndApplyUpdateAsync(
+                    currentVersion: GetAgentVersion(),
+                    agentDir: agentDirForTrigger,
+                    consoleMode: consoleMode,
+                    forceUpdate: true,
+                    triggerReason: "runtime_hash_mismatch",
+                    downloadTimeoutMsOverride: 60000,
+                    allowDowngrade: downgrade);
+            };
+
+            var integrityResult = BinaryIntegrityVerifier.Check(
+                expectedSha256: remoteConfig.LatestAgentExeSha256,
+                logger: logger,
+                runtimeSelfUpdateTrigger: runtimeSelfUpdateTrigger,
+                zipHash: remoteConfig.LatestAgentSha256,
+                allowDowngrade: remoteConfig.AllowAgentDowngrade);
             if (integrityResult.IsMismatch)
             {
                 _ = emergencyReporter.TrySendAsync(
@@ -393,6 +429,34 @@ namespace AutopilotMonitor.Agent.V2
             {
                 logger.Error("BackendTelemetryUploader construction failed.", ex);
                 return 5;
+            }
+
+            // V1 parity (MonitoringService.Start, MonitoringService.RegisterSessionAsync) —
+            // POST /api/agent/register-session with 5-retry exponential backoff (2s/4s/8s/16s)
+            // BEFORE the orchestrator starts. Without this call the backend's Sessions table
+            // never gets a row for this session, so IncrementSessionEventCountAsync /
+            // UpdateSessionStatusAsync silently no-op — events still land in the Events table
+            // but session status, phase, admin-overrides and validator reconcile all break.
+            // On failure we follow V1's rule: collectors MUST NOT start to prevent orphaned events.
+            var registrationResult = SessionRegistrationHelper.RegisterWithRetryAsync(
+                apiClient: backendApiClient,
+                agentConfig: agentConfig,
+                agentVersion: GetAgentVersion(),
+                logger: logger,
+                authFailureTracker: authFailureTracker,
+                emergencyReporter: emergencyReporter).GetAwaiter().GetResult();
+
+            if (registrationResult.Outcome != SessionRegistrationOutcome.Succeeded)
+            {
+                logger.Error(
+                    $"=== SESSION REGISTRATION FAILED ({registrationResult.Outcome}: {registrationResult.ErrorMessage}) — " +
+                    "collectors will NOT start to prevent orphaned events. ===");
+                if (consoleMode)
+                    Console.Error.WriteLine($"FATAL: session registration failed ({registrationResult.Outcome}). Agent exiting.");
+                try { mtlsHttpClient?.Dispose(); } catch { }
+                try { backendApiClient?.Dispose(); } catch { }
+                // Exit code differs so the diag skill can distinguish Auth vs Network in Scheduled-Task history.
+                return registrationResult.Outcome == SessionRegistrationOutcome.AuthFailed ? 6 : 7;
             }
 
             var classifiers = new IClassifier[]
@@ -461,7 +525,9 @@ namespace AutopilotMonitor.Agent.V2
                         cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
                         uploadDiagnosticsAsync: uploadDiagnosticsAsync,
                         signalShutdown: () => shutdown.Set(),
-                        analyzerManager: analyzerManager);
+                        analyzerManager: analyzerManager,
+                        emitEvent: evt => orchestrator.EventEmitter.Emit(evt),
+                        sessionPersistence: sessionPersistence);
 
                     // ServerActionDispatcher — handlers are live and the M4.6.ε response-parse
                     // path below feeds it. RotateConfig refetches remote config;
@@ -522,14 +588,85 @@ namespace AutopilotMonitor.Agent.V2
 
                     Console.CancelKeyPress += cancelHandler;
                     AppDomain.CurrentDomain.ProcessExit += processExitHandler;
+
+                    // V1 parity — on the max-lifetime watchdog firing, emit an explicit
+                    // `enrollment_failed` event with failureType=agent_timeout BEFORE the
+                    // regular termination path runs. Dashboards + KQL queries key on the
+                    // event type + data dictionary to distinguish a genuine enrollment failure
+                    // from a timeout-triggered shutdown.
+                    EventHandler<EnrollmentTerminatedEventArgs> maxLifetimeEmitter = (s, e) =>
+                    {
+                        if (e.Reason != EnrollmentTerminationReason.MaxLifetimeExceeded) return;
+                        try
+                        {
+                            var uptimeMin = (DateTime.UtcNow - agentStartTimeUtc).TotalMinutes;
+                            orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                            {
+                                SessionId = agentConfig.SessionId,
+                                TenantId = agentConfig.TenantId,
+                                EventType = "enrollment_failed",
+                                Severity = EventSeverity.Error,
+                                Source = "EnrollmentOrchestrator",
+                                Phase = EnrollmentPhase.Complete,
+                                Message = $"Agent max lifetime expired ({uptimeMin:F0} min) — enrollment did not complete in time",
+                                Data = new System.Collections.Generic.Dictionary<string, object>
+                                {
+                                    { "failureType", "agent_timeout" },
+                                    { "failureSource", "max_lifetime_timer" },
+                                    { "agentUptimeMinutes", Math.Round(uptimeMin, 1) },
+                                    { "agentMaxLifetimeMinutes", agentConfig.AgentMaxLifetimeMinutes },
+                                    { "stageAtTimeout", e.StageName ?? string.Empty },
+                                },
+                                ImmediateUpload = true,
+                            });
+                        }
+                        catch (Exception emitEx)
+                        {
+                            logger.Warning($"enrollment_failed (max_lifetime) emission failed: {emitEx.Message}");
+                        }
+                    };
+                    orchestrator.Terminated += maxLifetimeEmitter;
                     orchestrator.Terminated += terminationHandler.Handle;
 
                     // Auth-failure watchdog: when MaxAuthFailures / AuthFailureTimeoutMinutes
                     // is exceeded the agent must shut down cleanly instead of hammering a
                     // backend that has definitely said no. Event fires at most once.
+                    // V1 parity — emit a structured `agent_shutdown` event with reason=auth_failure
+                    // and the full telemetry payload before tripping the shutdown signal so the
+                    // backend sees WHY the agent terminated in the session timeline.
                     EventHandler<AuthFailureThresholdEventArgs> authThresholdHandler = (s, e) =>
                     {
                         logger.Error($"Auth-failure threshold exceeded ({e.Reason}) — initiating shutdown.");
+                        try
+                        {
+                            orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                            {
+                                SessionId = agentConfig.SessionId,
+                                TenantId = agentConfig.TenantId,
+                                EventType = "agent_shutdown",
+                                Severity = EventSeverity.Error,
+                                Source = "AuthFailureTracker",
+                                Phase = EnrollmentPhase.Unknown,
+                                Message = $"Agent shut down after {e.ConsecutiveFailures} consecutive auth failures",
+                                Data = new System.Collections.Generic.Dictionary<string, object>
+                                {
+                                    { "reason", "auth_failure" },
+                                    { "consecutiveFailures", e.ConsecutiveFailures },
+                                    { "firstFailureTime", e.FirstFailureUtc.ToString("o") },
+                                    { "maxFailures", agentConfig.MaxAuthFailures },
+                                    { "timeoutMinutes", agentConfig.AuthFailureTimeoutMinutes },
+                                    { "lastOperation", e.LastOperation ?? string.Empty },
+                                    { "lastStatusCode", e.LastStatusCode },
+                                    { "thresholdReason", e.Reason ?? string.Empty },
+                                },
+                                ImmediateUpload = true,
+                            });
+                        }
+                        catch (Exception emitEx)
+                        {
+                            logger.Warning($"agent_shutdown emission failed: {emitEx.Message}");
+                        }
+
                         shutdown.Set();
                     };
                     authFailureTracker.ThresholdExceeded += authThresholdHandler;
@@ -553,6 +690,59 @@ namespace AutopilotMonitor.Agent.V2
                         // Emit the agent_version_check event now that the EventEmitter is alive.
                         // VersionCheckEventBuilder.TryBuild is a no-op when no markers are present.
                         EmitVersionCheckEventIfAny(orchestrator, agentConfig, logger);
+
+                        // V1 parity (MonitoringService.AuditUnrestrictedModeChange) — whenever the
+                        // remote tenant admin flips the UnrestrictedMode guardrail, emit an audit
+                        // event so the change is visible in the session timeline and downstream
+                        // alerting. Fires AFTER orchestrator.Start so the EventEmitter is alive.
+                        EmitUnrestrictedModeAuditIfChanged(orchestrator, agentConfig, configMergeResult, logger);
+
+                        // V1 parity — agent_started lifecycle event. Purely informational
+                        // (Phase=Unknown); the session timeline and downstream alerting rely on
+                        // it to classify the boot.
+                        EmitAgentStartedEvent(orchestrator, agentConfig, previousExit, logger);
+
+                        // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
+                        // SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge — that
+                        // reducer effect emits whiteglove_resumed on the timeline. We only need
+                        // to clear the persisted marker here.
+                        if (isWhiteGloveResume)
+                        {
+                            try { sessionPersistence.ClearWhiteGloveComplete(logger); }
+                            catch (Exception ex) { logger.Debug($"ClearWhiteGloveComplete threw: {ex.Message}"); }
+                        }
+
+                        // Reboot mid-session: post SystemRebootObserved so the reducer records
+                        // the fact and emits the system_reboot_detected timeline entry.
+                        if (string.Equals(previousExit?.ExitType, "reboot_kill", StringComparison.OrdinalIgnoreCase))
+                        {
+                            PostSystemRebootObservedSignal(orchestrator.IngressSink, previousExit, logger);
+                        }
+
+                        // V2 parity — post SessionStarted so the reducer establishes the session anchor
+                        // (HandleSessionStartedV1 in DecisionEngine.Shared.cs). Skipped on:
+                        //   - WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
+                        //     SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge.
+                        //   - Admin preemption: the AdminPreemptionDetected signal below drives the
+                        //     session straight to a terminal stage; SessionStarted first would be noise.
+                        if (!isWhiteGloveResume && string.IsNullOrEmpty(registrationResult.AdminAction))
+                        {
+                            PostSessionStartedSignal(orchestrator.IngressSink, registrationResult, agentConfig, logger);
+                        }
+
+                        // V1 parity (MonitoringService.cs:388-413 "ADMIN OVERRIDE on startup") —
+                        // if the register-session response carried an AdminAction the operator
+                        // has already marked the session terminal via the portal. Post
+                        // AdminPreemptionDetected so the reducer transitions Stage to Completed /
+                        // Failed and emits the enrollment_complete/_failed timeline event as a
+                        // side effect. The orchestrator's DecisionStepProcessor picks up the
+                        // terminal stage and raises Terminated, which runs the termination
+                        // pipeline (cleanup + summary + self-destruct) through the subscribed
+                        // handler — no direct synthesis needed.
+                        if (!string.IsNullOrEmpty(registrationResult.AdminAction))
+                        {
+                            PostAdminPreemptionSignal(orchestrator.IngressSink, registrationResult, logger);
+                        }
 
                         // M4.6.δ — fire-and-forget startup analyzers (LocalAdmin / SoftwareInventory /
                         // IntegrityBypass). Runs on a background task inside AgentAnalyzerManager.
@@ -586,6 +776,7 @@ namespace AutopilotMonitor.Agent.V2
                         Console.CancelKeyPress -= cancelHandler;
                         AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
                         orchestrator.Terminated -= terminationHandler.Handle;
+                        orchestrator.Terminated -= maxLifetimeEmitter;
                         authFailureTracker.ThresholdExceeded -= authThresholdHandler;
 
                         try { orchestrator.Stop(); }
@@ -671,6 +862,224 @@ namespace AutopilotMonitor.Agent.V2
             };
         }
 
+        /// <summary>
+        /// V1 parity — when <see cref="RemoteConfigMerger"/> flips the tenant-controlled
+        /// <c>UnrestrictedMode</c> guardrail, surface the transition as an auditable event on
+        /// the session timeline so operators can correlate subsequent gather-rule exec with the
+        /// elevated policy. The V1 code lives in
+        /// <c>MonitoringService.AuditUnrestrictedModeChange</c>.
+        /// </summary>
+        private static void EmitUnrestrictedModeAuditIfChanged(
+            EnrollmentOrchestrator orchestrator,
+            AgentConfiguration agentConfig,
+            RemoteConfigMergeResult mergeResult,
+            AgentLogger logger)
+        {
+            if (mergeResult == null || !mergeResult.UnrestrictedModeChanged) return;
+
+            try
+            {
+                var newValue = mergeResult.NewUnrestrictedMode;
+                logger.Warning(
+                    $"UnrestrictedMode changed: {mergeResult.OldUnrestrictedMode} → {newValue}. Emitting audit event.");
+
+                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                {
+                    SessionId = agentConfig.SessionId,
+                    TenantId = agentConfig.TenantId,
+                    EventType = "agent_unrestricted_mode_changed",
+                    Severity = newValue ? EventSeverity.Warning : EventSeverity.Info,
+                    Source = "RemoteConfigMerger",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = newValue
+                        ? "Agent unrestricted mode ENABLED — gather rules can now execute without AllowList checks"
+                        : "Agent unrestricted mode disabled — gather rules revert to AllowList checks",
+                    Data = new System.Collections.Generic.Dictionary<string, object>
+                    {
+                        { "oldValue", mergeResult.OldUnrestrictedMode },
+                        { "newValue", newValue },
+                        { "changedAtUtc", DateTime.UtcNow.ToString("o") },
+                    },
+                    ImmediateUpload = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"EmitUnrestrictedModeAuditIfChanged: emission failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// V2 parity — post <see cref="DecisionSignalKind.AdminPreemptionDetected"/> when the
+        /// register-session response carried an <c>AdminAction</c>. The reducer handler at
+        /// DecisionEngine.Shared.cs#HandleAdminPreemptionDetectedV1 transitions Stage to the
+        /// terminal state and emits the enrollment_complete/_failed telemetry event; the
+        /// orchestrator's DecisionStepProcessor then raises the Terminated event, which the
+        /// subscribed <c>EnrollmentTerminationHandler</c> picks up — no direct synthesis needed.
+        /// </summary>
+        private static void PostAdminPreemptionSignal(
+            ISignalIngressSink ingressSink,
+            SessionRegistrationResult registrationResult,
+            AgentLogger logger)
+        {
+            try
+            {
+                var adminOutcome = registrationResult.AdminAction; // "Succeeded" | "Failed"
+                logger.Warning(
+                    $"=== ADMIN OVERRIDE on startup: session already marked as {adminOutcome} by administrator — posting AdminPreemptionDetected signal ===");
+
+                ingressSink.Post(
+                    kind: DecisionSignalKind.AdminPreemptionDetected,
+                    occurredAtUtc: DateTime.UtcNow,
+                    sourceOrigin: "register_session_response",
+                    evidence: new Evidence(
+                        kind: EvidenceKind.Synthetic,
+                        identifier: $"admin_preemption:{adminOutcome}",
+                        summary: $"Operator marked session as {adminOutcome} via portal before agent startup."),
+                    payload: new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["adminOutcome"] = adminOutcome,
+                    });
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"AdminPreemptionDetected post failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// V2 parity — post a <see cref="DecisionSignalKind.SessionStarted"/> signal with the
+        /// tenant-registered session metadata (EnrollmentType / IsHybridJoin / ValidatedBy) so the
+        /// reducer's session-anchor handler runs. Without this the DecisionState.Stage stays at
+        /// the initial value and subsequent raw signals (ESP / Hello) see an uninitialised session.
+        /// </summary>
+        internal static void PostSessionStartedSignal(
+            ISignalIngressSink ingressSink,
+            SessionRegistrationResult registrationResult,
+            AgentConfiguration agentConfig,
+            AgentLogger logger)
+        {
+            try
+            {
+                var payload = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["enrollmentType"] = EnrollmentRegistryDetector.DetectEnrollmentType(),
+                    ["isHybridJoin"] = EnrollmentRegistryDetector.DetectHybridJoin() ? "true" : "false",
+                    ["validatedBy"] = registrationResult.ValidatedBy.ToString(),
+                    ["agentVersion"] = GetAgentVersion(),
+                    ["isBootstrapSession"] = agentConfig.UseBootstrapTokenAuth ? "true" : "false",
+                };
+
+                var evidence = new Evidence(
+                    kind: EvidenceKind.Synthetic,
+                    identifier: "register_session_success",
+                    summary: "Session registration handshake succeeded; posting SessionStarted anchor for reducer.");
+
+                ingressSink.Post(
+                    kind: DecisionSignalKind.SessionStarted,
+                    occurredAtUtc: DateTime.UtcNow,
+                    sourceOrigin: "Program.RunAgent",
+                    evidence: evidence,
+                    payload: payload);
+
+                logger.Debug($"SessionStarted signal posted (validatedBy={registrationResult.ValidatedBy}, enrollmentType={payload["enrollmentType"]}).");
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"SessionStarted post failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// V1 parity — fire-and-forget <c>agent_started</c> event emitted after
+        /// <see cref="EnrollmentOrchestrator.Start"/>. Carries a snapshot of the boot classification
+        /// (<paramref name="previousExit"/>) and the tenant-influenced runtime knobs so dashboards
+        /// can classify crash-loops, backend-rejected sessions and forced self-destruct runs.
+        /// Phase stays <see cref="EnrollmentPhase.Unknown"/> — the event is NOT a phase declaration.
+        /// </summary>
+        private static void EmitAgentStartedEvent(
+            EnrollmentOrchestrator orchestrator,
+            AgentConfiguration agentConfig,
+            PreviousExitSummary previousExit,
+            AgentLogger logger)
+        {
+            try
+            {
+                var data = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "agentVersion", GetAgentVersion() },
+                    { "commandLineArgs", agentConfig.CommandLineArgs ?? string.Empty },
+                    { "isBootstrapSession", agentConfig.UseBootstrapTokenAuth },
+                    { "awaitEnrollment", agentConfig.AwaitEnrollment },
+                    { "selfDestructOnComplete", agentConfig.SelfDestructOnComplete },
+                    { "certAuth", !agentConfig.UseBootstrapTokenAuth },
+                    { "agentMaxLifetimeMinutes", agentConfig.AgentMaxLifetimeMinutes },
+                    { "diagnosticsUploadMode", agentConfig.DiagnosticsUploadMode ?? "Off" },
+                    { "previousExitType", previousExit?.ExitType ?? "unknown" },
+                    { "unrestrictedMode", agentConfig.UnrestrictedMode },
+                };
+
+                if (!string.IsNullOrEmpty(previousExit?.CrashExceptionType))
+                    data["previousCrashException"] = previousExit.CrashExceptionType;
+
+                if (previousExit?.LastBootUtc.HasValue == true)
+                    data["previousBootUtc"] = previousExit.LastBootUtc.Value.ToString("o");
+
+                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                {
+                    SessionId = agentConfig.SessionId,
+                    TenantId = agentConfig.TenantId,
+                    EventType = "agent_started",
+                    Severity = EventSeverity.Info,
+                    Source = "AutopilotMonitor.Agent.V2",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Agent v{GetAgentVersion()} started (previousExit={previousExit?.ExitType ?? "unknown"}).",
+                    Data = data,
+                    ImmediateUpload = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"agent_started emission failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// V2 parity — post <see cref="DecisionSignalKind.SystemRebootObserved"/> when the prior
+        /// agent process was terminated by an OS reboot. The reducer handler at
+        /// DecisionEngine.Edge.cs#HandleSystemRebootObservedV1 records the reboot fact on the
+        /// state (used by the WhiteGlove reboot-observed scoring weight, plan §2.4) and emits
+        /// the <c>system_reboot_detected</c> telemetry event as a side effect.
+        /// </summary>
+        private static void PostSystemRebootObservedSignal(
+            ISignalIngressSink ingressSink,
+            PreviousExitSummary previousExit,
+            AgentLogger logger)
+        {
+            try
+            {
+                var payload = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["previousExitType"] = previousExit?.ExitType ?? string.Empty,
+                    ["lastBootUtc"] = previousExit?.LastBootUtc?.ToString("o") ?? string.Empty,
+                };
+
+                ingressSink.Post(
+                    kind: DecisionSignalKind.SystemRebootObserved,
+                    occurredAtUtc: DateTime.UtcNow,
+                    sourceOrigin: "Program.DetectPreviousExit",
+                    evidence: new Evidence(
+                        kind: EvidenceKind.Synthetic,
+                        identifier: "previous_exit_reboot_kill",
+                        summary: $"Prior agent process terminated by OS reboot (exitType={previousExit?.ExitType})."),
+                    payload: payload);
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"SystemRebootObserved post failed: {ex.Message}");
+            }
+        }
+
         private static void EmitVersionCheckEventIfAny(
             EnrollmentOrchestrator orchestrator,
             AgentConfiguration agentConfig,
@@ -704,7 +1113,7 @@ namespace AutopilotMonitor.Agent.V2
 
         // ---------------------------------------------------------------- Configuration
 
-        private static AgentConfiguration BuildAgentConfiguration(
+        internal static AgentConfiguration BuildAgentConfiguration(
             string[] args,
             string tenantId,
             string sessionId,
@@ -714,6 +1123,20 @@ namespace AutopilotMonitor.Agent.V2
             var apiBaseUrl = GetArgValue(args, "--api-url", "--backend-api") ?? Constants.ApiBaseUrl;
             var imeLogPathOverride = GetArgValue(args, "--ime-log-path");
             var imeMatchLogPath = GetArgValue(args, "--ime-match-log");
+
+            // Dev / test — IME log replay (V1 compat mode). Feeds ImeLogTracker.SimulationMode
+            // + SpeedFactor so recorded raw IME logs are replayed at an accelerated rate; signal
+            // timestamps + ingress ordinals are regenerated as the replay runs.
+            var replayLogDir = GetArgValue(args, "--replay-log-dir");
+            var replaySpeedFactorRaw = GetArgValue(args, "--replay-speed-factor");
+            var replaySpeedFactor = 50.0;
+            if (!string.IsNullOrEmpty(replaySpeedFactorRaw)
+                && double.TryParse(replaySpeedFactorRaw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var parsedSpeed)
+                && parsedSpeed > 0)
+            {
+                replaySpeedFactor = parsedSpeed;
+            }
 
             var bootstrapToken = GetArgValue(args, "--bootstrap-token")
                 ?? bootstrapConfig?.BootstrapToken;
@@ -760,6 +1183,8 @@ namespace AutopilotMonitor.Agent.V2
                 KeepLogFile = keepLogFile,
                 SelfDestructOnComplete = !noCleanup,
                 CommandLineArgs = FormatArgsForLog(args),
+                ReplayLogDir = replayLogDir,
+                ReplaySpeedFactor = replaySpeedFactor,
             };
         }
 
@@ -860,6 +1285,10 @@ namespace AutopilotMonitor.Agent.V2
             Console.Out.WriteLine("  --api-url <URL>                   Override backend API base URL (alias: --backend-api)");
             Console.Out.WriteLine("  --ime-log-path <PATH>             Override IME logs directory");
             Console.Out.WriteLine("  --ime-match-log <PATH>            Write matched IME log lines to file (debug)");
+            Console.Out.WriteLine();
+            Console.Out.WriteLine("Dev / Test:");
+            Console.Out.WriteLine("  --replay-log-dir <PATH>           Replay IME logs from this directory (simulation mode)");
+            Console.Out.WriteLine("  --replay-speed-factor <N>         Time-compression factor for log replay (default: 50)");
         }
 
         private static void PrintVersion()

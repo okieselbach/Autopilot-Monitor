@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,8 +10,10 @@ using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Runtime;
+using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Termination
 {
@@ -17,28 +21,36 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
     /// Orchestrates peripheral termination work in response to
     /// <see cref="EnrollmentOrchestrator.Terminated"/>. Plan §4.x M4.6.β.
     /// <para>
-    /// <b>Sequence</b> (Legacy parity — single-writer, best-effort each step, never throws):
+    /// <b>Sequence</b> (V1 parity — single-writer, best-effort each step, never throws):
     /// </para>
     /// <list type="number">
+    ///   <item>Run shutdown analyzers (optional) so their delta events land before diagnostics.</item>
     ///   <item>Compose <see cref="FinalStatus"/> via <see cref="FinalStatusBuilder"/>.</item>
-    ///   <item>Write final-status.json + launch SummaryDialog via <see cref="SummaryDialogLauncher"/>.</item>
-    ///   <item>Upload diagnostics via <see cref="DiagnosticsPackageService"/> (respects
-    ///     <c>DiagnosticsUploadMode</c>: Off / Always / OnFailure).</item>
-    ///   <item>Write <c>enrollment-complete.marker</c> (so ghost-restart detection on next boot
-    ///     exits cleanly even if <see cref="CleanupService"/> failed).</item>
+    ///   <item>Write final-status.json + launch <see cref="SummaryDialogLauncher"/> if configured.</item>
+    ///   <item>Emit <c>enrollment_summary_shown</c> event once the dialog has been handed to the user session.</item>
+    ///   <item><see cref="Task.Delay(int)"/> 2s grace so late events can land before the next step.</item>
+    ///   <item>Emit <c>diagnostics_collecting</c> → upload diagnostics → emit <c>diagnostics_uploaded</c> / <c>diagnostics_upload_failed</c>.</item>
+    ///   <item>Write <c>enrollment-complete.marker</c> (ghost-restart guard on next boot).</item>
+    ///   <item>Standalone-reboot path: if <c>RebootOnComplete &amp;&amp; !SelfDestructOnComplete</c> emit
+    ///     <c>reboot_triggered</c>, drain spool, call <c>shutdown.exe /r /t &lt;delay&gt;</c>.</item>
     ///   <item>Run <see cref="CleanupService.ExecuteSelfDestruct"/> — UNLESS the stage is
-    ///     <see cref="SessionStage.WhiteGloveSealed"/> (Part 1 exit, session resumes Part 2).</item>
-    ///   <item>Signal the caller-owned shutdown <see cref="ManualResetEventSlim"/> so Program.cs'
-    ///     main loop exits the <c>shutdown.Wait()</c> and calls <c>orchestrator.Stop()</c>.</item>
+    ///     <see cref="SessionStage.WhiteGloveSealed"/> (Part-1 exit, session resumes Part 2).</item>
+    ///   <item>WhiteGlove Part-1 path: emit <c>whiteglove_part1_complete</c>, drain spool, and
+    ///     write <c>whiteglove.complete</c> marker via <see cref="SessionIdPersistence.SaveWhiteGloveComplete"/>
+    ///     so Part-2 resume is detected on the next boot.</item>
+    ///   <item>Signal the caller-owned shutdown <see cref="ManualResetEventSlim"/>.</item>
     /// </list>
     /// <para>
     /// Each step logs + continues on failure — nothing in here is allowed to prevent the agent
-    /// from shutting down. CleanupService is fire-and-forget (spawns a PowerShell cleanup script
-    /// that waits for process exit); this handler does not block waiting for the script.
+    /// from shutting down. <see cref="CleanupService"/> is fire-and-forget (spawns a PowerShell
+    /// cleanup script that waits for process exit); this handler does not block waiting for it.
     /// </para>
     /// </summary>
     public sealed class EnrollmentTerminationHandler
     {
+        private static readonly TimeSpan DefaultLateEventGrace = TimeSpan.FromMilliseconds(2000);
+        private static readonly TimeSpan DefaultSpoolDrain = TimeSpan.FromMilliseconds(10000); // V1 parity: up to 20 × 500ms drains before shutdown.exe
+
         private readonly AgentConfiguration _configuration;
         private readonly AgentLogger _logger;
         private readonly string _stateDirectory;
@@ -50,6 +62,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly Action _signalShutdown;
         private readonly string _dialogExePathOverride;
         private readonly AgentAnalyzerManager _analyzerManager;
+        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly SessionIdPersistence _sessionPersistence;
+        private readonly Action<int> _triggerReboot;
+        private readonly TimeSpan _lateEventGracePeriod;
+        private readonly TimeSpan _spoolDrainPeriod;
 
         private int _handled;
 
@@ -64,7 +81,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             Func<bool, string, Task<DiagnosticsUploadResult>> uploadDiagnosticsAsync,
             Action signalShutdown,
             string dialogExePathOverride = null,
-            AgentAnalyzerManager analyzerManager = null)
+            AgentAnalyzerManager analyzerManager = null,
+            Action<EnrollmentEvent> emitEvent = null,
+            SessionIdPersistence sessionPersistence = null,
+            Action<int> triggerReboot = null,
+            TimeSpan? lateEventGracePeriod = null,
+            TimeSpan? spoolDrainPeriod = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -77,6 +99,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _signalShutdown = signalShutdown ?? throw new ArgumentNullException(nameof(signalShutdown));
             _dialogExePathOverride = dialogExePathOverride;
             _analyzerManager = analyzerManager;
+            _emitEvent = emitEvent;
+            _sessionPersistence = sessionPersistence;
+            _triggerReboot = triggerReboot ?? DefaultTriggerReboot;
+            _lateEventGracePeriod = lateEventGracePeriod ?? DefaultLateEventGrace;
+            _spoolDrainPeriod = spoolDrainPeriod ?? DefaultSpoolDrain;
         }
 
         /// <summary>
@@ -85,6 +112,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         public void Handle(object sender, EnrollmentTerminatedEventArgs args)
         {
             if (Interlocked.Exchange(ref _handled, 1) == 1) return;
+
+            var isWhiteGlovePart1 = args.StageName == SessionStage.WhiteGloveSealed.ToString();
 
             try
             {
@@ -107,8 +136,35 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     RunBuildAndLaunchDialog(state, args);
                 }
 
-                RunUploadDiagnostics(args);
+                // WhiteGlove Part-1 exit: keep the session alive, but announce the handoff so
+                // the timeline clearly marks the transition. The `whiteglove.complete` marker
+                // lets the next agent boot classify itself as a Part-2 resume.
+                if (isWhiteGlovePart1)
+                {
+                    EmitEventSafe(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = "whiteglove_part1_complete",
+                        Severity = EventSeverity.Info,
+                        Source = "EnrollmentTerminationHandler",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = "WhiteGlove Part 1 complete — device will seal for end-user.",
+                        ImmediateUpload = true,
+                    });
+
+                    DelayLateEventGrace();
+                    DrainSpool();
+
+                    TrySaveWhiteGloveComplete();
+                    return;
+                }
+
+                DelayLateEventGrace();
+
+                RunUploadDiagnosticsWithEvents(args);
                 WriteEnrollmentCompleteMarker(args);
+                RunStandaloneRebootIfRequested();
                 RunSelfDestructIfAppropriate(args);
             }
             catch (Exception ex)
@@ -166,6 +222,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 var packages = TryGetPackageStates();
                 var status = FinalStatusBuilder.Build(state, args, packages, _agentStartTimeUtc);
                 SummaryDialogLauncher.WriteAndLaunch(status, _configuration, _stateDirectory, _logger, _dialogExePathOverride);
+
+                if (_configuration.ShowEnrollmentSummary)
+                {
+                    EmitEventSafe(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = "enrollment_summary_shown",
+                        Severity = EventSeverity.Info,
+                        Source = "EnrollmentTerminationHandler",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = "Enrollment summary dialog shown to user.",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "totalApps", status?.AppSummary?.TotalApps ?? 0 },
+                            { "errorCount", status?.AppSummary?.ErrorCount ?? 0 },
+                            { "outcome", status?.Outcome ?? string.Empty },
+                            { "timeoutSeconds", _configuration.EnrollmentSummaryTimeoutSeconds },
+                        },
+                        ImmediateUpload = true,
+                    });
+                }
             }
             catch (Exception ex)
             {
@@ -173,7 +251,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             }
         }
 
-        private void RunUploadDiagnostics(EnrollmentTerminatedEventArgs args)
+        private void RunUploadDiagnosticsWithEvents(EnrollmentTerminatedEventArgs args)
         {
             var mode = _configuration.DiagnosticsUploadMode ?? "Off";
             if (!_configuration.DiagnosticsUploadEnabled || string.Equals(mode, "Off", StringComparison.OrdinalIgnoreCase))
@@ -189,18 +267,74 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 return;
             }
 
+            EmitEventSafe(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = "diagnostics_collecting",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTerminationHandler",
+                Phase = EnrollmentPhase.Unknown,
+                Message = "Collecting diagnostics package.",
+                Data = new Dictionary<string, object>
+                {
+                    { "mode", mode },
+                    { "enrollmentSucceeded", enrollmentSucceeded },
+                },
+                ImmediateUpload = true,
+            });
+
+            DiagnosticsUploadResult result = null;
             try
             {
                 var suffix = enrollmentSucceeded ? "success" : "failure";
-                var result = _uploadDiagnosticsAsync(enrollmentSucceeded, suffix).GetAwaiter().GetResult();
-                if (result != null && result.Success)
-                    _logger.Info($"EnrollmentTerminationHandler: diagnostics uploaded (blob={result.BlobName}).");
-                else
-                    _logger.Warning($"EnrollmentTerminationHandler: diagnostics upload returned failure: {result?.ErrorCode ?? "null-result"}.");
+                result = _uploadDiagnosticsAsync(enrollmentSucceeded, suffix).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
                 _logger.Warning($"EnrollmentTerminationHandler: diagnostics upload threw: {ex.Message}");
+            }
+
+            if (result != null && result.Success)
+            {
+                _logger.Info($"EnrollmentTerminationHandler: diagnostics uploaded (blob={result.BlobName}).");
+                EmitEventSafe(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = "diagnostics_uploaded",
+                    Severity = EventSeverity.Info,
+                    Source = "EnrollmentTerminationHandler",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Diagnostics package uploaded ({result.BlobName}).",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "blobName", result.BlobName ?? string.Empty },
+                        { "sasUrlPrefix", result.SasUrlPrefix ?? string.Empty },
+                    },
+                    ImmediateUpload = true,
+                });
+            }
+            else
+            {
+                var errorCode = result?.ErrorCode ?? "null-result";
+                _logger.Warning($"EnrollmentTerminationHandler: diagnostics upload failed: {errorCode}.");
+                EmitEventSafe(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = "diagnostics_upload_failed",
+                    Severity = EventSeverity.Warning,
+                    Source = "EnrollmentTerminationHandler",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Diagnostics upload failed: {errorCode}.",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "errorCode", errorCode },
+                        { "blobName", result?.BlobName ?? string.Empty },
+                    },
+                    ImmediateUpload = true,
+                });
             }
         }
 
@@ -228,6 +362,48 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             }
         }
 
+        /// <summary>
+        /// V1 parity — standalone-reboot flow. When the tenant config disables self-destruct
+        /// but enables <c>RebootOnComplete</c>, the agent's final act is <c>shutdown.exe /r</c>
+        /// with the configured delay, giving the user a visible countdown.
+        /// </summary>
+        private void RunStandaloneRebootIfRequested()
+        {
+            if (_configuration.SelfDestructOnComplete) return;
+            if (!_configuration.RebootOnComplete) return;
+
+            var delay = _configuration.RebootDelaySeconds > 0 ? _configuration.RebootDelaySeconds : 10;
+
+            EmitEventSafe(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = "reboot_triggered",
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTerminationHandler",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"Standalone reboot triggered (delay={delay}s).",
+                Data = new Dictionary<string, object>
+                {
+                    { "rebootDelaySeconds", delay },
+                    { "selfDestructOnComplete", _configuration.SelfDestructOnComplete },
+                },
+                ImmediateUpload = true,
+            });
+
+            DrainSpool();
+
+            try
+            {
+                _triggerReboot(delay);
+                _logger.Info($"EnrollmentTerminationHandler: standalone reboot queued via shutdown.exe /r /t {delay}.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: standalone reboot invocation failed: {ex.Message}");
+            }
+        }
+
         private void RunSelfDestructIfAppropriate(EnrollmentTerminatedEventArgs args)
         {
             if (!_configuration.SelfDestructOnComplete)
@@ -252,6 +428,54 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             {
                 _logger.Error("EnrollmentTerminationHandler: cleanup service invocation threw.", ex);
             }
+        }
+
+        private void TrySaveWhiteGloveComplete()
+        {
+            if (_sessionPersistence == null)
+            {
+                _logger.Warning("EnrollmentTerminationHandler: sessionPersistence not wired — whiteglove.complete marker NOT written (Part-2 detection will fail).");
+                return;
+            }
+
+            try { _sessionPersistence.SaveWhiteGloveComplete(_logger); }
+            catch (Exception ex) { _logger.Warning($"EnrollmentTerminationHandler: SaveWhiteGloveComplete threw: {ex.Message}"); }
+        }
+
+        private void DelayLateEventGrace()
+        {
+            if (_lateEventGracePeriod <= TimeSpan.Zero) return;
+            try { Task.Delay(_lateEventGracePeriod).Wait(); }
+            catch { /* best-effort */ }
+        }
+
+        private void DrainSpool()
+        {
+            // V1 parity — block briefly so pending events can land before the next destructive
+            // step (shutdown.exe, self-destruct). A precise HasPending/PendingCount signal is
+            // internal to the orchestrator transport, so the V2 equivalent is a bounded wait.
+            if (_spoolDrainPeriod <= TimeSpan.Zero) return;
+            try { Task.Delay(_spoolDrainPeriod).Wait(); }
+            catch { /* best-effort */ }
+        }
+
+        private void EmitEventSafe(EnrollmentEvent evt)
+        {
+            if (_emitEvent == null) return;
+            try { _emitEvent(evt); }
+            catch (Exception ex) { _logger.Debug($"EnrollmentTerminationHandler: event emission '{evt?.EventType}' threw: {ex.Message}"); }
+        }
+
+        private static void DefaultTriggerReboot(int delaySeconds)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shutdown.exe"),
+                Arguments = $"/r /t {delaySeconds} /c \"Autopilot enrollment completed - rebooting\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            Process.Start(psi);
         }
     }
 }

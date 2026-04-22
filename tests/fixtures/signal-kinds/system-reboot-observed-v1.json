@@ -1,0 +1,5 @@
+# SystemRebootObserved v1 — V2 parity PR-B2.
+# Reducer handler HandleSystemRebootObservedV1 records SystemRebootUtc fact and emits
+# system_reboot_detected timeline entry. Payload carries previousExitType + lastBootUtc
+# so the backend can split the session into pre-/post-reboot segments.
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"SystemRebootObserved","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:00:00.0000000Z","SourceOrigin":"Program.DetectPreviousExit","Evidence":{"Kind":"Synthetic","Identifier":"previous_exit_reboot_kill","Summary":"Prior agent process terminated by OS reboot."},"Payload":{"previousExitType":"reboot_kill","lastBootUtc":"2026-04-22T08:00:00.0000000Z"}}

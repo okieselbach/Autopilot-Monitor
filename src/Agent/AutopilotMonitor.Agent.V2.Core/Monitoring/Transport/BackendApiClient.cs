@@ -121,9 +121,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
         }
 
         /// <summary>
-        /// Registers a new enrollment session
+        /// Registers a new enrollment session.
+        /// <para>
+        /// <c>virtual</c> so test doubles (e.g. <c>SessionRegistrationHelperTests.FakeApiClient</c>)
+        /// can intercept the HTTP call without spinning up a real mTLS stack. Production path is
+        /// unchanged — the virtual dispatch cost is negligible vs. the network round-trip.
+        /// </para>
         /// </summary>
-        public async Task<RegisterSessionResponse> RegisterSessionAsync(SessionRegistration registration)
+        public virtual async Task<RegisterSessionResponse> RegisterSessionAsync(SessionRegistration registration)
         {
             var request = new RegisterSessionRequest { Registration = registration };
             var endpoint = _useBootstrapTokenAuth

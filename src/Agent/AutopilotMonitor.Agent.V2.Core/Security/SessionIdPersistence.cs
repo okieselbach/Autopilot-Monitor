@@ -132,6 +132,38 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             lock (_lockObject) return File.Exists(_whiteGloveMarkerPath);
         }
 
+        /// <summary>
+        /// V1 parity (<c>SessionPersistence.SaveWhiteGloveComplete</c>) — persists the
+        /// <c>whiteglove.complete</c> marker so the next agent boot recognises this as a
+        /// Part-2 resume (<see cref="IsWhiteGloveResume"/>). Without this marker the
+        /// emergency-break watchdog would keep counting the session's wall-clock age through
+        /// the Part-1/Part-2 power-off window and eventually trip during Part-2 setup.
+        /// </summary>
+        public void SaveWhiteGloveComplete(AgentLogger logger = null)
+        {
+            lock (_lockObject)
+            {
+                try
+                {
+                    File.WriteAllText(_whiteGloveMarkerPath, DateTime.UtcNow.ToString("O"));
+                    logger?.Info("SessionIdPersistence: whiteglove.complete marker saved — Part 2 detection enabled.");
+                }
+                catch (Exception ex)
+                {
+                    logger?.Warning($"SessionIdPersistence: SaveWhiteGloveComplete failed: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Clears the <c>whiteglove.complete</c> marker once Part-2 resumes so a subsequent
+        /// session does not re-enter the resume code path.
+        /// </summary>
+        public void ClearWhiteGloveComplete(AgentLogger logger = null)
+        {
+            lock (_lockObject) TryDelete(_whiteGloveMarkerPath, logger);
+        }
+
         /// <summary>Deletes the persisted SessionId. Next <see cref="GetOrCreate"/> starts a fresh session.</summary>
         public void Delete(AgentLogger logger = null)
         {

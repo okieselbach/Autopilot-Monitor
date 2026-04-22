@@ -86,7 +86,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>
         /// Handle <see cref="DecisionSignalKind.SystemRebootObserved"/>. Records the fact so
-        /// WhiteGlove scoring (plan §2.4) can credit the +15 reboot-observed weight.
+        /// WhiteGlove scoring (plan §2.4) can credit the +15 reboot-observed weight, and emits
+        /// the <c>system_reboot_detected</c> timeline entry so the session timeline shows the
+        /// split between pre-reboot and post-reboot collection.
         /// </summary>
         private DecisionStep HandleSystemRebootObservedV1(DecisionState state, DecisionSignal signal)
         {
@@ -108,7 +110,27 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStep,
                 trigger: nameof(DecisionSignalKind.SystemRebootObserved));
 
-            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+            var timelineParams = new Dictionary<string, string>
+            {
+                ["eventType"] = "system_reboot_detected",
+                ["reason"] = "prior agent process was terminated by the reboot",
+            };
+            if (signal.Payload != null)
+            {
+                if (signal.Payload.TryGetValue("previousExitType", out var previousExitType))
+                    timelineParams["previousExitType"] = previousExitType ?? string.Empty;
+                if (signal.Payload.TryGetValue("lastBootUtc", out var lastBootUtc))
+                    timelineParams["lastBootUtc"] = lastBootUtc ?? string.Empty;
+            }
+
+            var effects = new[]
+            {
+                new DecisionEffect(
+                    DecisionEffectKind.EmitEventTimelineEntry,
+                    parameters: timelineParams),
+            };
+
+            return new DecisionStep(newState, transition, effects);
         }
     }
 }

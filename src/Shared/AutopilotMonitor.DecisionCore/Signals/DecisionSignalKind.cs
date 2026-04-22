@@ -41,5 +41,8 @@ namespace AutopilotMonitor.DecisionCore.Signals
         SessionStarted,
         SessionAborted,
         SessionRecovered,
+
+        // --- Admin-driven preemption (Plan §2.7 admin-action audit, V2 parity PR-B3) ---
+        AdminPreemptionDetected,
     }
 }

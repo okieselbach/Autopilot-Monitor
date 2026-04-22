@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,9 +9,11 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
 using AutopilotMonitor.DecisionCore.State;
+using AutopilotMonitor.Shared.Models;
 using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
@@ -44,6 +47,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             public string? LastDiagnosticsSuffix { get; private set; }
             public DiagnosticsUploadResult? DiagnosticsResult { get; set; }
             public int ShutdownSignalled;
+            public List<EnrollmentEvent> EmittedEvents { get; } = new List<EnrollmentEvent>();
+            public int RebootInvocations;
+            public int RebootDelaySeconds;
+            public SessionIdPersistence SessionPersistence { get; set; } = default!;
 
             public Rig()
             {
@@ -51,6 +58,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
                 Packages = new AppPackageStateList(Logger);
                 CleanupService = new RecordingCleanupService(BuildConfig(), Logger);
+                SessionPersistence = new SessionIdPersistence(Tmp.Path);
             }
 
             public AgentConfiguration BuildConfig(
@@ -90,7 +98,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                         LastDiagnosticsSuffix = suffix;
                         return Task.FromResult(DiagnosticsResult ?? new DiagnosticsUploadResult { BlobName = "blob" });
                     },
-                    signalShutdown: () => Interlocked.Increment(ref ShutdownSignalled));
+                    signalShutdown: () => Interlocked.Increment(ref ShutdownSignalled),
+                    analyzerManager: null,
+                    emitEvent: evt => EmittedEvents.Add(evt),
+                    sessionPersistence: SessionPersistence,
+                    triggerReboot: delay =>
+                    {
+                        Interlocked.Increment(ref RebootInvocations);
+                        RebootDelaySeconds = delay;
+                    },
+                    // Zero out the timing ceremony for tests — production paths are covered by
+                    // the dedicated V1-parity tests below which opt back in via their own Rig.
+                    lateEventGracePeriod: TimeSpan.Zero,
+                    spoolDrainPeriod: TimeSpan.Zero);
             }
 
             public void Dispose() => Tmp.Dispose();
@@ -216,6 +236,105 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             Assert.Equal("failure", rig.LastDiagnosticsSuffix);
             Assert.Equal(false, rig.LastDiagnosticsSucceededFlag);
+        }
+
+        // ============================================================= PR #50 lifecycle events
+
+        [Fact]
+        public void Handle_emits_diagnostics_collecting_and_uploaded_events_on_success()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+            rig.DiagnosticsResult = new DiagnosticsUploadResult { BlobName = "diag-blob.zip", SasUrlPrefix = "https://example.test" };
+            var cfg = rig.BuildConfig(diagEnabled: true, diagMode: "Always", selfDestruct: false);
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_collecting");
+            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_uploaded" &&
+                ((string)e.Data["blobName"]) == "diag-blob.zip");
+            Assert.DoesNotContain(rig.EmittedEvents, e => e.EventType == "diagnostics_upload_failed");
+        }
+
+        [Fact]
+        public void Handle_emits_diagnostics_upload_failed_when_upload_returns_null()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Failed }.Build();
+            rig.DiagnosticsResult = new DiagnosticsUploadResult { ErrorCode = "upload_5xx" };
+            var cfg = rig.BuildConfig(diagEnabled: true, diagMode: "Always", selfDestruct: false);
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_collecting");
+            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_upload_failed" &&
+                ((string)e.Data["errorCode"]) == "upload_5xx");
+        }
+
+        [Fact]
+        public void Handle_whiteglove_part1_writes_marker_and_emits_whiteglove_part1_complete()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.WhiteGloveSealed }.Build();
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.WhiteGloveSealed));
+
+            // The whiteglove.complete marker must be present so the next boot classifies as Part 2 resume.
+            Assert.True(rig.SessionPersistence.IsWhiteGloveResume());
+            Assert.Contains(rig.EmittedEvents, e => e.EventType == "whiteglove_part1_complete");
+            // And — critically — self-destruct MUST have been skipped and the enrollment-complete
+            // marker MUST NOT be written, or the next Part-2 boot would ghost-detect itself.
+            Assert.Equal(0, rig.CleanupService.Invocations);
+            Assert.False(File.Exists(Path.Combine(rig.StateDir, "enrollment-complete.marker")));
+        }
+
+        [Fact]
+        public void Handle_standalone_reboot_fires_when_reboot_enabled_and_no_self_destruct()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+            var cfg = rig.BuildConfig(selfDestruct: false);
+            cfg.RebootOnComplete = true;
+            cfg.RebootDelaySeconds = 15;
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            Assert.Equal(1, rig.RebootInvocations);
+            Assert.Equal(15, rig.RebootDelaySeconds);
+            Assert.Contains(rig.EmittedEvents, e => e.EventType == "reboot_triggered");
+        }
+
+        [Fact]
+        public void Handle_does_not_reboot_when_self_destruct_is_enabled()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+            var cfg = rig.BuildConfig(selfDestruct: true);
+            cfg.RebootOnComplete = true;
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            // Self-destruct owns the terminal transition; reboot is the no-self-destruct path only.
+            Assert.Equal(0, rig.RebootInvocations);
+            Assert.DoesNotContain(rig.EmittedEvents, e => e.EventType == "reboot_triggered");
+        }
+
+        [Fact]
+        public void Handle_emits_enrollment_summary_shown_when_dialog_enabled()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+            var cfg = rig.BuildConfig(showDialog: true, selfDestruct: false);
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            Assert.Contains(rig.EmittedEvents, e => e.EventType == "enrollment_summary_shown");
         }
     }
 }
