@@ -24,6 +24,16 @@ export interface AdminConfiguration {
   opsAlertSlackWebhookUrl?: string;
   allowAgentDowngrade?: boolean;
   modernDeploymentHarmlessEventIdsJson?: string;
+  // Agent hash oracle (written by CI/CD / build scripts, surfaced read-only; must round-trip via Save to survive Replace)
+  latestAgentVersion?: string;
+  latestAgentSha256?: string;
+  latestAgentExeSha256?: string;
+  latestBootstrapScriptVersion?: string;
+  // V2 agent hash oracle (separate release line — written by scripts/Deployment/V2/*.ps1)
+  latestAgentV2Version?: string;
+  latestAgentV2Sha256?: string;
+  latestAgentV2ExeSha256?: string;
+  latestBootstrapV2ScriptVersion?: string;
   /**
    * Feature flag for the V2 Decision Engine index-table dual-write (Plan §M5.d).
    * When true, IngestTelemetryFunction enqueues telemetry-index-reconcile envelopes after

@@ -146,10 +146,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
         private sealed class FakeApiClient : BackendApiClient
         {
             private readonly Func<int, RegisterSessionResponse> _respond;
-            private readonly Action<SessionRegistration> _onRegister;
+            private readonly Action<SessionRegistration>? _onRegister;
             public int CallCount;
 
-            public FakeApiClient(Func<int, RegisterSessionResponse> respond, Action<SessionRegistration> onRegister = null)
+            public FakeApiClient(Func<int, RegisterSessionResponse> respond, Action<SessionRegistration>? onRegister = null)
             {
                 _respond = respond;
                 _onRegister = onRegister;

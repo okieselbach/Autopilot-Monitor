@@ -563,6 +563,11 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "LatestAgentExeSha256", config.LatestAgentExeSha256 ?? string.Empty },
                 { "AllowAgentDowngrade", config.AllowAgentDowngrade },
                 { "LatestBootstrapScriptVersion", config.LatestBootstrapScriptVersion ?? string.Empty },
+                // V2 agent binary integrity (separate release line — written by V2 build scripts)
+                { "LatestAgentV2Version", config.LatestAgentV2Version ?? string.Empty },
+                { "LatestAgentV2Sha256", config.LatestAgentV2Sha256 ?? string.Empty },
+                { "LatestAgentV2ExeSha256", config.LatestAgentV2ExeSha256 ?? string.Empty },
+                { "LatestBootstrapV2ScriptVersion", config.LatestBootstrapV2ScriptVersion ?? string.Empty },
                 // Rate limiting per-role settings
                 { "UserRateLimitRequestsPerMinute", config.UserRateLimitRequestsPerMinute },
                 { "GlobalAdminRateLimitRequestsPerMinute", config.GlobalAdminRateLimitRequestsPerMinute },
@@ -617,6 +622,11 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 LatestAgentExeSha256 = entity.GetString("LatestAgentExeSha256") ?? string.Empty,
                 AllowAgentDowngrade = entity.GetBoolean("AllowAgentDowngrade") ?? false,
                 LatestBootstrapScriptVersion = entity.GetString("LatestBootstrapScriptVersion") ?? string.Empty,
+                // V2 agent binary integrity (separate release line)
+                LatestAgentV2Version = entity.GetString("LatestAgentV2Version") ?? string.Empty,
+                LatestAgentV2Sha256 = entity.GetString("LatestAgentV2Sha256") ?? string.Empty,
+                LatestAgentV2ExeSha256 = entity.GetString("LatestAgentV2ExeSha256") ?? string.Empty,
+                LatestBootstrapV2ScriptVersion = entity.GetString("LatestBootstrapV2ScriptVersion") ?? string.Empty,
                 // Rate limiting per-role settings
                 UserRateLimitRequestsPerMinute = entity.GetInt32("UserRateLimitRequestsPerMinute") ?? 120,
                 GlobalAdminRateLimitRequestsPerMinute = entity.GetInt32("GlobalAdminRateLimitRequestsPerMinute") ?? 600,

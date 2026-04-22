@@ -118,7 +118,7 @@ namespace AutopilotMonitor.Agent.Core.Tests.Collectors
                 "CloudExperienceHost Web App Event 2. Name: 'CommercialOOBE_ESPProgress_WhiteGlove_Success'",
                 DateTime.UtcNow.AddSeconds(1), "prov", false);
 
-            Assert.Single(_captured.ToList().Where(e => e.EventType == "whiteglove_complete"));
+            Assert.Single(_captured, e => e.EventType == "whiteglove_complete");
             Assert.Equal(1, _whiteGloveCompletedCount);
             Assert.True(t.IsWhiteGloveDetectedForTest);
             // WhiteGlove does NOT trigger FinalizingSetup

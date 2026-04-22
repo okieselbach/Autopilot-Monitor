@@ -273,6 +273,34 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public string LatestBootstrapScriptVersion { get; set; } = default!;
 
+        // ===== V2 AGENT HASH ORACLE =====
+        // Separate release line from V1 so V2 clients are not served V1 hashes (and vice versa).
+        // Written by scripts/Deployment/V2/build_and_upload_release_agent_build.ps1.
+        // GetAgentConfigFunction selects V1 vs V2 based on the X-Agent-Version header's major version.
+
+        /// <summary>
+        /// Version string of the latest published V2 agent (e.g. "2.0.114"). See <see cref="LatestAgentVersion"/> for V1.
+        /// </summary>
+        public string LatestAgentV2Version { get; set; } = default!;
+
+        /// <summary>
+        /// SHA-256 hash (lowercase hex) of the latest published V2 agent ZIP (AutopilotMonitor-Agent-V2.zip).
+        /// Mirror of <see cref="LatestAgentSha256"/> for the V2 release line.
+        /// </summary>
+        public string LatestAgentV2Sha256 { get; set; } = default!;
+
+        /// <summary>
+        /// SHA-256 hash (lowercase hex) of the latest published V2 agent EXE (AutopilotMonitor.Agent.V2.exe).
+        /// Mirror of <see cref="LatestAgentExeSha256"/> for the V2 release line.
+        /// </summary>
+        public string LatestAgentV2ExeSha256 { get; set; } = default!;
+
+        /// <summary>
+        /// Version string of the latest published V2 bootstrap script (Install-AutopilotMonitor-v2.ps1).
+        /// Mirror of <see cref="LatestBootstrapScriptVersion"/> for the V2 release line.
+        /// </summary>
+        public string LatestBootstrapV2ScriptVersion { get; set; } = default!;
+
         // ===== MODERN DEPLOYMENT NOISE SUPPRESSION =====
 
         /// <summary>

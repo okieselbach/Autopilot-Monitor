@@ -139,7 +139,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
             var wrongHash = new string('f', 64);
 
             var triggerCount = 0;
-            string capturedZipHash = null;
+            string? capturedZipHash = null;
             bool capturedDowngrade = false;
             var triggerDone = new ManualResetEventSlim(false);
             Func<string, bool, Task> trigger = (zip, down) =>

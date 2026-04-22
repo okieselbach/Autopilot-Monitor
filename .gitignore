@@ -132,3 +132,4 @@ tasks/
 # Produced by /cleanup-table skill — never commit deletion payloads
 db-backups/
 plans/REFACTOR_AGENT_V2.md
+.claude/scheduled_tasks.lock

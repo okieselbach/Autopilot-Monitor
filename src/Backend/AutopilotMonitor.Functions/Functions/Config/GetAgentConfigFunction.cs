@@ -103,6 +103,44 @@ namespace AutopilotMonitor.Functions.Functions.Config
         }
 
         /// <summary>
+        /// Determines whether an X-Agent-Version header advertises the V2 release line.
+        /// V2 agents use a separate hash-oracle (LatestAgentV2Sha256 / LatestAgentV2ExeSha256)
+        /// so they are not served V1 hashes and vice versa.
+        /// </summary>
+        /// <remarks>
+        /// Accepts SemVer-ish version strings like "2.0.114" or "2.0.114+abc123".
+        /// Missing or unparsable header → treat as V1 (backward compat for older agents
+        /// that do not send the header).
+        /// </remarks>
+        internal static bool IsV2Client(string? agentVersion)
+        {
+            if (string.IsNullOrWhiteSpace(agentVersion))
+                return false;
+
+            var dot = agentVersion.IndexOf('.');
+            var majorStr = dot > 0 ? agentVersion.Substring(0, dot) : agentVersion;
+            return int.TryParse(majorStr, out var major) && major >= 2;
+        }
+
+        /// <summary>
+        /// Returns the (ZipSha256, ExeSha256) pair appropriate for the calling agent.
+        /// Reads the X-Agent-Version header and dispatches to the V1 or V2 fields on
+        /// <see cref="AdminConfiguration"/>.
+        /// </summary>
+        internal static (string ZipSha256, string ExeSha256) SelectAgentHashesForClient(
+            HttpRequestData req,
+            AutopilotMonitor.Shared.Models.AdminConfiguration adminConfig)
+        {
+            var agentVersion = req.Headers.Contains("X-Agent-Version")
+                ? req.Headers.GetValues("X-Agent-Version").FirstOrDefault()
+                : null;
+
+            return IsV2Client(agentVersion)
+                ? (adminConfig.LatestAgentV2Sha256, adminConfig.LatestAgentV2ExeSha256)
+                : (adminConfig.LatestAgentSha256, adminConfig.LatestAgentExeSha256);
+        }
+
+        /// <summary>
         /// Core config logic: fetch tenant + admin config, gather rules, IME patterns.
         /// Called by both the cert-auth Run() method and the bootstrap wrapper.
         /// </summary>
@@ -138,6 +176,11 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var tenantDiagPaths = tenantConfig.GetDiagnosticsLogPaths();
             var diagLogPaths = globalDiagPaths.Concat(tenantDiagPaths).ToList();
 
+            // Select V1 vs V2 hash oracle based on the X-Agent-Version header.
+            // V1 agents get LatestAgentSha256/ExeSha256; V2 agents get LatestAgentV2Sha256/V2ExeSha256.
+            // Response field names stay the same so the agent code is unchanged.
+            var (latestAgentSha256, latestAgentExeSha256) = SelectAgentHashesForClient(req, adminConfig);
+
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
@@ -168,8 +211,8 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     EnableSoftwareInventoryAnalyzer = tenantConfig.EnableSoftwareInventoryAnalyzer ?? false,
                     EnableIntegrityBypassAnalyzer = tenantConfig.EnableIntegrityBypassAnalyzer ?? true
                 },
-                LatestAgentSha256 = adminConfig.LatestAgentSha256,
-                LatestAgentExeSha256 = adminConfig.LatestAgentExeSha256,
+                LatestAgentSha256 = latestAgentSha256,
+                LatestAgentExeSha256 = latestAgentExeSha256,
                 AllowAgentDowngrade = adminConfig.AllowAgentDowngrade,
                 NtpServer = string.IsNullOrEmpty(tenantConfig.NtpServer) ? "time.windows.com" : tenantConfig.NtpServer,
                 EnableTimezoneAutoSet = tenantConfig.EnableTimezoneAutoSet ?? false,

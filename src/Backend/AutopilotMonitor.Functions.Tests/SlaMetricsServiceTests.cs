@@ -94,7 +94,7 @@ public class SlaMetricsServiceTests
 
         Assert.Equal(100, result.CurrentWeek.SuccessRate);
         Assert.True(result.CurrentWeek.SuccessRateMet);
-        Assert.Empty(result.Violators.Where(v => v.ViolationType == "Failed"));
+        Assert.DoesNotContain(result.Violators, v => v.ViolationType == "Failed");
     }
 
     [Fact]
