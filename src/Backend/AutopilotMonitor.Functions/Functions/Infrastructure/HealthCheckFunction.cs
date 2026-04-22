@@ -12,6 +12,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
         private readonly ILogger<HealthCheckFunction> _logger;
         private readonly HealthCheckService _healthCheckService;
         private readonly IMemoryCache _cache;
+        private readonly BackendBuildInfo _buildInfo;
 
         private const int MaxRequestsPerMinute = 30;
         private static readonly TimeSpan RateWindow = TimeSpan.FromMinutes(1);
@@ -19,11 +20,13 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
         public HealthCheckFunction(
             ILogger<HealthCheckFunction> logger,
             HealthCheckService healthCheckService,
-            IMemoryCache cache)
+            IMemoryCache cache,
+            BackendBuildInfo buildInfo)
         {
             _logger = logger;
             _healthCheckService = healthCheckService;
             _cache = cache;
+            _buildInfo = buildInfo;
         }
 
         /// <summary>
@@ -71,7 +74,10 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
             {
                 status = "healthy",
                 service = "Autopilot Monitor API",
-                timestamp = DateTime.UtcNow
+                timestamp = DateTime.UtcNow,
+                version = _buildInfo.Version,
+                commitHash = _buildInfo.CommitHash,
+                buildUtc = _buildInfo.BuildUtc
             });
 
             return response;
@@ -101,7 +107,10 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                 service = "Autopilot Monitor API",
                 timestamp = healthCheckResult.Timestamp,
                 overallStatus = healthCheckResult.OverallStatus,
-                checks = healthCheckResult.Checks
+                checks = healthCheckResult.Checks,
+                version = _buildInfo.Version,
+                commitHash = _buildInfo.CommitHash,
+                buildUtc = _buildInfo.BuildUtc
             });
 
             return response;

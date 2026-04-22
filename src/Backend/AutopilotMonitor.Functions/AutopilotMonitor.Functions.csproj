@@ -6,6 +6,12 @@
     <OutputType>Exe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Backend version surfaced via /api/health. CommitHash is injected at CI time
+         through -p:SourceRevisionId=<github.sha> and appended to InformationalVersion. -->
+    <Version>1.0.0</Version>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

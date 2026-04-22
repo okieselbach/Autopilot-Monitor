@@ -146,6 +146,7 @@ builder.Services.AddSingleton<McpUserService>();
 builder.Services.AddSingleton<PreviewWhitelistService>();
 builder.Services.AddSingleton<TenantAdminsService>();
 builder.Services.AddSingleton<HealthCheckService>();
+builder.Services.AddSingleton<BackendBuildInfo>();
 builder.Services.AddSingleton<GatherRuleService>();
 builder.Services.AddSingleton<AnalyzeRuleService>();
 builder.Services.AddSingleton<ImeLogPatternService>();
