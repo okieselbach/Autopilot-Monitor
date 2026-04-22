@@ -126,6 +126,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             hosts.Add(new AadJoinHost(logger, ingress, clock));
 
+            // Dev / test — if --replay-log-dir is set, the tracker reads from the replay folder
+            // with SimulationMode ON + the configured SpeedFactor instead of tailing the live
+            // IME log folder. Production agents leave ReplayLogDir empty.
+            var simulationMode = !string.IsNullOrEmpty(_agentConfig.ReplayLogDir);
+            var imeLogFolder = simulationMode
+                ? _agentConfig.ReplayLogDir
+                : _agentConfig.ImeLogPathOverride;
+
             _imeLogHost = new ImeLogHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
@@ -133,11 +141,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 logger: logger,
                 ingress: ingress,
                 clock: clock,
-                imeLogPathOverride: _agentConfig.ImeLogPathOverride,
+                imeLogPathOverride: imeLogFolder,
                 imeMatchLogPath: _agentConfig.ImeMatchLogPath,
                 imePatterns: _remoteConfig.ImeLogPatterns,
                 stateDirectory: _stateDirectory,
-                whiteGloveSealingPatternIds: whiteGloveSealingPatternIds);
+                whiteGloveSealingPatternIds: whiteGloveSealingPatternIds,
+                simulationMode: simulationMode,
+                simulationSpeedFactor: _agentConfig.ReplaySpeedFactor);
             hosts.Add(_imeLogHost);
 
             if (collectors.StallProbeEnabled)
@@ -401,6 +411,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             /// </summary>
             internal Monitoring.Enrollment.Ime.ImeLogTracker Tracker => _tracker;
 
+            /// <summary>
+            /// Exposes the tracker's simulation flag so the Dev / Test CLI flag
+            /// <c>--replay-log-dir</c> is testable without poking through reflection.
+            /// </summary>
+            internal bool IsSimulationMode => _tracker.SimulationMode;
+
             public ImeLogHost(
                 string sessionId,
                 string tenantId,
@@ -412,7 +428,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 string? imeMatchLogPath,
                 List<ImeLogPattern>? imePatterns,
                 string stateDirectory,
-                IReadOnlyCollection<string>? whiteGloveSealingPatternIds)
+                IReadOnlyCollection<string>? whiteGloveSealingPatternIds,
+                bool simulationMode = false,
+                double simulationSpeedFactor = 50)
             {
                 _logger = logger;
                 var logFolder = string.IsNullOrEmpty(imeLogPathOverride) ? DefaultImeLogFolder : imeLogPathOverride!;
@@ -427,6 +445,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     logger: logger,
                     matchLogPath: expandedMatchLogPath,
                     stateDirectory: stateDirectory);
+
+                if (simulationMode)
+                {
+                    _tracker.SimulationMode = true;
+                    _tracker.SpeedFactor = simulationSpeedFactor;
+                    logger.Info($"ImeLogHost: SimulationMode ENABLED (speedFactor={simulationSpeedFactor}, path={logFolder})");
+                }
 
                 _adapter = new ImeLogTrackerAdapter(_tracker, ingress, clock, whiteGloveSealingPatternIds);
 

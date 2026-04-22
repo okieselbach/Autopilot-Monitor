@@ -1113,7 +1113,7 @@ namespace AutopilotMonitor.Agent.V2
 
         // ---------------------------------------------------------------- Configuration
 
-        private static AgentConfiguration BuildAgentConfiguration(
+        internal static AgentConfiguration BuildAgentConfiguration(
             string[] args,
             string tenantId,
             string sessionId,
@@ -1123,6 +1123,20 @@ namespace AutopilotMonitor.Agent.V2
             var apiBaseUrl = GetArgValue(args, "--api-url", "--backend-api") ?? Constants.ApiBaseUrl;
             var imeLogPathOverride = GetArgValue(args, "--ime-log-path");
             var imeMatchLogPath = GetArgValue(args, "--ime-match-log");
+
+            // Dev / test — IME log replay (V1 compat mode). Feeds ImeLogTracker.SimulationMode
+            // + SpeedFactor so recorded raw IME logs are replayed at an accelerated rate; signal
+            // timestamps + ingress ordinals are regenerated as the replay runs.
+            var replayLogDir = GetArgValue(args, "--replay-log-dir");
+            var replaySpeedFactorRaw = GetArgValue(args, "--replay-speed-factor");
+            var replaySpeedFactor = 50.0;
+            if (!string.IsNullOrEmpty(replaySpeedFactorRaw)
+                && double.TryParse(replaySpeedFactorRaw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var parsedSpeed)
+                && parsedSpeed > 0)
+            {
+                replaySpeedFactor = parsedSpeed;
+            }
 
             var bootstrapToken = GetArgValue(args, "--bootstrap-token")
                 ?? bootstrapConfig?.BootstrapToken;
@@ -1169,6 +1183,8 @@ namespace AutopilotMonitor.Agent.V2
                 KeepLogFile = keepLogFile,
                 SelfDestructOnComplete = !noCleanup,
                 CommandLineArgs = FormatArgsForLog(args),
+                ReplayLogDir = replayLogDir,
+                ReplaySpeedFactor = replaySpeedFactor,
             };
         }
 
@@ -1269,6 +1285,10 @@ namespace AutopilotMonitor.Agent.V2
             Console.Out.WriteLine("  --api-url <URL>                   Override backend API base URL (alias: --backend-api)");
             Console.Out.WriteLine("  --ime-log-path <PATH>             Override IME logs directory");
             Console.Out.WriteLine("  --ime-match-log <PATH>            Write matched IME log lines to file (debug)");
+            Console.Out.WriteLine();
+            Console.Out.WriteLine("Dev / Test:");
+            Console.Out.WriteLine("  --replay-log-dir <PATH>           Replay IME logs from this directory (simulation mode)");
+            Console.Out.WriteLine("  --replay-speed-factor <N>         Time-compression factor for log replay (default: 50)");
         }
 
         private static void PrintVersion()
