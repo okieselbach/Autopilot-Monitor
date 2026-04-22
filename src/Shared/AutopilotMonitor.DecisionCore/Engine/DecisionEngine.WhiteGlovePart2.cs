@@ -51,6 +51,14 @@ namespace AutopilotMonitor.DecisionCore.Engine
             var effects = new[]
             {
                 new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: safety),
+                new DecisionEffect(
+                    DecisionEffectKind.EmitEventTimelineEntry,
+                    parameters: new Dictionary<string, string>
+                    {
+                        ["eventType"] = "whiteglove_resumed",
+                        ["resumedAtUtc"] = signal.OccurredAtUtc.ToString("o"),
+                        ["sourceOrigin"] = signal.SourceOrigin ?? string.Empty,
+                    }),
             };
 
             return new DecisionStep(newState, transition, effects);

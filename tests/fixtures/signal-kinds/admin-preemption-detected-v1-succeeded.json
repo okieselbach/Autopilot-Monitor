@@ -1,0 +1,4 @@
+# AdminPreemptionDetected v1 — adminOutcome=Succeeded → Stage.Completed,
+# Outcome=AdminPreempted, effect emits enrollment_complete timeline entry with
+# adminAction=Succeeded + source=register_session_response.
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"AdminPreemptionDetected","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:00:00.0000000Z","SourceOrigin":"register_session_response","Evidence":{"Kind":"Synthetic","Identifier":"admin_preemption:Succeeded","Summary":"Operator marked session as Succeeded via portal before agent startup."},"Payload":{"adminOutcome":"Succeeded"}}

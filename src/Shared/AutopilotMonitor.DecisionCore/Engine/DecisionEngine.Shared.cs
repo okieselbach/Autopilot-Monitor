@@ -139,6 +139,64 @@ namespace AutopilotMonitor.DecisionCore.Engine
             return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }
 
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.AdminPreemptionDetected"/>. Plan §2.7 admin-
+        /// action audit; V2 parity PR-B3.
+        /// <para>
+        /// Emitted by <c>Program.RunAgent</c> when the register-session response carries an
+        /// <c>AdminAction</c> value (operator marked the session terminal via the portal before
+        /// the agent even started). The signal payload carries
+        /// <c>adminOutcome=Succeeded|Failed</c>.
+        /// </para>
+        /// <para>
+        /// Stage transitions to <see cref="SessionStage.Completed"/> (Succeeded) or
+        /// <see cref="SessionStage.Failed"/> (anything else); <see cref="SessionOutcome.AdminPreempted"/>
+        /// captures the non-enrollment nature of the transition so dashboards + KQL can tell
+        /// an admin-override apart from a genuine enrollment_complete/_failed.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleAdminPreemptionDetectedV1(DecisionState state, DecisionSignal signal)
+        {
+            var adminOutcome = signal.Payload != null && signal.Payload.TryGetValue("adminOutcome", out var v)
+                ? v
+                : "Failed"; // defensive default: preemption without outcome is treated as failure.
+
+            var succeeded = string.Equals(adminOutcome, "Succeeded", StringComparison.OrdinalIgnoreCase);
+            var toStage = succeeded ? SessionStage.Completed : SessionStage.Failed;
+            var eventType = succeeded ? "enrollment_complete" : "enrollment_failed";
+
+            var nextStep = state.StepIndex + 1;
+            var newState = state.ToBuilder()
+                .WithStage(toStage)
+                .WithOutcome(SessionOutcome.AdminPreempted)
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .ClearDeadlines()
+                .Build();
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: toStage,
+                nextStepIndex: nextStep,
+                trigger: $"AdminPreemption:{adminOutcome}");
+
+            var effects = new[]
+            {
+                new DecisionEffect(
+                    DecisionEffectKind.EmitEventTimelineEntry,
+                    parameters: new Dictionary<string, string>
+                    {
+                        ["eventType"] = eventType,
+                        ["adminAction"] = adminOutcome,
+                        ["source"] = signal.SourceOrigin ?? "register_session_response",
+                        ["reason"] = $"Session {adminOutcome.ToLowerInvariant()} by administrator (detected on register-session).",
+                    }),
+            };
+
+            return new DecisionStep(newState, transition, effects);
+        }
+
         // ============================================================== shared helpers
         // Partial-class shared helpers used by Classic / SelfDeploying / WhiteGlove handlers
         // as they come online in M3.1+ live below. M3.0 establishes the skeleton; the bodies

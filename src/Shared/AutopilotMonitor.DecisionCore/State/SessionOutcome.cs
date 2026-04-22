@@ -13,5 +13,12 @@ namespace AutopilotMonitor.DecisionCore.State
         WhiteGlovePart1Sealed,
         WhiteGlovePart2Complete,
         Aborted,
+
+        // V2 parity PR-B3 / plan §2.7 admin-action audit:
+        // Set when the register-session response carries an AdminAction
+        // (operator marked the session terminal via the portal before the
+        // agent even started). Stage transitions to Completed or Failed
+        // depending on the adminOutcome payload.
+        AdminPreempted,
     }
 }

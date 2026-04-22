@@ -697,20 +697,26 @@ namespace AutopilotMonitor.Agent.V2
                         // alerting. Fires AFTER orchestrator.Start so the EventEmitter is alive.
                         EmitUnrestrictedModeAuditIfChanged(orchestrator, agentConfig, configMergeResult, logger);
 
-                        // V1 parity — agent_started / whiteglove_resumed / system_reboot_detected
-                        // lifecycle events. These are purely informational (Phase=Unknown) but the
-                        // session timeline and downstream alerting depend on them to classify the
-                        // boot.
+                        // V1 parity — agent_started lifecycle event. Purely informational
+                        // (Phase=Unknown); the session timeline and downstream alerting rely on
+                        // it to classify the boot.
                         EmitAgentStartedEvent(orchestrator, agentConfig, previousExit, logger);
+
+                        // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
+                        // SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge — that
+                        // reducer effect emits whiteglove_resumed on the timeline. We only need
+                        // to clear the persisted marker here.
                         if (isWhiteGloveResume)
                         {
-                            EmitWhiteGloveResumedEvent(orchestrator, agentConfig, logger);
                             try { sessionPersistence.ClearWhiteGloveComplete(logger); }
                             catch (Exception ex) { logger.Debug($"ClearWhiteGloveComplete threw: {ex.Message}"); }
                         }
+
+                        // Reboot mid-session: post SystemRebootObserved so the reducer records
+                        // the fact and emits the system_reboot_detected timeline entry.
                         if (string.Equals(previousExit?.ExitType, "reboot_kill", StringComparison.OrdinalIgnoreCase))
                         {
-                            EmitSystemRebootDetectedEvent(orchestrator, agentConfig, previousExit, logger);
+                            PostSystemRebootObservedSignal(orchestrator.IngressSink, previousExit, logger);
                         }
 
                         // V2 parity — post SessionStarted so the reducer establishes the session anchor
@@ -724,20 +730,18 @@ namespace AutopilotMonitor.Agent.V2
                             PostSessionStartedSignal(orchestrator.IngressSink, registrationResult, agentConfig, logger);
                         }
 
-                        // V1 parity (MonitoringService.cs:388-413 — the "ADMIN OVERRIDE on startup"
-                        // block) — if the register-session response carried an AdminAction the
-                        // session was already marked terminal by an operator via the portal. Emit
-                        // the matching lifecycle event and synthesise a Terminated so the normal
-                        // termination pipeline (cleanup + summary + self-destruct) runs. The
-                        // orchestrator has only just started so the event ordering is clean.
+                        // V1 parity (MonitoringService.cs:388-413 "ADMIN OVERRIDE on startup") —
+                        // if the register-session response carried an AdminAction the operator
+                        // has already marked the session terminal via the portal. Post
+                        // AdminPreemptionDetected so the reducer transitions Stage to Completed /
+                        // Failed and emits the enrollment_complete/_failed timeline event as a
+                        // side effect. The orchestrator's DecisionStepProcessor picks up the
+                        // terminal stage and raises Terminated, which runs the termination
+                        // pipeline (cleanup + summary + self-destruct) through the subscribed
+                        // handler — no direct synthesis needed.
                         if (!string.IsNullOrEmpty(registrationResult.AdminAction))
                         {
-                            HandleStartupAdminOverride(
-                                orchestrator,
-                                terminationHandler,
-                                agentConfig,
-                                registrationResult.AdminAction,
-                                logger);
+                            PostAdminPreemptionSignal(orchestrator.IngressSink, registrationResult, logger);
                         }
 
                         // M4.6.δ — fire-and-forget startup analyzers (LocalAdmin / SoftwareInventory /
@@ -906,59 +910,40 @@ namespace AutopilotMonitor.Agent.V2
         }
 
         /// <summary>
-        /// V1 parity (MonitoringService.cs:388-413) — when the register-session response
-        /// carried an <c>AdminAction</c> ("Succeeded" / "Failed"), emit the matching
-        /// <c>enrollment_complete</c> / <c>enrollment_failed</c> event and synthesise a
-        /// <see cref="EnrollmentTerminatedEventArgs"/> so the termination pipeline (cleanup,
-        /// summary dialog, self-destruct) runs without waiting for an external signal.
+        /// V2 parity — post <see cref="DecisionSignalKind.AdminPreemptionDetected"/> when the
+        /// register-session response carried an <c>AdminAction</c>. The reducer handler at
+        /// DecisionEngine.Shared.cs#HandleAdminPreemptionDetectedV1 transitions Stage to the
+        /// terminal state and emits the enrollment_complete/_failed telemetry event; the
+        /// orchestrator's DecisionStepProcessor then raises the Terminated event, which the
+        /// subscribed <c>EnrollmentTerminationHandler</c> picks up — no direct synthesis needed.
         /// </summary>
-        private static void HandleStartupAdminOverride(
-            EnrollmentOrchestrator orchestrator,
-            EnrollmentTerminationHandler terminationHandler,
-            AgentConfiguration agentConfig,
-            string adminAction,
+        private static void PostAdminPreemptionSignal(
+            ISignalIngressSink ingressSink,
+            SessionRegistrationResult registrationResult,
             AgentLogger logger)
         {
             try
             {
-                var succeeded = string.Equals(adminAction, "Succeeded", StringComparison.OrdinalIgnoreCase);
+                var adminOutcome = registrationResult.AdminAction; // "Succeeded" | "Failed"
                 logger.Warning(
-                    $"=== ADMIN OVERRIDE on startup: session already marked as {adminAction} by administrator — running cleanup only ===");
+                    $"=== ADMIN OVERRIDE on startup: session already marked as {adminOutcome} by administrator — posting AdminPreemptionDetected signal ===");
 
-                orchestrator.EventEmitter.Emit(new EnrollmentEvent
-                {
-                    SessionId = agentConfig.SessionId,
-                    TenantId = agentConfig.TenantId,
-                    EventType = succeeded ? "enrollment_complete" : "enrollment_failed",
-                    Severity = succeeded ? EventSeverity.Info : EventSeverity.Warning,
-                    Source = "AdminOverride",
-                    Phase = EnrollmentPhase.Complete,
-                    Message = $"Session {adminAction.ToLowerInvariant()} by administrator (detected on restart) — cleanup initiated.",
-                    Data = new System.Collections.Generic.Dictionary<string, object>
+                ingressSink.Post(
+                    kind: DecisionSignalKind.AdminPreemptionDetected,
+                    occurredAtUtc: DateTime.UtcNow,
+                    sourceOrigin: "register_session_response",
+                    evidence: new Evidence(
+                        kind: EvidenceKind.Synthetic,
+                        identifier: $"admin_preemption:{adminOutcome}",
+                        summary: $"Operator marked session as {adminOutcome} via portal before agent startup."),
+                    payload: new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
                     {
-                        { "adminAction", adminAction },
-                        { "source", "register_session_response" },
-                    },
-                    ImmediateUpload = true,
-                });
-
-                var outcome = succeeded
-                    ? EnrollmentTerminationOutcome.Succeeded
-                    : EnrollmentTerminationOutcome.Failed;
-                var stage = succeeded ? SessionStage.Completed : SessionStage.Failed;
-
-                terminationHandler.Handle(
-                    sender: null,
-                    args: new EnrollmentTerminatedEventArgs(
-                        reason: EnrollmentTerminationReason.DecisionTerminalStage,
-                        outcome: outcome,
-                        stageName: stage.ToString(),
-                        terminatedAtUtc: DateTime.UtcNow,
-                        details: $"Admin marked session as {adminAction} via portal (detected on register-session)."));
+                        ["adminOutcome"] = adminOutcome,
+                    });
             }
             catch (Exception ex)
             {
-                logger.Warning($"HandleStartupAdminOverride failed: {ex.Message}");
+                logger.Warning($"AdminPreemptionDetected post failed: {ex.Message}");
             }
         }
 
@@ -1060,71 +1045,38 @@ namespace AutopilotMonitor.Agent.V2
         }
 
         /// <summary>
-        /// Emits <c>whiteglove_resumed</c> when the whiteglove.complete marker was present at
-        /// boot — signals that the agent has resumed Part 2 after the device reseal.
+        /// V2 parity — post <see cref="DecisionSignalKind.SystemRebootObserved"/> when the prior
+        /// agent process was terminated by an OS reboot. The reducer handler at
+        /// DecisionEngine.Edge.cs#HandleSystemRebootObservedV1 records the reboot fact on the
+        /// state (used by the WhiteGlove reboot-observed scoring weight, plan §2.4) and emits
+        /// the <c>system_reboot_detected</c> telemetry event as a side effect.
         /// </summary>
-        private static void EmitWhiteGloveResumedEvent(
-            EnrollmentOrchestrator orchestrator,
-            AgentConfiguration agentConfig,
-            AgentLogger logger)
-        {
-            try
-            {
-                orchestrator.EventEmitter.Emit(new EnrollmentEvent
-                {
-                    SessionId = agentConfig.SessionId,
-                    TenantId = agentConfig.TenantId,
-                    EventType = "whiteglove_resumed",
-                    Severity = EventSeverity.Info,
-                    Source = "AutopilotMonitor.Agent.V2",
-                    Phase = EnrollmentPhase.Unknown,
-                    Message = "WhiteGlove Part 2 resume detected — continuing user-phase monitoring.",
-                    Data = new System.Collections.Generic.Dictionary<string, object>
-                    {
-                        { "resumedAtUtc", DateTime.UtcNow.ToString("o") },
-                    },
-                    ImmediateUpload = true,
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"whiteglove_resumed emission failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Emits <c>system_reboot_detected</c> when the previous agent exit was classified as
-        /// <c>reboot_kill</c> — the OS rebooted mid-session. Gives the backend a hook to split
-        /// the session into pre-reboot and post-reboot segments.
-        /// </summary>
-        private static void EmitSystemRebootDetectedEvent(
-            EnrollmentOrchestrator orchestrator,
-            AgentConfiguration agentConfig,
+        private static void PostSystemRebootObservedSignal(
+            ISignalIngressSink ingressSink,
             PreviousExitSummary previousExit,
             AgentLogger logger)
         {
             try
             {
-                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                var payload = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    SessionId = agentConfig.SessionId,
-                    TenantId = agentConfig.TenantId,
-                    EventType = "system_reboot_detected",
-                    Severity = EventSeverity.Info,
-                    Source = "AutopilotMonitor.Agent.V2",
-                    Phase = EnrollmentPhase.Unknown,
-                    Message = "Session resumed after OS reboot — prior agent process was terminated by the reboot.",
-                    Data = new System.Collections.Generic.Dictionary<string, object>
-                    {
-                        { "lastBootUtc", previousExit?.LastBootUtc?.ToString("o") ?? string.Empty },
-                        { "previousExitType", previousExit?.ExitType ?? string.Empty },
-                    },
-                    ImmediateUpload = true,
-                });
+                    ["previousExitType"] = previousExit?.ExitType ?? string.Empty,
+                    ["lastBootUtc"] = previousExit?.LastBootUtc?.ToString("o") ?? string.Empty,
+                };
+
+                ingressSink.Post(
+                    kind: DecisionSignalKind.SystemRebootObserved,
+                    occurredAtUtc: DateTime.UtcNow,
+                    sourceOrigin: "Program.DetectPreviousExit",
+                    evidence: new Evidence(
+                        kind: EvidenceKind.Synthetic,
+                        identifier: "previous_exit_reboot_kill",
+                        summary: $"Prior agent process terminated by OS reboot (exitType={previousExit?.ExitType})."),
+                    payload: payload);
             }
             catch (Exception ex)
             {
-                logger.Warning($"system_reboot_detected emission failed: {ex.Message}");
+                logger.Warning($"SystemRebootObserved post failed: {ex.Message}");
             }
         }
 

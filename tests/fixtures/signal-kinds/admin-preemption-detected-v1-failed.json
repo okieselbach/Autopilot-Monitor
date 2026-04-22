@@ -1,0 +1,3 @@
+# AdminPreemptionDetected v1 — adminOutcome=Failed → Stage.Failed,
+# Outcome=AdminPreempted, effect emits enrollment_failed timeline entry.
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"AdminPreemptionDetected","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T10:00:00.0000000Z","SourceOrigin":"register_session_response","Evidence":{"Kind":"Synthetic","Identifier":"admin_preemption:Failed","Summary":"Operator marked session as Failed via portal before agent startup."},"Payload":{"adminOutcome":"Failed"}}

@@ -56,10 +56,11 @@ namespace AutopilotMonitor.DecisionCore.Engine
             return (signal.Kind, signal.KindSchemaVersion) switch
             {
                 // ----- Lifecycle (DecisionEngine.Shared.cs) -----
-                (DecisionSignalKind.SessionStarted, 1)   => HandleSessionStartedV1(state, signal),
-                (DecisionSignalKind.SessionRecovered, 1) => HandleSessionRecoveredV1(state, signal),
-                (DecisionSignalKind.SessionAborted, 1)   => HandleSessionAbortedV1(state, signal),
-                (DecisionSignalKind.DeadlineFired, 1)    => HandleDeadlineFiredV1(state, signal),
+                (DecisionSignalKind.SessionStarted, 1)           => HandleSessionStartedV1(state, signal),
+                (DecisionSignalKind.SessionRecovered, 1)         => HandleSessionRecoveredV1(state, signal),
+                (DecisionSignalKind.SessionAborted, 1)           => HandleSessionAbortedV1(state, signal),
+                (DecisionSignalKind.AdminPreemptionDetected, 1)  => HandleAdminPreemptionDetectedV1(state, signal),
+                (DecisionSignalKind.DeadlineFired, 1)            => HandleDeadlineFiredV1(state, signal),
 
                 // ----- Classic UserDriven-v1 (DecisionEngine.Classic.cs) -----
                 (DecisionSignalKind.EspPhaseChanged, 1)          => HandleEspPhaseChangedV1(state, signal),
