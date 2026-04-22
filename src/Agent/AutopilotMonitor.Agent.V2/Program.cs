@@ -16,6 +16,7 @@ using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
@@ -429,6 +430,34 @@ namespace AutopilotMonitor.Agent.V2
                 return 5;
             }
 
+            // V1 parity (MonitoringService.Start, MonitoringService.RegisterSessionAsync) —
+            // POST /api/agent/register-session with 5-retry exponential backoff (2s/4s/8s/16s)
+            // BEFORE the orchestrator starts. Without this call the backend's Sessions table
+            // never gets a row for this session, so IncrementSessionEventCountAsync /
+            // UpdateSessionStatusAsync silently no-op — events still land in the Events table
+            // but session status, phase, admin-overrides and validator reconcile all break.
+            // On failure we follow V1's rule: collectors MUST NOT start to prevent orphaned events.
+            var registrationResult = SessionRegistrationHelper.RegisterWithRetryAsync(
+                apiClient: backendApiClient,
+                agentConfig: agentConfig,
+                agentVersion: GetAgentVersion(),
+                logger: logger,
+                authFailureTracker: authFailureTracker,
+                emergencyReporter: emergencyReporter).GetAwaiter().GetResult();
+
+            if (registrationResult.Outcome != SessionRegistrationOutcome.Succeeded)
+            {
+                logger.Error(
+                    $"=== SESSION REGISTRATION FAILED ({registrationResult.Outcome}: {registrationResult.ErrorMessage}) — " +
+                    "collectors will NOT start to prevent orphaned events. ===");
+                if (consoleMode)
+                    Console.Error.WriteLine($"FATAL: session registration failed ({registrationResult.Outcome}). Agent exiting.");
+                try { mtlsHttpClient?.Dispose(); } catch { }
+                try { backendApiClient?.Dispose(); } catch { }
+                // Exit code differs so the diag skill can distinguish Auth vs Network in Scheduled-Task history.
+                return registrationResult.Outcome == SessionRegistrationOutcome.AuthFailed ? 6 : 7;
+            }
+
             var classifiers = new IClassifier[]
             {
                 new WhiteGloveSealingClassifier(),
@@ -683,6 +712,22 @@ namespace AutopilotMonitor.Agent.V2
                             EmitSystemRebootDetectedEvent(orchestrator, agentConfig, previousExit, logger);
                         }
 
+                        // V1 parity (MonitoringService.cs:388-413 — the "ADMIN OVERRIDE on startup"
+                        // block) — if the register-session response carried an AdminAction the
+                        // session was already marked terminal by an operator via the portal. Emit
+                        // the matching lifecycle event and synthesise a Terminated so the normal
+                        // termination pipeline (cleanup + summary + self-destruct) runs. The
+                        // orchestrator has only just started so the event ordering is clean.
+                        if (!string.IsNullOrEmpty(registrationResult.AdminAction))
+                        {
+                            HandleStartupAdminOverride(
+                                orchestrator,
+                                terminationHandler,
+                                agentConfig,
+                                registrationResult.AdminAction,
+                                logger);
+                        }
+
                         // M4.6.δ — fire-and-forget startup analyzers (LocalAdmin / SoftwareInventory /
                         // IntegrityBypass). Runs on a background task inside AgentAnalyzerManager.
                         try { analyzerManager.RunStartup(); }
@@ -845,6 +890,63 @@ namespace AutopilotMonitor.Agent.V2
             catch (Exception ex)
             {
                 logger.Warning($"EmitUnrestrictedModeAuditIfChanged: emission failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// V1 parity (MonitoringService.cs:388-413) — when the register-session response
+        /// carried an <c>AdminAction</c> ("Succeeded" / "Failed"), emit the matching
+        /// <c>enrollment_complete</c> / <c>enrollment_failed</c> event and synthesise a
+        /// <see cref="EnrollmentTerminatedEventArgs"/> so the termination pipeline (cleanup,
+        /// summary dialog, self-destruct) runs without waiting for an external signal.
+        /// </summary>
+        private static void HandleStartupAdminOverride(
+            EnrollmentOrchestrator orchestrator,
+            EnrollmentTerminationHandler terminationHandler,
+            AgentConfiguration agentConfig,
+            string adminAction,
+            AgentLogger logger)
+        {
+            try
+            {
+                var succeeded = string.Equals(adminAction, "Succeeded", StringComparison.OrdinalIgnoreCase);
+                logger.Warning(
+                    $"=== ADMIN OVERRIDE on startup: session already marked as {adminAction} by administrator — running cleanup only ===");
+
+                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                {
+                    SessionId = agentConfig.SessionId,
+                    TenantId = agentConfig.TenantId,
+                    EventType = succeeded ? "enrollment_complete" : "enrollment_failed",
+                    Severity = succeeded ? EventSeverity.Info : EventSeverity.Warning,
+                    Source = "AdminOverride",
+                    Phase = EnrollmentPhase.Complete,
+                    Message = $"Session {adminAction.ToLowerInvariant()} by administrator (detected on restart) — cleanup initiated.",
+                    Data = new System.Collections.Generic.Dictionary<string, object>
+                    {
+                        { "adminAction", adminAction },
+                        { "source", "register_session_response" },
+                    },
+                    ImmediateUpload = true,
+                });
+
+                var outcome = succeeded
+                    ? EnrollmentTerminationOutcome.Succeeded
+                    : EnrollmentTerminationOutcome.Failed;
+                var stage = succeeded ? SessionStage.Completed : SessionStage.Failed;
+
+                terminationHandler.Handle(
+                    sender: null,
+                    args: new EnrollmentTerminatedEventArgs(
+                        reason: EnrollmentTerminationReason.DecisionTerminalStage,
+                        outcome: outcome,
+                        stageName: stage.ToString(),
+                        terminatedAtUtc: DateTime.UtcNow,
+                        details: $"Admin marked session as {adminAction} via portal (detected on register-session)."));
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"HandleStartupAdminOverride failed: {ex.Message}");
             }
         }
 

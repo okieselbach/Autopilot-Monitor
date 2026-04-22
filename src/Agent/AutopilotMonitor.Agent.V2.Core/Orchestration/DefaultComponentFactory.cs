@@ -36,11 +36,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
     /// </list>
     /// Optional peripheral hosts (driven by <see cref="CollectorConfiguration"/> toggles):
     /// <list type="bullet">
-    ///   <item><b>PerformanceHost</b> — CPU/memory/disk samples.</item>
-    ///   <item><b>AgentSelfMetricsHost</b> — process CPU, memory and HTTP traffic counters.
-    ///     Wires into the <see cref="NetworkMetrics"/> instance created by the Program.cs
-    ///     <see cref="BackendApiClient"/> (the V2 <see cref="Transport.Telemetry.BackendTelemetryUploader"/>
-    ///     has no metrics — accepted M4.5.b tech-debt).</item>
+    ///   <item><b>PeriodicCollectorLifecycleHost</b> — owns <c>PerformanceCollector</c> (CPU /
+    ///     memory / disk samples) and <c>AgentSelfMetricsCollector</c> (process CPU, memory and
+    ///     HTTP traffic counters) under a single idle-timeout window (V1 parity with
+    ///     <c>PeriodicCollectorManager</c>). Wires <c>AgentSelfMetricsCollector</c> into the
+    ///     <see cref="NetworkMetrics"/> instance created by the Program.cs
+    ///     <see cref="BackendApiClient"/>.</item>
+    ///   <item><b>NetworkChangeHost</b> — owns <c>NetworkChangeDetector</c> for WiFi / SSID /
+    ///     default-route / MDM-reachability transitions (V1 parity with
+    ///     <c>CollectorCoordinator.StartOptionalCollectors:375-382</c>).</item>
     /// </list>
     /// </para>
     /// <para>
@@ -154,17 +158,37 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // ----- Peripheral hosts (event-only; driven by remote-config toggles) --------------
 
-            if (collectors.EnablePerformanceCollector)
+            // V1 parity (PeriodicCollectorManager) — combine Performance + AgentSelfMetrics under
+            // a single host that stops both after CollectorIdleTimeoutMinutes of no real enrollment
+            // activity and restarts them on the next real event. Without the idle timeout the two
+            // collectors run for the agent's entire lifetime (up to AgentMaxLifetime / 6 h),
+            // which drains battery + wastes bandwidth on dormant sessions.
+            if (collectors.EnablePerformanceCollector || (collectors.EnableAgentSelfMetrics && _networkMetrics != null))
             {
-                hosts.Add(new PerformanceHost(sessionId, tenantId, onEnrollmentEvent, logger,
-                    collectors.PerformanceIntervalSeconds));
+                hosts.Add(new PeriodicCollectorLifecycleHost(
+                    sessionId: sessionId,
+                    tenantId: tenantId,
+                    onEnrollmentEvent: onEnrollmentEvent,
+                    logger: logger,
+                    performanceEnabled: collectors.EnablePerformanceCollector,
+                    performanceIntervalSeconds: collectors.PerformanceIntervalSeconds,
+                    selfMetricsEnabled: collectors.EnableAgentSelfMetrics && _networkMetrics != null,
+                    selfMetricsIntervalSeconds: collectors.AgentSelfMetricsIntervalSeconds,
+                    idleTimeoutMinutes: collectors.CollectorIdleTimeoutMinutes,
+                    networkMetrics: _networkMetrics,
+                    agentVersion: _agentVersion));
             }
 
-            if (collectors.EnableAgentSelfMetrics && _networkMetrics != null)
-            {
-                hosts.Add(new AgentSelfMetricsHost(sessionId, tenantId, onEnrollmentEvent, logger,
-                    _networkMetrics, _agentVersion, collectors.AgentSelfMetricsIntervalSeconds));
-            }
+            // V1 parity (CollectorCoordinator.StartOptionalCollectors:375-382) — wire the
+            // NetworkChangeDetector. It captures WiFi SSID / default route / IPv4 / reachability
+            // changes and emits `network_change` events. Events are already debounced internally
+            // (5s); no separate remote-config toggle in V1 either.
+            hosts.Add(new NetworkChangeHost(
+                sessionId: sessionId,
+                tenantId: tenantId,
+                onEnrollmentEvent: onEnrollmentEvent,
+                logger: logger,
+                apiBaseUrl: _agentConfig.ApiBaseUrl));
 
             // M4.6.γ — Delivery-Optimization telemetry. Dormant-by-default: only polls when the
             // IME log tracker reports an app entering Downloading/Installing (see AppStateChanged
@@ -516,33 +540,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
         }
 
-        private sealed class PerformanceHost : ICollectorHost
-        {
-            public string Name => "PerformanceCollector";
-
-            private readonly PerformanceCollector _collector;
-            private int _disposed;
-
-            public PerformanceHost(
-                string sessionId,
-                string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
-                AgentLogger logger,
-                int intervalSeconds)
-            {
-                _collector = new PerformanceCollector(sessionId, tenantId, onEnrollmentEvent, logger, intervalSeconds);
-            }
-
-            public void Start() => _collector.Start();
-            public void Stop() => _collector.Stop();
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-                try { _collector.Dispose(); } catch { }
-            }
-        }
-
         private sealed class DeliveryOptimizationHost : ICollectorHost
         {
             public string Name => "DeliveryOptimizationCollector";
@@ -579,13 +576,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     logDirectory: Environment.ExpandEnvironmentVariables(Shared.Constants.LogDirectory));
             }
 
+            private Action<Monitoring.Enrollment.Ime.AppPackageState, Monitoring.Enrollment.Ime.AppInstallationState, Monitoring.Enrollment.Ime.AppInstallationState>? _chainedHandler;
+
             public void Start()
             {
                 // Chain ourselves into the tracker's OnAppStateChanged so the DO collector wakes
                 // up on the first Downloading/Installing transition (Legacy parity). We preserve
                 // any existing handler — the IME adapter's own listener must keep running.
                 _prevStateChanged = _imeHost.Tracker.OnAppStateChanged;
-                _imeHost.Tracker.OnAppStateChanged = (pkg, oldState, newState) =>
+                _chainedHandler = (pkg, oldState, newState) =>
                 {
                     try { _prevStateChanged?.Invoke(pkg, oldState, newState); }
                     catch (Exception ex) { _logger.Warning($"DeliveryOptimizationHost: previous OnAppStateChanged handler threw: {ex.Message}"); }
@@ -597,6 +596,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                         catch (Exception ex) { _logger.Warning($"DeliveryOptimizationHost: WakeUp threw: {ex.Message}"); }
                     }
                 };
+                _imeHost.Tracker.OnAppStateChanged = _chainedHandler;
 
                 _collector.Start();
                 _logger.Info($"DeliveryOptimizationHost: started dormant (interval={_collector}, wakes on Downloading/Installing).");
@@ -605,9 +605,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public void Stop()
             {
                 // Restore the previous handler only if we're still the current one — otherwise
-                // someone else replaced us and owns the slot now.
-                if (object.ReferenceEquals(_imeHost.Tracker.OnAppStateChanged, _imeHost.Tracker.OnAppStateChanged))
+                // someone else replaced us and owns the slot now. The V1 bug here compared the
+                // handler slot against itself (always true) which silently overwrote any newer
+                // handler that had since taken over; the captured `_chainedHandler` reference
+                // lets us make the check actually meaningful.
+                if (_chainedHandler != null
+                    && object.ReferenceEquals(_imeHost.Tracker.OnAppStateChanged, _chainedHandler))
+                {
                     _imeHost.Tracker.OnAppStateChanged = _prevStateChanged;
+                }
                 _collector.Stop();
             }
 
@@ -618,33 +624,273 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
         }
 
-        private sealed class AgentSelfMetricsHost : ICollectorHost
+        /// <summary>
+        /// V1 parity (<c>PeriodicCollectorManager</c>). Owns the <see cref="PerformanceCollector"/>
+        /// and <see cref="AgentSelfMetricsCollector"/> and enforces the
+        /// <c>CollectorIdleTimeoutMinutes</c> window: both stop after N minutes of no real event
+        /// activity and restart on the next real (non-periodic) event. Without this the two
+        /// collectors ran forever in V2 and filled the telemetry spool on dormant sessions.
+        /// <para>
+        /// Activity is observed by wrapping the <c>onEnrollmentEvent</c> sink: every event that
+        /// flows through this host bumps <c>_lastRealEventTimeUtc</c> unless it matches a
+        /// well-known periodic event type (<c>performance_snapshot</c>, <c>agent_metrics_snapshot</c>,
+        /// <c>stall_probe_*</c>, <c>session_stalled</c>). Events emitted by the managed
+        /// collectors themselves therefore never reset their own idle window.
+        /// </para>
+        /// </summary>
+        private sealed class PeriodicCollectorLifecycleHost : ICollectorHost
         {
-            public string Name => "AgentSelfMetricsCollector";
+            public string Name => "PeriodicCollectorLifecycleHost";
 
-            private readonly AgentSelfMetricsCollector _collector;
+            private static readonly TimeSpan IdleTickInterval = TimeSpan.FromSeconds(60);
+            private static readonly HashSet<string> PeriodicEventTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "performance_snapshot",
+                "agent_metrics_snapshot",
+                "performance_collector_stopped",
+                "agent_metrics_collector_stopped",
+                "stall_probe_check",
+                "stall_probe_result",
+                "session_stalled",
+            };
+
+            private readonly string _sessionId;
+            private readonly string _tenantId;
+            private readonly Action<EnrollmentEvent> _emitEvent;
+            private readonly AgentLogger _logger;
+            private readonly bool _perfEnabled;
+            private readonly int _perfIntervalSeconds;
+            private readonly bool _selfMetricsEnabled;
+            private readonly int _selfMetricsIntervalSeconds;
+            private readonly int _idleTimeoutMinutes;
+            private readonly NetworkMetrics? _networkMetrics;
+            private readonly string _agentVersion;
+
+            private readonly object _sync = new object();
+            private PerformanceCollector? _performanceCollector;
+            private AgentSelfMetricsCollector? _selfMetricsCollector;
+            private Timer? _idleTimer;
+            private DateTime _lastRealEventTimeUtc;
+            private bool _idleStopped;
             private int _disposed;
 
-            public AgentSelfMetricsHost(
+            public PeriodicCollectorLifecycleHost(
                 string sessionId,
                 string tenantId,
                 Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
-                NetworkMetrics networkMetrics,
-                string agentVersion,
-                int intervalSeconds)
+                bool performanceEnabled,
+                int performanceIntervalSeconds,
+                bool selfMetricsEnabled,
+                int selfMetricsIntervalSeconds,
+                int idleTimeoutMinutes,
+                NetworkMetrics? networkMetrics,
+                string agentVersion)
             {
-                _collector = new AgentSelfMetricsCollector(
-                    sessionId, tenantId, onEnrollmentEvent, networkMetrics, logger, agentVersion, intervalSeconds);
+                _sessionId = sessionId;
+                _tenantId = tenantId;
+                _emitEvent = WrapEventSink(onEnrollmentEvent);
+                _logger = logger;
+                _perfEnabled = performanceEnabled;
+                _perfIntervalSeconds = performanceIntervalSeconds;
+                _selfMetricsEnabled = selfMetricsEnabled;
+                _selfMetricsIntervalSeconds = selfMetricsIntervalSeconds;
+                _idleTimeoutMinutes = idleTimeoutMinutes;
+                _networkMetrics = networkMetrics;
+                _agentVersion = agentVersion;
+                _lastRealEventTimeUtc = DateTime.UtcNow;
             }
 
-            public void Start() => _collector.Start();
-            public void Stop() => _collector.Stop();
+            public void Start()
+            {
+                lock (_sync)
+                {
+                    StartCollectorsInternal();
+                    if (_idleTimeoutMinutes > 0)
+                    {
+                        _idleTimer = new Timer(_ => IdleCheckTick(), state: null,
+                            dueTime: IdleTickInterval, period: IdleTickInterval);
+                        _logger.Info($"PeriodicCollectorLifecycleHost: started (idle timeout={_idleTimeoutMinutes}min).");
+                    }
+                    else
+                    {
+                        _logger.Info("PeriodicCollectorLifecycleHost: started (idle timeout disabled).");
+                    }
+                }
+            }
+
+            public void Stop()
+            {
+                lock (_sync)
+                {
+                    try { _idleTimer?.Dispose(); } catch { }
+                    _idleTimer = null;
+                    StopCollectorsInternal();
+                }
+            }
 
             public void Dispose()
             {
                 if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-                try { _collector.Dispose(); } catch { }
+                Stop();
+            }
+
+            private void StartCollectorsInternal()
+            {
+                if (_perfEnabled && _performanceCollector == null)
+                {
+                    _performanceCollector = new PerformanceCollector(
+                        _sessionId, _tenantId, _emitEvent, _logger, _perfIntervalSeconds);
+                    _performanceCollector.Start();
+                }
+                if (_selfMetricsEnabled && _selfMetricsCollector == null && _networkMetrics != null)
+                {
+                    _selfMetricsCollector = new AgentSelfMetricsCollector(
+                        _sessionId, _tenantId, _emitEvent, _networkMetrics, _logger, _agentVersion, _selfMetricsIntervalSeconds);
+                    _selfMetricsCollector.Start();
+                }
+                _idleStopped = false;
+            }
+
+            private void StopCollectorsInternal()
+            {
+                try { _performanceCollector?.Stop(); } catch { }
+                try { _performanceCollector?.Dispose(); } catch { }
+                _performanceCollector = null;
+
+                try { _selfMetricsCollector?.Stop(); } catch { }
+                try { _selfMetricsCollector?.Dispose(); } catch { }
+                _selfMetricsCollector = null;
+            }
+
+            private Action<EnrollmentEvent> WrapEventSink(Action<EnrollmentEvent> inner)
+            {
+                return evt =>
+                {
+                    if (evt == null)
+                    {
+                        inner(null!);
+                        return;
+                    }
+                    if (!string.IsNullOrEmpty(evt.EventType)
+                        && !PeriodicEventTypes.Contains(evt.EventType))
+                    {
+                        OnRealEvent();
+                    }
+                    inner(evt);
+                };
+            }
+
+            private void OnRealEvent()
+            {
+                lock (_sync)
+                {
+                    _lastRealEventTimeUtc = DateTime.UtcNow;
+                    if (_idleStopped)
+                    {
+                        _logger.Info("PeriodicCollectorLifecycleHost: real event detected — restarting periodic collectors.");
+                        StartCollectorsInternal();
+                    }
+                }
+            }
+
+            private void IdleCheckTick()
+            {
+                try
+                {
+                    lock (_sync)
+                    {
+                        if (_idleStopped) return;
+                        if (_idleTimeoutMinutes <= 0) return;
+
+                        var idleMinutes = (DateTime.UtcNow - _lastRealEventTimeUtc).TotalMinutes;
+                        if (idleMinutes < _idleTimeoutMinutes) return;
+
+                        _logger.Info($"PeriodicCollectorLifecycleHost: idle for {idleMinutes:F0}min (limit={_idleTimeoutMinutes}) — stopping collectors.");
+
+                        var hadPerformance = _performanceCollector != null;
+                        var hadSelfMetrics = _selfMetricsCollector != null;
+                        StopCollectorsInternal();
+                        _idleStopped = true;
+
+                        if (hadPerformance)
+                            EmitIdleStopped("performance_collector_stopped", idleMinutes);
+                        if (hadSelfMetrics)
+                            EmitIdleStopped("agent_metrics_collector_stopped", idleMinutes);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"PeriodicCollectorLifecycleHost: idle-check tick threw: {ex.Message}");
+                }
+            }
+
+            private void EmitIdleStopped(string eventType, double idleMinutes)
+            {
+                try
+                {
+                    _emitEvent(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = eventType,
+                        Severity = EventSeverity.Info,
+                        Source = "PeriodicCollectorLifecycleHost",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"{eventType} after {idleMinutes:F0}min idle (no real enrollment activity).",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "reason", "idle_timeout" },
+                            { "idleTimeoutMinutes", _idleTimeoutMinutes },
+                            { "idleMinutes", Math.Round(idleMinutes, 1) },
+                        },
+                    });
+                }
+                catch (Exception ex) { _logger.Debug($"PeriodicCollectorLifecycleHost: emit '{eventType}' threw: {ex.Message}"); }
+            }
+        }
+
+        /// <summary>
+        /// V1 parity (<c>CollectorCoordinator.StartOptionalCollectors:375-382</c>) — owns the
+        /// lifecycle of <see cref="NetworkChangeDetector"/>. Without this host the detector class
+        /// existed in V2 but was never instantiated, so WiFi / SSID / connectivity transitions
+        /// were invisible to the backend.
+        /// </summary>
+        private sealed class NetworkChangeHost : ICollectorHost
+        {
+            public string Name => "NetworkChangeDetector";
+
+            private readonly NetworkChangeDetector _detector;
+            private readonly AgentLogger _logger;
+            private int _disposed;
+
+            public NetworkChangeHost(
+                string sessionId,
+                string tenantId,
+                Action<EnrollmentEvent> onEnrollmentEvent,
+                AgentLogger logger,
+                string? apiBaseUrl)
+            {
+                _logger = logger;
+                _detector = new NetworkChangeDetector(sessionId, tenantId, onEnrollmentEvent, logger, apiBaseUrl);
+            }
+
+            public void Start()
+            {
+                try { _detector.Start(); }
+                catch (Exception ex) { _logger.Warning($"NetworkChangeHost: Start failed: {ex.Message}"); }
+            }
+
+            public void Stop()
+            {
+                try { _detector.Stop(); }
+                catch (Exception ex) { _logger.Warning($"NetworkChangeHost: Stop failed: {ex.Message}"); }
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+                try { _detector.Dispose(); } catch { }
             }
         }
     }
