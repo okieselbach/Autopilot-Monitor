@@ -16,6 +16,7 @@ using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
@@ -712,6 +713,17 @@ namespace AutopilotMonitor.Agent.V2
                             EmitSystemRebootDetectedEvent(orchestrator, agentConfig, previousExit, logger);
                         }
 
+                        // V2 parity — post SessionStarted so the reducer establishes the session anchor
+                        // (HandleSessionStartedV1 in DecisionEngine.Shared.cs). Skipped on:
+                        //   - WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
+                        //     SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge.
+                        //   - Admin preemption: the AdminPreemptionDetected signal below drives the
+                        //     session straight to a terminal stage; SessionStarted first would be noise.
+                        if (!isWhiteGloveResume && string.IsNullOrEmpty(registrationResult.AdminAction))
+                        {
+                            PostSessionStartedSignal(orchestrator.IngressSink, registrationResult, agentConfig, logger);
+                        }
+
                         // V1 parity (MonitoringService.cs:388-413 — the "ADMIN OVERRIDE on startup"
                         // block) — if the register-session response carried an AdminAction the
                         // session was already marked terminal by an operator via the portal. Emit
@@ -947,6 +959,49 @@ namespace AutopilotMonitor.Agent.V2
             catch (Exception ex)
             {
                 logger.Warning($"HandleStartupAdminOverride failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// V2 parity — post a <see cref="DecisionSignalKind.SessionStarted"/> signal with the
+        /// tenant-registered session metadata (EnrollmentType / IsHybridJoin / ValidatedBy) so the
+        /// reducer's session-anchor handler runs. Without this the DecisionState.Stage stays at
+        /// the initial value and subsequent raw signals (ESP / Hello) see an uninitialised session.
+        /// </summary>
+        internal static void PostSessionStartedSignal(
+            ISignalIngressSink ingressSink,
+            SessionRegistrationResult registrationResult,
+            AgentConfiguration agentConfig,
+            AgentLogger logger)
+        {
+            try
+            {
+                var payload = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["enrollmentType"] = EnrollmentRegistryDetector.DetectEnrollmentType(),
+                    ["isHybridJoin"] = EnrollmentRegistryDetector.DetectHybridJoin() ? "true" : "false",
+                    ["validatedBy"] = registrationResult.ValidatedBy.ToString(),
+                    ["agentVersion"] = GetAgentVersion(),
+                    ["isBootstrapSession"] = agentConfig.UseBootstrapTokenAuth ? "true" : "false",
+                };
+
+                var evidence = new Evidence(
+                    kind: EvidenceKind.Synthetic,
+                    identifier: "register_session_success",
+                    summary: "Session registration handshake succeeded; posting SessionStarted anchor for reducer.");
+
+                ingressSink.Post(
+                    kind: DecisionSignalKind.SessionStarted,
+                    occurredAtUtc: DateTime.UtcNow,
+                    sourceOrigin: "Program.RunAgent",
+                    evidence: evidence,
+                    payload: payload);
+
+                logger.Debug($"SessionStarted signal posted (validatedBy={registrationResult.ValidatedBy}, enrollmentType={payload["enrollmentType"]}).");
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"SessionStarted post failed: {ex.Message}");
             }
         }
 
