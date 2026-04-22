@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
+using AutopilotMonitor.Shared.Models;
 using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
@@ -224,6 +228,77 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
         {
             Assert.Throws<ArgumentNullException>(() =>
                 new AuthFailureTracker(1, 0, new FakeClock(DateTime.UtcNow), null!));
+        }
+
+        // ============================================================= Distress dispatch (V1 parity)
+
+        [Fact]
+        public void RecordFailure_dispatches_distress_only_on_first_failure_for_401()
+        {
+            var clock = new FakeClock(new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc));
+            var fakeDistress = new FakeDistressReporter();
+            var tracker = new AuthFailureTracker(maxFailures: 5, timeoutMinutes: 0, clock, NewLogger(), fakeDistress);
+
+            tracker.RecordFailure(401, "agent/config");
+            tracker.RecordFailure(401, "agent/config");
+            tracker.RecordFailure(401, "agent/config");
+
+            Assert.Single(fakeDistress.Calls);
+            Assert.Equal(DistressErrorType.AuthCertificateRejected, fakeDistress.Calls[0].ErrorType);
+            Assert.Equal(401, fakeDistress.Calls[0].HttpStatusCode);
+            Assert.Contains("agent/config", fakeDistress.Calls[0].Message);
+        }
+
+        [Fact]
+        public void RecordFailure_dispatches_device_not_registered_for_403()
+        {
+            var clock = new FakeClock(new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc));
+            var fakeDistress = new FakeDistressReporter();
+            var tracker = new AuthFailureTracker(maxFailures: 5, timeoutMinutes: 0, clock, NewLogger(), fakeDistress);
+
+            tracker.RecordFailure(403, "agent/telemetry");
+
+            Assert.Single(fakeDistress.Calls);
+            Assert.Equal(DistressErrorType.DeviceNotRegistered, fakeDistress.Calls[0].ErrorType);
+            Assert.Equal(403, fakeDistress.Calls[0].HttpStatusCode);
+        }
+
+        [Fact]
+        public void RecordFailure_without_distress_reporter_is_silent_but_still_tracks()
+        {
+            var clock = new FakeClock(new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc));
+            var tracker = new AuthFailureTracker(maxFailures: 2, timeoutMinutes: 0, clock, NewLogger());
+
+            int events = 0;
+            tracker.ThresholdExceeded += (_, _) => events++;
+
+            tracker.RecordFailure(401, "op");
+            tracker.RecordFailure(401, "op");
+
+            Assert.Equal(1, events);
+        }
+
+        private sealed class FakeDistressReporter : DistressReporter
+        {
+            public sealed class Call
+            {
+                public DistressErrorType ErrorType { get; set; }
+                public string Message { get; set; } = default!;
+                public int? HttpStatusCode { get; set; }
+            }
+
+            public List<Call> Calls { get; } = new List<Call>();
+
+            public FakeDistressReporter()
+                : base(baseUrl: "https://example.test", tenantId: "t", manufacturer: "m", model: "d", serialNumber: "s", agentVersion: "0.0.0", logger: null!)
+            {
+            }
+
+            public override Task TrySendAsync(DistressErrorType errorType, string message, int? httpStatusCode = null)
+            {
+                Calls.Add(new Call { ErrorType = errorType, Message = message, HttpStatusCode = httpStatusCode });
+                return Task.CompletedTask;
+            }
         }
 
         private sealed class FakeClock : AutopilotMonitor.DecisionCore.Engine.IClock

@@ -192,7 +192,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     onEnrollmentEvent: onEnrollmentEvent,
                     logger: logger,
                     rules: _remoteConfig.GatherRules,
-                    imeLogPathOverride: _agentConfig.ImeLogPathOverride));
+                    imeLogPathOverride: _agentConfig.ImeLogPathOverride,
+                    unrestrictedMode: _agentConfig.UnrestrictedMode));
             }
 
             return hosts;
@@ -209,6 +210,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             private readonly Monitoring.Telemetry.Gather.GatherRuleExecutor _executor;
             private readonly System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule> _rules;
             private readonly AgentLogger _logger;
+            private readonly bool _unrestrictedMode;
             private int _disposed;
 
             public GatherRuleExecutorHost(
@@ -217,18 +219,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
                 System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule> rules,
-                string? imeLogPathOverride)
+                string? imeLogPathOverride,
+                bool unrestrictedMode = false)
             {
                 _logger = logger;
                 _rules = rules ?? new System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule>();
+                _unrestrictedMode = unrestrictedMode;
                 _executor = new Monitoring.Telemetry.Gather.GatherRuleExecutor(
                     sessionId, tenantId, onEnrollmentEvent, logger, imeLogPathOverride);
             }
 
             public void Start()
             {
+                // V1 parity (CollectorCoordinator.StartGatherRuleExecutor) — propagate the
+                // tenant-controlled UnrestrictedMode BEFORE UpdateRules so any startup-trigger
+                // rule sees the elevated policy when AllowList checks would otherwise reject it.
+                _executor.UnrestrictedMode = _unrestrictedMode;
                 _executor.UpdateRules(_rules);
-                _logger.Info($"GatherRuleExecutorHost: started with {_rules.Count} rule(s).");
+                _logger.Info(
+                    $"GatherRuleExecutorHost: started with {_rules.Count} rule(s), unrestrictedMode={_unrestrictedMode}.");
             }
 
             public void Stop()

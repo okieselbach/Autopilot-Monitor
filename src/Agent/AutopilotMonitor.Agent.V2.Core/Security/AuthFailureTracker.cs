@@ -1,7 +1,9 @@
 using System;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Security
 {
@@ -18,6 +20,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
     /// <c>AgentConfigResponse</c> (defaults: 5 consecutive, time window disabled).
     /// </para>
     /// <para>
+    /// V1 parity (<c>EventUploadOrchestrator.HandleAuthFailure</c>): the tracker is the single
+    /// dispatch point for distress reports. The <b>first</b> failure emits a distress signal
+    /// via the optional <see cref="DistressReporter"/> with
+    /// <see cref="DistressErrorType.AuthCertificateRejected"/> for 401 and
+    /// <see cref="DistressErrorType.DeviceNotRegistered"/> for 403. Subsequent failures are
+    /// logged but do not spam the distress channel — there is no point asking the backend
+    /// twice about a certificate it already rejected.
+    /// </para>
+    /// <para>
     /// Thread-safety: consecutive-count uses <see cref="Interlocked"/>; the first-failure timestamp
     /// is protected by a single monitor lock. <see cref="ThresholdExceeded"/> is raised outside the
     /// lock to prevent handler re-entrancy deadlocks.
@@ -27,6 +38,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
     {
         private readonly IClock _clock;
         private readonly AgentLogger _logger;
+        private readonly DistressReporter _distressReporter;
         private readonly object _windowLock = new object();
 
         private int _maxFailures;              // 0 = disabled
@@ -39,10 +51,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             int maxFailures,
             int timeoutMinutes,
             IClock clock,
-            AgentLogger logger)
+            AgentLogger logger,
+            DistressReporter distressReporter = null)
         {
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _distressReporter = distressReporter;
             UpdateLimits(maxFailures, timeoutMinutes);
         }
 
@@ -67,8 +81,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         }
 
         /// <summary>
-        /// Record a 401/403 from the given <paramref name="operation"/>. Emits <see cref="ThresholdExceeded"/>
-        /// the first time either ceiling is crossed; subsequent calls after termination is armed are no-ops.
+        /// Record a 401/403 from the given <paramref name="operation"/>. V1 parity — on the FIRST
+        /// failure this fires a single distress report via the constructor-injected
+        /// <see cref="DistressReporter"/> (401 → AuthCertificateRejected, 403 → DeviceNotRegistered).
+        /// Subsequent failures are logged + counted but do not dispatch further distress signals.
+        /// Emits <see cref="ThresholdExceeded"/> the first time either ceiling is crossed;
+        /// subsequent calls after termination is armed are no-ops.
         /// </summary>
         public void RecordFailure(int statusCode, string operation)
         {
@@ -84,12 +102,35 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                 firstFailureAt = _firstFailureUtc.Value;
             }
 
+            // V1 parity — only the first consecutive failure produces a distress report. Repeat
+            // hits at 2..N use the local log only; the backend already knows from the first
+            // report that the device is unauthorized.
+            if (count == 1 && _distressReporter != null)
+            {
+                var distressType = statusCode == 403
+                    ? DistressErrorType.DeviceNotRegistered
+                    : DistressErrorType.AuthCertificateRejected;
+                try
+                {
+                    _ = _distressReporter.TrySendAsync(
+                        distressType,
+                        $"Backend returned {statusCode} during {operation}",
+                        httpStatusCode: statusCode);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug($"AuthFailureTracker: distress dispatch threw: {ex.Message}");
+                }
+            }
+
             bool countExceeded = _maxFailures > 0 && count >= _maxFailures;
             bool windowExceeded = _timeoutWindow.HasValue && (now - firstFailureAt) >= _timeoutWindow.Value;
 
             if (!countExceeded && !windowExceeded)
             {
-                _logger.Warning($"AuthFailureTracker: consecutive auth failure #{count} (http {statusCode}, {operation}).");
+                _logger.Warning(
+                    $"Authentication failure {count}/{_maxFailures} (first failure at {firstFailureAt:HH:mm:ss}, " +
+                    $"http {statusCode}, {operation}).");
                 return;
             }
 
@@ -99,7 +140,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                 ? $"consecutive auth failures reached limit ({count} >= {_maxFailures})"
                 : $"auth-failure time window exceeded ({(now - firstFailureAt).TotalMinutes:F0}min >= {_timeoutWindow.Value.TotalMinutes:F0}min)";
 
-            _logger.Error($"AuthFailureTracker: {reason} — signalling shutdown. Last operation: {operation}, statusCode={statusCode}.");
+            _logger.Error(
+                $"=== AGENT SHUTDOWN: {count} consecutive authentication failures (401/403) — " +
+                "backend rejecting requests. Terminating agent to prevent distress spam. ===");
+            _logger.Error($"AuthFailureTracker: {reason}. Last operation: {operation}, statusCode={statusCode}.");
 
             try
             {

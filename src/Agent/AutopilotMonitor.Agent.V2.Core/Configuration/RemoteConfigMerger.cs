@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Configuration
@@ -17,100 +18,160 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
     /// to <see cref="AgentConfiguration"/> defaults set from CLI / bootstrap-config, so tenant
     /// admin settings were effectively ignored.
     /// <para>
-    /// CLI-override semantics: command-line flags that were explicitly passed take precedence
-    /// over the remote value. In production (Scheduled Task run with no args) the remote value
-    /// always wins; in local dev runs the developer can still force a specific behaviour with
-    /// a CLI flag without their tenant remote config clobbering it.
+    /// <b>Merge semantics (V1 parity):</b> remote values OVERWRITE the runtime configuration
+    /// unconditionally (V1 <c>ApplyRuntimeSettingsFromRemoteConfig</c>). CLI flags seed the
+    /// initial <see cref="AgentConfiguration"/> before Merge runs and then yield to tenant
+    /// policy — if an operator deploys with <c>--reboot-on-complete</c> but the tenant config
+    /// disables reboots, the tenant wins. This matches the V1 behaviour and keeps tenants as
+    /// the source of truth for the knobs that have a remote equivalent.
     /// </para>
     /// </summary>
     public static class RemoteConfigMerger
     {
         /// <summary>
         /// Overwrites the relevant <paramref name="agentConfig"/> fields with values from
-        /// <paramref name="remoteConfig"/>. Unknown / null / empty remote fields keep the
-        /// current <paramref name="agentConfig"/> value (partial-remote-config tolerance).
+        /// <paramref name="remoteConfig"/>. Remote wins unconditionally for every field that has
+        /// a direct 1:1 mapping. Returns a <see cref="RemoteConfigMergeResult"/> describing which
+        /// observable knobs changed so the caller can emit audit events (e.g.
+        /// <c>agent_unrestricted_mode_changed</c>) after the orchestrator is running.
         /// </summary>
-        public static void Merge(
+        public static RemoteConfigMergeResult Merge(
             AgentConfiguration agentConfig,
             AgentConfigResponse remoteConfig,
-            string[] cliArgs)
+            AgentLogger logger = null)
         {
             if (agentConfig == null) throw new ArgumentNullException(nameof(agentConfig));
-            if (remoteConfig == null) return;
-            cliArgs = cliArgs ?? Array.Empty<string>();
+            if (remoteConfig == null) return RemoteConfigMergeResult.NoChange();
 
-            // ---- Boolean flags that have a matching CLI override — CLI wins when present.
-            if (!ContainsFlag(cliArgs, "--no-cleanup"))
-                agentConfig.SelfDestructOnComplete = remoteConfig.SelfDestructOnComplete;
-            if (!ContainsFlag(cliArgs, "--keep-logfile"))
-                agentConfig.KeepLogFile = remoteConfig.KeepLogFile;
-            if (!ContainsFlag(cliArgs, "--reboot-on-complete"))
-                agentConfig.RebootOnComplete = remoteConfig.RebootOnComplete;
-            if (!ContainsFlag(cliArgs, "--disable-geolocation"))
-                agentConfig.EnableGeoLocation = remoteConfig.EnableGeoLocation;
+            var result = new RemoteConfigMergeResult();
 
-            // ---- Log level — CLI `--log-level <value>` wins. Remote is a string that may not parse.
-            if (!ContainsValueArg(cliArgs, "--log-level")
-                && !string.IsNullOrWhiteSpace(remoteConfig.LogLevel)
-                && Enum.TryParse<AgentLogLevel>(remoteConfig.LogLevel, ignoreCase: true, out var parsedLevel))
+            // ---------------- Simple scalar flags — remote wins.
+            agentConfig.SelfDestructOnComplete = remoteConfig.SelfDestructOnComplete;
+            agentConfig.KeepLogFile = remoteConfig.KeepLogFile;
+            agentConfig.RebootOnComplete = remoteConfig.RebootOnComplete;
+            agentConfig.EnableGeoLocation = remoteConfig.EnableGeoLocation;
+
+            // ---------------- Log level — remote wins, but we parse defensively so an invalid
+            //                  remote value keeps the current level (and logs a warning).
+            result.OldLogLevel = agentConfig.LogLevel;
+            if (!string.IsNullOrWhiteSpace(remoteConfig.LogLevel))
             {
-                agentConfig.LogLevel = parsedLevel;
+                if (Enum.TryParse<AgentLogLevel>(remoteConfig.LogLevel, ignoreCase: true, out var parsedLevel))
+                {
+                    if (parsedLevel != agentConfig.LogLevel)
+                    {
+                        logger?.Info($"Remote config: LogLevel {agentConfig.LogLevel} → {parsedLevel}");
+                        agentConfig.LogLevel = parsedLevel;
+                    }
+                }
+                else
+                {
+                    logger?.Warning($"Remote config: LogLevel '{remoteConfig.LogLevel}' is not a valid AgentLogLevel — keeping {agentConfig.LogLevel}.");
+                }
             }
+            result.NewLogLevel = agentConfig.LogLevel;
+            result.LogLevelChanged = result.OldLogLevel != result.NewLogLevel;
 
-            // ---- Fields without a CLI override — always apply remote.
+            // ---------------- Reboot / summary-dialog knobs — direct assignment.
             agentConfig.RebootDelaySeconds = remoteConfig.RebootDelaySeconds;
             agentConfig.ShowEnrollmentSummary = remoteConfig.ShowEnrollmentSummary;
             agentConfig.EnrollmentSummaryTimeoutSeconds = remoteConfig.EnrollmentSummaryTimeoutSeconds;
             agentConfig.EnrollmentSummaryBrandingImageUrl = remoteConfig.EnrollmentSummaryBrandingImageUrl;
             agentConfig.EnrollmentSummaryLaunchRetrySeconds = remoteConfig.EnrollmentSummaryLaunchRetrySeconds;
 
-            if (!string.IsNullOrWhiteSpace(remoteConfig.NtpServer))
-                agentConfig.NtpServer = remoteConfig.NtpServer;
+            // ---------------- NTP / Timezone — remote wins even when the remote sends null so
+            //                  a tenant admin can clear a previously-applied custom NTP server.
+            agentConfig.NtpServer = remoteConfig.NtpServer;
             agentConfig.EnableTimezoneAutoSet = remoteConfig.EnableTimezoneAutoSet;
 
+            // ---------------- Diagnostics — remote wins (including DiagnosticsUploadMode="Off"
+            //                  which must clear any CLI-initial default).
             agentConfig.DiagnosticsUploadEnabled = remoteConfig.DiagnosticsUploadEnabled;
-            if (!string.IsNullOrWhiteSpace(remoteConfig.DiagnosticsUploadMode))
-                agentConfig.DiagnosticsUploadMode = remoteConfig.DiagnosticsUploadMode;
+            agentConfig.DiagnosticsUploadMode = remoteConfig.DiagnosticsUploadMode;
             agentConfig.DiagnosticsLogPaths = remoteConfig.DiagnosticsLogPaths ?? new List<DiagnosticsLogPath>();
 
             agentConfig.SendTraceEvents = remoteConfig.SendTraceEvents;
-            agentConfig.UnrestrictedMode = remoteConfig.UnrestrictedMode;
 
-            // ---- Positive-only int knobs — a zero or negative remote value keeps the current default.
-            if (remoteConfig.UploadIntervalSeconds > 0)
-                agentConfig.UploadIntervalSeconds = remoteConfig.UploadIntervalSeconds;
+            // ---------------- UnrestrictedMode audit — track old/new for the caller so the
+            //                  agent_unrestricted_mode_changed event can fire AFTER the
+            //                  orchestrator emitter is alive (V1 parity with
+            //                  AuditUnrestrictedModeChange in MonitoringService.cs).
+            result.OldUnrestrictedMode = agentConfig.UnrestrictedMode;
+            agentConfig.UnrestrictedMode = remoteConfig.UnrestrictedMode;
+            result.NewUnrestrictedMode = agentConfig.UnrestrictedMode;
+            result.UnrestrictedModeChanged = result.OldUnrestrictedMode != result.NewUnrestrictedMode;
+
+            // ---------------- ImeMatchLog: remote ships a bool, V2 runtime uses a file path.
+            //                  V1 parity — `true` expands Constants.ImeMatchLogPath, `false`
+            //                  nulls the runtime path so the collector disables itself.
+            //                  A CLI override (--ime-match-log <path>) already populated
+            //                  ImeMatchLogPath in BuildAgentConfiguration; we only clobber it
+            //                  when the remote bool flips off, mirroring V1's unconditional
+            //                  assignment with tolerance for the explicit dev override.
+            if (remoteConfig.EnableImeMatchLog)
+            {
+                agentConfig.ImeMatchLogPath = Environment.ExpandEnvironmentVariables(Constants.ImeMatchLogPath);
+            }
+            else
+            {
+                // Only null the path when the user did NOT supply an explicit CLI override.
+                // A non-null value that does not match the default is a dev-time override.
+                var defaultPath = Environment.ExpandEnvironmentVariables(Constants.ImeMatchLogPath);
+                if (string.IsNullOrEmpty(agentConfig.ImeMatchLogPath)
+                    || string.Equals(agentConfig.ImeMatchLogPath, defaultPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    agentConfig.ImeMatchLogPath = null;
+                }
+            }
+
+            // ---------------- Upload interval / batch — direct, V1 parity (no > 0 gate so a
+            //                  misconfigured tenant can in theory break uploads, but this
+            //                  surfaces the config bug instead of silently masking it).
+            agentConfig.UploadIntervalSeconds = remoteConfig.UploadIntervalSeconds;
             if (remoteConfig.MaxBatchSize > 0)
                 agentConfig.MaxBatchSize = remoteConfig.MaxBatchSize;
 
-            // ---- Nested: CollectorConfiguration. Only the fields that have a V2 consumer
-            //      on AgentConfiguration are projected here; the rest flow directly from
-            //      remoteConfig.Collectors via DefaultComponentFactory.
+            // ---------------- AuthFailure ceilings — tracker.UpdateLimits() called by caller
+            //                  so the refresh lands on the live watchdog.
+            agentConfig.MaxAuthFailures = remoteConfig.MaxAuthFailures;
+            agentConfig.AuthFailureTimeoutMinutes = remoteConfig.AuthFailureTimeoutMinutes;
+
+            // ---------------- Nested CollectorConfiguration — only the two knobs that have a
+            //                  V2 consumer on AgentConfiguration itself. The rest flow through
+            //                  the untouched remoteConfig.Collectors to DefaultComponentFactory.
             var collectors = remoteConfig.Collectors;
             if (collectors != null)
             {
                 // AgentMaxLifetimeMinutes: 0 = disabled (valid); passed to the orchestrator as a TimeSpan?.
                 agentConfig.AgentMaxLifetimeMinutes = collectors.AgentMaxLifetimeMinutes;
+
+                // HelloWaitTimeoutSeconds: V1 parity — only apply when > 0 so an accidentally
+                // zero/negative remote value keeps the current non-zero default. V1:
+                // MonitoringService.ApplyRuntimeSettingsFromRemoteConfig preserves the current
+                // setting instead of disabling Hello-wait altogether.
                 if (collectors.HelloWaitTimeoutSeconds > 0)
                     agentConfig.HelloWaitTimeoutSeconds = collectors.HelloWaitTimeoutSeconds;
             }
-        }
 
-        private static bool ContainsFlag(string[] args, string flag)
-        {
-            for (int i = 0; i < args.Length; i++)
-                if (string.Equals(args[i], flag, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            return false;
+            return result;
         }
+    }
 
-        private static bool ContainsValueArg(string[] args, string flag)
-        {
-            // Value-args need both the flag and a subsequent token, otherwise the CLI helper would
-            // not have parsed them — mirror GetArgValue's "i < args.Length - 1" contract.
-            for (int i = 0; i < args.Length - 1; i++)
-                if (string.Equals(args[i], flag, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            return false;
-        }
+    /// <summary>
+    /// Observable side-effects of <see cref="RemoteConfigMerger.Merge"/>. The caller uses this
+    /// to decide whether to emit audit events / reconfigure live components (logger, watchdog)
+    /// after the orchestrator is alive.
+    /// </summary>
+    public sealed class RemoteConfigMergeResult
+    {
+        public bool UnrestrictedModeChanged { get; set; }
+        public bool OldUnrestrictedMode { get; set; }
+        public bool NewUnrestrictedMode { get; set; }
+
+        public bool LogLevelChanged { get; set; }
+        public AgentLogLevel OldLogLevel { get; set; }
+        public AgentLogLevel NewLogLevel { get; set; }
+
+        public static RemoteConfigMergeResult NoChange() => new RemoteConfigMergeResult();
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Xunit;
 
@@ -9,8 +10,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
 {
     /// <summary>
     /// Tests for <see cref="RemoteConfigMerger"/>. This merger is the single source of
-    /// Legacy-parity: every field delivered by the backend that has a live V2 consumer must
-    /// land on <see cref="AgentConfiguration"/> after <c>FetchConfigAsync</c>.
+    /// V1-parity: every field delivered by the backend that has a live V2 consumer must land
+    /// on <see cref="AgentConfiguration"/> after <c>FetchConfigAsync</c>.
+    /// <para>
+    /// V1 parity: remote values OVERWRITE the runtime configuration unconditionally. CLI
+    /// flags only seed the initial <see cref="AgentConfiguration"/> and yield to tenant
+    /// policy once Merge runs. This is asserted by a regression test below.
+    /// </para>
     /// </summary>
     public sealed class RemoteConfigMergerTests
     {
@@ -46,6 +52,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             LogLevel = "Debug",
             SendTraceEvents = false,
             UnrestrictedMode = true,
+            MaxAuthFailures = 7,
+            AuthFailureTimeoutMinutes = 15,
+            EnableImeMatchLog = true,
             Collectors = new CollectorConfiguration
             {
                 AgentMaxLifetimeMinutes = 120,
@@ -56,12 +65,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
         // ============================================================= Happy path
 
         [Fact]
-        public void Merge_applies_all_tenant_fields_when_no_cli_overrides()
+        public void Merge_applies_all_tenant_fields()
         {
             var agent = NewAgentConfig();
             var remote = FullRemote();
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            var result = RemoteConfigMerger.Merge(agent, remote);
 
             Assert.False(agent.SelfDestructOnComplete);
             Assert.True(agent.KeepLogFile);
@@ -85,40 +94,39 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             Assert.Equal(250, agent.MaxBatchSize);
             Assert.Equal(120, agent.AgentMaxLifetimeMinutes);
             Assert.Equal(45, agent.HelloWaitTimeoutSeconds);
+            Assert.Equal(7, agent.MaxAuthFailures);
+            Assert.Equal(15, agent.AuthFailureTimeoutMinutes);
+
+            Assert.NotNull(result);
+            Assert.True(result.UnrestrictedModeChanged);
+            Assert.False(result.OldUnrestrictedMode);
+            Assert.True(result.NewUnrestrictedMode);
+            Assert.True(result.LogLevelChanged);
+            Assert.Equal(AgentLogLevel.Info, result.OldLogLevel);
+            Assert.Equal(AgentLogLevel.Debug, result.NewLogLevel);
         }
 
-        // ============================================================= CLI override wins
+        // ============================================================= Remote-wins-always (V1 parity)
 
         [Fact]
-        public void Merge_preserves_no_cleanup_cli_flag_over_remote_true()
+        public void Merge_remote_wins_over_prior_agent_self_destruct()
         {
+            // BuildAgentConfiguration may have set SelfDestructOnComplete from the --no-cleanup CLI
+            // flag. Once remote config arrives it takes over — V1 behaviour (operator cannot
+            // override tenant policy from the command line).
             var agent = NewAgentConfig();
-            agent.SelfDestructOnComplete = false; // as set by BuildAgentConfiguration when CLI had --no-cleanup
+            agent.SelfDestructOnComplete = false;
 
             var remote = FullRemote();
-            remote.SelfDestructOnComplete = true; // tenant enabled cleanup, dev disabled locally
+            remote.SelfDestructOnComplete = true;
 
-            RemoteConfigMerger.Merge(agent, remote, new[] { "--no-cleanup" });
+            RemoteConfigMerger.Merge(agent, remote);
 
-            Assert.False(agent.SelfDestructOnComplete);
+            Assert.True(agent.SelfDestructOnComplete);
         }
 
         [Fact]
-        public void Merge_preserves_keep_logfile_cli_flag_over_remote_false()
-        {
-            var agent = NewAgentConfig();
-            agent.KeepLogFile = true;
-
-            var remote = FullRemote();
-            remote.KeepLogFile = false;
-
-            RemoteConfigMerger.Merge(agent, remote, new[] { "--keep-logfile" });
-
-            Assert.True(agent.KeepLogFile);
-        }
-
-        [Fact]
-        public void Merge_preserves_reboot_cli_flag_over_remote_false()
+        public void Merge_remote_wins_over_prior_agent_reboot_on_complete()
         {
             var agent = NewAgentConfig();
             agent.RebootOnComplete = true;
@@ -126,27 +134,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             var remote = FullRemote();
             remote.RebootOnComplete = false;
 
-            RemoteConfigMerger.Merge(agent, remote, new[] { "--reboot-on-complete" });
+            RemoteConfigMerger.Merge(agent, remote);
 
-            Assert.True(agent.RebootOnComplete);
+            Assert.False(agent.RebootOnComplete);
         }
 
         [Fact]
-        public void Merge_preserves_disable_geolocation_cli_flag_over_remote_true()
-        {
-            var agent = NewAgentConfig();
-            agent.EnableGeoLocation = false;
-
-            var remote = FullRemote();
-            remote.EnableGeoLocation = true;
-
-            RemoteConfigMerger.Merge(agent, remote, new[] { "--disable-geolocation" });
-
-            Assert.False(agent.EnableGeoLocation);
-        }
-
-        [Fact]
-        public void Merge_preserves_log_level_cli_arg_over_remote_string()
+        public void Merge_remote_wins_over_prior_agent_log_level()
         {
             var agent = NewAgentConfig();
             agent.LogLevel = AgentLogLevel.Verbose;
@@ -154,9 +148,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             var remote = FullRemote();
             remote.LogLevel = "Debug";
 
-            RemoteConfigMerger.Merge(agent, remote, new[] { "--log-level", "Verbose" });
+            RemoteConfigMerger.Merge(agent, remote);
 
-            Assert.Equal(AgentLogLevel.Verbose, agent.LogLevel);
+            Assert.Equal(AgentLogLevel.Debug, agent.LogLevel);
         }
 
         [Fact]
@@ -166,7 +160,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             var remote = FullRemote();
             remote.LogLevel = "trace";
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            RemoteConfigMerger.Merge(agent, remote);
 
             Assert.Equal(AgentLogLevel.Trace, agent.LogLevel);
         }
@@ -180,9 +174,123 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             var remote = FullRemote();
             remote.LogLevel = "NotAValidLevel";
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            RemoteConfigMerger.Merge(agent, remote);
 
             Assert.Equal(AgentLogLevel.Info, agent.LogLevel);
+        }
+
+        [Fact]
+        public void Merge_remote_null_ntp_server_clears_prior_value()
+        {
+            // V1 parity: remote null overwrites local without a IsNullOrWhiteSpace gate.
+            var agent = NewAgentConfig();
+            agent.NtpServer = "local.ntp";
+
+            var remote = FullRemote();
+            remote.NtpServer = null!;
+
+            RemoteConfigMerger.Merge(agent, remote);
+
+            Assert.Null(agent.NtpServer);
+        }
+
+        [Fact]
+        public void Merge_remote_off_overrides_prior_diagnostics_upload_mode()
+        {
+            // Tenant disables diagnostics upload — must take effect even when the agent was
+            // previously configured (e.g. by a prior config fetch cached on disk) to something
+            // else. V1 parity.
+            var agent = NewAgentConfig();
+            agent.DiagnosticsUploadMode = "OnFailure";
+            agent.DiagnosticsUploadEnabled = true;
+
+            var remote = FullRemote();
+            remote.DiagnosticsUploadMode = "Off";
+            remote.DiagnosticsUploadEnabled = false;
+
+            RemoteConfigMerger.Merge(agent, remote);
+
+            Assert.Equal("Off", agent.DiagnosticsUploadMode);
+            Assert.False(agent.DiagnosticsUploadEnabled);
+        }
+
+        [Fact]
+        public void Merge_unrestricted_mode_change_is_reported_via_result()
+        {
+            var agent = NewAgentConfig();
+            agent.UnrestrictedMode = false;
+
+            var remote = FullRemote();
+            remote.UnrestrictedMode = true;
+
+            var result = RemoteConfigMerger.Merge(agent, remote);
+
+            Assert.True(result.UnrestrictedModeChanged);
+            Assert.False(result.OldUnrestrictedMode);
+            Assert.True(result.NewUnrestrictedMode);
+            Assert.True(agent.UnrestrictedMode);
+        }
+
+        [Fact]
+        public void Merge_unrestricted_mode_stable_is_not_reported_as_change()
+        {
+            var agent = NewAgentConfig();
+            agent.UnrestrictedMode = true;
+
+            var remote = FullRemote();
+            remote.UnrestrictedMode = true;
+
+            var result = RemoteConfigMerger.Merge(agent, remote);
+
+            Assert.False(result.UnrestrictedModeChanged);
+        }
+
+        [Fact]
+        public void Merge_maps_enable_ime_match_log_true_to_default_path()
+        {
+            var agent = NewAgentConfig();
+            agent.ImeMatchLogPath = null;
+
+            var remote = FullRemote();
+            remote.EnableImeMatchLog = true;
+
+            RemoteConfigMerger.Merge(agent, remote);
+
+            Assert.False(string.IsNullOrEmpty(agent.ImeMatchLogPath));
+            Assert.Equal(
+                Environment.ExpandEnvironmentVariables(Constants.ImeMatchLogPath),
+                agent.ImeMatchLogPath);
+        }
+
+        [Fact]
+        public void Merge_maps_enable_ime_match_log_false_clears_path()
+        {
+            var agent = NewAgentConfig();
+            agent.ImeMatchLogPath = Environment.ExpandEnvironmentVariables(Constants.ImeMatchLogPath);
+
+            var remote = FullRemote();
+            remote.EnableImeMatchLog = false;
+
+            RemoteConfigMerger.Merge(agent, remote);
+
+            Assert.Null(agent.ImeMatchLogPath);
+        }
+
+        [Fact]
+        public void Merge_preserves_custom_ime_match_log_path_when_remote_disables()
+        {
+            // A dev-time --ime-match-log <custom> override seeds a non-default path on the
+            // AgentConfiguration. When the tenant remote flips EnableImeMatchLog off we keep
+            // the custom path rather than clobbering a deliberate dev override.
+            var agent = NewAgentConfig();
+            agent.ImeMatchLogPath = @"C:\Temp\custom-ime.log";
+
+            var remote = FullRemote();
+            remote.EnableImeMatchLog = false;
+
+            RemoteConfigMerger.Merge(agent, remote);
+
+            Assert.Equal(@"C:\Temp\custom-ime.log", agent.ImeMatchLogPath);
         }
 
         // ============================================================= Null / partial tolerance
@@ -194,22 +302,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             agent.NtpServer = "local.ntp";
             agent.SelfDestructOnComplete = true;
 
-            RemoteConfigMerger.Merge(agent, null!, Array.Empty<string>());
+            var result = RemoteConfigMerger.Merge(agent, null!);
 
             Assert.Equal("local.ntp", agent.NtpServer);
             Assert.True(agent.SelfDestructOnComplete);
-        }
-
-        [Fact]
-        public void Merge_accepts_null_cli_args()
-        {
-            var agent = NewAgentConfig();
-            var remote = FullRemote();
-
-            RemoteConfigMerger.Merge(agent, remote, null!);
-
-            Assert.False(agent.SelfDestructOnComplete);
-            Assert.Equal("pool.ntp.org", agent.NtpServer);
+            Assert.NotNull(result);
+            Assert.False(result.UnrestrictedModeChanged);
         }
 
         [Fact]
@@ -222,38 +320,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             var remote = FullRemote();
             remote.Collectors = null!;
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            RemoteConfigMerger.Merge(agent, remote);
 
             Assert.Equal(360, agent.AgentMaxLifetimeMinutes);
             Assert.Equal(30, agent.HelloWaitTimeoutSeconds);
-        }
-
-        [Fact]
-        public void Merge_keeps_default_ntp_server_when_remote_is_empty()
-        {
-            var agent = NewAgentConfig();
-            agent.NtpServer = "time.windows.com";
-
-            var remote = FullRemote();
-            remote.NtpServer = "";
-
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
-
-            Assert.Equal("time.windows.com", agent.NtpServer);
-        }
-
-        [Fact]
-        public void Merge_keeps_default_diagnostics_mode_when_remote_is_null()
-        {
-            var agent = NewAgentConfig();
-            agent.DiagnosticsUploadMode = "Off";
-
-            var remote = FullRemote();
-            remote.DiagnosticsUploadMode = null!;
-
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
-
-            Assert.Equal("Off", agent.DiagnosticsUploadMode);
         }
 
         [Fact]
@@ -268,27 +338,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             var remote = FullRemote();
             remote.DiagnosticsLogPaths = null!;
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            RemoteConfigMerger.Merge(agent, remote);
 
             Assert.NotNull(agent.DiagnosticsLogPaths);
             Assert.Empty(agent.DiagnosticsLogPaths);
         }
 
         // ============================================================= Int clamping
-
-        [Fact]
-        public void Merge_skips_non_positive_upload_interval()
-        {
-            var agent = NewAgentConfig();
-            agent.UploadIntervalSeconds = 30;
-
-            var remote = FullRemote();
-            remote.UploadIntervalSeconds = 0;
-
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
-
-            Assert.Equal(30, agent.UploadIntervalSeconds);
-        }
 
         [Fact]
         public void Merge_skips_non_positive_max_batch_size()
@@ -299,7 +355,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             var remote = FullRemote();
             remote.MaxBatchSize = -1;
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            RemoteConfigMerger.Merge(agent, remote);
 
             Assert.Equal(100, agent.MaxBatchSize);
         }
@@ -307,6 +363,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
         [Fact]
         public void Merge_skips_non_positive_hello_wait_timeout()
         {
+            // V1 parity: MonitoringService.ApplyRuntimeSettingsFromRemoteConfig only applies the
+            // remote value when > 0 so an accidentally misconfigured tenant does not drop the
+            // Hello-wait to zero.
             var agent = NewAgentConfig();
             agent.HelloWaitTimeoutSeconds = 30;
 
@@ -317,7 +376,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
                 HelloWaitTimeoutSeconds = 0,
             };
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            RemoteConfigMerger.Merge(agent, remote);
 
             Assert.Equal(30, agent.HelloWaitTimeoutSeconds);
         }
@@ -335,7 +394,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
                 HelloWaitTimeoutSeconds = 30,
             };
 
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
+            RemoteConfigMerger.Merge(agent, remote);
 
             Assert.Equal(0, agent.AgentMaxLifetimeMinutes);
         }
@@ -346,26 +405,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
         public void Merge_throws_on_null_agent_config()
         {
             Assert.Throws<ArgumentNullException>(() =>
-                RemoteConfigMerger.Merge(null!, FullRemote(), Array.Empty<string>()));
-        }
-
-        // ============================================================= The user's scenario
-
-        [Fact]
-        public void Merge_flips_self_destruct_off_when_tenant_admin_disables_cleanup_and_agent_runs_without_cli_args()
-        {
-            // Regression guard for the VM smoke-test bug: tenant config has SelfDestructOnComplete=false
-            // but agent was built with CLI-default true, and without the merger the remote value never
-            // reached CleanupService / EnrollmentTerminationHandler.
-            var agent = NewAgentConfig();
-            agent.SelfDestructOnComplete = true; // BuildAgentConfiguration CLI-default when no --no-cleanup
-
-            var remote = FullRemote();
-            remote.SelfDestructOnComplete = false;
-
-            RemoteConfigMerger.Merge(agent, remote, Array.Empty<string>());
-
-            Assert.False(agent.SelfDestructOnComplete);
+                RemoteConfigMerger.Merge(null!, FullRemote()));
         }
     }
 }
