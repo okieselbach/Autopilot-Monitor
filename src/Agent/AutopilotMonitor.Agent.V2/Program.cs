@@ -501,6 +501,7 @@ namespace AutopilotMonitor.Agent.V2
                 agentMaxLifetime: agentMaxLifetime))
             {
                 using (var shutdown = new ManualResetEventSlim(false))
+                using (var shutdownComplete = new ManualResetEventSlim(false))
                 {
                     // M4.6.δ — Analyzer manager. Emits through the live orchestrator's event
                     // emitter. RunStartup fires after orchestrator.Start; RunShutdown is wired
@@ -734,6 +735,22 @@ namespace AutopilotMonitor.Agent.V2
                                             stageName: orchestrator.CurrentState?.Stage.ToString(),
                                             terminatedAtUtc: DateTime.UtcNow,
                                             details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
+
+                                    // Plan §6.2 synchronous-shutdown — block the ingest dispatcher
+                                    // thread until the main-thread cleanup (orchestrator.Stop, client
+                                    // disposal) has fully run. This prevents the agent from issuing
+                                    // another ingest call after terminationHandler.Handle returns but
+                                    // before the process actually exits, which would give the backend
+                                    // another window to re-deliver terminate_session. The dedup in
+                                    // ServerActionDispatcher already squelches those re-deliveries,
+                                    // but waiting here keeps the ingest loop itself quiet. 60s bound
+                                    // covers the 10s spool drain + cleanup-service launch + orchestrator
+                                    // stop; if it times out the agent is misbehaving and we return
+                                    // anyway rather than deadlock the ingest thread forever.
+                                    if (!shutdownComplete.Wait(TimeSpan.FromSeconds(60)))
+                                    {
+                                        logger.Warning("Terminate callback: shutdownComplete wait timed out after 60s — returning without confirmed shutdown.");
+                                    }
                                     return Task.CompletedTask;
                                 },
                                 post: lifecyclePost);
@@ -838,6 +855,12 @@ namespace AutopilotMonitor.Agent.V2
 
                         try { mtlsHttpClient.Dispose(); } catch { }
                         try { backendApiClient.Dispose(); } catch { }
+
+                        // Plan §6.2 synchronous-shutdown — release any ingest-dispatcher thread
+                        // currently parked in the terminate callback (see onTerminateRequested
+                        // above). Signalled AFTER orchestrator.Stop and client disposal so the
+                        // ingest thread only returns once no more HTTP work can happen.
+                        shutdownComplete.Set();
                     }
                 }
             }
