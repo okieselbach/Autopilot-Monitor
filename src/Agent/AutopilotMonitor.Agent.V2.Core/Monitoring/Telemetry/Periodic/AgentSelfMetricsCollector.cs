@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
@@ -29,12 +30,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
         public AgentSelfMetricsCollector(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> onEventCollected,
+            InformationalEventPost post,
             NetworkMetrics networkMetrics,
             AgentLogger logger,
             string agentVersion = "unknown",
             int intervalSeconds = 60)
-            : base(sessionId, tenantId, onEventCollected, logger, intervalSeconds)
+            : base(sessionId, tenantId, post, logger, intervalSeconds)
         {
             _networkMetrics = networkMetrics ?? throw new ArgumentNullException(nameof(networkMetrics));
             _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
@@ -131,7 +132,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 
             if (data.Count > 0)
             {
-                EmitEvent(new EnrollmentEvent
+                Post.Emit(new EnrollmentEvent
                 {
                     SessionId = SessionId,
                     TenantId = TenantId,

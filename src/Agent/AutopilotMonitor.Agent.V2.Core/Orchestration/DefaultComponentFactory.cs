@@ -11,6 +11,7 @@ using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.SignalAdapters;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Orchestration
@@ -178,7 +179,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 hosts.Add(new PeriodicCollectorLifecycleHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
+                    ingress: ingress,
+                    clock: clock,
                     logger: logger,
                     performanceEnabled: collectors.EnablePerformanceCollector,
                     performanceIntervalSeconds: collectors.PerformanceIntervalSeconds,
@@ -196,7 +198,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             hosts.Add(new NetworkChangeHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
-                onEnrollmentEvent: onEnrollmentEvent,
+                ingress: ingress,
+                clock: clock,
                 logger: logger,
                 apiBaseUrl: _agentConfig.ApiBaseUrl));
 
@@ -208,7 +211,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 var doHost = new DeliveryOptimizationHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
+                    ingress: ingress,
+                    clock: clock,
                     logger: logger,
                     intervalSeconds: collectors.DeliveryOptimizationIntervalSeconds,
                     imeHost: _imeLogHost);
@@ -578,18 +582,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public DeliveryOptimizationHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 int intervalSeconds,
                 ImeLogHost imeHost)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _imeHost = imeHost;
                 _logger = logger;
 
+                var post = new InformationalEventPost(ingress, clock);
                 _collector = new DeliveryOptimizationCollector(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    emitEvent: onEnrollmentEvent,
+                    post: post,
                     logger: logger,
                     intervalSeconds: intervalSeconds,
                     getPackageStates: () => imeHost.PackageStates,
@@ -656,11 +664,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// activity and restart on the next real (non-periodic) event. Without this the two
         /// collectors ran forever in V2 and filled the telemetry spool on dormant sessions.
         /// <para>
-        /// Activity is observed by wrapping the <c>onEnrollmentEvent</c> sink: every event that
-        /// flows through this host bumps <c>_lastRealEventTimeUtc</c> unless it matches a
-        /// well-known periodic event type (<c>performance_snapshot</c>, <c>agent_metrics_snapshot</c>,
-        /// <c>stall_probe_*</c>, <c>session_stalled</c>). Events emitted by the managed
-        /// collectors themselves therefore never reset their own idle window.
+        /// Single-rail refactor (plan §5.4): both collectors and the idle-stopped events emit
+        /// through a shared <see cref="InformationalEventPost"/> constructed over an
+        /// <see cref="IdleActivityObservingIngressSink"/> wrapper. The wrapper peeks every posted
+        /// signal's <c>eventType</c> payload and bumps <c>_lastRealEventTimeUtc</c> unless the
+        /// event belongs to a well-known periodic type (<c>performance_snapshot</c>,
+        /// <c>agent_metrics_snapshot</c>, <c>performance_collector_stopped</c>,
+        /// <c>agent_metrics_collector_stopped</c>, <c>stall_probe_*</c>, <c>session_stalled</c>).
+        /// Events emitted by the managed collectors themselves therefore never reset their own
+        /// idle window.
         /// </para>
         /// </summary>
         private sealed class PeriodicCollectorLifecycleHost : ICollectorHost
@@ -681,7 +693,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             private readonly string _sessionId;
             private readonly string _tenantId;
-            private readonly Action<EnrollmentEvent> _emitEvent;
+            private readonly InformationalEventPost _post;
             private readonly AgentLogger _logger;
             private readonly bool _perfEnabled;
             private readonly int _perfIntervalSeconds;
@@ -702,7 +714,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public PeriodicCollectorLifecycleHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 bool performanceEnabled,
                 int performanceIntervalSeconds,
@@ -712,9 +725,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 NetworkMetrics? networkMetrics,
                 string agentVersion)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _sessionId = sessionId;
                 _tenantId = tenantId;
-                _emitEvent = WrapEventSink(onEnrollmentEvent);
                 _logger = logger;
                 _perfEnabled = performanceEnabled;
                 _perfIntervalSeconds = performanceIntervalSeconds;
@@ -724,6 +738,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 _networkMetrics = networkMetrics;
                 _agentVersion = agentVersion;
                 _lastRealEventTimeUtc = DateTime.UtcNow;
+
+                // Wrap the ingress so every posted signal triggers the idle-activity observer.
+                // Collector emissions + EmitIdleStopped all flow through the same post, so the
+                // activity check runs at the same point it did for the legacy Action<EnrollmentEvent>
+                // wrapper — only now it sits at the ingress layer instead of the pre-emitter sink.
+                var observingIngress = new IdleActivityObservingIngressSink(ingress, ObserveEventType);
+                _post = new InformationalEventPost(observingIngress, clock);
+            }
+
+            private void ObserveEventType(string? eventType)
+            {
+                if (string.IsNullOrEmpty(eventType)) return;
+                if (PeriodicEventTypes.Contains(eventType!)) return;
+                OnRealEvent();
             }
 
             public void Start()
@@ -765,13 +793,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 if (_perfEnabled && _performanceCollector == null)
                 {
                     _performanceCollector = new PerformanceCollector(
-                        _sessionId, _tenantId, _emitEvent, _logger, _perfIntervalSeconds);
+                        _sessionId, _tenantId, _post, _logger, _perfIntervalSeconds);
                     _performanceCollector.Start();
                 }
                 if (_selfMetricsEnabled && _selfMetricsCollector == null && _networkMetrics != null)
                 {
                     _selfMetricsCollector = new AgentSelfMetricsCollector(
-                        _sessionId, _tenantId, _emitEvent, _networkMetrics, _logger, _agentVersion, _selfMetricsIntervalSeconds);
+                        _sessionId, _tenantId, _post, _networkMetrics, _logger, _agentVersion, _selfMetricsIntervalSeconds);
                     _selfMetricsCollector.Start();
                 }
                 _idleStopped = false;
@@ -786,24 +814,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 try { _selfMetricsCollector?.Stop(); } catch { }
                 try { _selfMetricsCollector?.Dispose(); } catch { }
                 _selfMetricsCollector = null;
-            }
-
-            private Action<EnrollmentEvent> WrapEventSink(Action<EnrollmentEvent> inner)
-            {
-                return evt =>
-                {
-                    if (evt == null)
-                    {
-                        inner(null!);
-                        return;
-                    }
-                    if (!string.IsNullOrEmpty(evt.EventType)
-                        && !PeriodicEventTypes.Contains(evt.EventType))
-                    {
-                        OnRealEvent();
-                    }
-                    inner(evt);
-                };
             }
 
             private void OnRealEvent()
@@ -854,7 +864,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             {
                 try
                 {
-                    _emitEvent(new EnrollmentEvent
+                    _post.Emit(new EnrollmentEvent
                     {
                         SessionId = _sessionId,
                         TenantId = _tenantId,
@@ -872,6 +882,40 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     });
                 }
                 catch (Exception ex) { _logger.Debug($"PeriodicCollectorLifecycleHost: emit '{eventType}' threw: {ex.Message}"); }
+            }
+
+            /// <summary>
+            /// Ingress sink wrapper that peeks every posted signal's <c>eventType</c> payload for
+            /// idle-activity observation, then forwards to the real ingress unchanged. Plan §5.4.
+            /// </summary>
+            private sealed class IdleActivityObservingIngressSink : ISignalIngressSink
+            {
+                private readonly ISignalIngressSink _inner;
+                private readonly Action<string?> _observeEventType;
+
+                public IdleActivityObservingIngressSink(ISignalIngressSink inner, Action<string?> observeEventType)
+                {
+                    _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                    _observeEventType = observeEventType ?? throw new ArgumentNullException(nameof(observeEventType));
+                }
+
+                public void Post(
+                    DecisionSignalKind kind,
+                    DateTime occurredAtUtc,
+                    string sourceOrigin,
+                    Evidence evidence,
+                    IReadOnlyDictionary<string, string>? payload = null,
+                    int kindSchemaVersion = 1)
+                {
+                    string? eventType = null;
+                    if (payload != null && payload.TryGetValue(SignalPayloadKeys.EventType, out var value))
+                    {
+                        eventType = value;
+                    }
+                    try { _observeEventType(eventType); }
+                    catch { /* observer exceptions must never break the ingress pipe */ }
+                    _inner.Post(kind, occurredAtUtc, sourceOrigin, evidence, payload, kindSchemaVersion);
+                }
             }
         }
 
@@ -892,12 +936,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public NetworkChangeHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 string? apiBaseUrl)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _logger = logger;
-                _detector = new NetworkChangeDetector(sessionId, tenantId, onEnrollmentEvent, logger, apiBaseUrl);
+                var post = new InformationalEventPost(ingress, clock);
+                _detector = new NetworkChangeDetector(sessionId, tenantId, post, logger, apiBaseUrl);
             }
 
             public void Start()

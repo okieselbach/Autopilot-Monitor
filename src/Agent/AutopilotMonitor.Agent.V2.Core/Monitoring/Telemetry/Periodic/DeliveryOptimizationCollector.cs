@@ -7,6 +7,7 @@ using System.Management.Automation.Runspaces;
 using System.Text;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -52,13 +53,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
         public DeliveryOptimizationCollector(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> emitEvent,
+            InformationalEventPost post,
             AgentLogger logger,
             int intervalSeconds,
             Func<AppPackageStateList> getPackageStates,
             Action<AppPackageState> onDoTelemetryReceived,
             string logDirectory)
-            : base(sessionId, tenantId, emitEvent, logger, intervalSeconds)
+            : base(sessionId, tenantId, post, logger, intervalSeconds)
         {
             _getPackageStates = getPackageStates ?? throw new ArgumentNullException(nameof(getPackageStates));
             _onDoTelemetryReceived = onDoTelemetryReceived;
@@ -335,7 +336,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 
                     int percentComplete = fileSize > 0 ? (int)((totalBytes * 100) / fileSize) : 0;
 
-                    EmitEvent(new EnrollmentEvent
+                    Post.Emit(new EnrollmentEvent
                     {
                         SessionId = SessionId,
                         TenantId = TenantId,

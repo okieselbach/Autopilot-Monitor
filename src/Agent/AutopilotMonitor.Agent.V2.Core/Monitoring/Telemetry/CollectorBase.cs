@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry
@@ -8,12 +9,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry
     /// <summary>
     /// Abstract base for interval-based event collectors.
     /// Handles Timer lifecycle (Start/Stop/Dispose) so subclasses only implement Collect().
+    /// <para>
+    /// Single-rail refactor (plan §5.4): subclasses emit through <see cref="InformationalEventPost"/>
+    /// instead of a raw <c>Action&lt;EnrollmentEvent&gt;</c> callback. Every collector-produced event
+    /// flows Signal-Ingress → Reducer → EmitEventTimelineEntry effect → EventTimelineEmitter, with
+    /// no direct <c>TelemetryEventEmitter.Emit</c> bypass.
+    /// </para>
     /// </summary>
     public abstract class CollectorBase : IDisposable
     {
         protected readonly string SessionId;
         protected readonly string TenantId;
-        protected readonly Action<EnrollmentEvent> EmitEvent;
+        protected readonly InformationalEventPost Post;
         protected readonly AgentLogger Logger;
 
         private readonly int _intervalSeconds;
@@ -23,13 +30,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry
         protected CollectorBase(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> emitEvent,
+            InformationalEventPost post,
             AgentLogger logger,
             int intervalSeconds)
         {
             SessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             TenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
-            EmitEvent = emitEvent ?? throw new ArgumentNullException(nameof(emitEvent));
+            Post = post ?? throw new ArgumentNullException(nameof(post));
             Logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _intervalSeconds = intervalSeconds;
         }
