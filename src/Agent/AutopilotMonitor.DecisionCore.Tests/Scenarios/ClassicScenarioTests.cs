@@ -1,4 +1,5 @@
 using System;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared.Models;
 using Xunit;
@@ -33,13 +34,21 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(HypothesisLevel.Strong, result.FinalState.EnrollmentType.Level);
             Assert.Equal("ime_user_session_completed", result.FinalState.EnrollmentType.Reason);
 
-            // All 7 signals produced taken transitions.
-            Assert.Equal(7, result.Transitions.Count);
+            // 7 fixture signals + 1 auto-fired FinalizingGrace deadline (plan §5 Fix 6 — the
+            // reducer now parks in Finalizing after both prerequisites resolve; the harness
+            // flushes the deadline so the test asserts on the true terminal state).
+            Assert.Equal(8, result.Transitions.Count);
             Assert.All(result.Transitions, t => Assert.True(t.Taken));
 
-            // A completion effect should have been emitted at the last step.
+            // Penultimate transition is DesktopArrived → Finalizing (both-gate resolved).
+            var penultimate = result.Transitions[^2];
+            Assert.Equal("DesktopArrived", penultimate.Trigger);
+            Assert.Equal(SessionStage.Finalizing, penultimate.ToStage);
+
+            // Last transition is the FinalizingGrace fire → Completed + enrollment_complete.
             var last = result.Transitions[^1];
-            Assert.Equal("DesktopArrived", last.Trigger);
+            Assert.EndsWith(DeadlineNames.FinalizingGrace, last.Trigger);
+            Assert.Equal(SessionStage.Completed, last.ToStage);
         }
 
         [Fact]
@@ -57,9 +66,17 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.NotNull(result.FinalState.DesktopArrivedUtc);
             Assert.Empty(result.FinalState.Deadlines);
 
-            // The terminating signal is DeadlineFired:hello_safety.
-            Assert.EndsWith("hello_safety", result.Transitions[^1].Trigger);
-            Assert.True(result.Transitions[^1].Taken);
+            // Plan §5 Fix 6: hello_safety fire (Desktop-already-arrived path) now routes the
+            // synthetic-timeout through Finalizing instead of Completed. The harness then
+            // auto-fires finalizing_grace so the terminal state is still Completed.
+            var helloSafetyTransition = result.Transitions[^2];
+            Assert.EndsWith("hello_safety", helloSafetyTransition.Trigger);
+            Assert.Equal(SessionStage.Finalizing, helloSafetyTransition.ToStage);
+
+            var finalizingFire = result.Transitions[^1];
+            Assert.EndsWith(DeadlineNames.FinalizingGrace, finalizingFire.Trigger);
+            Assert.Equal(SessionStage.Completed, finalizingFire.ToStage);
+            Assert.True(finalizingFire.Taken);
         }
 
         [Fact]
@@ -128,10 +145,16 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Empty(result.FinalState.Deadlines);
 
             // Completion must come from HelloResolved (AND-gate with prior DesktopArrived),
-            // NOT from DeviceSetupProvisioningComplete.
-            var last = result.Transitions[^1];
-            Assert.Equal("HelloResolved", last.Trigger);
-            Assert.True(last.Taken);
+            // NOT from DeviceSetupProvisioningComplete. Per Fix 6, HelloResolved parks in
+            // Finalizing; the auto-fired FinalizingGrace deadline transitions to Completed.
+            var helloResolved = result.Transitions[^2];
+            Assert.Equal("HelloResolved", helloResolved.Trigger);
+            Assert.Equal(SessionStage.Finalizing, helloResolved.ToStage);
+            Assert.True(helloResolved.Taken);
+
+            var finalizingFire = result.Transitions[^1];
+            Assert.EndsWith(DeadlineNames.FinalizingGrace, finalizingFire.Trigger);
+            Assert.Equal(SessionStage.Completed, finalizingFire.ToStage);
 
             // The DeviceSetupProvisioningComplete signal is observed as a taken but stage-unchanged
             // step (informational on Classic path — not a terminal trigger).

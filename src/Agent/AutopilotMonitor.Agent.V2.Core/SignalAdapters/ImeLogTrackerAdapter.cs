@@ -83,6 +83,11 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private bool _sealingPatternPosted;
         private readonly HashSet<string> _appsAlreadyPostedTerminal = new HashSet<string>(StringComparer.Ordinal);
 
+        // Plan §5 Fix 2: fire-once per ESP phase — tracks which ESP phases we've already
+        // published a sub-phase `phase_transition` declaration for (e.g. "DeviceSetup" ->
+        // AppsDevice once, "AccountSetup" -> AppsUser once).
+        private readonly HashSet<string> _subPhaseDeclarationsEmitted = new HashSet<string>(StringComparer.Ordinal);
+
         public ImeLogTrackerAdapter(
             ImeLogTracker tracker,
             ISignalIngressSink ingress,
@@ -301,6 +306,12 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
 
             var now = _clock.UtcNow;
 
+            // Plan §5 Fix 2: first app activity in a given ESP phase opens the sub-phase on
+            // the UI timeline via a `phase_transition` declaration event. Fire-once per ESP
+            // phase; emission happens BEFORE the actual app_* event so the UI sees the phase
+            // boundary before the app entry inside it.
+            MaybeEmitSubPhaseDeclaration(now);
+
             // (1) DecisionSignal — terminal states only, once per app.
             var terminalKind = ClassifyTerminalState(newState);
             if (terminalKind != null)
@@ -353,6 +364,56 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 immediateUpload: true,
                 data: BuildAppStatePayload(app, newState),
                 occurredAtUtc: now);
+        }
+
+        /// <summary>
+        /// Plan §5 Fix 2 — emit a <c>phase_transition</c> declaration event the first time we
+        /// see app activity in a given ESP phase, so the Web UI's PhaseTimeline opens an
+        /// "Apps (Device)" / "Apps (User)" sub-phase. Fire-once per ESP phase value; a change
+        /// of <see cref="_lastEspPhase"/> is the trigger for the next emission when the next
+        /// app event arrives. No-op when no ESP phase has been seen yet (WDP-v2 / device-only
+        /// paths stay unchanged in this PR — those phase vocabularies are a follow-up).
+        /// </summary>
+        private void MaybeEmitSubPhaseDeclaration(DateTime occurredAtUtc)
+        {
+            string? currentEspPhase;
+            lock (_lock) { currentEspPhase = _lastEspPhase; }
+            if (string.IsNullOrEmpty(currentEspPhase)) return;
+
+            EnrollmentPhase mapped;
+            switch (currentEspPhase)
+            {
+                case "DeviceSetup":
+                    mapped = EnrollmentPhase.AppsDevice;
+                    break;
+                case "AccountSetup":
+                    mapped = EnrollmentPhase.AppsUser;
+                    break;
+                default:
+                    // FinalizingSetup / Finalizing / Complete — not an apps sub-phase, and the
+                    // Finalizing declaration is emitted by the reducer on stage entry (Fix 6).
+                    return;
+            }
+
+            lock (_lock)
+            {
+                if (!_subPhaseDeclarationsEmitted.Add(currentEspPhase!)) return;
+            }
+
+            _post.Emit(
+                eventType: SharedEventTypes.PhaseTransition,
+                source: SourceLabel,
+                message: $"Phase: {mapped}",
+                // Phase boundary — flush immediately so the UI timeline opens the sub-phase
+                // before the individual app events inside it.
+                immediateUpload: true,
+                phase: mapped,
+                data: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["espPhase"] = currentEspPhase!,
+                    ["trigger"] = "first_app_activity_in_esp_phase",
+                },
+                occurredAtUtc: occurredAtUtc);
         }
 
         private void MaybeEmitWhiteGloveSealingPattern(string patternId)

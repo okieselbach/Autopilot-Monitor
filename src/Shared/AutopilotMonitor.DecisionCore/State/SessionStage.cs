@@ -22,6 +22,13 @@ namespace AutopilotMonitor.DecisionCore.State
         AwaitingDesktop,
         DesktopArrivedEspBlocking,
 
+        // Finalizing: both Hello + Desktop have resolved. Grace window before the session
+        // transitions to `Completed` so the emitted `enrollment_complete` + phase-declaration
+        // events reach the backend before `EnrollmentTerminationHandler` tears everything
+        // down. Non-terminal (IsTerminal()==false) — the FinalizingGrace deadline fires the
+        // actual Completed transition.
+        Finalizing,
+
         // SelfDeploying-v1 / Device-Only
         AwaitingDeviceSetupProvisioning,
         AwaitingDeviceOnlyEsp,

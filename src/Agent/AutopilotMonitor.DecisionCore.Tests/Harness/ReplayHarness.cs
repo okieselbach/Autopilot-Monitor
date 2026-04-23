@@ -48,10 +48,52 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
                 transitions.Add(step.Transition);
             }
 
+            // Plan §5 Fix 6: if the fixture ended with the reducer parked in Finalizing
+            // (both prerequisites resolved, FinalizingGrace armed), synthesize the deadline
+            // fire that the orchestrator's timer would emit in production. Scenario fixtures
+            // carry only "real" signals; the harness is responsible for flushing the in-flight
+            // deadline so tests continue to assert on the actual terminal state.
+            if (state.Stage == SessionStage.Finalizing)
+            {
+                var finalizingDeadline = FindDeadline(state, DeadlineNames.FinalizingGrace);
+                if (finalizingDeadline != null)
+                {
+                    var lastOrdinal = signals.Count > 0 ? signals[signals.Count - 1].SessionSignalOrdinal : 0;
+                    var autoFire = new DecisionSignal(
+                        sessionSignalOrdinal: lastOrdinal + 1,
+                        sessionTraceOrdinal: lastOrdinal + 1,
+                        kind: DecisionSignalKind.DeadlineFired,
+                        kindSchemaVersion: 1,
+                        occurredAtUtc: finalizingDeadline.DueAtUtc,
+                        sourceOrigin: "replay_harness",
+                        evidence: new Evidence(
+                            kind: EvidenceKind.Synthetic,
+                            identifier: $"replay-deadline-fire:{DeadlineNames.FinalizingGrace}",
+                            summary: "Auto-fired FinalizingGrace deadline at end-of-stream"),
+                        payload: new Dictionary<string, string>
+                        {
+                            [SignalPayloadKeys.Deadline] = DeadlineNames.FinalizingGrace,
+                        });
+
+                    var autoStep = _engine.Reduce(state, autoFire);
+                    state = autoStep.NewState;
+                    transitions.Add(autoStep.Transition);
+                }
+            }
+
             return new ReplayResult(
                 finalState: state,
                 transitions: transitions,
                 finalStepHash: ComputeStepHash(state));
+        }
+
+        private static ActiveDeadline? FindDeadline(DecisionState state, string name)
+        {
+            foreach (var d in state.Deadlines)
+            {
+                if (string.Equals(d.Name, name, StringComparison.Ordinal)) return d;
+            }
+            return null;
         }
 
         /// <summary>

@@ -243,6 +243,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     return HandleClassifierTickDeadlineFired(state, signal);
                 case DeadlineNames.WhiteGlovePart2Safety:
                     return HandleWhiteGlovePart2SafetyDeadlineFired(state, signal);
+                case DeadlineNames.FinalizingGrace:
+                    return HandleFinalizingGraceDeadlineFired(state, signal);
                 default:
                     // Deadline name not recognized in this sub-milestone. Cancel it from state
                     // and record a neutral taken transition — M3.3+ adds handlers for
@@ -287,29 +289,33 @@ namespace AutopilotMonitor.DecisionCore.Engine
             }
 
             var desktopAlreadyArrived = state.DesktopArrivedUtc != null;
-            var toStage = desktopAlreadyArrived ? SessionStage.Completed : SessionStage.AwaitingDesktop;
-            builder.WithStage(toStage);
 
+            // Plan §5 Fix 6: route the both-prerequisites case through Finalizing so the
+            // synthetic-timeout terminal event shares the same grace window + phase-declaration
+            // pathway as the happy-path handlers. AwaitingDesktop path is unchanged.
             if (desktopAlreadyArrived)
             {
-                builder.WithOutcome(SessionOutcome.EnrollmentComplete);
-                builder.ClearDeadlines();
+                return TransitionToFinalizing(
+                    state: state,
+                    signal: signal,
+                    preparedBuilder: builder,
+                    nextStepIndex: nextStep,
+                    trigger: $"DeadlineFired:{DeadlineNames.HelloSafety}");
             }
 
+            builder.WithStage(SessionStage.AwaitingDesktop);
             var newState = builder.Build();
 
             var transition = BuildTakenTransition(
                 before: state,
                 signal: signal,
-                toStage: toStage,
+                toStage: SessionStage.AwaitingDesktop,
                 nextStepIndex: nextStep,
                 trigger: $"DeadlineFired:{DeadlineNames.HelloSafety}");
 
-            DecisionEffect[] effects = desktopAlreadyArrived
-                ? new[] { BuildEnrollmentCompleteEffect() }
-                : Array.Empty<DecisionEffect>();
-
-            return new DecisionStep(newState, transition, effects);
+            // AwaitingDesktop path: terminal effect is deferred to the later DesktopArrived
+            // handler (which will itself route through Finalizing per Fix 6).
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }
 
         // ============================================================== diagnostic signals

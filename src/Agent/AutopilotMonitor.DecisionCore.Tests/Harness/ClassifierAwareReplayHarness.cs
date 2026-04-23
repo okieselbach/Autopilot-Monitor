@@ -116,6 +116,45 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
                 }
             }
 
+            // Plan §5 Fix 6: flush the FinalizingGrace deadline at end-of-stream the same way
+            // ReplayHarness does (see its Replay() for rationale).
+            if (state.Stage == SessionStage.Finalizing)
+            {
+                ActiveDeadline? finalizingDeadline = null;
+                foreach (var d in state.Deadlines)
+                {
+                    if (string.Equals(d.Name, DeadlineNames.FinalizingGrace, StringComparison.Ordinal))
+                    {
+                        finalizingDeadline = d;
+                        break;
+                    }
+                }
+
+                if (finalizingDeadline != null)
+                {
+                    var autoFire = new DecisionSignal(
+                        sessionSignalOrdinal: nextSyntheticOrdinal,
+                        sessionTraceOrdinal: nextSyntheticOrdinal,
+                        kind: DecisionSignalKind.DeadlineFired,
+                        kindSchemaVersion: 1,
+                        occurredAtUtc: finalizingDeadline.DueAtUtc,
+                        sourceOrigin: "replay_harness",
+                        evidence: new Evidence(
+                            kind: EvidenceKind.Synthetic,
+                            identifier: $"replay-deadline-fire:{DeadlineNames.FinalizingGrace}",
+                            summary: "Auto-fired FinalizingGrace deadline at end-of-stream"),
+                        payload: new Dictionary<string, string>
+                        {
+                            [SignalPayloadKeys.Deadline] = DeadlineNames.FinalizingGrace,
+                        });
+                    nextSyntheticOrdinal++;
+
+                    var autoStep = _engine.Reduce(state, autoFire);
+                    state = autoStep.NewState;
+                    allTransitions.Add(autoStep.Transition);
+                }
+            }
+
             return new ReplayResult(
                 finalState: state,
                 transitions: allTransitions,

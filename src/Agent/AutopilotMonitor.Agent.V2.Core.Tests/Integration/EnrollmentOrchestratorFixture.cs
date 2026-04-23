@@ -140,6 +140,63 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
                         $"queueLen={ingress.ApproximateQueueLength}). Fixture: {fixtureFilename}.");
                 }
             }
+
+            // Plan §5 Fix 6: fixtures end with the real-world "both-prerequisites-resolved"
+            // signal, which now parks the reducer in Finalizing with a wall-clock-future
+            // FinalizingGrace deadline. The real DeadlineScheduler would fire that deadline
+            // in 5 s, but tests use a VirtualClock + skip wall-clock waits. Post a synthetic
+            // DeadlineFired signal here to flush the grace window deterministically — mirrors
+            // what <see cref="Harness.ReplayHarness"/> does for the DecisionCore scenario tests.
+            // The per-signal wait above has a well-known race: <c>ApproximateQueueLength</c>
+            // drops to 0 the moment the ingress worker dequeues an item, BEFORE Reduce +
+            // ApplyStep run. A synthetic signal posted by the EffectRunner of the PRIOR step
+            // can also satisfy "stepIndex > stepIndexBefore" before the current signal has been
+            // applied. Wait here for the reducer's <see cref="DecisionState.LastAppliedSignalOrdinal"/>
+            // to reach the signal log's last-appended ordinal — the authoritative "reducer has
+            // caught up" watermark.
+            var signalLog = GetSignalLog();
+            if (!SpinWait.SpinUntil(
+                () => ingress.ApproximateQueueLength == 0
+                      && Orchestrator.CurrentState.LastAppliedSignalOrdinal >= signalLog.LastOrdinal,
+                5000))
+            {
+                throw new TimeoutException(
+                    $"Fixture replay did not settle (queueLen={ingress.ApproximateQueueLength}, " +
+                    $"lastAppliedOrdinal={Orchestrator.CurrentState.LastAppliedSignalOrdinal}, " +
+                    $"signalLog.LastOrdinal={signalLog.LastOrdinal}). Fixture: {fixtureFilename}.");
+            }
+            if (Orchestrator.CurrentState.Stage == SessionStage.Finalizing)
+            {
+                var finalizingDeadline = Orchestrator.CurrentState.Deadlines
+                    .FirstOrDefault(d => string.Equals(d.Name, DeadlineNames.FinalizingGrace, StringComparison.Ordinal));
+                if (finalizingDeadline != null)
+                {
+                    int stepIndexBefore = Orchestrator.CurrentState.StepIndex;
+                    Orchestrator.IngressSink.Post(
+                        kind: DecisionSignalKind.DeadlineFired,
+                        occurredAtUtc: finalizingDeadline.DueAtUtc,
+                        sourceOrigin: "integration_fixture",
+                        evidence: new Evidence(
+                            kind: EvidenceKind.Synthetic,
+                            identifier: $"integration-fixture-deadline-fire:{DeadlineNames.FinalizingGrace}",
+                            summary: "Auto-fired FinalizingGrace deadline at end-of-fixture"),
+                        payload: new Dictionary<string, string>
+                        {
+                            [SignalPayloadKeys.Deadline] = DeadlineNames.FinalizingGrace,
+                        });
+
+                    if (!SpinWait.SpinUntil(
+                        () => Orchestrator.CurrentState.StepIndex > stepIndexBefore
+                              && ingress.ApproximateQueueLength == 0,
+                        5000))
+                    {
+                        throw new TimeoutException(
+                            $"FinalizingGrace auto-fire stalled (stepIndex before={stepIndexBefore}, " +
+                            $"now={Orchestrator.CurrentState.StepIndex}, stage={Orchestrator.CurrentState.Stage}, " +
+                            $"queueLen={ingress.ApproximateQueueLength}). Fixture: {fixtureFilename}.");
+                    }
+                }
+            }
         }
 
         public AutopilotMonitor.Agent.V2.Core.Orchestration.SignalIngress GetIngress()
