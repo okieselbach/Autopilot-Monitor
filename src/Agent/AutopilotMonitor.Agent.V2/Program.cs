@@ -513,21 +513,10 @@ namespace AutopilotMonitor.Agent.V2
 
                     // M4.6.β — the peripheral termination sequence (FinalStatus + SummaryDialog
                     // + diagnostics upload + enrollment-complete.marker + CleanupService) lives
-                    // in Program.cs, not in the kernel. We compose it here and hook it onto the
-                    // orchestrator's typed Terminated event.
-                    var terminationHandler = new EnrollmentTerminationHandler(
-                        configuration: agentConfig,
-                        logger: logger,
-                        stateDirectory: stateSubdir,
-                        agentStartTimeUtc: agentStartTimeUtc,
-                        currentStateAccessor: () => orchestrator.CurrentState,
-                        packageStatesAccessor: () => componentFactory.ImePackageStates,
-                        cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
-                        uploadDiagnosticsAsync: uploadDiagnosticsAsync,
-                        signalShutdown: () => shutdown.Set(),
-                        analyzerManager: analyzerManager,
-                        emitEvent: evt => orchestrator.EventEmitter.Emit(evt),
-                        sessionPersistence: sessionPersistence);
+                    // in Program.cs, not in the kernel. Declared here; constructed inside
+                    // orchestrator.Start's onIngressReady hook (plan §5.3) so the live
+                    // InformationalEventPost backs its telemetry.
+                    EnrollmentTerminationHandler terminationHandler = null;
 
                     // ServerActionDispatcher — constructed after orchestrator.Start (see below) so
                     // the live lifecyclePost can back its telemetry. Declared here so the terminate
@@ -605,7 +594,21 @@ namespace AutopilotMonitor.Agent.V2
                         }
                     };
                     orchestrator.Terminated += maxLifetimeEmitter;
-                    orchestrator.Terminated += terminationHandler.Handle;
+                    // terminationHandler is constructed inside orchestrator.Start's onIngressReady
+                    // hook below, so this wrapper null-checks the captured variable. Terminated
+                    // cannot fire until the decision loop has at least one posted signal, and that
+                    // loop is started *inside* Start — by the time the first signal is processed,
+                    // the hook has already run synchronously and terminationHandler is non-null.
+                    EventHandler<EnrollmentTerminatedEventArgs> terminatedDispatch = (s, e) =>
+                    {
+                        if (terminationHandler == null)
+                        {
+                            logger.Warning("orchestrator.Terminated fired before terminationHandler constructed — ignoring.");
+                            return;
+                        }
+                        terminationHandler.Handle(s, e);
+                    };
+                    orchestrator.Terminated += terminatedDispatch;
 
                     // Auth-failure watchdog: when MaxAuthFailures / AuthFailureTimeoutMinutes
                     // is exceeded the agent must shut down cleanly instead of hammering a
@@ -670,6 +673,24 @@ namespace AutopilotMonitor.Agent.V2
                             EmitAgentStartedEvent(lifecyclePost, agentConfig, previousExit, logger);
                             EmitVersionCheckEventIfAny(lifecyclePost, agentConfig, logger);
                             EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
+
+                            // Single-rail refactor (plan §5.3) — EnrollmentTerminationHandler emits
+                            // through the same InformationalEventPost. Constructed inside this hook
+                            // so lifecyclePost is guaranteed non-null; the terminated-dispatch wrapper
+                            // registered above picks this instance up via closure capture.
+                            terminationHandler = new EnrollmentTerminationHandler(
+                                configuration: agentConfig,
+                                logger: logger,
+                                stateDirectory: stateSubdir,
+                                agentStartTimeUtc: agentStartTimeUtc,
+                                currentStateAccessor: () => orchestrator.CurrentState,
+                                packageStatesAccessor: () => componentFactory.ImePackageStates,
+                                cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
+                                uploadDiagnosticsAsync: uploadDiagnosticsAsync,
+                                signalShutdown: () => shutdown.Set(),
+                                analyzerManager: analyzerManager,
+                                post: lifecyclePost,
+                                sessionPersistence: sessionPersistence);
 
                             // Single-rail refactor (plan §5.3) — ServerActionDispatcher emits through
                             // the same InformationalEventPost. Constructed inside this hook so
@@ -808,7 +829,7 @@ namespace AutopilotMonitor.Agent.V2
                     {
                         Console.CancelKeyPress -= cancelHandler;
                         AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
-                        orchestrator.Terminated -= terminationHandler.Handle;
+                        orchestrator.Terminated -= terminatedDispatch;
                         orchestrator.Terminated -= maxLifetimeEmitter;
                         authFailureTracker.ThresholdExceeded -= authThresholdHandler;
 

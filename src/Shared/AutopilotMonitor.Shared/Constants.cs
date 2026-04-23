@@ -209,6 +209,7 @@ namespace AutopilotMonitor.Shared
             public const string SoftwareInventoryAnalysis = "software_inventory_analysis";
             public const string VulnerabilityReport       = "vulnerability_report";
             public const string AgentVersionCheck         = "agent_version_check";
+            public const string AgentShuttingDown         = "agent_shutting_down";  // V2 single-rail plan §6.2 — terminate-hygiene acknowledgement emitted before CleanupService tears down
 
             // Stall detection (Ebene 2 — StallProbeCollector)
             public const string StallProbeCheck           = "stall_probe_check";   // Trace heartbeat from Probe 2 (15 min) when no anomaly found
