@@ -730,17 +730,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
         /// populated. Fix 8's reducer guards then block premature <c>AwaitingHello</c> transitions
         /// on Classic (SkipUser=false) enrollments.
         /// <para>
-        /// Fire-once per collector instance: re-collection paths
-        /// (<see cref="CollectAtEnrollmentStart"/>) would otherwise post the signal multiple times
-        /// and clutter the reducer journal with no-op steps.
+        /// Deduplication lives in the reducer: <c>HandleEspConfigDetectedV1</c> uses per-fact
+        /// set-once semantics, so repeat posts (e.g. <see cref="CollectAtEnrollmentStart"/> once
+        /// wired, or a retry after FirstSync populates late) are safe and can fill in any fact
+        /// that was still <c>null</c>. The collector deliberately does not carry its own
+        /// fire-once flag — that would defeat the reducer's late-fill path.
         /// </para>
         /// </summary>
         private void PostEspConfigDetectedSignal(bool? skipUser, bool? skipDevice)
         {
             if (_signalIngress == null || _clock == null) return;
-            if (_espConfigSignalPosted) return;
             if (skipUser == null && skipDevice == null) return;
-            _espConfigSignalPosted = true;
 
             var payload = new Dictionary<string, string>(StringComparer.Ordinal);
             if (skipUser.HasValue)

@@ -35,6 +35,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         internal const int MdmEnrollmentType = 6;
 
         /// <summary>
+        /// Test seam — when non-null, <see cref="Read"/> delegates to this func instead of
+        /// touching the live registry. Internal so only in-repo test projects (via
+        /// InternalsVisibleTo) can set it. Production code never assigns this.
+        /// <para>
+        /// Tests that set this MUST reset it to <c>null</c> in Dispose to avoid cross-test
+        /// contamination; use the <see cref="ScopedOverride"/> helper to guarantee cleanup.
+        /// </para>
+        /// </summary>
+        internal static Func<AgentLogger, (bool? skipUser, bool? skipDevice)> TestOverride;
+
+        /// <summary>
         /// Reads the current device's <c>SkipUserStatusPage</c> / <c>SkipDeviceStatusPage</c>
         /// flags. Returns <c>(null, null)</c> when the enrollment key is missing or unreadable —
         /// callers must treat <c>null</c> as "unknown", not "false".
@@ -42,6 +53,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         /// <param name="logger">Optional logger — Debug-level trace only; no warn/error.</param>
         public static (bool? skipUser, bool? skipDevice) Read(AgentLogger logger = null)
         {
+            var probe = TestOverride;
+            if (probe != null) return probe(logger);
+
             bool? skipUser = null;
             bool? skipDevice = null;
 
@@ -93,6 +107,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             }
 
             return (skipUser, skipDevice);
+        }
+
+        /// <summary>
+        /// Disposable scope that sets <see cref="TestOverride"/> for the lifetime of the
+        /// scope and restores the previous value on <see cref="IDisposable.Dispose"/>. Nestable.
+        /// Internal test-only helper; not exposed to production callers.
+        /// </summary>
+        internal sealed class ScopedOverride : IDisposable
+        {
+            private readonly Func<AgentLogger, (bool? skipUser, bool? skipDevice)> _previous;
+            private int _disposed;
+
+            public ScopedOverride(Func<AgentLogger, (bool? skipUser, bool? skipDevice)> probe)
+            {
+                _previous = TestOverride;
+                TestOverride = probe;
+            }
+
+            public void Dispose()
+            {
+                if (System.Threading.Interlocked.Exchange(ref _disposed, 1) == 1) return;
+                TestOverride = _previous;
+            }
         }
     }
 }

@@ -440,6 +440,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 }
             }
 
+            // 13c) Plan §6 Fix 9 bootstrap — probe the FirstSync SkipUser/SkipDevice flags
+            //      synchronously and post EspConfigDetected BEFORE any collector host starts.
+            //      Rationale: DeviceInfoHost.CollectAll runs fire-and-forget on the ThreadPool,
+            //      so on SkipUser=true enrollments the Shell-Core esp_exiting event can fire
+            //      (via EspAndHelloHost which started here already) BEFORE the reducer has seen
+            //      EspConfigDetected. Without this bootstrap, Fix 8's guard
+            //      (ShouldTransitionToAwaitingHello) would block the legitimate AwaitingHello
+            //      promotion because SkipUserEsp is still null in state — and the adapter's
+            //      _finalizingPosted fire-once flag prevents a second attempt, leaving the
+            //      session stuck in EspDeviceSetup/EspAccountSetup forever. Reducer has
+            //      per-fact set-once semantics, so a later re-post from DeviceInfoCollector on
+            //      CollectAll filling previously-missing facts is both allowed and safe.
+            //      Always-on: production correctness > test convenience. Tests that count
+            //      signals or transitions use <c>EspSkipConfigurationProbe.ScopedOverride</c>
+            //      to force the probe to (null, null) which makes the bootstrap a no-op.
+            PostEspConfigDetectedBootstrap();
+
             // 14) Collector-Hosts via Factory — nach Plan §5.10 (single-rail enforcement) gibt
             //     es keine Action<EnrollmentEvent>-Bridge mehr; jede Collector-Emission fließt
             //     über den Ingress als InformationalEvent.
@@ -480,6 +497,59 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
 
             _logger.Info("EnrollmentOrchestrator: started.");
+        }
+
+        /// <summary>
+        /// Plan §6 Fix 9 bootstrap. Probes <c>HKLM\SOFTWARE\Microsoft\Enrollments\{guid}\FirstSync</c>
+        /// synchronously and posts <see cref="DecisionSignalKind.EspConfigDetected"/> so the
+        /// reducer's <c>SkipUserEsp</c> / <c>SkipDeviceEsp</c> facts are set BEFORE any
+        /// collector-driven <c>EspPhaseChanged(FinalizingSetup)</c> can arrive from
+        /// <c>EspAndHelloHost</c>. No-op when neither flag can be read (FirstSync missing or
+        /// registry probe fails) — the reducer's guards treat <c>null</c> as "unknown" and
+        /// defensively keep the current stage, which is also the correct behavior in that
+        /// edge case (the collector's subsequent <c>CollectAll</c> post will pick up the
+        /// values once FirstSync populates).
+        /// </summary>
+        private void PostEspConfigDetectedBootstrap()
+        {
+            try
+            {
+                var (skipUser, skipDevice) = Monitoring.Enrollment.SystemSignals.EspSkipConfigurationProbe.Read(_logger);
+                if (skipUser == null && skipDevice == null)
+                {
+                    _logger.Debug(
+                        "EnrollmentOrchestrator: EspConfigDetected bootstrap skipped — FirstSync not yet populated; DeviceInfoCollector will post when CollectAll runs.");
+                    return;
+                }
+
+                var payload = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (skipUser.HasValue)
+                    payload[SignalPayloadKeys.SkipUserEsp] = skipUser.Value ? "true" : "false";
+                if (skipDevice.HasValue)
+                    payload[SignalPayloadKeys.SkipDeviceEsp] = skipDevice.Value ? "true" : "false";
+
+                _ingress!.Post(
+                    kind: DecisionSignalKind.EspConfigDetected,
+                    occurredAtUtc: _clock.UtcNow,
+                    sourceOrigin: "EnrollmentOrchestrator",
+                    evidence: new Evidence(
+                        kind: EvidenceKind.Raw,
+                        identifier: "esp_config_detected_bootstrap",
+                        summary: $"SkipUser={skipUser?.ToString() ?? "unknown"}, SkipDevice={skipDevice?.ToString() ?? "unknown"}",
+                        derivationInputs: new Dictionary<string, string>(payload, StringComparer.Ordinal)
+                        {
+                            ["source"] = "registry_firstsync_bootstrap",
+                        }),
+                    payload: payload);
+
+                _logger.Info(
+                    $"EnrollmentOrchestrator: EspConfigDetected bootstrap posted (SkipUser={skipUser?.ToString() ?? "unknown"}, SkipDevice={skipDevice?.ToString() ?? "unknown"}).");
+            }
+            catch (Exception ex)
+            {
+                // Never fail Start over a bootstrap probe — the DeviceInfoCollector is the fallback.
+                _logger.Error("EnrollmentOrchestrator: EspConfigDetected bootstrap threw — continuing startup.", ex);
+            }
         }
 
         private void RaiseMaxLifetimeExceeded()

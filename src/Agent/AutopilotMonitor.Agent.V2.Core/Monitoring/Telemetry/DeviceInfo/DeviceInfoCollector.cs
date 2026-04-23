@@ -32,7 +32,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
         private readonly AgentLogger _logger;
         private readonly ISignalIngressSink _signalIngress;
         private readonly IClock _clock;
-        private bool _espConfigSignalPosted;
 
         private const string RegKeyWindowsCurrentVersion = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 

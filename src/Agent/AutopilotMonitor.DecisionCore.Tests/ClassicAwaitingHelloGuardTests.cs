@@ -153,6 +153,72 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Empty(step.NewState.Deadlines);
         }
 
+        // ====================================================== Codex review — ordering contract
+
+        [Fact]
+        public void EspConfigDetectedSkipUserTrue_beforeFinalizing_unblocksAwaitingHello()
+        {
+            // Codex PR-1-pass-1 Hoch — documents the ordering contract that
+            // EnrollmentOrchestrator.PostEspConfigDetectedBootstrap must preserve:
+            // EspConfigDetected(skipUser=true) landed first → reducer's SkipUserEsp fact set →
+            // subsequent EspPhaseChanged(FinalizingSetup) promotes to AwaitingHello as intended
+            // on SkipUser=true flows. Regression guard: if the bootstrap ever regresses to
+            // being posted AFTER collector start (e.g. from the background CollectAll path),
+            // the adapter's _finalizingPosted fire-once flag would make the forward unrecoverable.
+            var engine = new DecisionEngine();
+            var seed = DecisionState.CreateInitial("s", "t")
+                .ToBuilder()
+                .WithStage(SessionStage.EspDeviceSetup)
+                .WithStepIndex(1)
+                .WithLastAppliedSignalOrdinal(0)
+                .Build();
+
+            // Step 1 — EspConfigDetected (bootstrap ordering).
+            var espConfig = new DecisionSignal(
+                sessionSignalOrdinal: 1,
+                sessionTraceOrdinal: 1,
+                kind: DecisionSignalKind.EspConfigDetected,
+                kindSchemaVersion: 1,
+                occurredAtUtc: Fixed,
+                sourceOrigin: "EnrollmentOrchestrator",
+                evidence: new Evidence(EvidenceKind.Raw, "esp_config_detected_bootstrap", "SkipUser=true, SkipDevice=false"),
+                payload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.SkipUserEsp] = "true",
+                    [SignalPayloadKeys.SkipDeviceEsp] = "false",
+                });
+            var afterConfig = engine.Reduce(seed, espConfig).NewState;
+            Assert.True(afterConfig.SkipUserEsp!.Value);
+
+            // Step 2 — EspPhaseChanged(FinalizingSetup) from EspAndHelloTrackerAdapter.
+            var finalizing = MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 2);
+            var afterFinalizing = engine.Reduce(afterConfig, finalizing);
+
+            Assert.Equal(SessionStage.AwaitingHello, afterFinalizing.NewState.Stage);
+        }
+
+        [Fact]
+        public void Finalizing_beforeEspConfigDetected_staysInStage_evenIfRegistryWouldSaySkipUser()
+        {
+            // Regression guard for the OPPOSITE ordering: this MUST keep blocking, because the
+            // reducer has no way to know SkipUser is true until EspConfigDetected arrives. That
+            // is precisely why the orchestrator bootstrap posts EspConfigDetected BEFORE any
+            // collector can produce EspPhaseChanged. If this test ever flips to "AwaitingHello"
+            // without the bootstrap signal, the reducer's guard has regressed.
+            var engine = new DecisionEngine();
+            var seed = DecisionState.CreateInitial("s", "t")
+                .ToBuilder()
+                .WithStage(SessionStage.EspDeviceSetup)
+                .WithStepIndex(1)
+                .WithLastAppliedSignalOrdinal(0)
+                .Build();
+
+            var finalizing = MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 1);
+            var step = engine.Reduce(seed, finalizing);
+
+            Assert.Equal(SessionStage.EspDeviceSetup, step.NewState.Stage);
+        }
+
         // ====================================================================== test helpers
 
         private static DecisionState BuildState(
