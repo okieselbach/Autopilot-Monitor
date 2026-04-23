@@ -131,6 +131,91 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
         }
 
         [Fact]
+        public void Phase_parameter_with_valid_enum_name_is_applied_to_event()
+        {
+            // Plan §1.4 — opt-in override: phase-declaration events may set the Phase via the
+            // "phase" parameter on the EmitEventTimelineEntry effect.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "DeviceSetup",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal((int)EnrollmentPhase.DeviceSetup, (int)parsed["PhaseNumber"]!);
+            // PhaseName is the display form ("Device Setup") derived by EnrollmentEvent.GetPhaseName,
+            // not the raw enum name. Emitter-side we only control Phase (enum); the display form
+            // follows from that deterministically.
+            Assert.Equal("Device Setup", (string?)parsed["PhaseName"]);
+        }
+
+        [Fact]
+        public void Phase_parameter_with_invalid_value_falls_back_to_Unknown()
+        {
+            // Parse-failure MUST fall back to Unknown, never throw — the emitter path must not
+            // break telemetry on a malformed reducer-case. Deterministic & safe by default.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "Bogus",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal((int)EnrollmentPhase.Unknown, (int)parsed["PhaseNumber"]!);
+            Assert.Equal("Unknown", (string?)parsed["PhaseName"]);
+        }
+
+        [Fact]
+        public void Phase_parameter_match_is_case_sensitive_and_non_matching_casing_falls_back_to_Unknown()
+        {
+            // The phase contract is strict Ordinal match against the enum name. Lower/upper
+            // mismatches are rejected so the wire format stays deterministic.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "devicesetup",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal((int)EnrollmentPhase.Unknown, (int)parsed["PhaseNumber"]!);
+        }
+
+        [Fact]
+        public void Phase_parameter_is_not_duplicated_in_Data_dict()
+        {
+            // Like eventType, the phase parameter is a top-level EnrollmentEvent field and
+            // must not leak into Data — otherwise the Data dictionary drifts from the contract.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "AccountSetup",
+                    ["subcategory"] = "WorkplaceJoin",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            Assert.Null(data["phase"]);
+            Assert.Null(data["eventType"]);
+            Assert.Equal("WorkplaceJoin", (string?)data["subcategory"]);
+        }
+
+        [Fact]
         public void ImmediateUpload_is_forced_true_for_reducer_terminal_events()
         {
             using var r = new Rig();
