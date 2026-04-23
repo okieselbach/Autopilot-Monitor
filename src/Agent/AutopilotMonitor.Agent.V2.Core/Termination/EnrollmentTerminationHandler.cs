@@ -62,7 +62,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly Action _signalShutdown;
         private readonly string _dialogExePathOverride;
         private readonly AgentAnalyzerManager _analyzerManager;
-        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly InformationalEventPost _post;
         private readonly SessionIdPersistence _sessionPersistence;
         private readonly Action<int> _triggerReboot;
         private readonly TimeSpan _lateEventGracePeriod;
@@ -82,7 +82,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             Action signalShutdown,
             string dialogExePathOverride = null,
             AgentAnalyzerManager analyzerManager = null,
-            Action<EnrollmentEvent> emitEvent = null,
+            InformationalEventPost post = null,
             SessionIdPersistence sessionPersistence = null,
             Action<int> triggerReboot = null,
             TimeSpan? lateEventGracePeriod = null,
@@ -99,7 +99,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _signalShutdown = signalShutdown ?? throw new ArgumentNullException(nameof(signalShutdown));
             _dialogExePathOverride = dialogExePathOverride;
             _analyzerManager = analyzerManager;
-            _emitEvent = emitEvent;
+            _post = post;
             _sessionPersistence = sessionPersistence;
             _triggerReboot = triggerReboot ?? DefaultTriggerReboot;
             _lateEventGracePeriod = lateEventGracePeriod ?? DefaultLateEventGrace;
@@ -418,6 +418,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 return;
             }
 
+            // Plan §6.2 terminate-hygiene — post an explicit agent_shutting_down acknowledgement BEFORE
+            // the CleanupService tears the agent down. This guarantees the backend sees the agent
+            // accept the termination (so it can stop re-queuing terminate_session) even when the
+            // cleanup script races ahead of the final telemetry flush.
+            EmitEventSafe(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = Constants.EventTypes.AgentShuttingDown,
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTerminationHandler",
+                Phase = EnrollmentPhase.Unknown,
+                Message = "Agent accepted termination — running CleanupService.",
+                Data = new Dictionary<string, object>
+                {
+                    { "reason", args.Reason.ToString() },
+                    { "outcome", args.Outcome.ToString() },
+                    { "stage", args.StageName ?? string.Empty },
+                },
+                ImmediateUpload = true,
+            });
+
             try
             {
                 var service = _cleanupServiceFactory();
@@ -461,8 +483,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
         private void EmitEventSafe(EnrollmentEvent evt)
         {
-            if (_emitEvent == null) return;
-            try { _emitEvent(evt); }
+            if (_post == null || evt == null) return;
+            try { _post.Emit(evt); }
             catch (Exception ex) { _logger.Debug($"EnrollmentTerminationHandler: event emission '{evt?.EventType}' threw: {ex.Message}"); }
         }
 

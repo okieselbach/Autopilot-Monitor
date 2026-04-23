@@ -11,6 +11,7 @@ using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.SignalAdapters;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Orchestration
@@ -90,7 +91,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             string sessionId,
             string tenantId,
             AgentLogger logger,
-            Action<EnrollmentEvent> onEnrollmentEvent,
             IReadOnlyCollection<string> whiteGloveSealingPatternIds,
             ISignalIngressSink ingress,
             IClock clock)
@@ -98,7 +98,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("SessionId required.", nameof(sessionId));
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("TenantId required.", nameof(tenantId));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
-            if (onEnrollmentEvent == null) throw new ArgumentNullException(nameof(onEnrollmentEvent));
             if (ingress == null) throw new ArgumentNullException(nameof(ingress));
             if (clock == null) throw new ArgumentNullException(nameof(clock));
 
@@ -110,7 +109,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             hosts.Add(new EspAndHelloHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
-                onEnrollmentEvent: onEnrollmentEvent,
                 logger: logger,
                 ingress: ingress,
                 clock: clock,
@@ -126,6 +124,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             hosts.Add(new AadJoinHost(logger, ingress, clock));
 
+            // Single-rail refactor (plan §5.8) — DeviceInfoCollector existed in V2.Core but had
+            // no host so the Device-Details UI block was empty in V2 sessions (V1-Parity Issue #2).
+            // Kernel host: always on, not remote-config-gated; fires CollectAll on Start on a
+            // background thread so the agent's critical path is not blocked by WMI queries.
+            hosts.Add(new DeviceInfoHost(
+                sessionId: sessionId,
+                tenantId: tenantId,
+                ingress: ingress,
+                clock: clock,
+                logger: logger));
+
             // Dev / test — if --replay-log-dir is set, the tracker reads from the replay folder
             // with SimulationMode ON + the configured SpeedFactor instead of tailing the live
             // IME log folder. Production agents leave ReplayLogDir empty.
@@ -137,7 +146,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _imeLogHost = new ImeLogHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
-                onEnrollmentEvent: onEnrollmentEvent,
                 logger: logger,
                 ingress: ingress,
                 clock: clock,
@@ -155,7 +163,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 hosts.Add(new StallProbeHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
                     logger: logger,
                     ingress: ingress,
                     clock: clock,
@@ -178,7 +185,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 hosts.Add(new PeriodicCollectorLifecycleHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
+                    ingress: ingress,
+                    clock: clock,
                     logger: logger,
                     performanceEnabled: collectors.EnablePerformanceCollector,
                     performanceIntervalSeconds: collectors.PerformanceIntervalSeconds,
@@ -196,7 +204,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             hosts.Add(new NetworkChangeHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
-                onEnrollmentEvent: onEnrollmentEvent,
+                ingress: ingress,
+                clock: clock,
                 logger: logger,
                 apiBaseUrl: _agentConfig.ApiBaseUrl));
 
@@ -208,7 +217,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 var doHost = new DeliveryOptimizationHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
+                    ingress: ingress,
+                    clock: clock,
                     logger: logger,
                     intervalSeconds: collectors.DeliveryOptimizationIntervalSeconds,
                     imeHost: _imeLogHost);
@@ -223,7 +233,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 hosts.Add(new GatherRuleExecutorHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
+                    ingress: ingress,
+                    clock: clock,
                     logger: logger,
                     rules: _remoteConfig.GatherRules,
                     imeLogPathOverride: _agentConfig.ImeLogPathOverride,
@@ -250,17 +261,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public GatherRuleExecutorHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule> rules,
                 string? imeLogPathOverride,
                 bool unrestrictedMode = false)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _logger = logger;
                 _rules = rules ?? new System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule>();
                 _unrestrictedMode = unrestrictedMode;
+
+                // Single-rail routing (plan §5.6): the gather executor and its collectors keep
+                // their internal Action<EnrollmentEvent> signature because (a) they have no
+                // interface contract and (b) the standalone --run-gather-rules CLI mode still
+                // needs to collect raw EnrollmentEvents in-memory for the direct
+                // BackendApiClient.IngestEventsAsync upload (plan §9 orthogonal world). In
+                // session mode we wrap post.Emit so every session-mode gather event still
+                // flows through the InformationalEvent ingress pipe before hitting the
+                // telemetry spool — Rail-A semantics for ordering / replay determinism.
+                var post = new InformationalEventPost(ingress, clock);
                 _executor = new Monitoring.Telemetry.Gather.GatherRuleExecutor(
-                    sessionId, tenantId, onEnrollmentEvent, logger, imeLogPathOverride);
+                    sessionId, tenantId, evt => post.Emit(evt), logger, imeLogPathOverride);
             }
 
             public void Start()
@@ -297,7 +321,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public EspAndHelloHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
                 ISignalIngressSink ingress,
                 IClock clock,
@@ -309,10 +332,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 int[]? modernDeploymentHarmlessEventIds,
                 string stateDirectory)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
+                var post = new InformationalEventPost(ingress, clock);
                 _tracker = new EspAndHelloTracker(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEventCollected: onEnrollmentEvent,
+                    post: post,
                     logger: logger,
                     helloWaitTimeoutSeconds: helloWaitTimeoutSeconds,
                     modernDeploymentWatcherEnabled: modernDeploymentWatcherEnabled,
@@ -358,6 +384,75 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
                 try { _adapter.Dispose(); } catch { }
                 try { _detector.Dispose(); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// Single-rail refactor (plan §5.8) — wraps <see cref="Monitoring.Telemetry.DeviceInfo.DeviceInfoCollector"/>
+        /// to deliver the V1 "Device Details" event surface (OS / hardware / TPM / BitLocker /
+        /// AAD-Join / autopilot profile / ESP config / network / hardware spec, 14 event types).
+        /// <para>
+        /// Kernel host (not remote-config-gated). Fires <see cref="DeviceInfoCollector.CollectAll"/>
+        /// on <see cref="Start"/> on a ThreadPool task so the orchestrator's critical path is not
+        /// blocked by the underlying WMI / registry / networking probes. Exceptions from the task
+        /// are swallowed and logged; a failure in any one sub-emit must not kill the agent.
+        /// </para>
+        /// <para>
+        /// <b>Out of scope today</b>: the Legacy EnrollmentTracker also called
+        /// <c>CollectAtEnrollmentStart</c> on first DeviceSetup phase detection (re-fetches AAD
+        /// join / autopilot profile / ESP config / TPM once MDM enrollment has populated them)
+        /// and <c>CollectAtEnd</c> at termination (re-fetches BitLocker + active NIC). Hooking
+        /// those into the V2 signal timeline requires a reducer-driven subscription that does
+        /// not exist yet. The basic <see cref="Start"/> path solves Parity Issue #2 for the
+        /// dominant case; the phase-transition re-collections are a follow-up (plan §5.8 TODO).
+        /// </para>
+        /// </summary>
+        private sealed class DeviceInfoHost : ICollectorHost
+        {
+            public string Name => "DeviceInfoCollector";
+
+            private readonly Monitoring.Telemetry.DeviceInfo.DeviceInfoCollector _collector;
+            private readonly AgentLogger _logger;
+            private int _disposed;
+
+            public DeviceInfoHost(
+                string sessionId,
+                string tenantId,
+                ISignalIngressSink ingress,
+                IClock clock,
+                AgentLogger logger)
+            {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
+                _logger = logger;
+                var post = new InformationalEventPost(ingress, clock);
+                _collector = new Monitoring.Telemetry.DeviceInfo.DeviceInfoCollector(
+                    sessionId, tenantId, post, logger);
+            }
+
+            public void Start()
+            {
+                // Fire-and-forget — WMI queries can take several seconds and must not block the
+                // orchestrator's Start path. The collector emits its 13+ events into the ingress
+                // pipe as each sub-collector completes.
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try { _collector.CollectAll(); }
+                    catch (Exception ex) { _logger.Warning($"DeviceInfoHost: CollectAll threw: {ex.Message}"); }
+                });
+                _logger.Info("DeviceInfoHost: CollectAll scheduled on background thread.");
+            }
+
+            public void Stop()
+            {
+                // No background worker to stop; the scheduled Task either completed or is still
+                // running and will exit once it finishes emitting. Stop is a no-op by design.
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+                // DeviceInfoCollector does not implement IDisposable — purely event-emitting.
             }
         }
 
@@ -420,7 +515,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public ImeLogHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
                 ISignalIngressSink ingress,
                 IClock clock,
@@ -455,7 +549,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
                 _adapter = new ImeLogTrackerAdapter(_tracker, ingress, clock, whiteGloveSealingPatternIds);
 
-                _processWatcher = new ImeProcessWatcher(sessionId, tenantId, onEnrollmentEvent, logger);
+                var processWatcherPost = new InformationalEventPost(ingress, clock);
+                _processWatcher = new ImeProcessWatcher(sessionId, tenantId, processWatcherPost, logger);
             }
 
             public void Start()
@@ -497,7 +592,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public StallProbeHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
                 ISignalIngressSink ingress,
                 IClock clock,
@@ -507,11 +601,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 int sessionStalledAfterProbeIndex,
                 int[]? harmlessModernDeploymentEventIds)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _logger = logger;
+                var post = new InformationalEventPost(ingress, clock);
                 _collector = new StallProbeCollector(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEventCollected: onEnrollmentEvent,
+                    post: post,
                     logger: logger,
                     thresholdsMinutes: thresholdsMinutes ?? new[] { 2, 15, 30, 60, 180 },
                     traceIndices: traceIndices ?? new[] { 2 },
@@ -578,18 +675,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public DeliveryOptimizationHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 int intervalSeconds,
                 ImeLogHost imeHost)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _imeHost = imeHost;
                 _logger = logger;
 
+                var post = new InformationalEventPost(ingress, clock);
                 _collector = new DeliveryOptimizationCollector(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    emitEvent: onEnrollmentEvent,
+                    post: post,
                     logger: logger,
                     intervalSeconds: intervalSeconds,
                     getPackageStates: () => imeHost.PackageStates,
@@ -656,11 +757,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// activity and restart on the next real (non-periodic) event. Without this the two
         /// collectors ran forever in V2 and filled the telemetry spool on dormant sessions.
         /// <para>
-        /// Activity is observed by wrapping the <c>onEnrollmentEvent</c> sink: every event that
-        /// flows through this host bumps <c>_lastRealEventTimeUtc</c> unless it matches a
-        /// well-known periodic event type (<c>performance_snapshot</c>, <c>agent_metrics_snapshot</c>,
-        /// <c>stall_probe_*</c>, <c>session_stalled</c>). Events emitted by the managed
-        /// collectors themselves therefore never reset their own idle window.
+        /// Single-rail refactor (plan §5.4): both collectors and the idle-stopped events emit
+        /// through a shared <see cref="InformationalEventPost"/> constructed over an
+        /// <see cref="IdleActivityObservingIngressSink"/> wrapper. The wrapper peeks every posted
+        /// signal's <c>eventType</c> payload and bumps <c>_lastRealEventTimeUtc</c> unless the
+        /// event belongs to a well-known periodic type (<c>performance_snapshot</c>,
+        /// <c>agent_metrics_snapshot</c>, <c>performance_collector_stopped</c>,
+        /// <c>agent_metrics_collector_stopped</c>, <c>stall_probe_*</c>, <c>session_stalled</c>).
+        /// Events emitted by the managed collectors themselves therefore never reset their own
+        /// idle window.
         /// </para>
         /// </summary>
         private sealed class PeriodicCollectorLifecycleHost : ICollectorHost
@@ -681,7 +786,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             private readonly string _sessionId;
             private readonly string _tenantId;
-            private readonly Action<EnrollmentEvent> _emitEvent;
+            private readonly InformationalEventPost _post;
             private readonly AgentLogger _logger;
             private readonly bool _perfEnabled;
             private readonly int _perfIntervalSeconds;
@@ -690,6 +795,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             private readonly int _idleTimeoutMinutes;
             private readonly NetworkMetrics? _networkMetrics;
             private readonly string _agentVersion;
+
+            // Codex Finding 4 — reference to the concrete SignalIngress (when available) so we
+            // can subscribe to its SignalPosted event. This lets us observe activity from
+            // ALL sources — Program.cs lifecycle, IME, ESP, DeviceInfo, Analyzer, Gather, etc.
+            // — not just the subset that flows through our own _post. Null when ingress is a
+            // test fake / non-SignalIngress implementation, in which case we degrade to
+            // "only my own posts update the idle clock" (original broken behaviour, but the
+            // fakes in tests do not exercise idle logic).
+            private readonly SignalIngress? _observableIngress;
+            private Action<DecisionSignalKind, IReadOnlyDictionary<string, string>?>? _signalPostedHandler;
 
             private readonly object _sync = new object();
             private PerformanceCollector? _performanceCollector;
@@ -702,7 +817,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public PeriodicCollectorLifecycleHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 bool performanceEnabled,
                 int performanceIntervalSeconds,
@@ -712,9 +828,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 NetworkMetrics? networkMetrics,
                 string agentVersion)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _sessionId = sessionId;
                 _tenantId = tenantId;
-                _emitEvent = WrapEventSink(onEnrollmentEvent);
                 _logger = logger;
                 _perfEnabled = performanceEnabled;
                 _perfIntervalSeconds = performanceIntervalSeconds;
@@ -724,6 +841,38 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 _networkMetrics = networkMetrics;
                 _agentVersion = agentVersion;
                 _lastRealEventTimeUtc = DateTime.UtcNow;
+
+                // Post goes to the raw ingress — no per-host wrapping. Activity observation
+                // now lives centrally on SignalIngress.SignalPosted (Codex Finding 4).
+                _post = new InformationalEventPost(ingress, clock);
+                _observableIngress = ingress as SignalIngress;
+            }
+
+            /// <summary>
+            /// Subscriber for <see cref="SignalIngress.SignalPosted"/>. Filters out periodic
+            /// events the host itself produces (they would self-reset the idle clock and keep
+            /// the collectors alive forever), treats everything else as "real enrollment
+            /// activity" and resets the idle clock accordingly.
+            /// </summary>
+            private void OnSignalPosted(DecisionSignalKind kind, IReadOnlyDictionary<string, string>? payload)
+            {
+                // InformationalEvents carry eventType in payload — filter those against the
+                // periodic-denylist so snapshots never mark the session as "active".
+                if (kind == DecisionSignalKind.InformationalEvent)
+                {
+                    if (payload != null
+                        && payload.TryGetValue(SignalPayloadKeys.EventType, out var eventType)
+                        && !string.IsNullOrEmpty(eventType)
+                        && PeriodicEventTypes.Contains(eventType))
+                    {
+                        return;
+                    }
+                }
+
+                // Every other signal kind — ESP phase, IME session, hello, desktop arrival,
+                // deadline fired, classifier verdict, session-lifecycle, … — is real activity
+                // that should keep the collectors running.
+                OnRealEvent();
             }
 
             public void Start()
@@ -731,6 +880,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 lock (_sync)
                 {
                     StartCollectorsInternal();
+
+                    // Subscribe for cross-source activity BEFORE the idle timer starts so the
+                    // clock cannot be reset by an early signal we miss. Subscription is a no-op
+                    // on test fakes (_observableIngress is null).
+                    if (_observableIngress != null && _signalPostedHandler == null)
+                    {
+                        _signalPostedHandler = OnSignalPosted;
+                        _observableIngress.SignalPosted += _signalPostedHandler;
+                    }
+
                     if (_idleTimeoutMinutes > 0)
                     {
                         _idleTimer = new Timer(_ => IdleCheckTick(), state: null,
@@ -750,6 +909,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 {
                     try { _idleTimer?.Dispose(); } catch { }
                     _idleTimer = null;
+
+                    if (_observableIngress != null && _signalPostedHandler != null)
+                    {
+                        try { _observableIngress.SignalPosted -= _signalPostedHandler; }
+                        catch { /* best-effort unsubscribe during shutdown */ }
+                        _signalPostedHandler = null;
+                    }
+
                     StopCollectorsInternal();
                 }
             }
@@ -765,13 +932,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 if (_perfEnabled && _performanceCollector == null)
                 {
                     _performanceCollector = new PerformanceCollector(
-                        _sessionId, _tenantId, _emitEvent, _logger, _perfIntervalSeconds);
+                        _sessionId, _tenantId, _post, _logger, _perfIntervalSeconds);
                     _performanceCollector.Start();
                 }
                 if (_selfMetricsEnabled && _selfMetricsCollector == null && _networkMetrics != null)
                 {
                     _selfMetricsCollector = new AgentSelfMetricsCollector(
-                        _sessionId, _tenantId, _emitEvent, _networkMetrics, _logger, _agentVersion, _selfMetricsIntervalSeconds);
+                        _sessionId, _tenantId, _post, _networkMetrics, _logger, _agentVersion, _selfMetricsIntervalSeconds);
                     _selfMetricsCollector.Start();
                 }
                 _idleStopped = false;
@@ -786,24 +953,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 try { _selfMetricsCollector?.Stop(); } catch { }
                 try { _selfMetricsCollector?.Dispose(); } catch { }
                 _selfMetricsCollector = null;
-            }
-
-            private Action<EnrollmentEvent> WrapEventSink(Action<EnrollmentEvent> inner)
-            {
-                return evt =>
-                {
-                    if (evt == null)
-                    {
-                        inner(null!);
-                        return;
-                    }
-                    if (!string.IsNullOrEmpty(evt.EventType)
-                        && !PeriodicEventTypes.Contains(evt.EventType))
-                    {
-                        OnRealEvent();
-                    }
-                    inner(evt);
-                };
             }
 
             private void OnRealEvent()
@@ -854,7 +1003,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             {
                 try
                 {
-                    _emitEvent(new EnrollmentEvent
+                    _post.Emit(new EnrollmentEvent
                     {
                         SessionId = _sessionId,
                         TenantId = _tenantId,
@@ -873,6 +1022,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 }
                 catch (Exception ex) { _logger.Debug($"PeriodicCollectorLifecycleHost: emit '{eventType}' threw: {ex.Message}"); }
             }
+
         }
 
         /// <summary>
@@ -892,12 +1042,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public NetworkChangeHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 string? apiBaseUrl)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _logger = logger;
-                _detector = new NetworkChangeDetector(sessionId, tenantId, onEnrollmentEvent, logger, apiBaseUrl);
+                var post = new InformationalEventPost(ingress, clock);
+                _detector = new NetworkChangeDetector(sessionId, tenantId, post, logger, apiBaseUrl);
             }
 
             public void Start()

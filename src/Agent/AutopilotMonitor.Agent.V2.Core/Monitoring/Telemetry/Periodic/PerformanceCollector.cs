@@ -6,6 +6,7 @@ using System.Net.NetworkInformation;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Interop;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
@@ -27,9 +28,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
         private DateTime _prevNetSampleTime;
         private bool _networkInitialized;
 
-        public PerformanceCollector(string sessionId, string tenantId, Action<EnrollmentEvent> onEventCollected,
+        public PerformanceCollector(string sessionId, string tenantId, InformationalEventPost post,
             AgentLogger logger, int intervalSeconds = 60)
-            : base(sessionId, tenantId, onEventCollected, logger, intervalSeconds)
+            : base(sessionId, tenantId, post, logger, intervalSeconds)
         {
         }
 
@@ -236,7 +237,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 
             if (data.Count > 0)
             {
-                EmitEvent(new EnrollmentEvent
+                Post.Emit(new EnrollmentEvent
                 {
                     SessionId = SessionId,
                     TenantId = TenantId,

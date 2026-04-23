@@ -69,6 +69,37 @@ namespace AutopilotMonitor.DecisionCore.Serialization
                 payload = p;
             }
 
+            // TypedPayload (single-rail §1.3) — the structured sidecar carrying e.g.
+            // EnrollmentEvent.Data with nested Dict/List. Newtonsoft serialized it verbatim;
+            // on restore we hand the JToken back as an IReadOnlyDictionary<string, object> so
+            // EventTimelineEmitter.ResolveData can consume it on the fast path. Non-object
+            // payloads (e.g. JArray) are preserved as the raw JToken and fall through to the
+            // emitter's string-reconstruction fallback.
+            object? typedPayload = null;
+            if (obj["TypedPayload"] is JObject typedObj)
+            {
+                var t = new Dictionary<string, object>(typedObj.Count, StringComparer.Ordinal);
+                foreach (var prop in typedObj.Properties())
+                {
+                    // JSON null → C# null (NOT string.Empty — Codex Pass-2 finding).
+                    // Collectors like DeviceInfoCollector place nullable fields (e.g.
+                    // displayVersion, dhcpServer) directly into EnrollmentEvent.Data; live
+                    // Newtonsoft serializes those as JSON null, and the dict kept them as null.
+                    // Coercing to "" on replay would break wire-parity between live and replay
+                    // — the next outbound Emit would serialize "" instead of null.
+                    // Other JTokens (JValue / JArray / JObject) pass through — Newtonsoft
+                    // re-serializes them identically on the next outbound Emit.
+                    t[prop.Name] = prop.Value is JValue jv && jv.Value is null
+                        ? null!
+                        : (object)prop.Value;
+                }
+                typedPayload = t;
+            }
+            else if (obj["TypedPayload"] != null && obj["TypedPayload"]!.Type != JTokenType.Null)
+            {
+                typedPayload = obj["TypedPayload"];
+            }
+
             return new DecisionSignal(
                 sessionSignalOrdinal: obj.Value<long>("SessionSignalOrdinal"),
                 sessionTraceOrdinal: obj.Value<long>("SessionTraceOrdinal"),
@@ -77,7 +108,8 @@ namespace AutopilotMonitor.DecisionCore.Serialization
                 occurredAtUtc: obj.Value<DateTime>("OccurredAtUtc"),
                 sourceOrigin: obj.Value<string>("SourceOrigin") ?? "unknown",
                 evidence: evidence,
-                payload: payload);
+                payload: payload,
+                typedPayload: typedPayload);
         }
 
         private static T ParseEnum<T>(string? raw, T fallback) where T : struct, Enum

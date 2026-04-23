@@ -283,7 +283,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
                 EmitDeviceInfoEvent("autopilot_profile", "Autopilot profile configuration", data);
 
                 // Emit dedicated enrollment_type_detected event for easy filtering
-                _emitEvent(new EnrollmentEvent
+                _post.Emit(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId = _tenantId,
@@ -751,7 +751,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
 
         private void EmitDeviceInfoEvent(string eventType, string message, Dictionary<string, object> data)
         {
-            _emitEvent(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,

@@ -501,78 +501,28 @@ namespace AutopilotMonitor.Agent.V2
                 agentMaxLifetime: agentMaxLifetime))
             {
                 using (var shutdown = new ManualResetEventSlim(false))
+                using (var shutdownComplete = new ManualResetEventSlim(false))
                 {
-                    // M4.6.δ — Analyzer manager. Emits through the live orchestrator's event
-                    // emitter. RunStartup fires after orchestrator.Start; RunShutdown is wired
-                    // into the termination handler so it runs before diagnostics upload.
-                    var analyzerManager = new AgentAnalyzerManager(
-                        configuration: agentConfig,
-                        logger: logger,
-                        emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); },
-                        analyzerConfig: remoteConfig.Analyzers);
+                    // M4.6.δ — Analyzer manager. Single-rail refactor (plan §5.7): the manager
+                    // now takes an InformationalEventPost so LocalAdmin / SoftwareInventory /
+                    // IntegrityBypass analyzer events flow through the same ingress pipe as
+                    // every other telemetry source. Construction is deferred into
+                    // orchestrator.Start's onIngressReady hook so lifecyclePost is non-null at
+                    // construction time. RunStartup fires after orchestrator.Start; RunShutdown
+                    // is wired into the termination handler so it runs before diagnostics upload.
+                    AgentAnalyzerManager analyzerManager = null;
 
                     // M4.6.β — the peripheral termination sequence (FinalStatus + SummaryDialog
                     // + diagnostics upload + enrollment-complete.marker + CleanupService) lives
-                    // in Program.cs, not in the kernel. We compose it here and hook it onto the
-                    // orchestrator's typed Terminated event.
-                    var terminationHandler = new EnrollmentTerminationHandler(
-                        configuration: agentConfig,
-                        logger: logger,
-                        stateDirectory: stateSubdir,
-                        agentStartTimeUtc: agentStartTimeUtc,
-                        currentStateAccessor: () => orchestrator.CurrentState,
-                        packageStatesAccessor: () => componentFactory.ImePackageStates,
-                        cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
-                        uploadDiagnosticsAsync: uploadDiagnosticsAsync,
-                        signalShutdown: () => shutdown.Set(),
-                        analyzerManager: analyzerManager,
-                        emitEvent: evt => orchestrator.EventEmitter.Emit(evt),
-                        sessionPersistence: sessionPersistence);
+                    // in Program.cs, not in the kernel. Declared here; constructed inside
+                    // orchestrator.Start's onIngressReady hook (plan §5.3) so the live
+                    // InformationalEventPost backs its telemetry.
+                    EnrollmentTerminationHandler terminationHandler = null;
 
-                    // ServerActionDispatcher — handlers are live and the M4.6.ε response-parse
-                    // path below feeds it. RotateConfig refetches remote config;
-                    // RequestDiagnostics triggers the same diagnostics pipeline as enrollment-end;
-                    // TerminateSession routes to the termination handler (reason: server-requested).
-                    var serverActionDispatcher = new ServerActionDispatcher(
-                        configuration: agentConfig,
-                        logger: logger,
-                        rotateConfigAsync: async () =>
-                        {
-                            try { var _ = await remoteConfigService.FetchConfigAsync(); return true; }
-                            catch (Exception ex) { logger.Warning($"ServerAction rotate_config failed: {ex.Message}"); return false; }
-                        },
-                        uploadDiagnosticsAsync: async (suffix) =>
-                            await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
-                        onTerminateRequested: action =>
-                        {
-                            var forceSelfDestruct = action?.Params != null
-                                && action.Params.TryGetValue("forceSelfDestruct", out var f)
-                                && string.Equals(f, "true", StringComparison.OrdinalIgnoreCase);
-                            if (forceSelfDestruct && !agentConfig.SelfDestructOnComplete)
-                            {
-                                logger.Warning("ServerAction terminate_session: forceSelfDestruct=true overrides SelfDestructOnComplete=false.");
-                                agentConfig.SelfDestructOnComplete = true;
-                            }
-
-                            // Codex Finding 2: forward adminOutcome from the ServerAction params so
-                            // a portal Mark-Succeeded really lands as Succeeded locally (was
-                            // hard-coded to Failed before, masquerading every admin override as an
-                            // error in SummaryDialog + firing spurious diagnostics uploads).
-                            var mappedOutcome = MapAdminOutcome(action?.Params);
-
-                            logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}, outcome={mappedOutcome}) — invoking termination handler.");
-                            // Synthesise a Terminated event as if the kernel fired it.
-                            terminationHandler.Handle(
-                                sender: null,
-                                args: new EnrollmentTerminatedEventArgs(
-                                    reason: EnrollmentTerminationReason.DecisionTerminalStage,
-                                    outcome: mappedOutcome,
-                                    stageName: orchestrator.CurrentState?.Stage.ToString(),
-                                    terminatedAtUtc: DateTime.UtcNow,
-                                    details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
-                            return Task.CompletedTask;
-                        },
-                        emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); });
+                    // ServerActionDispatcher — constructed after orchestrator.Start (see below) so
+                    // the live lifecyclePost can back its telemetry. Declared here so the terminate
+                    // callback + WireTelemetryServerResponse reach it via the local scope.
+                    ServerActionDispatcher serverActionDispatcher = null;
 
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
@@ -589,6 +539,16 @@ namespace AutopilotMonitor.Agent.V2
                     Console.CancelKeyPress += cancelHandler;
                     AppDomain.CurrentDomain.ProcessExit += processExitHandler;
 
+                    // Single-rail refactor (plan §5.1) — lifecycle events (agent_started,
+                    // agent_version_check, agent_unrestricted_mode_changed, enrollment_failed,
+                    // agent_shutdown) flow through InformationalEventPost → SignalIngress →
+                    // Reducer → EmitEventTimelineEntry effect → EventTimelineEmitter. The post
+                    // instance is constructed inside orchestrator.Start's onIngressReady callback
+                    // (ingress is not alive before Start); later-firing handlers (max-lifetime
+                    // watchdog, auth-failure watchdog) capture this variable by reference so they
+                    // see the live helper when their event fires.
+                    InformationalEventPost lifecyclePost = null;
+
                     // V1 parity — on the max-lifetime watchdog firing, emit an explicit
                     // `enrollment_failed` event with failureType=agent_timeout BEFORE the
                     // regular termination path runs. Dashboards + KQL queries key on the
@@ -597,17 +557,26 @@ namespace AutopilotMonitor.Agent.V2
                     EventHandler<EnrollmentTerminatedEventArgs> maxLifetimeEmitter = (s, e) =>
                     {
                         if (e.Reason != EnrollmentTerminationReason.MaxLifetimeExceeded) return;
+                        if (lifecyclePost == null)
+                        {
+                            logger.Warning("enrollment_failed (max_lifetime) suppressed — ingress not ready.");
+                            return;
+                        }
                         try
                         {
                             var uptimeMin = (DateTime.UtcNow - agentStartTimeUtc).TotalMinutes;
-                            orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                            // Phase stays Unknown per plan §1.4 phase-invariant — the UI timeline
+                            // buckets chronologically into the last-declared phase. This fixes the
+                            // legacy violation where enrollment_failed (max_lifetime) carried
+                            // Phase=Complete and caused a phantom phase in the UI.
+                            lifecyclePost.Emit(new EnrollmentEvent
                             {
                                 SessionId = agentConfig.SessionId,
                                 TenantId = agentConfig.TenantId,
                                 EventType = "enrollment_failed",
                                 Severity = EventSeverity.Error,
                                 Source = "EnrollmentOrchestrator",
-                                Phase = EnrollmentPhase.Complete,
+                                Phase = EnrollmentPhase.Unknown,
                                 Message = $"Agent max lifetime expired ({uptimeMin:F0} min) — enrollment did not complete in time",
                                 Data = new System.Collections.Generic.Dictionary<string, object>
                                 {
@@ -626,7 +595,21 @@ namespace AutopilotMonitor.Agent.V2
                         }
                     };
                     orchestrator.Terminated += maxLifetimeEmitter;
-                    orchestrator.Terminated += terminationHandler.Handle;
+                    // terminationHandler is constructed inside orchestrator.Start's onIngressReady
+                    // hook below, so this wrapper null-checks the captured variable. Terminated
+                    // cannot fire until the decision loop has at least one posted signal, and that
+                    // loop is started *inside* Start — by the time the first signal is processed,
+                    // the hook has already run synchronously and terminationHandler is non-null.
+                    EventHandler<EnrollmentTerminatedEventArgs> terminatedDispatch = (s, e) =>
+                    {
+                        if (terminationHandler == null)
+                        {
+                            logger.Warning("orchestrator.Terminated fired before terminationHandler constructed — ignoring.");
+                            return;
+                        }
+                        terminationHandler.Handle(s, e);
+                    };
+                    orchestrator.Terminated += terminatedDispatch;
 
                     // Auth-failure watchdog: when MaxAuthFailures / AuthFailureTimeoutMinutes
                     // is exceeded the agent must shut down cleanly instead of hammering a
@@ -637,34 +620,41 @@ namespace AutopilotMonitor.Agent.V2
                     EventHandler<AuthFailureThresholdEventArgs> authThresholdHandler = (s, e) =>
                     {
                         logger.Error($"Auth-failure threshold exceeded ({e.Reason}) — initiating shutdown.");
-                        try
+                        if (lifecyclePost != null)
                         {
-                            orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                            try
                             {
-                                SessionId = agentConfig.SessionId,
-                                TenantId = agentConfig.TenantId,
-                                EventType = "agent_shutdown",
-                                Severity = EventSeverity.Error,
-                                Source = "AuthFailureTracker",
-                                Phase = EnrollmentPhase.Unknown,
-                                Message = $"Agent shut down after {e.ConsecutiveFailures} consecutive auth failures",
-                                Data = new System.Collections.Generic.Dictionary<string, object>
+                                lifecyclePost.Emit(new EnrollmentEvent
                                 {
-                                    { "reason", "auth_failure" },
-                                    { "consecutiveFailures", e.ConsecutiveFailures },
-                                    { "firstFailureTime", e.FirstFailureUtc.ToString("o") },
-                                    { "maxFailures", agentConfig.MaxAuthFailures },
-                                    { "timeoutMinutes", agentConfig.AuthFailureTimeoutMinutes },
-                                    { "lastOperation", e.LastOperation ?? string.Empty },
-                                    { "lastStatusCode", e.LastStatusCode },
-                                    { "thresholdReason", e.Reason ?? string.Empty },
-                                },
-                                ImmediateUpload = true,
-                            });
+                                    SessionId = agentConfig.SessionId,
+                                    TenantId = agentConfig.TenantId,
+                                    EventType = "agent_shutdown",
+                                    Severity = EventSeverity.Error,
+                                    Source = "AuthFailureTracker",
+                                    Phase = EnrollmentPhase.Unknown,
+                                    Message = $"Agent shut down after {e.ConsecutiveFailures} consecutive auth failures",
+                                    Data = new System.Collections.Generic.Dictionary<string, object>
+                                    {
+                                        { "reason", "auth_failure" },
+                                        { "consecutiveFailures", e.ConsecutiveFailures },
+                                        { "firstFailureTime", e.FirstFailureUtc.ToString("o") },
+                                        { "maxFailures", agentConfig.MaxAuthFailures },
+                                        { "timeoutMinutes", agentConfig.AuthFailureTimeoutMinutes },
+                                        { "lastOperation", e.LastOperation ?? string.Empty },
+                                        { "lastStatusCode", e.LastStatusCode },
+                                        { "thresholdReason", e.Reason ?? string.Empty },
+                                    },
+                                    ImmediateUpload = true,
+                                });
+                            }
+                            catch (Exception emitEx)
+                            {
+                                logger.Warning($"agent_shutdown emission failed: {emitEx.Message}");
+                            }
                         }
-                        catch (Exception emitEx)
+                        else
                         {
-                            logger.Warning($"agent_shutdown emission failed: {emitEx.Message}");
+                            logger.Warning("agent_shutdown (auth_failure) suppressed — ingress not ready.");
                         }
 
                         shutdown.Set();
@@ -673,7 +663,130 @@ namespace AutopilotMonitor.Agent.V2
 
                     try
                     {
-                        orchestrator.Start();
+                        // Pre-collector hook emits the lifecycle events (agent_started first so
+                        // it is Seq=1 on the wire, then version-check, then the unrestricted-mode
+                        // audit). These must land on the signal log before any collector-generated
+                        // signal — fixes the Seq=13 ordering regression from the V2 parity audit
+                        // (plan Parity Issue #1).
+                        orchestrator.Start(ingress =>
+                        {
+                            lifecyclePost = new InformationalEventPost(ingress, SystemClock.Instance);
+                            EmitAgentStartedEvent(lifecyclePost, agentConfig, previousExit, logger);
+                            EmitVersionCheckEventIfAny(lifecyclePost, agentConfig, logger);
+                            EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
+
+                            // Single-rail refactor (plan §5.7) — AgentAnalyzerManager emits through
+                            // the same InformationalEventPost. Constructed inside this hook so
+                            // lifecyclePost is guaranteed non-null by the time RunStartup (below,
+                            // after Start returns) and RunShutdown (via terminationHandler) call
+                            // into the three analyzers.
+                            analyzerManager = new AgentAnalyzerManager(
+                                configuration: agentConfig,
+                                logger: logger,
+                                post: lifecyclePost,
+                                analyzerConfig: remoteConfig.Analyzers);
+
+                            // Single-rail refactor (plan §5.3) — EnrollmentTerminationHandler emits
+                            // through the same InformationalEventPost. Constructed inside this hook
+                            // so lifecyclePost is guaranteed non-null; the terminated-dispatch wrapper
+                            // registered above picks this instance up via closure capture.
+                            terminationHandler = new EnrollmentTerminationHandler(
+                                configuration: agentConfig,
+                                logger: logger,
+                                stateDirectory: stateSubdir,
+                                agentStartTimeUtc: agentStartTimeUtc,
+                                currentStateAccessor: () => orchestrator.CurrentState,
+                                packageStatesAccessor: () => componentFactory.ImePackageStates,
+                                cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
+                                uploadDiagnosticsAsync: uploadDiagnosticsAsync,
+                                signalShutdown: () => shutdown.Set(),
+                                analyzerManager: analyzerManager,
+                                post: lifecyclePost,
+                                sessionPersistence: sessionPersistence);
+
+                            // Single-rail refactor (plan §5.3) — ServerActionDispatcher emits through
+                            // the same InformationalEventPost. Constructed inside this hook so
+                            // lifecyclePost is guaranteed non-null; the dispatcher is only wired into
+                            // the telemetry response-path below (WireTelemetryServerResponse), which
+                            // runs strictly after Start returns.
+                            serverActionDispatcher = new ServerActionDispatcher(
+                                configuration: agentConfig,
+                                logger: logger,
+                                rotateConfigAsync: async () =>
+                                {
+                                    try { var _ = await remoteConfigService.FetchConfigAsync(); return true; }
+                                    catch (Exception ex) { logger.Warning($"ServerAction rotate_config failed: {ex.Message}"); return false; }
+                                },
+                                uploadDiagnosticsAsync: async (suffix) =>
+                                    await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
+                                onTerminateRequested: action =>
+                                {
+                                    // Codex Finding 1 (defensive) — re-entry short-circuit. If a
+                                    // nested drain (e.g. orchestrator.Stop's terminal drain) parses
+                                    // a NEW ActionId out of a late response, the dispatcher would
+                                    // otherwise call us again on a thread that is ALREADY inside the
+                                    // shutdown sequence. That thread is responsible for setting
+                                    // shutdownComplete, so waiting on it below would self-deadlock.
+                                    // ActionId dedup in ServerActionDispatcher handles the same-id
+                                    // case; this handles pathological different-id re-entries.
+                                    if (shutdown.IsSet)
+                                    {
+                                        logger.Debug("Terminate callback: shutdown already in progress — short-circuiting re-entry.");
+                                        return Task.CompletedTask;
+                                    }
+
+                                    var forceSelfDestruct = action?.Params != null
+                                        && action.Params.TryGetValue("forceSelfDestruct", out var f)
+                                        && string.Equals(f, "true", StringComparison.OrdinalIgnoreCase);
+                                    if (forceSelfDestruct && !agentConfig.SelfDestructOnComplete)
+                                    {
+                                        logger.Warning("ServerAction terminate_session: forceSelfDestruct=true overrides SelfDestructOnComplete=false.");
+                                        agentConfig.SelfDestructOnComplete = true;
+                                    }
+
+                                    // Codex Finding 2: forward adminOutcome from the ServerAction params so
+                                    // a portal Mark-Succeeded really lands as Succeeded locally (was
+                                    // hard-coded to Failed before, masquerading every admin override as an
+                                    // error in SummaryDialog + firing spurious diagnostics uploads).
+                                    var mappedOutcome = MapAdminOutcome(action?.Params);
+
+                                    logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}, outcome={mappedOutcome}) — invoking termination handler.");
+                                    // Synthesise a Terminated event as if the kernel fired it.
+                                    terminationHandler.Handle(
+                                        sender: null,
+                                        args: new EnrollmentTerminatedEventArgs(
+                                            reason: EnrollmentTerminationReason.DecisionTerminalStage,
+                                            outcome: mappedOutcome,
+                                            stageName: orchestrator.CurrentState?.Stage.ToString(),
+                                            terminatedAtUtc: DateTime.UtcNow,
+                                            details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
+
+                                    // Plan §6.2 synchronous-shutdown — block the ingest dispatcher
+                                    // thread until the main-thread cleanup (orchestrator.Stop, client
+                                    // disposal) has fully run. This prevents the agent from issuing
+                                    // another ingest call after terminationHandler.Handle returns but
+                                    // before the process actually exits, which would give the backend
+                                    // another window to re-deliver terminate_session. The dedup in
+                                    // ServerActionDispatcher already squelches those re-deliveries,
+                                    // but waiting here keeps the ingest loop itself quiet. 60s bound
+                                    // covers the 10s spool drain + cleanup-service launch + orchestrator
+                                    // stop; if it times out the agent is misbehaving and we return
+                                    // anyway rather than deadlock the ingest thread forever.
+                                    //
+                                    // Codex Finding 1: the deadlock that previously fired here came
+                                    // from TelemetryUploadOrchestrator raising ServerResponseReceived
+                                    // WHILE holding its _drainGuard. That is fixed at source — events
+                                    // are now raised AFTER guard release, so orchestrator.Stop's
+                                    // terminal DrainAllAsync on the main thread can acquire the guard
+                                    // and actually upload agent_shutting_down before we unblock.
+                                    if (!shutdownComplete.Wait(TimeSpan.FromSeconds(60)))
+                                    {
+                                        logger.Warning("Terminate callback: shutdownComplete wait timed out after 60s — returning without confirmed shutdown.");
+                                    }
+                                    return Task.CompletedTask;
+                                },
+                                post: lifecyclePost);
+                        });
 
                         // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator parses
                         // DeviceBlocked / DeviceKillSignal / AdminAction / Actions out of the 2xx
@@ -686,21 +799,6 @@ namespace AutopilotMonitor.Agent.V2
                         // InvalidOperationException before Start() because the
                         // TelemetryUploadOrchestrator is constructed inside Start() at step 311.
                         WireTelemetryServerResponse(orchestrator, serverActionDispatcher, logger);
-
-                        // Emit the agent_version_check event now that the EventEmitter is alive.
-                        // VersionCheckEventBuilder.TryBuild is a no-op when no markers are present.
-                        EmitVersionCheckEventIfAny(orchestrator, agentConfig, logger);
-
-                        // V1 parity (MonitoringService.AuditUnrestrictedModeChange) — whenever the
-                        // remote tenant admin flips the UnrestrictedMode guardrail, emit an audit
-                        // event so the change is visible in the session timeline and downstream
-                        // alerting. Fires AFTER orchestrator.Start so the EventEmitter is alive.
-                        EmitUnrestrictedModeAuditIfChanged(orchestrator, agentConfig, configMergeResult, logger);
-
-                        // V1 parity — agent_started lifecycle event. Purely informational
-                        // (Phase=Unknown); the session timeline and downstream alerting rely on
-                        // it to classify the boot.
-                        EmitAgentStartedEvent(orchestrator, agentConfig, previousExit, logger);
 
                         // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
                         // SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge — that
@@ -755,8 +853,13 @@ namespace AutopilotMonitor.Agent.V2
                         {
                             try
                             {
+                                // lifecyclePost is non-null here — orchestrator.Start's hook
+                                // has already run synchronously (see line ~700). The probes
+                                // emit device_location / timezone_auto_set / ntp_time_check /
+                                // agent_trace through the single-rail pipe, preserving their
+                                // Source labels via the InformationalEventPost contract.
                                 await StartupEnvironmentProbes
-                                    .RunAsync(agentConfig, logger, orchestrator.EventEmitter)
+                                    .RunAsync(agentConfig, logger, lifecyclePost)
                                     .ConfigureAwait(false);
                             }
                             catch (Exception ex)
@@ -775,7 +878,7 @@ namespace AutopilotMonitor.Agent.V2
                     {
                         Console.CancelKeyPress -= cancelHandler;
                         AppDomain.CurrentDomain.ProcessExit -= processExitHandler;
-                        orchestrator.Terminated -= terminationHandler.Handle;
+                        orchestrator.Terminated -= terminatedDispatch;
                         orchestrator.Terminated -= maxLifetimeEmitter;
                         authFailureTracker.ThresholdExceeded -= authThresholdHandler;
 
@@ -784,6 +887,12 @@ namespace AutopilotMonitor.Agent.V2
 
                         try { mtlsHttpClient.Dispose(); } catch { }
                         try { backendApiClient.Dispose(); } catch { }
+
+                        // Plan §6.2 synchronous-shutdown — release any ingest-dispatcher thread
+                        // currently parked in the terminate callback (see onTerminateRequested
+                        // above). Signalled AFTER orchestrator.Stop and client disposal so the
+                        // ingest thread only returns once no more HTTP work can happen.
+                        shutdownComplete.Set();
                     }
                 }
             }
@@ -870,7 +979,7 @@ namespace AutopilotMonitor.Agent.V2
         /// <c>MonitoringService.AuditUnrestrictedModeChange</c>.
         /// </summary>
         private static void EmitUnrestrictedModeAuditIfChanged(
-            EnrollmentOrchestrator orchestrator,
+            InformationalEventPost post,
             AgentConfiguration agentConfig,
             RemoteConfigMergeResult mergeResult,
             AgentLogger logger)
@@ -883,7 +992,7 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Warning(
                     $"UnrestrictedMode changed: {mergeResult.OldUnrestrictedMode} → {newValue}. Emitting audit event.");
 
-                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                post.Emit(new EnrollmentEvent
                 {
                     SessionId = agentConfig.SessionId,
                     TenantId = agentConfig.TenantId,
@@ -998,7 +1107,7 @@ namespace AutopilotMonitor.Agent.V2
         /// Phase stays <see cref="EnrollmentPhase.Unknown"/> — the event is NOT a phase declaration.
         /// </summary>
         private static void EmitAgentStartedEvent(
-            EnrollmentOrchestrator orchestrator,
+            InformationalEventPost post,
             AgentConfiguration agentConfig,
             PreviousExitSummary previousExit,
             AgentLogger logger)
@@ -1025,7 +1134,7 @@ namespace AutopilotMonitor.Agent.V2
                 if (previousExit?.LastBootUtc.HasValue == true)
                     data["previousBootUtc"] = previousExit.LastBootUtc.Value.ToString("o");
 
-                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                post.Emit(new EnrollmentEvent
                 {
                     SessionId = agentConfig.SessionId,
                     TenantId = agentConfig.TenantId,
@@ -1081,7 +1190,7 @@ namespace AutopilotMonitor.Agent.V2
         }
 
         private static void EmitVersionCheckEventIfAny(
-            EnrollmentOrchestrator orchestrator,
+            InformationalEventPost post,
             AgentConfiguration agentConfig,
             AgentLogger logger)
         {
@@ -1097,7 +1206,7 @@ namespace AutopilotMonitor.Agent.V2
 
                 if (buildResult?.Event != null)
                 {
-                    orchestrator.EventEmitter.Emit(buildResult.Event);
+                    post.Emit(buildResult.Event);
                     logger.Info($"agent_version_check emitted (outcome={buildResult.Outcome}).");
                 }
                 else if (buildResult?.Deduped == true)

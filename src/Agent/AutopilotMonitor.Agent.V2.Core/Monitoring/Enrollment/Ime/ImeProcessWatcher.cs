@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
@@ -20,7 +21,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
 
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _onEventCollected;
+        private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
 
         private Timer _discoveryTimer;
@@ -31,12 +32,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         public ImeProcessWatcher(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> onEventCollected,
+            InformationalEventPost post,
             AgentLogger logger)
         {
             _sessionId = sessionId;
             _tenantId = tenantId;
-            _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
+            _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -104,7 +105,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
 
             _logger.Info($"ImeProcessWatcher: {ImeProcessName}.exe exited (PID={pid}, exit={exitCode}, uptime={uptimeSeconds:F0}s)");
 
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,

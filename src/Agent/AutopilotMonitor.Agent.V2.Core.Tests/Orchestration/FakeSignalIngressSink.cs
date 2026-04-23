@@ -20,9 +20,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             string sourceOrigin,
             Evidence evidence,
             IReadOnlyDictionary<string, string>? payload = null,
-            int kindSchemaVersion = 1)
+            int kindSchemaVersion = 1,
+            object? typedPayload = null)
         {
-            _posted.Add(new PostedSignal(kind, occurredAtUtc, sourceOrigin, evidence, payload, kindSchemaVersion));
+            _posted.Add(new PostedSignal(kind, occurredAtUtc, sourceOrigin, evidence, payload, kindSchemaVersion, typedPayload));
         }
 
         internal sealed class PostedSignal
@@ -33,7 +34,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 string sourceOrigin,
                 Evidence evidence,
                 IReadOnlyDictionary<string, string>? payload,
-                int kindSchemaVersion)
+                int kindSchemaVersion,
+                object? typedPayload)
             {
                 Kind = kind;
                 OccurredAtUtc = occurredAtUtc;
@@ -41,6 +43,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 Evidence = evidence;
                 Payload = payload;
                 KindSchemaVersion = kindSchemaVersion;
+                TypedPayload = typedPayload;
             }
 
             public DecisionSignalKind Kind { get; }
@@ -49,6 +52,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             public Evidence Evidence { get; }
             public IReadOnlyDictionary<string, string>? Payload { get; }
             public int KindSchemaVersion { get; }
+            public object? TypedPayload { get; }
         }
     }
 }

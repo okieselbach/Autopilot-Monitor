@@ -117,15 +117,14 @@ scripts/Deployment/build_and_upload_release_agent_build.ps1
 scripts/Deployment/V2/
 
 # M2 — local raw session fixtures before anonymization (plan §4 M2)
-tests/fixtures/enrollment-sessions-local/*
-!tests/fixtures/enrollment-sessions-local/.gitkeep
-!tests/fixtures/enrollment-sessions-local/README.md
+tests/fixtures/enrollment-sessions-local/
 
 
 .dotnet-home/
 .vscode/
 TODO.txt
 tools/orphan-analysis.py
+tools/export-session-fixture.mjs
 tasks/
 
 # Azure Table cleanup backups (dry-run exports + delete manifests)

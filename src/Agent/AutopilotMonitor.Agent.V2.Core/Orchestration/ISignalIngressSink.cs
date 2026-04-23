@@ -20,13 +20,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
     /// </summary>
     public interface ISignalIngressSink
     {
-        /// <summary>Post ein synthetisches Signal an den Ingress.</summary>
+        /// <summary>
+        /// Post ein synthetisches Signal an den Ingress.
+        /// <paramref name="typedPayload"/> ist ein optionaler Sidecar für strukturierte Daten,
+        /// die nicht in den string-only <paramref name="payload"/>-Contract passen. Plan §1.3 —
+        /// z.B. <c>EnrollmentEvent.Data</c> mit nested Dict/List wird so untouched zum
+        /// <c>EventTimelineEmitter</c> durchgereicht, ohne intermediäre Serialisierung.
+        /// </summary>
         void Post(
             DecisionSignalKind kind,
             DateTime occurredAtUtc,
             string sourceOrigin,
             Evidence evidence,
             IReadOnlyDictionary<string, string>? payload = null,
-            int kindSchemaVersion = 1);
+            int kindSchemaVersion = 1,
+            object? typedPayload = null);
     }
 }

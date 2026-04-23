@@ -24,10 +24,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <paramref name="occurredAtUtc"/> ist der deterministische Schritt-Zeitstempel
         /// (<c>DecisionSignal.OccurredAtUtc</c> des auslösenden Signals) — nicht
         /// <c>clock.UtcNow</c>. Damit bleibt die Event-Timeline replay-deterministisch.
+        /// <para>
+        /// <paramref name="typedPayload"/> ist ein optionaler Sidecar für strukturierte
+        /// <c>EnrollmentEvent.Data</c>. Wenn er als <c>IReadOnlyDictionary&lt;string, object&gt;</c>
+        /// vorliegt, wird er direkt als Data-Feld verwendet — erhält damit nested Dict/List
+        /// ohne Round-Trip durch die string-only <paramref name="parameters"/> (plan §1.3).
+        /// </para>
         /// </summary>
         void Emit(
             IReadOnlyDictionary<string, string>? parameters,
             DecisionState currentState,
-            DateTime occurredAtUtc);
+            DateTime occurredAtUtc,
+            object? typedPayload = null);
     }
 }

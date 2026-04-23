@@ -151,5 +151,44 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             Assert.Equal(1, drain.UploadedItems);
             Assert.Equal(0, drain.FailedBatches);
         }
+
+        /// <summary>
+        /// Codex Finding 1 — regression guard. Before the fix, the drain loop raised
+        /// <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/> <b>while</b>
+        /// still holding its internal _drainGuard. A realistic termination callback posts
+        /// a final event (e.g. <c>agent_shutting_down</c>) and then expects the orchestrator
+        /// shutdown path to do one more <see cref="TelemetryUploadOrchestrator.DrainAllAsync"/>
+        /// to actually flush that event — that re-entrant drain deadlocked on the guard
+        /// and timed out, dropping the final event on the floor. The fix raises events
+        /// AFTER the guard is released so a handler can legitimately run nested drain code.
+        /// </summary>
+        [Fact]
+        public async Task Handler_may_invoke_reentrant_drain_without_deadlock()
+        {
+            using var rig = new Rig();
+            rig.Sut.Enqueue(Draft(traceOrdinal: 1));
+            rig.Uploader.QueueOkWithSignals(deviceKillSignal: true);
+
+            var reentrantDrain = 0;
+            rig.Sut.ServerResponseReceived += (_, _) =>
+            {
+                // Simulate the termination-handler side of onTerminateRequested: post one
+                // more telemetry item (the "agent_shutting_down" analogue) and synchronously
+                // flush it via another drain. Before the fix, this would deadlock on the
+                // still-held _drainGuard and the 1s timeout below would trip.
+                rig.Sut.Enqueue(Draft(traceOrdinal: 2));
+                rig.Uploader.QueueOk();
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                var nested = rig.Sut.DrainAllAsync(cts.Token).GetAwaiter().GetResult();
+                Interlocked.Exchange(ref reentrantDrain, nested.UploadedItems);
+            };
+
+            var outer = await rig.Sut.DrainAllAsync();
+
+            Assert.Equal(1, outer.UploadedItems);
+            Assert.Equal(1, reentrantDrain);  // the agent_shutting_down analogue was flushed
+            Assert.Equal(2, rig.Uploader.CallCount);
+        }
     }
 }

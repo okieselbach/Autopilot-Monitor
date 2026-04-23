@@ -106,5 +106,44 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(r1.FinalStepHash, r2.FinalStepHash);
             Assert.Equal(16, r1.FinalStepHash.Length);
         }
+
+        [Fact]
+        public void LateProvisioningComplete_afterAccountSetup_doesNotCompletePrematurely()
+        {
+            // Plan §6.1 regression guard — reproduces session e259c121-dc13-46d6-8e96-118f1da9845e.
+            // DeviceSetupProvisioningComplete arrives AFTER AccountSetup has started and
+            // DesktopArrived was observed, but BEFORE HelloResolved. The SelfDeploying terminal
+            // handler must NOT complete the session on the Classic path.
+            var result = RunFixture(
+                fixtureFilename: "userdriven-late-provisioning-complete-v1.jsonl",
+                sessionId: "session-anon-0006",
+                tenantId: "tenant-anon-0006");
+
+            Assert.Equal(SessionStage.Completed, result.FinalState.Stage);
+            Assert.Equal(SessionOutcome.EnrollmentComplete, result.FinalState.Outcome);
+            Assert.Equal("Success", result.FinalState.HelloOutcome!.Value);
+            Assert.NotNull(result.FinalState.HelloResolvedUtc);
+            Assert.NotNull(result.FinalState.DesktopArrivedUtc);
+            Assert.NotNull(result.FinalState.AccountSetupEnteredUtc);
+            Assert.Empty(result.FinalState.Deadlines);
+
+            // Completion must come from HelloResolved (AND-gate with prior DesktopArrived),
+            // NOT from DeviceSetupProvisioningComplete.
+            var last = result.Transitions[^1];
+            Assert.Equal("HelloResolved", last.Trigger);
+            Assert.True(last.Taken);
+
+            // The DeviceSetupProvisioningComplete signal is observed as a taken but stage-unchanged
+            // step (informational on Classic path — not a terminal trigger).
+            var provTransition = Assert.Single(
+                result.Transitions,
+                t => t.Trigger == nameof(AutopilotMonitor.DecisionCore.Signals.DecisionSignalKind.DeviceSetupProvisioningComplete));
+            Assert.True(provTransition.Taken);
+            Assert.Equal(SessionStage.EspAccountSetup, provTransition.FromStage);
+            Assert.Equal(SessionStage.EspAccountSetup, provTransition.ToStage);
+
+            // DeviceOnlyDeployment hypothesis must stay Unknown — this is a Classic UserDriven path.
+            Assert.Equal(HypothesisLevel.Unknown, result.FinalState.DeviceOnlyDeployment.Level);
+        }
     }
 }

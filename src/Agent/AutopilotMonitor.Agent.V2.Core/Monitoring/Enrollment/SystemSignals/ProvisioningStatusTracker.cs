@@ -6,6 +6,7 @@ using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Interop;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
@@ -51,7 +52,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly AgentLogger _logger;
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _onEventCollected;
+        private readonly InformationalEventPost _post;
 
         private RegistryWatcher _provisioningWatcher;
         private Timer _provisioningWatcherRetryTimer;
@@ -84,12 +85,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public ProvisioningStatusTracker(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> onEventCollected,
+            InformationalEventPost post,
             AgentLogger logger)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
-            _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
+            _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -505,7 +506,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                         };
                     }
 
-                    _onEventCollected(new EnrollmentEvent
+                    _post.Emit(new EnrollmentEvent
                     {
                         SessionId = _sessionId,
                         TenantId = _tenantId,
@@ -807,7 +808,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 }
             }
 
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -824,7 +825,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         private void EmitRawRegistryDump(string categoryLabel, string rawJson, string trigger)
         {
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,

@@ -16,7 +16,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
     /// <see cref="SignalIngress"/> — hier wird jedes reingereichte Ereignis emittiert.
     /// </para>
     /// </summary>
-    public sealed class BackPressureEventObserver : IBackPressureObserver
+    internal sealed class BackPressureEventObserver : IBackPressureObserver
     {
         internal const string EventType = "ingress_backpressure";
         internal const string SourceId = "signal_ingress";

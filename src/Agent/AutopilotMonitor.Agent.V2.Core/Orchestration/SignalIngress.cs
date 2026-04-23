@@ -100,6 +100,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         public int ApproximateQueueLength => _channel.Count;
 
         /// <summary>
+        /// Fires synchronously from <see cref="Post"/> after a signal has been accepted into
+        /// the channel (for both the fast-path <see cref="BlockingCollection{T}.TryAdd"/> and
+        /// the back-pressured <c>Add</c> slow-path). Exposed so idle-activity observers — e.g.
+        /// <c>PeriodicCollectorLifecycleHost</c> — can see <b>every</b> signal, regardless of
+        /// which <c>InformationalEventPost</c> instance posted it. Codex Finding 4.
+        /// <para>
+        /// <b>Handler contract</b>: must be fast and must not throw. Exceptions are caught and
+        /// swallowed so a buggy observer cannot disrupt the production ingress path.
+        /// </para>
+        /// </summary>
+        public event Action<DecisionSignalKind, IReadOnlyDictionary<string, string>?>? SignalPosted;
+
+        /// <summary>
         /// Startet den Worker-Thread. Muss vor dem ersten <see cref="Post"/> aufgerufen werden.
         /// Mehrfach-Aufruf wirft.
         /// </summary>
@@ -164,7 +177,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             string sourceOrigin,
             Evidence evidence,
             IReadOnlyDictionary<string, string>? payload = null,
-            int kindSchemaVersion = 1)
+            int kindSchemaVersion = 1,
+            object? typedPayload = null)
         {
             if (Volatile.Read(ref _stopRequested) == 1 || _channel.IsAddingCompleted)
             {
@@ -179,11 +193,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 throw new ArgumentException("SourceOrigin is mandatory.", nameof(sourceOrigin));
             }
 
-            var item = new IngressItem(kind, kindSchemaVersion, occurredAtUtc, sourceOrigin, evidence, payload);
+            var item = new IngressItem(kind, kindSchemaVersion, occurredAtUtc, sourceOrigin, evidence, payload, typedPayload);
 
             // Fast path: non-blocking enqueue.
             if (_channel.TryAdd(item))
             {
+                RaiseSignalPosted(kind, payload);
                 return;
             }
 
@@ -207,6 +222,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
 
             NotifyBackPressureThrottled(sourceOrigin, queueLenAtBlock, blockedFor);
+            RaiseSignalPosted(kind, payload);
+        }
+
+        private void RaiseSignalPosted(DecisionSignalKind kind, IReadOnlyDictionary<string, string>? payload)
+        {
+            // Snapshot the delegate once — standard pattern to tolerate concurrent subscribe /
+            // unsubscribe around the invocation.
+            var handler = SignalPosted;
+            if (handler == null) return;
+            try { handler(kind, payload); }
+            catch
+            {
+                // Observer exceptions MUST NOT disrupt the production ingress path. The idle-
+                // activity observer (Codex Finding 4) is advisory — dropping one observation
+                // is strictly better than surfacing a mid-Post exception to a collector thread.
+            }
         }
 
         private void NotifyBackPressureThrottled(string origin, int queueLengthAtBlock, TimeSpan blockedFor)
@@ -271,7 +302,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     occurredAtUtc: item.OccurredAtUtc,
                     sourceOrigin: item.SourceOrigin,
                     evidence: item.Evidence,
-                    payload: item.Payload);
+                    payload: item.Payload,
+                    typedPayload: item.TypedPayload);
             }
             catch
             {
@@ -329,7 +361,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 DateTime occurredAtUtc,
                 string sourceOrigin,
                 Evidence evidence,
-                IReadOnlyDictionary<string, string>? payload)
+                IReadOnlyDictionary<string, string>? payload,
+                object? typedPayload)
             {
                 Kind = kind;
                 KindSchemaVersion = kindSchemaVersion;
@@ -337,6 +370,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 SourceOrigin = sourceOrigin;
                 Evidence = evidence;
                 Payload = payload;
+                TypedPayload = typedPayload;
             }
 
             public DecisionSignalKind Kind { get; }
@@ -345,6 +379,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public string SourceOrigin { get; }
             public Evidence Evidence { get; }
             public IReadOnlyDictionary<string, string>? Payload { get; }
+            public object? TypedPayload { get; }
         }
     }
 }

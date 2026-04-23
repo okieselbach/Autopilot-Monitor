@@ -346,6 +346,80 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         /// <summary>
+        /// Handle <see cref="DecisionSignalKind.InformationalEvent"/>. Pure pass-through for
+        /// the single-rail refactor (plan §1.3): the signal payload is copied 1:1 into an
+        /// <see cref="DecisionEffectKind.EmitEventTimelineEntry"/> effect and the
+        /// <see cref="Telemetry.Events.EventTimelineEmitter"/> reconstructs the
+        /// <c>EnrollmentEvent</c> from the <see cref="SignalPayloadKeys"/>. DecisionState is
+        /// unchanged apart from the standard bookkeeping (<c>StepIndex</c>,
+        /// <c>LastAppliedSignalOrdinal</c>) — this handler is deliberately not a decision point.
+        /// <para>
+        /// <b>Validation</b>: <see cref="SignalPayloadKeys.EventType"/> and
+        /// <see cref="SignalPayloadKeys.Source"/> are mandatory. A missing / empty key produces
+        /// a <c>DeadEnd</c> transition with reason
+        /// <c>informational_event_missing_{key}</c> so the malformed signal is visible in the
+        /// transitions table instead of silently reaching the emitter with a throw (kernel
+        /// fail-safe would also catch it, but with a less descriptive reason).
+        /// </para>
+        /// <para>
+        /// <b>Promotion path</b>: if a sender later needs a specific pass-through to influence
+        /// a decision, swap the signal kind for a dedicated one (e.g.
+        /// <c>PlatformScriptCompleted</c>) and add a state-mutating reducer case. The emission
+        /// contract and UI shape stay identical because the emitter still receives the same
+        /// parameter keys.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleInformationalEventV1(DecisionState state, DecisionSignal signal)
+        {
+            var payload = signal.Payload;
+
+            if (payload == null
+                || !payload.TryGetValue(SignalPayloadKeys.EventType, out var eventType)
+                || string.IsNullOrEmpty(eventType))
+            {
+                return BuildInformationalEventDeadEnd(state, signal, SignalPayloadKeys.EventType);
+            }
+            if (!payload.TryGetValue(SignalPayloadKeys.Source, out var source)
+                || string.IsNullOrEmpty(source))
+            {
+                return BuildInformationalEventDeadEnd(state, signal, SignalPayloadKeys.Source);
+            }
+
+            var newState = BumpStepBookkeeping(state, signal);
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: newState.StepIndex,
+                trigger: nameof(DecisionSignalKind.InformationalEvent));
+
+            // Effect parameters are the signal payload verbatim. EventTimelineEmitter extracts
+            // the reserved top-level keys (eventType, source, severity, message, phase,
+            // immediateUpload) and keeps the rest as Data entries. The TypedPayload sidecar —
+            // when present — carries the original EnrollmentEvent.Data dictionary through the
+            // bus with its nested structure intact; the emitter prefers it over reconstructing
+            // Data from the string parameters (single-rail refactor plan §1.3).
+            var effect = new DecisionEffect(
+                kind: DecisionEffectKind.EmitEventTimelineEntry,
+                parameters: payload,
+                typedPayload: signal.TypedPayload);
+
+            return new DecisionStep(newState, transition, new[] { effect });
+        }
+
+        private DecisionStep BuildInformationalEventDeadEnd(DecisionState state, DecisionSignal signal, string missingKey)
+        {
+            var bookkept = BumpStepBookkeeping(state, signal);
+            var transition = BuildDeadEndTransition(
+                state: state,
+                signal: signal,
+                nextStepIndex: bookkept.StepIndex,
+                trigger: nameof(DecisionSignalKind.InformationalEvent),
+                deadEndReason: $"informational_event_missing_{missingKey}");
+            return new DecisionStep(bookkept, transition, Array.Empty<DecisionEffect>());
+        }
+
+        /// <summary>
         /// Determine the user-visible enrollment phase implied by an ESP phase-change signal.
         /// Plan §2.3 phase-fact mapping. Populated in M3.1 as Classic handlers come online.
         /// </summary>

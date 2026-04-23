@@ -5,8 +5,10 @@ using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
+using AutopilotMonitor.Agent.V2.Core.Tests.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using Xunit;
 
@@ -24,12 +26,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
 
         private static AgentLogger NewLogger(string dir) => new AgentLogger(dir, AgentLogLevel.Info);
 
+        // Throwaway InformationalEventPost for tests that exercise manager lifecycle, not
+        // emission surface. Tracker events flow into a discarded FakeSignalIngressSink so
+        // tests that inject a FakeAnalyzer see no cross-talk from real analyzer emissions.
+        private static InformationalEventPost NewPost() =>
+            new InformationalEventPost(new FakeSignalIngressSink(), new VirtualClock(new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc)));
+
         [Fact]
         public void Initialize_respects_toggle_all_off_registers_no_analyzers()
         {
             using var tmp = new TempDirectory();
             var sut = new AgentAnalyzerManager(
-                Config(), NewLogger(tmp.Path), _ => { },
+                Config(), NewLogger(tmp.Path), NewPost(),
                 new AnalyzerConfiguration
                 {
                     EnableLocalAdminAnalyzer = false,
@@ -46,7 +54,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
         {
             using var tmp = new TempDirectory();
             var sut = new AgentAnalyzerManager(
-                Config(), NewLogger(tmp.Path), _ => { },
+                Config(), NewLogger(tmp.Path), NewPost(),
                 new AnalyzerConfiguration
                 {
                     EnableLocalAdminAnalyzer = true,
@@ -66,7 +74,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
         public void Initialize_tolerates_null_analyzer_config()
         {
             using var tmp = new TempDirectory();
-            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), _ => { }, analyzerConfig: null);
+            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), NewPost(), analyzerConfig: null);
 
             sut.Initialize();
             // Default AnalyzerConfiguration enables LocalAdmin + IntegrityBypass, disables SoftwareInventory.
@@ -81,7 +89,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
         {
             using var tmp = new TempDirectory();
             var sut = new AgentAnalyzerManager(
-                Config(), NewLogger(tmp.Path), _ => { },
+                Config(), NewLogger(tmp.Path), NewPost(),
                 new AnalyzerConfiguration { EnableLocalAdminAnalyzer = true });
 
             sut.Initialize();
@@ -96,9 +104,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
             using var tmp = new TempDirectory();
             var logger = NewLogger(tmp.Path);
             Assert.Throws<ArgumentNullException>(() =>
-                new AgentAnalyzerManager(null!, logger, _ => { }, null));
+                new AgentAnalyzerManager(null!, logger, NewPost(), null));
             Assert.Throws<ArgumentNullException>(() =>
-                new AgentAnalyzerManager(Config(), null!, _ => { }, null));
+                new AgentAnalyzerManager(Config(), null!, NewPost(), null));
             Assert.Throws<ArgumentNullException>(() =>
                 new AgentAnalyzerManager(Config(), logger, null!, null));
         }
@@ -149,7 +157,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
         public void RunShutdown_invokes_AnalyzeAtShutdown_on_every_analyzer()
         {
             using var tmp = new TempDirectory();
-            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), _ => { }, new AnalyzerConfiguration());
+            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), NewPost(), new AnalyzerConfiguration());
             var fake = new FakeAnalyzer();
             InjectAnalyzer(sut, fake);
 
@@ -161,7 +169,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
         public void RunShutdown_swallows_analyzer_exceptions_and_continues()
         {
             using var tmp = new TempDirectory();
-            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), _ => { }, new AnalyzerConfiguration());
+            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), NewPost(), new AnalyzerConfiguration());
             var fake = new FakeAnalyzer { ThrowOnShutdown = new InvalidOperationException("boom") };
             InjectAnalyzer(sut, fake);
 
@@ -175,7 +183,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
         public void RunShutdown_is_safe_on_empty_analyzer_list()
         {
             using var tmp = new TempDirectory();
-            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), _ => { },
+            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), NewPost(),
                 new AnalyzerConfiguration
                 {
                     EnableLocalAdminAnalyzer = false,

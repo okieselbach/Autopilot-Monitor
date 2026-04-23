@@ -131,6 +131,91 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
         }
 
         [Fact]
+        public void Phase_parameter_with_valid_enum_name_is_applied_to_event()
+        {
+            // Plan §1.4 — opt-in override: phase-declaration events may set the Phase via the
+            // "phase" parameter on the EmitEventTimelineEntry effect.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "DeviceSetup",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal((int)EnrollmentPhase.DeviceSetup, (int)parsed["PhaseNumber"]!);
+            // PhaseName is the display form ("Device Setup") derived by EnrollmentEvent.GetPhaseName,
+            // not the raw enum name. Emitter-side we only control Phase (enum); the display form
+            // follows from that deterministically.
+            Assert.Equal("Device Setup", (string?)parsed["PhaseName"]);
+        }
+
+        [Fact]
+        public void Phase_parameter_with_invalid_value_falls_back_to_Unknown()
+        {
+            // Parse-failure MUST fall back to Unknown, never throw — the emitter path must not
+            // break telemetry on a malformed reducer-case. Deterministic & safe by default.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "Bogus",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal((int)EnrollmentPhase.Unknown, (int)parsed["PhaseNumber"]!);
+            Assert.Equal("Unknown", (string?)parsed["PhaseName"]);
+        }
+
+        [Fact]
+        public void Phase_parameter_match_is_case_sensitive_and_non_matching_casing_falls_back_to_Unknown()
+        {
+            // The phase contract is strict Ordinal match against the enum name. Lower/upper
+            // mismatches are rejected so the wire format stays deterministic.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "devicesetup",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal((int)EnrollmentPhase.Unknown, (int)parsed["PhaseNumber"]!);
+        }
+
+        [Fact]
+        public void Phase_parameter_is_not_duplicated_in_Data_dict()
+        {
+            // Like eventType, the phase parameter is a top-level EnrollmentEvent field and
+            // must not leak into Data — otherwise the Data dictionary drifts from the contract.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "esp_phase_changed",
+                    ["phase"] = "AccountSetup",
+                    ["subcategory"] = "WorkplaceJoin",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            Assert.Null(data["phase"]);
+            Assert.Null(data["eventType"]);
+            Assert.Equal("WorkplaceJoin", (string?)data["subcategory"]);
+        }
+
+        [Fact]
         public void ImmediateUpload_is_forced_true_for_reducer_terminal_events()
         {
             using var r = new Rig();
@@ -175,6 +260,239 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
 
             var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
             Assert.Equal("decision_engine", (string?)parsed["Source"]);
+        }
+
+        [Fact]
+        public void Source_parameter_overrides_default_so_single_rail_events_keep_origin_label()
+        {
+            // Plan §1.3 — InformationalEvent carries the originating collector's source label.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["source"] = "Network",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("Network", (string?)parsed["Source"]);
+        }
+
+        [Fact]
+        public void Empty_source_parameter_falls_back_to_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "enrollment_complete",
+                    ["source"] = string.Empty,
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("decision_engine", (string?)parsed["Source"]);
+        }
+
+        [Fact]
+        public void Severity_parameter_overrides_suffix_derived_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["severity"] = "Warning",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("Warning", (string?)parsed["SeverityString"]);
+        }
+
+        [Fact]
+        public void Invalid_severity_parameter_falls_back_to_suffix_derived_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "enrollment_failed",
+                    ["severity"] = "NotAnEnumValue",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            // "_failed" suffix still drives the default → Error.
+            Assert.Equal("Error", (string?)parsed["SeverityString"]);
+        }
+
+        [Fact]
+        public void Message_parameter_overrides_reason_based_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["message"] = "NTP offset -124.02s from time.windows.com",
+                    // reason is ignored when an explicit message is provided.
+                    ["reason"] = "should_not_appear_in_message",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("NTP offset -124.02s from time.windows.com", (string?)parsed["Message"]);
+            // reason still stays in Data even when unused by the message.
+            var data = (JObject)parsed["Data"]!;
+            Assert.Equal("should_not_appear_in_message", (string?)data["reason"]);
+        }
+
+        [Fact]
+        public void ImmediateUpload_parameter_false_opts_out_of_immediate_flush()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "performance_snapshot",
+                    ["immediateUpload"] = "false",
+                },
+                State(),
+                At);
+
+            Assert.False(r.Transport.Enqueued[0].RequiresImmediateFlush);
+        }
+
+        [Fact]
+        public void ImmediateUpload_default_remains_true_for_reducer_effects_without_override()
+        {
+            // Regression guard — today's reducer cases do not pass immediateUpload, and the
+            // wire contract keeps immediate flush for reducer-emitted events.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string> { ["eventType"] = "whiteglove_complete" },
+                State(),
+                At);
+
+            Assert.True(r.Transport.Enqueued[0].RequiresImmediateFlush);
+        }
+
+        [Fact]
+        public void Top_level_parameters_are_not_duplicated_in_Data()
+        {
+            // Plan §1.3 — every top-level EnrollmentEvent field (eventType, phase, source,
+            // severity, message, immediateUpload) is stripped from the Data dictionary so the
+            // wire format is not self-contradicting.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["phase"] = "DeviceSetup",
+                    ["source"] = "Network",
+                    ["severity"] = "Warning",
+                    ["message"] = "NTP offset -124.02s",
+                    ["immediateUpload"] = "false",
+                    ["offsetSeconds"] = "-124.02",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            Assert.Null(data["eventType"]);
+            Assert.Null(data["phase"]);
+            Assert.Null(data["source"]);
+            Assert.Null(data["severity"]);
+            Assert.Null(data["message"]);
+            Assert.Null(data["immediateUpload"]);
+            Assert.Equal("-124.02", (string?)data["offsetSeconds"]);
+        }
+
+        /// <summary>
+        /// Codex Finding 2 — the typed-sidecar fast path. When a caller supplies a structured
+        /// <c>Dictionary&lt;string, object&gt;</c> as <c>typedPayload</c>, the emitter uses it
+        /// directly as <c>EnrollmentEvent.Data</c>. Newtonsoft then serializes nested Dict/List
+        /// values as real JSON objects / arrays on the wire — no string round-trip, no marker,
+        /// no type-name degeneracies.
+        /// </summary>
+        [Fact]
+        public void TypedPayload_dictionary_becomes_EnrollmentEvent_Data_verbatim_on_wire()
+        {
+            using var r = new Rig();
+
+            var adapters = new List<Dictionary<string, object>>
+            {
+                new Dictionary<string, object>
+                {
+                    ["description"] = "Intel Wireless",
+                    ["macAddress"] = "AA:BB:CC:DD:EE:FF",
+                },
+                new Dictionary<string, object>
+                {
+                    ["description"] = "Loopback",
+                },
+            };
+            var typed = new Dictionary<string, object>
+            {
+                ["adapterCount"] = 2,
+                ["adapters"] = adapters,
+            };
+
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "network_adapters",
+                    ["source"] = "DeviceInfoCollector",
+                },
+                State(),
+                At,
+                typedPayload: typed);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            // Scalar int → JSON number (not "2" string).
+            Assert.Equal(JTokenType.Integer, data["adapterCount"]!.Type);
+            Assert.Equal(2, (int)data["adapterCount"]!);
+            // Nested list → JSON array of JSON objects. Full structural fidelity.
+            var adaptersToken = data["adapters"];
+            Assert.NotNull(adaptersToken);
+            Assert.Equal(JTokenType.Array, adaptersToken!.Type);
+            var array = (JArray)adaptersToken;
+            Assert.Equal(2, array.Count);
+            Assert.Equal("Intel Wireless", (string?)array[0]["description"]);
+            Assert.Equal("AA:BB:CC:DD:EE:FF", (string?)array[0]["macAddress"]);
+            Assert.Equal("Loopback", (string?)array[1]["description"]);
+        }
+
+        [Fact]
+        public void TypedPayload_missing_falls_back_to_string_parameter_reconstruction()
+        {
+            // Non-informational signals (e.g. reducer-synthesised classifier verdicts) do not
+            // supply a typed payload. The emitter must still build Data from the string-only
+            // effect parameters — same behaviour as before the sidecar existed.
+            using var r = new Rig();
+
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "decision_classifier_verdict",
+                    ["verdictId"] = "v-123",
+                },
+                State(),
+                At,
+                typedPayload: null);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            Assert.Equal("v-123", (string?)data["verdictId"]);
         }
     }
 }

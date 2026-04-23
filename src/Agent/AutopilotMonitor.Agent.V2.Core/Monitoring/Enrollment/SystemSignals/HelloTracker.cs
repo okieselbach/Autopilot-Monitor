@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
 using System.Text.RegularExpressions;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -64,7 +65,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly AgentLogger _logger;
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _onEventCollected;
+        private readonly InformationalEventPost _post;
         private readonly int _helloWaitTimeoutSeconds;
 
         private EventLogWatcher _udrWatcher;
@@ -91,13 +92,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public HelloTracker(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> onEventCollected,
+            InformationalEventPost post,
             AgentLogger logger,
             int helloWaitTimeoutSeconds = 30)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
-            _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
+            _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _helloWaitTimeoutSeconds = helloWaitTimeoutSeconds;
         }
@@ -296,7 +297,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                         _isHelloPolicyEnabled = isEnabled.Value;
                         var status = isEnabled.Value ? "enabled" : "disabled";
 
-                        _onEventCollected(new EnrollmentEvent
+                        _post.Emit(new EnrollmentEvent
                         {
                             SessionId = _sessionId,
                             TenantId = _tenantId,
@@ -515,7 +516,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 data["backfill"] = true;
             }
 
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -711,7 +712,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             if (hresult != null) data["hresult"] = hresult;
             if (isBackfill) data["backfill"] = true;
 
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -845,7 +846,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     _logger.Info($"Hello wait timeout ({_helloWaitTimeoutSeconds}s) expired but Hello policy is enabled — " +
                                  $"wizard not yet visible, starting long completion timer ({HelloCompletionTimeoutSeconds}s)");
 
-                    _onEventCollected(new EnrollmentEvent
+                    _post.Emit(new EnrollmentEvent
                     {
                         SessionId = _sessionId,
                         TenantId = _tenantId,
@@ -876,7 +877,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 HelloOutcome = "not_configured";
                 StopHelloCompletionTimerLocked();
 
-                _onEventCollected(new EnrollmentEvent
+                _post.Emit(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId = _tenantId,
@@ -935,7 +936,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 HelloOutcome = _helloWizardStarted ? "timeout" : "wizard_not_started";
                 StopHelloCompletionTimerLocked();
 
-                _onEventCollected(new EnrollmentEvent
+                _post.Emit(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId = _tenantId,
@@ -969,7 +970,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 _isPolicyConfigured = true;
                 _isHelloPolicyEnabled = helloEnabled;
 
-                _onEventCollected(new EnrollmentEvent
+                _post.Emit(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId = _tenantId,

@@ -283,6 +283,95 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Equal(2, rig.SignalLog.ReadAll().Count);
         }
 
+        // ============================================================ Codex Finding 4 — SignalPosted
+
+        [Fact]
+        public void SignalPosted_fires_for_every_successful_post_regardless_of_kind()
+        {
+            using var rig = new Rig();
+            var ing = rig.Build();
+            ing.Start();
+
+            var observed = new List<(DecisionSignalKind Kind, string? EventType)>();
+            ing.SignalPosted += (kind, payload) =>
+            {
+                string? eventType = null;
+                payload?.TryGetValue("eventType", out eventType);
+                lock (observed) observed.Add((kind, eventType));
+            };
+
+            // Cross-source simulation: different InformationalEventPost instances all hitting
+            // the same ingress. Before Finding 4's fix, only one instance's posts would reach
+            // the observer; now all of them do because the event lives on the ingress itself.
+            ISignalIngressSink sink = ing;
+            var postA = new InformationalEventPost(sink, rig.Clock);
+            var postB = new InformationalEventPost(sink, rig.Clock);
+
+            postA.Emit(eventType: "esp_phase_changed", source: "EspAndHelloTracker");
+            postB.Emit(eventType: "ime_user_session_completed", source: "ImeLogTracker");
+            sink.Post(
+                DecisionSignalKind.ClassifierVerdictIssued,
+                At,
+                "effectrunner:classifier:whiteglove_sealing",
+                new Evidence(EvidenceKind.Synthetic, "classifier:abc", "Strong/85"),
+                new Dictionary<string, string> { ["level"] = "Strong" });
+
+            ing.Stop();
+
+            Assert.Equal(3, observed.Count);
+            Assert.Contains(observed, o => o.Kind == DecisionSignalKind.InformationalEvent && o.EventType == "esp_phase_changed");
+            Assert.Contains(observed, o => o.Kind == DecisionSignalKind.InformationalEvent && o.EventType == "ime_user_session_completed");
+            Assert.Contains(observed, o => o.Kind == DecisionSignalKind.ClassifierVerdictIssued);
+        }
+
+        [Fact]
+        public void SignalPosted_handler_exception_does_not_break_ingress()
+        {
+            using var rig = new Rig();
+            var ing = rig.Build();
+            ing.Start();
+
+            ing.SignalPosted += (_, _) => throw new InvalidOperationException("observer bug");
+
+            // The post MUST succeed and the signal MUST still reach the reducer — observer
+            // exceptions are advisory-only.
+            ing.Post(
+                DecisionSignalKind.SessionStarted,
+                At,
+                "test",
+                new Evidence(EvidenceKind.Synthetic, "session-start", "first signal"));
+
+            ing.Stop();
+
+            Assert.Single(rig.Processor.Calls);
+        }
+
+        [Fact]
+        public void SignalPosted_is_raised_even_when_channel_took_slow_path()
+        {
+            // The back-pressured slow path (BlockingCollection.Add after TryAdd fails) must
+            // still trigger the observer so the idle clock is reset under load.
+            using var rig = new Rig();
+            var ing = rig.Build(channelCapacity: 1);
+            ing.Start();
+
+            var observedCount = 0;
+            ing.SignalPosted += (_, _) => Interlocked.Increment(ref observedCount);
+
+            for (int i = 0; i < 5; i++)
+            {
+                ing.Post(
+                    DecisionSignalKind.SessionStarted,
+                    At,
+                    "test",
+                    new Evidence(EvidenceKind.Synthetic, $"signal-{i}", "slow-path probe"));
+            }
+
+            ing.Stop();
+
+            Assert.Equal(5, observedCount);
+        }
+
         [Fact]
         public void Post_via_ISignalIngressSink_reaches_reducer_like_any_signal()
         {

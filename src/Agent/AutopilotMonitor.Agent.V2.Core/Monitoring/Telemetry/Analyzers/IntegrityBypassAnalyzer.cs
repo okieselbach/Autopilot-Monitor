@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -34,7 +35,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
     {
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
 
         public string Name => "IntegrityBypassAnalyzer";
@@ -63,12 +64,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
         public IntegrityBypassAnalyzer(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> emitEvent,
+            InformationalEventPost post,
             AgentLogger logger)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
-            _emitEvent = emitEvent ?? throw new ArgumentNullException(nameof(emitEvent));
+            _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -220,7 +221,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
                     }
                 };
 
-                _emitEvent(new EnrollmentEvent
+                _post.Emit(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId = _tenantId,

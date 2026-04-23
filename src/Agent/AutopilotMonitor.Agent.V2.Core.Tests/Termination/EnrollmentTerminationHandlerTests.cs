@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
@@ -12,7 +13,11 @@ using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
+using AutopilotMonitor.Agent.V2.Core.Tests.Orchestration;
+using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.DecisionCore.State;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Xunit;
 
@@ -47,7 +52,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             public string? LastDiagnosticsSuffix { get; private set; }
             public DiagnosticsUploadResult? DiagnosticsResult { get; set; }
             public int ShutdownSignalled;
-            public List<EnrollmentEvent> EmittedEvents { get; } = new List<EnrollmentEvent>();
+            public FakeSignalIngressSink Ingress { get; } = new FakeSignalIngressSink();
+            public InformationalEventPost Post { get; }
             public int RebootInvocations;
             public int RebootDelaySeconds;
             public SessionIdPersistence SessionPersistence { get; set; } = default!;
@@ -59,7 +65,47 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 Packages = new AppPackageStateList(Logger);
                 CleanupService = new RecordingCleanupService(BuildConfig(), Logger);
                 SessionPersistence = new SessionIdPersistence(Tmp.Path);
+                Post = new InformationalEventPost(Ingress, new VirtualClock(StartUtc));
             }
+
+            /// <summary>
+            /// Returns the event-types emitted through the single-rail InformationalEventPost, in
+            /// the order their underlying signals were posted.
+            /// </summary>
+            public IReadOnlyList<string> EmittedEventTypes =>
+                Ingress.Posted
+                    .Where(p => p.Kind == DecisionSignalKind.InformationalEvent && p.Payload != null)
+                    .Select(p => p.Payload!.TryGetValue(SignalPayloadKeys.EventType, out var v) ? v : string.Empty)
+                    .ToList();
+
+            /// <summary>
+            /// Returns the string payload dictionary for the first emitted event of the given
+            /// type, or null if no such event was emitted. Only the top-level reserved fields
+            /// (eventType, source, severity, message, immediateUpload, phase) live here after
+            /// the single-rail typed-sidecar refactor.
+            /// </summary>
+            public IReadOnlyDictionary<string, string>? PayloadOf(string eventType) =>
+                Ingress.Posted
+                    .Where(p => p.Kind == DecisionSignalKind.InformationalEvent && p.Payload != null)
+                    .Where(p => p.Payload!.TryGetValue(SignalPayloadKeys.EventType, out var v) &&
+                                string.Equals(v, eventType, StringComparison.Ordinal))
+                    .Select(p => p.Payload)
+                    .FirstOrDefault();
+
+            /// <summary>
+            /// Returns the structured <see cref="EnrollmentEvent.Data"/> dictionary for the first
+            /// emitted event of the given type. After the single-rail typed-sidecar refactor
+            /// (plan §1.3), Data fields flow through <see cref="DecisionSignal.TypedPayload"/>
+            /// untouched — tests that previously read Data keys from the string payload must
+            /// read them from here instead.
+            /// </summary>
+            public IReadOnlyDictionary<string, object>? DataOf(string eventType) =>
+                Ingress.Posted
+                    .Where(p => p.Kind == DecisionSignalKind.InformationalEvent && p.Payload != null)
+                    .Where(p => p.Payload!.TryGetValue(SignalPayloadKeys.EventType, out var v) &&
+                                string.Equals(v, eventType, StringComparison.Ordinal))
+                    .Select(p => p.TypedPayload as IReadOnlyDictionary<string, object>)
+                    .FirstOrDefault();
 
             public AgentConfiguration BuildConfig(
                 bool selfDestruct = true,
@@ -100,7 +146,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                     },
                     signalShutdown: () => Interlocked.Increment(ref ShutdownSignalled),
                     analyzerManager: null,
-                    emitEvent: evt => EmittedEvents.Add(evt),
+                    post: Post,
                     sessionPersistence: SessionPersistence,
                     triggerReboot: delay =>
                     {
@@ -251,10 +297,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             rig.Build(cfg).Handle(sender: null!,
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
 
-            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_collecting");
-            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_uploaded" &&
-                ((string)e.Data["blobName"]) == "diag-blob.zip");
-            Assert.DoesNotContain(rig.EmittedEvents, e => e.EventType == "diagnostics_upload_failed");
+            Assert.Contains("diagnostics_collecting", rig.EmittedEventTypes);
+            var uploaded = rig.DataOf("diagnostics_uploaded");
+            Assert.NotNull(uploaded);
+            Assert.Equal("diag-blob.zip", (string)uploaded!["blobName"]);
+            Assert.DoesNotContain("diagnostics_upload_failed", rig.EmittedEventTypes);
         }
 
         [Fact]
@@ -268,9 +315,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             rig.Build(cfg).Handle(sender: null!,
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
 
-            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_collecting");
-            Assert.Contains(rig.EmittedEvents, e => e.EventType == "diagnostics_upload_failed" &&
-                ((string)e.Data["errorCode"]) == "upload_5xx");
+            Assert.Contains("diagnostics_collecting", rig.EmittedEventTypes);
+            var failed = rig.DataOf("diagnostics_upload_failed");
+            Assert.NotNull(failed);
+            Assert.Equal("upload_5xx", (string)failed!["errorCode"]);
         }
 
         [Fact]
@@ -284,7 +332,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             // The whiteglove.complete marker must be present so the next boot classifies as Part 2 resume.
             Assert.True(rig.SessionPersistence.IsWhiteGloveResume());
-            Assert.Contains(rig.EmittedEvents, e => e.EventType == "whiteglove_part1_complete");
+            Assert.Contains("whiteglove_part1_complete", rig.EmittedEventTypes);
             // And — critically — self-destruct MUST have been skipped and the enrollment-complete
             // marker MUST NOT be written, or the next Part-2 boot would ghost-detect itself.
             Assert.Equal(0, rig.CleanupService.Invocations);
@@ -305,7 +353,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             Assert.Equal(1, rig.RebootInvocations);
             Assert.Equal(15, rig.RebootDelaySeconds);
-            Assert.Contains(rig.EmittedEvents, e => e.EventType == "reboot_triggered");
+            Assert.Contains("reboot_triggered", rig.EmittedEventTypes);
         }
 
         [Fact]
@@ -321,7 +369,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             // Self-destruct owns the terminal transition; reboot is the no-self-destruct path only.
             Assert.Equal(0, rig.RebootInvocations);
-            Assert.DoesNotContain(rig.EmittedEvents, e => e.EventType == "reboot_triggered");
+            Assert.DoesNotContain("reboot_triggered", rig.EmittedEventTypes);
         }
 
         [Fact]
@@ -334,7 +382,59 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             rig.Build(cfg).Handle(sender: null!,
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
 
-            Assert.Contains(rig.EmittedEvents, e => e.EventType == "enrollment_summary_shown");
+            Assert.Contains("enrollment_summary_shown", rig.EmittedEventTypes);
+        }
+
+        // ============================================================= Plan §6.2 agent_shutting_down
+
+        [Fact]
+        public void Handle_emits_agent_shutting_down_before_cleanup_self_destruct()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            Assert.Equal(1, rig.CleanupService.Invocations);
+            var shuttingDownIdx = rig.EmittedEventTypes.ToList().IndexOf(Constants.EventTypes.AgentShuttingDown);
+            Assert.True(shuttingDownIdx >= 0, "agent_shutting_down event must be emitted when self-destruct runs.");
+
+            var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
+            Assert.NotNull(data);
+            Assert.Equal(EnrollmentTerminationOutcome.Succeeded.ToString(), (string)data!["outcome"]);
+            Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage.ToString(), (string)data["reason"]);
+        }
+
+        [Fact]
+        public void Handle_skips_agent_shutting_down_when_self_destruct_disabled()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+            var cfg = rig.BuildConfig(selfDestruct: false);
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            // agent_shutting_down is a CleanupService acknowledgement — if cleanup doesn't run,
+            // the event must not fire either (the agent isn't really shutting down via self-destruct).
+            Assert.Equal(0, rig.CleanupService.Invocations);
+            Assert.DoesNotContain(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void Handle_skips_agent_shutting_down_on_whiteglove_part1_exit()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.WhiteGloveSealed }.Build();
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.WhiteGloveSealed));
+
+            // WhiteGlove Part-1 exit keeps the agent alive for Part 2 — no self-destruct, so no
+            // agent_shutting_down acknowledgement either.
+            Assert.Equal(0, rig.CleanupService.Invocations);
+            Assert.DoesNotContain(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
         }
     }
 }

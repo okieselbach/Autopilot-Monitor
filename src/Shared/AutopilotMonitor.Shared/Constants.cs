@@ -209,6 +209,14 @@ namespace AutopilotMonitor.Shared
             public const string SoftwareInventoryAnalysis = "software_inventory_analysis";
             public const string VulnerabilityReport       = "vulnerability_report";
             public const string AgentVersionCheck         = "agent_version_check";
+            public const string AgentShuttingDown         = "agent_shutting_down";  // V2 single-rail plan §6.2 — terminate-hygiene acknowledgement emitted before CleanupService tears down
+
+            // IME log tracker — app / device / script telemetry (V2 single-rail plan §5.9)
+            public const string EspPhaseChanged           = "esp_phase_changed";
+            public const string ImeAgentVersion           = "ime_agent_version";
+            public const string ImeUserSessionCompleted   = "ime_user_session_completed";
+            public const string DoTelemetry               = "do_telemetry";
+            public const string AllAppsCompleted          = "all_apps_completed";
 
             // Stall detection (Ebene 2 — StallProbeCollector)
             public const string StallProbeCheck           = "stall_probe_check";   // Trace heartbeat from Probe 2 (15 min) when no anomaly found

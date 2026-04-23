@@ -44,5 +44,19 @@ namespace AutopilotMonitor.DecisionCore.Signals
 
         // --- Admin-driven preemption (Plan §2.7 admin-action audit, V2 parity PR-B3) ---
         AdminPreemptionDetected,
+
+        // --- Informational pass-through (Single-Rail refactor, plan §1.3) ---
+        // Carries a full EnrollmentEvent payload through the reducer without mutating
+        // DecisionState. The HandleInformationalEventV1 reducer case emits exactly one
+        // EmitEventTimelineEntry effect with the payload 1:1, then yields the unchanged
+        // state. Any peripheral collector / lifecycle source that needs to appear on the
+        // Events timeline posts an InformationalEvent instead of calling TelemetryEventEmitter
+        // directly — the engine remains the single ordering / replay source.
+        //
+        // Promotion path: if a sender later needs its event to drive a decision, replace
+        // the InformationalEvent post with a specific kind (e.g. PlatformScriptCompleted)
+        // and add a state-mutating reducer case. Emission shape and UI contract stay the
+        // same because the effect parameters carry the same EnrollmentEvent fields.
+        InformationalEvent,
     }
 }

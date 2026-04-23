@@ -93,6 +93,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.DeviceInfoCollected, 1)                => HandleDeviceInfoCollectedV1(state, signal),
                 (DecisionSignalKind.AutopilotProfileRead, 1)               => HandleAutopilotProfileReadV1(state, signal),
 
+                // ----- Informational pass-through (DecisionEngine.Shared.cs) — single-rail §1.3 -----
+                (DecisionSignalKind.InformationalEvent, 1)                 => HandleInformationalEventV1(state, signal),
+
                 // ----- Still unwired (AppInstall — v11.1+) -----
                 _ => HandleUnhandledSignal(state, signal),
             };

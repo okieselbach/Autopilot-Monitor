@@ -8,13 +8,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
 {
     /// <summary>
     /// Zentrale Senke für alle <see cref="EnrollmentEvent"/>-Emissionen im V2-Agent.
-    /// Plan §2.7a / L.10.
+    /// Plan §2.7a / L.10 / §5.10 (single-rail enforcement).
     /// <para>
-    /// Drei Aufrufer: <see cref="EventTimelineEmitter"/> (Reducer-Effekte),
-    /// Collector-Callbacks (via Orchestrator-Wiring in M4.4.5) und
-    /// <see cref="BackPressureEventObserver"/>. Alle nutzen denselben Pfad:
-    /// Sequence-Vergabe → Wire-Format-Serialisierung (Newtonsoft, Legacy-kompatibel) →
-    /// <see cref="TelemetryItemDraft"/> Kind=Event → <see cref="ITelemetryTransport.Enqueue"/>.
+    /// Nach PR #10 (single-rail enforcement) sind nur noch zwei Aufrufer erlaubt:
+    /// <see cref="EventTimelineEmitter"/> (Rail A, Reducer-Effekt-Pfad) und
+    /// <see cref="BackPressureEventObserver"/> (Meta-Ausnahme wegen zirkulärer
+    /// Ingress-Abhängigkeit). Beide wohnen im gleichen Namespace — der Typ ist
+    /// <c>internal</c>, sodass ein dritter Caller nur aus demselben Namespace
+    /// kompilieren kann (plus Test-Assembly via <c>InternalsVisibleTo</c>).
     /// </para>
     /// <para>
     /// <b>Mutation</b>: setzt <see cref="EnrollmentEvent.Sequence"/>, <see cref="EnrollmentEvent.RowKey"/>,
@@ -22,7 +23,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
     /// Caller darf das Event nach <see cref="Emit"/> nicht weiter verwenden.
     /// </para>
     /// </summary>
-    public sealed class TelemetryEventEmitter
+    internal sealed class TelemetryEventEmitter
     {
         private readonly ITelemetryTransport _transport;
         private readonly EventSequenceCounter _sequenceCounter;
@@ -49,7 +50,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
         /// Weist Sequence zu, serialisiert im Legacy-Wire-Format und enqueued via Transport.
         /// Thread-safe (EventSequenceCounter + ITelemetryTransport.Enqueue beide unter Lock).
         /// </summary>
-        public TelemetryItem Emit(EnrollmentEvent evt)
+        internal TelemetryItem Emit(EnrollmentEvent evt)
         {
             if (evt == null) throw new ArgumentNullException(nameof(evt));
             if (string.IsNullOrEmpty(evt.EventType))
