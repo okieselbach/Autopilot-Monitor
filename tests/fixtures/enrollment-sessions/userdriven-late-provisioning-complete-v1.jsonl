@@ -1,0 +1,19 @@
+# Scenario: UserDriven-v1 with late spurious DeviceSetupProvisioningComplete after AccountSetup started.
+# Reproduces regression from session e259c121-dc13-46d6-8e96-118f1da9845e (2026-04-22):
+# ProvisioningStatusTracker fired DeviceSetupProvisioningComplete (payload
+# deviceSetupResolved="unknown") AFTER AccountSetup was already in progress and
+# DesktopArrived had been observed — but HelloResolved had NOT yet fired.
+# Before the fix: the reducer completed the session to Stage=Completed unconditionally on
+# DeviceSetupProvisioningComplete, short-circuiting Hello.
+# After the fix: the handler detects AccountSetupEnteredUtc != null and treats the signal as
+# informational only (stage unchanged, no completion effect). Completion happens on the
+# subsequent HelloResolved via the Classic Hello+Desktop AND-gate.
+# Expected terminal: Stage=Completed, Outcome=EnrollmentComplete, HelloOutcome=Success,
+# last trigger = HelloResolved (NOT DeviceSetupProvisioningComplete).
+# Plan: §6.1 regression fixture.
+{"SessionSignalOrdinal":0,"SessionTraceOrdinal":0,"Kind":"SessionStarted","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T17:48:00Z","SourceOrigin":"orchestrator","Evidence":{"Kind":"Synthetic","Identifier":"session:userdriven-late-provisioning-complete:started","Summary":"Session start anchor"}}
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T17:48:30Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=DeviceSetup","DerivationInputs":{"rawValue":"1"}},"Payload":{"phase":"DeviceSetup"}}
+{"SessionSignalOrdinal":2,"SessionTraceOrdinal":2,"Kind":"EspPhaseChanged","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T17:51:38Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-phase-detector-v1","Summary":"ESP phase=AccountSetup","DerivationInputs":{"rawValue":"2"}},"Payload":{"phase":"AccountSetup"}}
+{"SessionSignalOrdinal":3,"SessionTraceOrdinal":3,"Kind":"DesktopArrived","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T17:51:58Z","SourceOrigin":"DesktopArrivalDetector","Evidence":{"Kind":"Derived","Identifier":"desktop-arrival-detector-v1","Summary":"Explorer.exe running as real user","DerivationInputs":{"user":"user-anon-0006","explorerPid":"4242"}}}
+{"SessionSignalOrdinal":4,"SessionTraceOrdinal":4,"Kind":"DeviceSetupProvisioningComplete","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T17:51:59Z","SourceOrigin":"ProvisioningStatusTracker","Evidence":{"Kind":"Derived","Identifier":"provisioning-status-tracker-v1","Summary":"DeviceSetupCategory subcategories succeeded but category unresolved","DerivationInputs":{"deviceSetupResolved":"unknown"}},"Payload":{"deviceSetupResolved":"unknown"}}
+{"SessionSignalOrdinal":5,"SessionTraceOrdinal":5,"Kind":"HelloResolved","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-22T17:53:30Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Raw","Identifier":"hello-event-recordId:77","Summary":"Hello for Business enrolled"},"Payload":{"outcome":"Success"}}

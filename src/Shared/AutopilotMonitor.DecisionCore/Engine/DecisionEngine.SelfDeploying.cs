@@ -27,18 +27,43 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// <summary>
         /// Handle <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/>.
         /// <para>
-        /// The canonical SelfDeploying / Device-Only terminal signal. Cancels the
-        /// <see cref="DeadlineNames.DeviceOnlyEspDetection"/> deadline if still armed,
-        /// finalizes the <see cref="DecisionState.DeviceOnlyDeployment"/> hypothesis based
-        /// on whether any user-presence fact was observed, and transitions the session to
-        /// <see cref="SessionStage.Completed"/> with <see cref="SessionOutcome.EnrollmentComplete"/>.
+        /// Terminal only on the SelfDeploying / Device-Only path (no AccountSetup phase ever
+        /// entered). On the Classic UserDriven-v1 path — where <see cref="DecisionState.AccountSetupEnteredUtc"/>
+        /// is already set — this is just the ProvisioningStatusTracker marking DeviceSetupCategory
+        /// resolved; completion on that path requires <see cref="DecisionSignalKind.HelloResolved"/>
+        /// + <see cref="DecisionSignalKind.DesktopArrived"/> (handled by Classic.cs).
+        /// </para>
+        /// <para>
+        /// Guarding on <see cref="DecisionState.AccountSetupEnteredUtc"/> prevents the regression
+        /// observed in session e259c121-dc13-46d6-8e96-118f1da9845e (2026-04-22), where a late
+        /// DeviceSetupProvisioningComplete (payload <c>deviceSetupResolved=unknown</c>) fired while
+        /// Stage was <see cref="SessionStage.EspAccountSetup"/> and <see cref="DecisionState.HelloResolvedUtc"/>
+        /// was still null — terminating the session before Hello even ran.
         /// </para>
         /// </summary>
         private DecisionStep HandleDeviceSetupProvisioningCompleteV1(DecisionState state, DecisionSignal signal)
         {
             var nextStep = state.StepIndex + 1;
 
-            // Determine DeviceOnlyDeployment verdict.
+            // Classic-path guard: AccountSetup already started → this signal is informational only.
+            if (state.AccountSetupEnteredUtc != null)
+            {
+                var passthroughState = state.ToBuilder()
+                    .WithStepIndex(nextStep)
+                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                    .Build();
+
+                var passthroughTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete));
+
+                return new DecisionStep(passthroughState, passthroughTransition, Array.Empty<DecisionEffect>());
+            }
+
+            // SelfDeploying / Device-Only terminal path.
             var hasUserPresence =
                 (state.AadJoinedWithUser != null && state.AadJoinedWithUser.Value) ||
                 state.HelloResolvedUtc != null ||
@@ -62,10 +87,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .ClearDeadlines();
             builder.DeviceOnlyDeployment = updatedHypothesis;
 
-            // Also strengthen EnrollmentType: observing DeviceSetupProvisioningComplete
-            // without preceding AccountSetup strongly implies SelfDeploying-v1.
-            if (state.AccountSetupEnteredUtc == null &&
-                state.EnrollmentType.Level < HypothesisLevel.Strong)
+            // Strengthen EnrollmentType: observing DeviceSetupProvisioningComplete without
+            // preceding AccountSetup strongly implies SelfDeploying-v1.
+            if (state.EnrollmentType.Level < HypothesisLevel.Strong)
             {
                 builder.EnrollmentType = state.EnrollmentType.With(
                     level: HypothesisLevel.Strong,
