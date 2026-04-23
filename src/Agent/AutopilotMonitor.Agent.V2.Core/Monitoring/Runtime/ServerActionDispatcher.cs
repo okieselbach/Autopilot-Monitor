@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
@@ -20,6 +22,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
     /// - All three concrete handlers are passed in as callbacks so the dispatcher itself does not
     ///   depend on the internal wiring of <see cref="RemoteConfigService"/>, <see cref="DiagnosticsPackageService"/>,
     ///   or the orchestrator's shutdown sequence.
+    /// - ActionId dedup: repeated delivery of the same ActionId is observed in the wild when the
+    ///   backend re-queues terminate_session before the agent has had a chance to acknowledge. The
+    ///   dispatcher short-circuits duplicates before any telemetry fires, so the timeline shows a
+    ///   single server_action_received / _executed pair per unique action (plan §6.2).
     /// </summary>
     public class ServerActionDispatcher
     {
@@ -28,7 +34,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         private readonly Func<Task<bool>> _rotateConfigAsync;
         private readonly Func<string, Task<DiagnosticsUploadResult>> _uploadDiagnosticsAsync;
         private readonly Func<ServerAction, Task> _onTerminateRequested;
-        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly InformationalEventPost _post;
+        private readonly ConcurrentDictionary<string, byte> _seenActionIds = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
 
         /// <param name="rotateConfigAsync">
         /// Refetch remote config from the backend and apply to the agent's live state.
@@ -45,20 +52,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         /// itself — shutdown requires coordinating timers, spool flush, and cleanup that lives in the
         /// orchestrator. The callback is responsible for the actual termination sequence.
         /// </param>
+        /// <param name="post">
+        /// Single-rail telemetry sink. Every emit flows through the signal ingress + reducer pass-through,
+        /// never directly to <c>TelemetryEventEmitter</c> (plan §1 Invariant 1).
+        /// </param>
         public ServerActionDispatcher(
             AgentConfiguration configuration,
             AgentLogger logger,
             Func<Task<bool>> rotateConfigAsync,
             Func<string, Task<DiagnosticsUploadResult>> uploadDiagnosticsAsync,
             Func<ServerAction, Task> onTerminateRequested,
-            Action<EnrollmentEvent> emitEvent)
+            InformationalEventPost post)
         {
             _configuration = configuration;
             _logger = logger;
             _rotateConfigAsync = rotateConfigAsync;
             _uploadDiagnosticsAsync = uploadDiagnosticsAsync;
             _onTerminateRequested = onTerminateRequested;
-            _emitEvent = emitEvent;
+            _post = post ?? throw new ArgumentNullException(nameof(post));
         }
 
         /// <summary>
@@ -74,6 +85,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             foreach (var action in actions)
             {
                 if (action == null) continue;
+
+                // Action dedup — the backend's PendingActions queue delivers at-least-once, so the
+                // same queued action (e.g. terminate_session) keeps arriving across ingest responses
+                // until the agent actually exits. ServerAction has no ActionId field, so we compose
+                // one from the fields the server fixes at queue time: Type + RuleId + QueuedAt. Every
+                // re-delivery of the same server-queued action maps to the same key; two genuinely
+                // distinct issuances (different RuleId or QueuedAt) get different keys and dispatch
+                // independently. Squelch duplicates before any telemetry or handler side effect fires.
+                var dedupKey = BuildDedupKey(action);
+                if (!_seenActionIds.TryAdd(dedupKey, 0))
+                {
+                    _logger.Debug($"ServerActionDispatcher: duplicate action '{action.Type}' ({dedupKey}) — skipping");
+                    continue;
+                }
 
                 EmitReceived(action);
 
@@ -153,18 +178,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 
         private void EmitReceived(ServerAction action)
         {
-            _emitEvent?.Invoke(new EnrollmentEvent
-            {
-                SessionId = _configuration.SessionId,
-                TenantId = _configuration.TenantId,
-                EventType = "server_action_received",
-                Severity = EventSeverity.Info,
-                Source = "ServerActionDispatcher",
-                Phase = EnrollmentPhase.Unknown,
-                Message = $"Received server action '{action.Type}'",
-                Timestamp = DateTime.UtcNow,
-                Data = BuildTelemetryData(action)
-            });
+            PostEvent(
+                eventType: "server_action_received",
+                severity: EventSeverity.Info,
+                message: $"Received server action '{action.Type}'",
+                data: BuildTelemetryData(action));
         }
 
         private void EmitExecuted(ServerAction action, Dictionary<string, object> extraData = null)
@@ -176,18 +194,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                     data[kvp.Key] = kvp.Value;
             }
 
-            _emitEvent?.Invoke(new EnrollmentEvent
-            {
-                SessionId = _configuration.SessionId,
-                TenantId = _configuration.TenantId,
-                EventType = "server_action_executed",
-                Severity = EventSeverity.Info,
-                Source = "ServerActionDispatcher",
-                Phase = EnrollmentPhase.Unknown,
-                Message = $"Executed server action '{action.Type}'",
-                Timestamp = DateTime.UtcNow,
-                Data = data
-            });
+            PostEvent(
+                eventType: "server_action_executed",
+                severity: EventSeverity.Info,
+                message: $"Executed server action '{action.Type}'",
+                data: data);
         }
 
         private void EmitFailed(ServerAction action, string reason)
@@ -195,17 +206,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             var data = BuildTelemetryData(action);
             data["failureReason"] = reason ?? string.Empty;
 
-            _emitEvent?.Invoke(new EnrollmentEvent
+            PostEvent(
+                eventType: "server_action_failed",
+                severity: EventSeverity.Warning,
+                message: $"Failed to execute server action '{action.Type}': {reason}",
+                data: data);
+        }
+
+        private void PostEvent(string eventType, EventSeverity severity, string message, Dictionary<string, object> data)
+        {
+            // Go through the InformationalEventPost.Emit(EnrollmentEvent) overload so the wire shape
+            // stays identical to the legacy Action<EnrollmentEvent> path: the emitter stringifies the
+            // data dictionary preserving invariant-culture formatting.
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _configuration.SessionId,
                 TenantId = _configuration.TenantId,
-                EventType = "server_action_failed",
-                Severity = EventSeverity.Warning,
+                EventType = eventType,
+                Severity = severity,
                 Source = "ServerActionDispatcher",
                 Phase = EnrollmentPhase.Unknown,
-                Message = $"Failed to execute server action '{action.Type}': {reason}",
+                Message = message,
                 Timestamp = DateTime.UtcNow,
-                Data = data
+                Data = data,
             });
         }
 
@@ -218,6 +241,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 { "ruleId", action?.RuleId ?? string.Empty },
                 { "queuedAt", action?.QueuedAt.ToString("O") ?? string.Empty }
             };
+        }
+
+        private static string BuildDedupKey(ServerAction action)
+        {
+            // Composite of server-queue-time fields. QueuedAt is stamped when the backend enqueues
+            // and stays fixed across re-deliveries; RuleId is set for rule-triggered actions and
+            // null for admin/manual triggers. Type alone would be too aggressive (two genuine
+            // terminate_session issuances from different admins would collide).
+            return string.Concat(
+                action.Type ?? string.Empty,
+                "|",
+                action.RuleId ?? string.Empty,
+                "|",
+                action.QueuedAt.ToString("O"));
         }
     }
 }

@@ -529,50 +529,10 @@ namespace AutopilotMonitor.Agent.V2
                         emitEvent: evt => orchestrator.EventEmitter.Emit(evt),
                         sessionPersistence: sessionPersistence);
 
-                    // ServerActionDispatcher — handlers are live and the M4.6.ε response-parse
-                    // path below feeds it. RotateConfig refetches remote config;
-                    // RequestDiagnostics triggers the same diagnostics pipeline as enrollment-end;
-                    // TerminateSession routes to the termination handler (reason: server-requested).
-                    var serverActionDispatcher = new ServerActionDispatcher(
-                        configuration: agentConfig,
-                        logger: logger,
-                        rotateConfigAsync: async () =>
-                        {
-                            try { var _ = await remoteConfigService.FetchConfigAsync(); return true; }
-                            catch (Exception ex) { logger.Warning($"ServerAction rotate_config failed: {ex.Message}"); return false; }
-                        },
-                        uploadDiagnosticsAsync: async (suffix) =>
-                            await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
-                        onTerminateRequested: action =>
-                        {
-                            var forceSelfDestruct = action?.Params != null
-                                && action.Params.TryGetValue("forceSelfDestruct", out var f)
-                                && string.Equals(f, "true", StringComparison.OrdinalIgnoreCase);
-                            if (forceSelfDestruct && !agentConfig.SelfDestructOnComplete)
-                            {
-                                logger.Warning("ServerAction terminate_session: forceSelfDestruct=true overrides SelfDestructOnComplete=false.");
-                                agentConfig.SelfDestructOnComplete = true;
-                            }
-
-                            // Codex Finding 2: forward adminOutcome from the ServerAction params so
-                            // a portal Mark-Succeeded really lands as Succeeded locally (was
-                            // hard-coded to Failed before, masquerading every admin override as an
-                            // error in SummaryDialog + firing spurious diagnostics uploads).
-                            var mappedOutcome = MapAdminOutcome(action?.Params);
-
-                            logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}, outcome={mappedOutcome}) — invoking termination handler.");
-                            // Synthesise a Terminated event as if the kernel fired it.
-                            terminationHandler.Handle(
-                                sender: null,
-                                args: new EnrollmentTerminatedEventArgs(
-                                    reason: EnrollmentTerminationReason.DecisionTerminalStage,
-                                    outcome: mappedOutcome,
-                                    stageName: orchestrator.CurrentState?.Stage.ToString(),
-                                    terminatedAtUtc: DateTime.UtcNow,
-                                    details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
-                            return Task.CompletedTask;
-                        },
-                        emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); });
+                    // ServerActionDispatcher — constructed after orchestrator.Start (see below) so
+                    // the live lifecyclePost can back its telemetry. Declared here so the terminate
+                    // callback + WireTelemetryServerResponse reach it via the local scope.
+                    ServerActionDispatcher serverActionDispatcher = null;
 
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
@@ -710,6 +670,52 @@ namespace AutopilotMonitor.Agent.V2
                             EmitAgentStartedEvent(lifecyclePost, agentConfig, previousExit, logger);
                             EmitVersionCheckEventIfAny(lifecyclePost, agentConfig, logger);
                             EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
+
+                            // Single-rail refactor (plan §5.3) — ServerActionDispatcher emits through
+                            // the same InformationalEventPost. Constructed inside this hook so
+                            // lifecyclePost is guaranteed non-null; the dispatcher is only wired into
+                            // the telemetry response-path below (WireTelemetryServerResponse), which
+                            // runs strictly after Start returns.
+                            serverActionDispatcher = new ServerActionDispatcher(
+                                configuration: agentConfig,
+                                logger: logger,
+                                rotateConfigAsync: async () =>
+                                {
+                                    try { var _ = await remoteConfigService.FetchConfigAsync(); return true; }
+                                    catch (Exception ex) { logger.Warning($"ServerAction rotate_config failed: {ex.Message}"); return false; }
+                                },
+                                uploadDiagnosticsAsync: async (suffix) =>
+                                    await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
+                                onTerminateRequested: action =>
+                                {
+                                    var forceSelfDestruct = action?.Params != null
+                                        && action.Params.TryGetValue("forceSelfDestruct", out var f)
+                                        && string.Equals(f, "true", StringComparison.OrdinalIgnoreCase);
+                                    if (forceSelfDestruct && !agentConfig.SelfDestructOnComplete)
+                                    {
+                                        logger.Warning("ServerAction terminate_session: forceSelfDestruct=true overrides SelfDestructOnComplete=false.");
+                                        agentConfig.SelfDestructOnComplete = true;
+                                    }
+
+                                    // Codex Finding 2: forward adminOutcome from the ServerAction params so
+                                    // a portal Mark-Succeeded really lands as Succeeded locally (was
+                                    // hard-coded to Failed before, masquerading every admin override as an
+                                    // error in SummaryDialog + firing spurious diagnostics uploads).
+                                    var mappedOutcome = MapAdminOutcome(action?.Params);
+
+                                    logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}, outcome={mappedOutcome}) — invoking termination handler.");
+                                    // Synthesise a Terminated event as if the kernel fired it.
+                                    terminationHandler.Handle(
+                                        sender: null,
+                                        args: new EnrollmentTerminatedEventArgs(
+                                            reason: EnrollmentTerminationReason.DecisionTerminalStage,
+                                            outcome: mappedOutcome,
+                                            stageName: orchestrator.CurrentState?.Stage.ToString(),
+                                            terminatedAtUtc: DateTime.UtcNow,
+                                            details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
+                                    return Task.CompletedTask;
+                                },
+                                post: lifecyclePost);
                         });
 
                         // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator parses
