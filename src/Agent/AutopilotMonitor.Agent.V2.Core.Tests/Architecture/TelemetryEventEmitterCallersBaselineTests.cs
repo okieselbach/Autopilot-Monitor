@@ -9,18 +9,17 @@ using Xunit;
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Architecture
 {
     /// <summary>
-    /// Single-rail refactor plan §4.4 / §8 — baseline inventory of every type in
-    /// <c>AutopilotMonitor.Agent.V2.Core</c> that can reach
-    /// <see cref="TelemetryEventEmitter"/>. The test is a living document: as the migration PRs
-    /// (#1 through #9) remove bypass paths one by one, the baseline shrinks. PR #10 tightens
-    /// the expected set to only the two permitted callers — <see cref="EventTimelineEmitter"/>
-    /// (Rail A) and <see cref="BackPressureEventObserver"/> (documented meta exception).
+    /// Single-rail refactor plan §4.4 / §5.10 / §8 — enforcement gate on the
+    /// <see cref="TelemetryEventEmitter"/> caller set. PR #10 promoted this test from a
+    /// transitional baseline (3 dependents) to strict enforcement (exactly 2 permitted callers):
+    /// <see cref="EventTimelineEmitter"/> (Rail A) and <see cref="BackPressureEventObserver"/>
+    /// (documented meta exception — it cannot route through the ingress without creating a
+    /// cycle because it observes the ingress itself).
     /// <para>
-    /// <b>Scope</b>: this test inspects the V2.Core assembly only. Program.cs lives in the
-    /// V2 executable assembly and reaches the emitter via
-    /// <see cref="EnrollmentOrchestrator.EventEmitter"/>; internalizing that property in PR #10
-    /// removes the reach automatically. Until then Program.cs is tracked via the plan's §2
-    /// inventory (B2–B6), not this test.
+    /// <b>Scope</b>: this test inspects the V2.Core assembly only. The emitter class itself is
+    /// <c>internal</c> post-PR #10, so there is no surface for the V2 executable assembly or
+    /// any external library to reach it — the inventory is complete with the two types that
+    /// live next to it in the <c>Telemetry.Events</c> namespace.
     /// </para>
     /// <para>
     /// <b>Detection strategy</b>: reflection over fields, constructor parameters, method
@@ -34,55 +33,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Architecture
         private static readonly Type EmitterType = typeof(TelemetryEventEmitter);
 
         /// <summary>
-        /// Types permitted to reach <see cref="TelemetryEventEmitter"/> at the end of the
-        /// single-rail refactor (PR #10 enforcement gate). Kept separate from the transitional
-        /// baseline so that a single-line diff in PR #10 switches enforcement on:
-        /// <c>Assert.Equal(PermittedCallers, ActualCallers)</c>.
+        /// The two and only two types permitted to reach <see cref="TelemetryEventEmitter"/>
+        /// after the single-rail refactor. A third entry would mean someone reintroduced a
+        /// bypass; the test fails and reviewers are forced to reason about whether the new
+        /// caller belongs here (essentially never — the answer is almost always "route via
+        /// ISignalIngressSink + InformationalEventPost instead").
         /// </summary>
-        private static readonly HashSet<string> PermittedCallersAfterPr10 = new HashSet<string>(StringComparer.Ordinal)
+        private static readonly HashSet<string> PermittedCallers = new HashSet<string>(StringComparer.Ordinal)
         {
             "AutopilotMonitor.Agent.V2.Core.Telemetry.Events.EventTimelineEmitter",
             "AutopilotMonitor.Agent.V2.Core.Telemetry.Events.BackPressureEventObserver",
-        };
-
-        /// <summary>
-        /// Current transitional baseline (PR #0). Every additional entry is a documented
-        /// bypass that a later PR will remove. Adding a new bypass requires updating this list
-        /// explicitly — the review signal is loud because tests fail.
-        /// </summary>
-        private static readonly HashSet<string> ExpectedCurrentBaseline = new HashSet<string>(StringComparer.Ordinal)
-        {
-            // Rail A — engine effect path. Permitted after PR #10.
-            "AutopilotMonitor.Agent.V2.Core.Telemetry.Events.EventTimelineEmitter",
-            // Meta exception — cannot route through the ingress without a cycle. Permitted after PR #10.
-            "AutopilotMonitor.Agent.V2.Core.Telemetry.Events.BackPressureEventObserver",
-            // Owns the field and exposes it via the public EventEmitter property (BuildTelemetryEventSink
-            // factory + the ServerActionDispatcher emitEvent callback in Program.cs). Removed /
-            // internalized in PR #10 once those bypasses are themselves migrated.
-            "AutopilotMonitor.Agent.V2.Core.Orchestration.EnrollmentOrchestrator",
-            // PR #2 (5.2) migrated StartupEnvironmentProbes to InformationalEventPost — baseline
-            // shrunk by one. Next to fall: the ServerActionDispatcher / EnrollmentTerminationHandler
-            // callbacks, Periodic collectors, Enrollment SystemSignals trackers, Gather rules,
-            // Analyzers, DeviceInfoCollector (PR #3 – PR #9).
         };
 
         [Fact]
-        public void V2Core_types_with_structural_dependency_on_TelemetryEventEmitter_match_current_baseline()
+        public void V2Core_types_with_structural_dependency_on_TelemetryEventEmitter_match_permitted_callers()
         {
             var actual = FindStructuralDependents(EmitterType.Assembly);
 
-            Assert.Equal(ExpectedCurrentBaseline.OrderBy(x => x), actual.OrderBy(x => x));
-        }
-
-        [Fact]
-        public void Current_baseline_is_a_superset_of_the_PR10_permitted_callers()
-        {
-            // Sanity guard: every permitted-after-PR10 caller must be present today, otherwise
-            // we've accidentally removed Rail A or the meta exception.
-            foreach (var permitted in PermittedCallersAfterPr10)
-            {
-                Assert.Contains(permitted, ExpectedCurrentBaseline);
-            }
+            Assert.Equal(PermittedCallers.OrderBy(x => x), actual.OrderBy(x => x));
         }
 
         private static ISet<string> FindStructuralDependents(Assembly assembly)

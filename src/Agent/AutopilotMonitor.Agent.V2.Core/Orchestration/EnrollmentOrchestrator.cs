@@ -93,7 +93,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private EventSequenceCounter? _eventSequenceCounter;
         private TelemetrySpool? _spool;
         private TelemetryUploadOrchestrator? _transport;
-        private TelemetryEventEmitter? _eventEmitter;
         private TelemetrySignalEmitter? _signalEmitter;
         private TelemetryTransitionEmitter? _transitionEmitter;
         private EventTimelineEmitter? _timelineEmitter;
@@ -222,10 +221,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         public ISignalIngressSink IngressSink =>
             (ISignalIngressSink?)_ingress ?? throw new InvalidOperationException("Orchestrator not started.");
 
-        /// <summary>Exposed für Sub-c-Wiring (Collector <c>onEventCollected</c>-Bridge).</summary>
-        public TelemetryEventEmitter EventEmitter =>
-            _eventEmitter ?? throw new InvalidOperationException("Orchestrator not started.");
-
         /// <summary>
         /// Exposed so Program.cs can subscribe to <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/>
         /// for M4.6.ε DeviceBlocked / DeviceKillSignal / AdminAction / Actions plumbing.
@@ -321,13 +316,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _spool = new TelemetrySpool(_transportDirectory, _clock);
             _transport = new TelemetryUploadOrchestrator(_spool, _uploader, _clock);
 
-            // 4) Event-Emitter-Kette.
+            // 4) Event-Emitter-Kette. Single-rail (Plan §5.10): der TelemetryEventEmitter wird
+            //    lokal gebaut und nur in die zwei erlaubten Caller (EventTimelineEmitter,
+            //    BackPressureEventObserver) injiziert. Kein Feld mehr auf dem Orchestrator —
+            //    strukturelle Abhängigkeit erlischt damit, Architektur-Baseline-Test gate
+            //    shrinks to exactly two permitted callers.
             _eventSequenceCounter = new EventSequenceCounter(_eventSequencePersistence);
-            _eventEmitter = new TelemetryEventEmitter(_transport, _eventSequenceCounter, _sessionId, _tenantId);
+            var eventEmitter = new TelemetryEventEmitter(_transport, _eventSequenceCounter, _sessionId, _tenantId);
             _signalEmitter = new TelemetrySignalEmitter(_transport, _sessionId, _tenantId);
             _transitionEmitter = new TelemetryTransitionEmitter(_transport, _sessionId, _tenantId);
-            _timelineEmitter = new EventTimelineEmitter(_eventEmitter);
-            _backPressureObserver = new BackPressureEventObserver(_eventEmitter, _clock);
+            _timelineEmitter = new EventTimelineEmitter(eventEmitter);
+            _backPressureObserver = new BackPressureEventObserver(eventEmitter, _clock);
 
             // 5) Deadlines + Classifiers.
             _scheduler = new DeadlineScheduler(_clock);
@@ -441,14 +440,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 }
             }
 
-            // 14) Collector-Hosts via Factory — onEnrollmentEvent bridged Telemetry-Events
-            //     an den zentralen TelemetryEventEmitter. Exception-Swallow damit ein
-            //     Collector-Thread nicht am Emitter-Fehler stirbt (Plan §2.7a).
+            // 14) Collector-Hosts via Factory — nach Plan §5.10 (single-rail enforcement) gibt
+            //     es keine Action<EnrollmentEvent>-Bridge mehr; jede Collector-Emission fließt
+            //     über den Ingress als InformationalEvent.
             if (_componentFactory != null)
             {
-                var safeSink = BuildTelemetryEventSink();
                 _collectorHosts = _componentFactory.CreateCollectorHosts(
-                    _sessionId, _tenantId, _logger, safeSink, _whiteGloveSealingPatternIds,
+                    _sessionId, _tenantId, _logger, _whiteGloveSealingPatternIds,
                     ingress: _ingress, clock: _clock);
                 foreach (var host in _collectorHosts)
                 {
@@ -665,27 +663,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         {
             if (!Directory.Exists(_stateDirectory)) Directory.CreateDirectory(_stateDirectory);
             if (!Directory.Exists(_transportDirectory)) Directory.CreateDirectory(_transportDirectory);
-        }
-
-        /// <summary>
-        /// Shared callback that collector hosts use for <c>onEventCollected</c>. Exception-safe:
-        /// an emitter failure (disk hiccup, transport closed) must never kill a collector thread.
-        /// </summary>
-        private Action<AutopilotMonitor.Shared.Models.EnrollmentEvent> BuildTelemetryEventSink()
-        {
-            return evt =>
-            {
-                if (evt == null || _eventEmitter == null) return;
-                try
-                {
-                    _eventEmitter.Emit(evt);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Error(
-                        $"EnrollmentOrchestrator: telemetry emit failed for event '{evt.EventType}'.", ex);
-                }
-            };
         }
 
         private void OnDeadlineFired(object? sender, DeadlineFiredEventArgs e)

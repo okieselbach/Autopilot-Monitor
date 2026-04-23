@@ -91,7 +91,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             string sessionId,
             string tenantId,
             AgentLogger logger,
-            Action<EnrollmentEvent> onEnrollmentEvent,
             IReadOnlyCollection<string> whiteGloveSealingPatternIds,
             ISignalIngressSink ingress,
             IClock clock)
@@ -99,7 +98,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("SessionId required.", nameof(sessionId));
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("TenantId required.", nameof(tenantId));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
-            if (onEnrollmentEvent == null) throw new ArgumentNullException(nameof(onEnrollmentEvent));
             if (ingress == null) throw new ArgumentNullException(nameof(ingress));
             if (clock == null) throw new ArgumentNullException(nameof(clock));
 
@@ -148,7 +146,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _imeLogHost = new ImeLogHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
-                onEnrollmentEvent: onEnrollmentEvent,
                 logger: logger,
                 ingress: ingress,
                 clock: clock,
@@ -518,7 +515,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public ImeLogHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
                 ISignalIngressSink ingress,
                 IClock clock,

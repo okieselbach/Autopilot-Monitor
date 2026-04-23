@@ -24,7 +24,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 string sessionId,
                 string tenantId,
                 AgentLogger logger,
-                Action<EnrollmentEvent> onEnrollmentEvent,
                 IReadOnlyCollection<string> whiteGloveSealingPatternIds,
                 ISignalIngressSink ingress,
                 IClock clock)

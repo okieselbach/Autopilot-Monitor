@@ -138,7 +138,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 
             // Post-Start, observability accessors work (= Start completed, did not throw out).
             Assert.NotNull(orchestrator.IngressSink);
-            Assert.NotNull(orchestrator.EventEmitter);
         }
 
         [Fact]

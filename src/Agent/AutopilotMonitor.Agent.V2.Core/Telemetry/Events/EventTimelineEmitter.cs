@@ -25,7 +25,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
     /// throw on a malformed phase value.
     /// </para>
     /// </summary>
-    public sealed class EventTimelineEmitter : IEventTimelineEmitter
+    internal sealed class EventTimelineEmitter : IEventTimelineEmitter
     {
         /// <summary>Default <see cref="EnrollmentEvent.Source"/> when no <see cref="SourceParamKey"/> override is provided.</summary>
         internal const string SourceId = "decision_engine";
