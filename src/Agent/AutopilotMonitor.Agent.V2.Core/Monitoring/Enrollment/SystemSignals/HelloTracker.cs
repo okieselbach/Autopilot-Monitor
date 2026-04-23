@@ -310,7 +310,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                             {
                                 { "helloEnabled", isEnabled.Value },
                                 { "policySource", source }
-                            }
+                            },
+                            // First lifecycle signal that pins down Hello policy — flush immediately
+                            // so the UI timeline reflects "WHfB enabled/disabled" within seconds.
+                            ImmediateUpload = true
                         });
 
                         _logger.Info($"WHfB policy detected: {status} (source: {source})");
@@ -527,7 +530,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 Phase = EnrollmentPhase.Unknown,
                 Message = message,
                 Data = data,
-                ImmediateUpload = shouldTriggerHelloCompleted || eventType == "hello_provisioning_failed"
+                // Flush only events that finalize Hello provisioning or signal a terminal
+                // failure: 300/301/362 (completion/failure/blocked), 6045-skip, and the
+                // explicit `hello_provisioning_failed` case. Snapshot-type events
+                // (willlaunch, willnotlaunch, pin_status) are not decision-relevant and can
+                // flip state multiple times — keep batched.
+                ImmediateUpload = shouldTriggerHelloCompleted
+                    || eventType == "hello_provisioning_failed"
             });
 
             _logger.Info($"Hello event detected: {eventType} (EventID {eventId}{(isBackfill ? ", backfill" : "")})");
@@ -983,7 +992,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     {
                         { "helloEnabled", helloEnabled },
                         { "policySource", source }
-                    }
+                    },
+                    ImmediateUpload = true
                 });
             }
         }

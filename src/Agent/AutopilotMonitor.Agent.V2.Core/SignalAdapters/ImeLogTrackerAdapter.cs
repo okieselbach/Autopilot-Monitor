@@ -248,6 +248,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 eventType: SharedEventTypes.EspPhaseChanged,
                 source: SourceLabel,
                 message: $"ESP phase: {phase}",
+                // Phase declaration — UI timeline hinges on it; flush immediately so the
+                // backend sees the transition within seconds, not at the next batch boundary.
+                immediateUpload: true,
                 phase: mappedPhase == EnrollmentPhase.Unknown ? (EnrollmentPhase?)null : mappedPhase,
                 data: data,
                 occurredAtUtc: now);
@@ -338,11 +341,16 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             if (mapped == null) return;
 
             var (eventType, severity) = mapped.Value;
+            // All app-state transitions flush immediately, including `download_progress`:
+            // progress ticks run every 3s and only while a download is actively in flight
+            // (bounded by download duration), so live UI responsiveness wins over the small
+            // extra request volume.
             _post.Emit(
                 eventType: eventType,
                 source: SourceLabel,
                 message: BuildAppStateMessage(app, newState, eventType),
                 severity: severity,
+                immediateUpload: true,
                 data: BuildAppStatePayload(app, newState),
                 occurredAtUtc: now);
         }
@@ -438,6 +446,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 eventType: SharedEventTypes.DoTelemetry,
                 source: SourceLabel,
                 message: msg,
+                // Terminal DO-summary per app — fires once per download, flush immediately so
+                // the UI sees peer-caching stats without waiting for the next batch.
+                immediateUpload: true,
                 data: data,
                 occurredAtUtc: _clock.UtcNow);
         }

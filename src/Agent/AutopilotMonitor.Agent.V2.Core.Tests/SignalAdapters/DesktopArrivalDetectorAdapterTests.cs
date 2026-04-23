@@ -5,7 +5,9 @@ using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
 using AutopilotMonitor.Agent.V2.Core.SignalAdapters;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
 using AutopilotMonitor.Agent.V2.Core.Tests.Orchestration;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
+using SharedEventTypes = AutopilotMonitor.Shared.Constants.EventTypes;
 using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
@@ -28,6 +30,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
                 Detector = new DesktopArrivalDetector(Logger);
             }
 
+            public FakeSignalIngressSink.PostedSignal DecisionSignal(DecisionSignalKind kind) =>
+                Ingress.Posted.Single(p => p.Kind == kind);
+
+            public FakeSignalIngressSink.PostedSignal InfoEvent(string eventType) =>
+                Ingress.Posted.Single(p =>
+                    p.Kind == DecisionSignalKind.InformationalEvent
+                    && p.Payload != null
+                    && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                    && et == eventType);
+
             public void Dispose()
             {
                 Detector.Dispose();
@@ -43,29 +55,48 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
 
             adapter.TriggerFromTest();
 
-            var posted = Assert.Single(f.Ingress.Posted);
-            Assert.Equal(DecisionSignalKind.DesktopArrived, posted.Kind);
-            Assert.Equal(Fixed, posted.OccurredAtUtc);
-            Assert.Equal("DesktopArrivalDetector", posted.SourceOrigin);
-            Assert.Equal(EvidenceKind.Derived, posted.Evidence.Kind);
-            Assert.Equal("desktop-arrival-detector-v1", posted.Evidence.Identifier);
+            var decision = f.DecisionSignal(DecisionSignalKind.DesktopArrived);
+            Assert.Equal(Fixed, decision.OccurredAtUtc);
+            Assert.Equal("DesktopArrivalDetector", decision.SourceOrigin);
+            Assert.Equal(EvidenceKind.Derived, decision.Evidence.Kind);
+            Assert.Equal("desktop-arrival-detector-v1", decision.Evidence.Identifier);
         }
 
         [Fact]
-        public void Part2Mode_emits_DesktopArrivedPart2_kind()
+        public void TriggerFromTest_also_emits_desktop_arrived_informational_event_with_immediate_upload()
+        {
+            using var f = new Fixture();
+            using var adapter = new DesktopArrivalDetectorAdapter(f.Detector, f.Ingress, f.Clock);
+
+            adapter.TriggerFromTest();
+
+            var info = f.InfoEvent(SharedEventTypes.DesktopArrived);
+            Assert.Equal("DesktopArrivalDetector", info.Payload![SignalPayloadKeys.Source]);
+            // Fix 1 policy: desktop_arrived is a completion-gate event → flush immediately.
+            Assert.Equal("true", info.Payload[SignalPayloadKeys.ImmediateUpload]);
+            Assert.Equal("false", info.Payload["part2Mode"]);
+            Assert.Equal("explorer.exe process poll", info.Payload["detectionSource"]);
+            Assert.True(info.Payload.ContainsKey("detectedAt"));
+        }
+
+        [Fact]
+        public void Part2Mode_emits_DesktopArrivedPart2_kind_and_part2_flagged_info_event()
         {
             using var f = new Fixture();
             using var adapter = new DesktopArrivalDetectorAdapter(f.Detector, f.Ingress, f.Clock, part2Mode: true);
 
             adapter.TriggerFromTest();
 
-            var posted = f.Ingress.Posted.Single();
-            Assert.Equal(DecisionSignalKind.DesktopArrivedPart2, posted.Kind);
-            Assert.Contains("Part 2", posted.Evidence.Summary);
+            var decision = f.DecisionSignal(DecisionSignalKind.DesktopArrivedPart2);
+            Assert.Contains("Part 2", decision.Evidence.Summary);
+
+            var info = f.InfoEvent(SharedEventTypes.DesktopArrived);
+            Assert.Equal("true", info.Payload!["part2Mode"]);
+            Assert.Contains("Part 2", info.Payload[SignalPayloadKeys.Message]);
         }
 
         [Fact]
-        public void Duplicate_trigger_is_deduplicated()
+        public void Duplicate_trigger_is_deduplicated_on_both_rails()
         {
             using var f = new Fixture();
             using var adapter = new DesktopArrivalDetectorAdapter(f.Detector, f.Ingress, f.Clock);
@@ -74,7 +105,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             adapter.TriggerFromTest();
             adapter.TriggerFromTest();
 
-            Assert.Single(f.Ingress.Posted);
+            // Exactly one decision signal + one informational event — fire-once semantics hold
+            // for the dual-emission refactor.
+            Assert.Single(f.Ingress.Posted, p => p.Kind == DecisionSignalKind.DesktopArrived);
+            Assert.Single(
+                f.Ingress.Posted,
+                p => p.Kind == DecisionSignalKind.InformationalEvent
+                    && p.Payload != null
+                    && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                    && et == SharedEventTypes.DesktopArrived);
+            Assert.Equal(2, f.Ingress.Posted.Count);
         }
 
         [Fact]
