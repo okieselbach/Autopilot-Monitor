@@ -1,5 +1,6 @@
 using System;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
@@ -25,7 +26,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly AgentLogger _logger;
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _onEventCollected;
+        private readonly InformationalEventPost _post;
 
         private readonly int _helloWaitTimeoutSeconds;
         private readonly bool _modernDeploymentWatcherEnabled;
@@ -112,7 +113,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public EspAndHelloTracker(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> onEventCollected,
+            InformationalEventPost post,
             AgentLogger logger,
             int helloWaitTimeoutSeconds = 30,
             bool modernDeploymentWatcherEnabled = true,
@@ -124,7 +125,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
-            _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
+            _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _helloWaitTimeoutSeconds = helloWaitTimeoutSeconds;
             _modernDeploymentWatcherEnabled = modernDeploymentWatcherEnabled;
@@ -182,7 +183,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             _helloTracker = new HelloTracker(
                 _sessionId,
                 _tenantId,
-                _onEventCollected,
+                _post,
                 _logger,
                 _helloWaitTimeoutSeconds);
             _helloTracker.HelloCompleted += OnHelloCompleted;
@@ -191,7 +192,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             _shellCoreTracker = new ShellCoreTracker(
                 _sessionId,
                 _tenantId,
-                _onEventCollected,
+                _post,
                 _logger,
                 _helloTracker);
             _shellCoreTracker.FinalizingSetupPhaseTriggered += OnFinalizingSetupPhaseTriggered;
@@ -202,7 +203,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             _provisioningTracker = new ProvisioningStatusTracker(
                 _sessionId,
                 _tenantId,
-                _onEventCollected,
+                _post,
                 _logger);
             _provisioningTracker.EspFailureDetected += OnEspFailureDetected;
             _provisioningTracker.DeviceSetupProvisioningComplete += OnDeviceSetupProvisioningComplete;
@@ -213,7 +214,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 _modernDeploymentTracker = new ModernDeploymentTracker(
                     _sessionId,
                     _tenantId,
-                    _onEventCollected,
+                    _post,
                     _logger,
                     _modernDeploymentLogLevelMax,
                     _modernDeploymentBackfillEnabled,

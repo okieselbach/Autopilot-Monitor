@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.SignalAdapters;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
 using AutopilotMonitor.Agent.V2.Core.Tests.Orchestration;
@@ -27,10 +28,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             public Fixture()
             {
                 Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
+                var trackerPost = new InformationalEventPost(new FakeSignalIngressSink(), Clock);
                 Tracker = new ShellCoreTracker(
                     sessionId: "S1",
                     tenantId: "T1",
-                    onEventCollected: _ => { },
+                    post: trackerPost,
                     logger: Logger,
                     helloTracker: null);
             }

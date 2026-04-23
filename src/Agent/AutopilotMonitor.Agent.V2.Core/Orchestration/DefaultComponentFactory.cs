@@ -111,7 +111,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             hosts.Add(new EspAndHelloHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
-                onEnrollmentEvent: onEnrollmentEvent,
                 logger: logger,
                 ingress: ingress,
                 clock: clock,
@@ -300,7 +299,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public EspAndHelloHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
                 ISignalIngressSink ingress,
                 IClock clock,
@@ -312,10 +310,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 int[]? modernDeploymentHarmlessEventIds,
                 string stateDirectory)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
+                var post = new InformationalEventPost(ingress, clock);
                 _tracker = new EspAndHelloTracker(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEventCollected: onEnrollmentEvent,
+                    post: post,
                     logger: logger,
                     helloWaitTimeoutSeconds: helloWaitTimeoutSeconds,
                     modernDeploymentWatcherEnabled: modernDeploymentWatcherEnabled,
