@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Runtime
@@ -24,7 +25,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
     {
         private readonly AgentConfiguration _configuration;
         private readonly AgentLogger _logger;
-        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly InformationalEventPost _post;
         private readonly AnalyzerConfiguration _analyzerConfig;
 
         private readonly List<IAgentAnalyzer> _analyzers = new List<IAgentAnalyzer>();
@@ -33,12 +34,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
         public AgentAnalyzerManager(
             AgentConfiguration configuration,
             AgentLogger logger,
-            Action<EnrollmentEvent> emitEvent,
+            InformationalEventPost post,
             AnalyzerConfiguration? analyzerConfig)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _emitEvent = emitEvent ?? throw new ArgumentNullException(nameof(emitEvent));
+            _post = post ?? throw new ArgumentNullException(nameof(post));
             _analyzerConfig = analyzerConfig ?? new AnalyzerConfiguration();
         }
 
@@ -56,7 +57,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 _analyzers.Add(new LocalAdminAnalyzer(
                     _configuration.SessionId,
                     _configuration.TenantId,
-                    _emitEvent,
+                    _post,
                     _logger,
                     _analyzerConfig.LocalAdminAllowedAccounts));
                 _logger.Info("LocalAdminAnalyzer registered");
@@ -71,7 +72,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 _analyzers.Add(new SoftwareInventoryAnalyzer(
                     _configuration.SessionId,
                     _configuration.TenantId,
-                    _emitEvent,
+                    _post,
                     _logger));
                 _logger.Info("SoftwareInventoryAnalyzer registered");
             }
@@ -85,7 +86,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 _analyzers.Add(new IntegrityBypassAnalyzer(
                     _configuration.SessionId,
                     _configuration.TenantId,
-                    _emitEvent,
+                    _post,
                     _logger));
                 _logger.Info("IntegrityBypassAnalyzer registered");
             }

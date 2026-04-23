@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -30,7 +31,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
     {
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
         private readonly List<string> _allowedAccounts;
 
@@ -57,13 +58,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
         public LocalAdminAnalyzer(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> emitEvent,
+            InformationalEventPost post,
             AgentLogger logger,
             List<string> allowedAccounts = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId  = tenantId  ?? throw new ArgumentNullException(nameof(tenantId));
-            _emitEvent = emitEvent ?? throw new ArgumentNullException(nameof(emitEvent));
+            _post      = post      ?? throw new ArgumentNullException(nameof(post));
             _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
 
             // Tenant-supplied accounts are additive (union with built-ins, not replacement)
@@ -203,7 +204,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
                     ? $"{Name}: No unexpected local admins detected"
                     : $"{Name}: Unexpected admin activity detected (confidence={confidenceScore})";
 
-                _emitEvent(new EnrollmentEvent
+                _post.Emit(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId  = _tenantId,

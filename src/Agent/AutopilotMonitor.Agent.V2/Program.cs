@@ -503,14 +503,14 @@ namespace AutopilotMonitor.Agent.V2
                 using (var shutdown = new ManualResetEventSlim(false))
                 using (var shutdownComplete = new ManualResetEventSlim(false))
                 {
-                    // M4.6.δ — Analyzer manager. Emits through the live orchestrator's event
-                    // emitter. RunStartup fires after orchestrator.Start; RunShutdown is wired
-                    // into the termination handler so it runs before diagnostics upload.
-                    var analyzerManager = new AgentAnalyzerManager(
-                        configuration: agentConfig,
-                        logger: logger,
-                        emitEvent: evt => { orchestrator.EventEmitter.Emit(evt); },
-                        analyzerConfig: remoteConfig.Analyzers);
+                    // M4.6.δ — Analyzer manager. Single-rail refactor (plan §5.7): the manager
+                    // now takes an InformationalEventPost so LocalAdmin / SoftwareInventory /
+                    // IntegrityBypass analyzer events flow through the same ingress pipe as
+                    // every other telemetry source. Construction is deferred into
+                    // orchestrator.Start's onIngressReady hook so lifecyclePost is non-null at
+                    // construction time. RunStartup fires after orchestrator.Start; RunShutdown
+                    // is wired into the termination handler so it runs before diagnostics upload.
+                    AgentAnalyzerManager analyzerManager = null;
 
                     // M4.6.β — the peripheral termination sequence (FinalStatus + SummaryDialog
                     // + diagnostics upload + enrollment-complete.marker + CleanupService) lives
@@ -674,6 +674,17 @@ namespace AutopilotMonitor.Agent.V2
                             EmitAgentStartedEvent(lifecyclePost, agentConfig, previousExit, logger);
                             EmitVersionCheckEventIfAny(lifecyclePost, agentConfig, logger);
                             EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
+
+                            // Single-rail refactor (plan §5.7) — AgentAnalyzerManager emits through
+                            // the same InformationalEventPost. Constructed inside this hook so
+                            // lifecyclePost is guaranteed non-null by the time RunStartup (below,
+                            // after Start returns) and RunShutdown (via terminationHandler) call
+                            // into the three analyzers.
+                            analyzerManager = new AgentAnalyzerManager(
+                                configuration: agentConfig,
+                                logger: logger,
+                                post: lifecyclePost,
+                                analyzerConfig: remoteConfig.Analyzers);
 
                             // Single-rail refactor (plan §5.3) — EnrollmentTerminationHandler emits
                             // through the same InformationalEventPost. Constructed inside this hook

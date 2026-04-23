@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -22,7 +23,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
     {
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
 
         // Captured at startup for delta detection at shutdown
@@ -349,12 +350,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
         public SoftwareInventoryAnalyzer(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> emitEvent,
+            InformationalEventPost post,
             AgentLogger logger)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId  = tenantId  ?? throw new ArgumentNullException(nameof(tenantId));
-            _emitEvent = emitEvent ?? throw new ArgumentNullException(nameof(emitEvent));
+            _post      = post      ?? throw new ArgumentNullException(nameof(post));
             _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -874,7 +875,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
                         : $"{Name}: Shutdown inventory ({inventory.Count} items, {newInstalls?.Count ?? 0} new during enrollment)")
                     : $"{Name}: Inventory chunk {i + 1}/{totalChunks}";
 
-                _emitEvent(new EnrollmentEvent
+                _post.Emit(new EnrollmentEvent
                 {
                     SessionId = _sessionId,
                     TenantId = _tenantId,
