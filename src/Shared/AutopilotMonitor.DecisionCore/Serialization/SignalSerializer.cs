@@ -81,12 +81,17 @@ namespace AutopilotMonitor.DecisionCore.Serialization
                 var t = new Dictionary<string, object>(typedObj.Count, StringComparer.Ordinal);
                 foreach (var prop in typedObj.Properties())
                 {
-                    // Cast null tokens to null objects; all other JTokens (JValue / JArray /
-                    // JObject) carry typed data that Newtonsoft re-serializes identically on
-                    // the next outbound Emit. This keeps replay wire-parity with live.
+                    // JSON null → C# null (NOT string.Empty — Codex Pass-2 finding).
+                    // Collectors like DeviceInfoCollector place nullable fields (e.g.
+                    // displayVersion, dhcpServer) directly into EnrollmentEvent.Data; live
+                    // Newtonsoft serializes those as JSON null, and the dict kept them as null.
+                    // Coercing to "" on replay would break wire-parity between live and replay
+                    // — the next outbound Emit would serialize "" instead of null.
+                    // Other JTokens (JValue / JArray / JObject) pass through — Newtonsoft
+                    // re-serializes them identically on the next outbound Emit.
                     t[prop.Name] = prop.Value is JValue jv && jv.Value is null
-                        ? (object)string.Empty
-                        : (object)prop.Value!;
+                        ? null!
+                        : (object)prop.Value;
                 }
                 typedPayload = t;
             }

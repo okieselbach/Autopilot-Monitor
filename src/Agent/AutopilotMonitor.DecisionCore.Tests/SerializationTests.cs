@@ -141,6 +141,62 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Null(roundtripped.TypedPayload);
         }
 
+        /// <summary>
+        /// Codex Pass-2 finding — top-level null values inside a TypedPayload dict MUST survive
+        /// persistence as C# null, not degenerate into <c>string.Empty</c>. Realistic producers
+        /// (e.g. <c>DeviceInfoCollector</c> writing <c>displayVersion</c> = null when the
+        /// registry key is absent) rely on this for wire/replay parity: live emits
+        /// <c>{"displayVersion":null}</c>, so replay must too. The pre-fix code coerced null
+        /// tokens to "" at deserialize time, breaking single-rail determinism on replay.
+        /// </summary>
+        [Fact]
+        public void SignalSerializer_roundtrip_null_value_in_TypedPayload_stays_null_not_empty_string()
+        {
+            var original = new DecisionSignal(
+                sessionSignalOrdinal: 1,
+                sessionTraceOrdinal: 1,
+                kind: DecisionSignalKind.InformationalEvent,
+                kindSchemaVersion: 1,
+                occurredAtUtc: new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc),
+                sourceOrigin: "DeviceInfoCollector",
+                evidence: new Evidence(EvidenceKind.Raw, "informational_event:os_info", "OS information collected"),
+                payload: new Dictionary<string, string>
+                {
+                    ["eventType"] = "os_info",
+                    ["source"] = "DeviceInfoCollector",
+                },
+                typedPayload: new Dictionary<string, object>
+                {
+                    ["version"] = "10.0.26100.1",
+                    // Realistic: GetOsDisplayVersion() returned null on this SKU — collector
+                    // places it directly into Data as null rather than coercing to "".
+                    ["displayVersion"] = null!,
+                    ["edition"] = "Enterprise",
+                });
+
+            var json = SignalSerializer.Serialize(original);
+            // On-disk representation must already be JSON null, not "".
+            Assert.Contains("\"displayVersion\":null", json);
+
+            var roundtripped = SignalSerializer.Deserialize(json);
+            var typed = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(roundtripped.TypedPayload!);
+
+            // Pass-2 regression: was "" before the fix.
+            Assert.True(typed.ContainsKey("displayVersion"));
+            Assert.Null(typed["displayVersion"]);
+
+            // Wire-parity check — re-serialize the restored payload as JSON and confirm the
+            // null shape is preserved. This is what the outbound TelemetryEventEmitter.Emit
+            // chain sees when replay fires through EventTimelineEmitter.
+            var reemittedDataJson = Newtonsoft.Json.JsonConvert.SerializeObject(typed);
+            Assert.Contains("\"displayVersion\":null", reemittedDataJson);
+            Assert.DoesNotContain("\"displayVersion\":\"\"", reemittedDataJson);
+
+            // Sibling non-null values untouched.
+            Assert.Equal("10.0.26100.1", ((Newtonsoft.Json.Linq.JValue)typed["version"]).Value);
+            Assert.Equal("Enterprise", ((Newtonsoft.Json.Linq.JValue)typed["edition"]).Value);
+        }
+
         [Fact]
         public void UnknownFallbackEnumConverter_unknownValue_mapsToFallback()
         {
