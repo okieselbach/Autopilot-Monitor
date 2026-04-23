@@ -57,11 +57,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Architecture
             // Meta exception — cannot route through the ingress without a cycle. Permitted after PR #10.
             "AutopilotMonitor.Agent.V2.Core.Telemetry.Events.BackPressureEventObserver",
             // Owns the field and exposes it via the public EventEmitter property (BuildTelemetryEventSink
-            // factory + Program.cs direct calls). Removed / internalized in PR #10.
+            // factory + the ServerActionDispatcher emitEvent callback in Program.cs). Removed /
+            // internalized in PR #10 once those bypasses are themselves migrated.
             "AutopilotMonitor.Agent.V2.Core.Orchestration.EnrollmentOrchestrator",
-            // Static RunAsync takes the emitter as a parameter to emit geo / timezone / ntp events.
-            // Migrated to ISignalIngressSink in PR #2.
-            "AutopilotMonitor.Agent.V2.Core.Runtime.StartupEnvironmentProbes",
+            // PR #2 (5.2) migrated StartupEnvironmentProbes to InformationalEventPost — baseline
+            // shrunk by one. Next to fall: the ServerActionDispatcher / EnrollmentTerminationHandler
+            // callbacks, Periodic collectors, Enrollment SystemSignals trackers, Gather rules,
+            // Analyzers, DeviceInfoCollector (PR #3 – PR #9).
         };
 
         [Fact]

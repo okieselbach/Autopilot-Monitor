@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
-using AutopilotMonitor.Agent.V2.Core.Telemetry.Events;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Runtime
@@ -33,30 +32,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
     {
         /// <summary>
         /// Runs all three probes sequentially and emits the resulting events via
-        /// <paramref name="emitter"/>. Returns a <see cref="Task"/> that completes when all
+        /// <paramref name="post"/>. Returns a <see cref="Task"/> that completes when all
         /// probes have finished (typical runtime &lt;10s; longer on slow/blocked networks).
         /// </summary>
         public static async Task RunAsync(
             AgentConfiguration configuration,
             AgentLogger logger,
-            TelemetryEventEmitter emitter)
+            Orchestration.InformationalEventPost post)
         {
             if (configuration == null) throw new ArgumentNullException(nameof(configuration));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
-            if (emitter == null) throw new ArgumentNullException(nameof(emitter));
+            if (post == null) throw new ArgumentNullException(nameof(post));
 
             if (configuration.EnableGeoLocation)
-                await RunGeoAndTimezone(configuration, logger, emitter).ConfigureAwait(false);
+                await RunGeoAndTimezone(configuration, logger, post).ConfigureAwait(false);
             else
                 logger.Debug("StartupEnvironmentProbes: EnableGeoLocation=false — skipping geo + timezone probes.");
 
-            await RunNtpCheck(configuration, logger, emitter).ConfigureAwait(false);
+            await RunNtpCheck(configuration, logger, post).ConfigureAwait(false);
         }
 
         private static async Task RunGeoAndTimezone(
             AgentConfiguration configuration,
             AgentLogger logger,
-            TelemetryEventEmitter emitter)
+            Orchestration.InformationalEventPost post)
         {
             GeoLocationAttemptResult? attempt = null;
             try
@@ -70,11 +69,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
 
             if (attempt?.Location != null)
             {
-                SafeEmit(emitter, logger, BuildGeoEvent(configuration, attempt.Location));
+                SafeEmit(post, logger, BuildGeoEvent(configuration, attempt.Location));
             }
             else
             {
-                SafeEmit(emitter, logger, BuildGeoFailureEvent(configuration, attempt));
+                SafeEmit(post, logger, BuildGeoFailureEvent(configuration, attempt));
             }
 
             if (configuration.EnableTimezoneAutoSet && !string.IsNullOrEmpty(attempt?.Location?.Timezone))
@@ -82,7 +81,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 try
                 {
                     var tzResult = TimezoneService.TrySetTimezone(attempt!.Location!.Timezone, logger);
-                    SafeEmit(emitter, logger, BuildTimezoneEvent(configuration, tzResult));
+                    SafeEmit(post, logger, BuildTimezoneEvent(configuration, tzResult));
                 }
                 catch (Exception tzEx)
                 {
@@ -94,7 +93,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
         private static async Task RunNtpCheck(
             AgentConfiguration configuration,
             AgentLogger logger,
-            TelemetryEventEmitter emitter)
+            Orchestration.InformationalEventPost post)
         {
             try
             {
@@ -106,7 +105,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 var result = await Task.Run(() => NtpTimeCheckService.CheckTime(ntpServer, logger))
                     .ConfigureAwait(false);
 
-                SafeEmit(emitter, logger, BuildNtpEvent(configuration, ntpServer, result));
+                SafeEmit(post, logger, BuildNtpEvent(configuration, ntpServer, result));
             }
             catch (Exception ex)
             {
@@ -220,9 +219,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
             };
         }
 
-        private static void SafeEmit(TelemetryEventEmitter emitter, AgentLogger logger, EnrollmentEvent evt)
+        private static void SafeEmit(Orchestration.InformationalEventPost post, AgentLogger logger, EnrollmentEvent evt)
         {
-            try { emitter.Emit(evt); }
+            try { post.Emit(evt); }
             catch (Exception ex) { logger.Warning($"StartupEnvironmentProbes: emit failed for '{evt.EventType}': {ex.Message}"); }
         }
     }

@@ -777,8 +777,13 @@ namespace AutopilotMonitor.Agent.V2
                         {
                             try
                             {
+                                // lifecyclePost is non-null here — orchestrator.Start's hook
+                                // has already run synchronously (see line ~700). The probes
+                                // emit device_location / timezone_auto_set / ntp_time_check /
+                                // agent_trace through the single-rail pipe, preserving their
+                                // Source labels via the InformationalEventPost contract.
                                 await StartupEnvironmentProbes
-                                    .RunAsync(agentConfig, logger, orchestrator.EventEmitter)
+                                    .RunAsync(agentConfig, logger, lifecyclePost)
                                     .ConfigureAwait(false);
                             }
                             catch (Exception ex)
