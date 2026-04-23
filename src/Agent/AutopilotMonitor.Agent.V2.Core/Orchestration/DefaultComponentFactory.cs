@@ -796,6 +796,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             private readonly NetworkMetrics? _networkMetrics;
             private readonly string _agentVersion;
 
+            // Codex Finding 4 — reference to the concrete SignalIngress (when available) so we
+            // can subscribe to its SignalPosted event. This lets us observe activity from
+            // ALL sources — Program.cs lifecycle, IME, ESP, DeviceInfo, Analyzer, Gather, etc.
+            // — not just the subset that flows through our own _post. Null when ingress is a
+            // test fake / non-SignalIngress implementation, in which case we degrade to
+            // "only my own posts update the idle clock" (original broken behaviour, but the
+            // fakes in tests do not exercise idle logic).
+            private readonly SignalIngress? _observableIngress;
+            private Action<DecisionSignalKind, IReadOnlyDictionary<string, string>?>? _signalPostedHandler;
+
             private readonly object _sync = new object();
             private PerformanceCollector? _performanceCollector;
             private AgentSelfMetricsCollector? _selfMetricsCollector;
@@ -832,18 +842,36 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 _agentVersion = agentVersion;
                 _lastRealEventTimeUtc = DateTime.UtcNow;
 
-                // Wrap the ingress so every posted signal triggers the idle-activity observer.
-                // Collector emissions + EmitIdleStopped all flow through the same post, so the
-                // activity check runs at the same point it did for the legacy Action<EnrollmentEvent>
-                // wrapper — only now it sits at the ingress layer instead of the pre-emitter sink.
-                var observingIngress = new IdleActivityObservingIngressSink(ingress, ObserveEventType);
-                _post = new InformationalEventPost(observingIngress, clock);
+                // Post goes to the raw ingress — no per-host wrapping. Activity observation
+                // now lives centrally on SignalIngress.SignalPosted (Codex Finding 4).
+                _post = new InformationalEventPost(ingress, clock);
+                _observableIngress = ingress as SignalIngress;
             }
 
-            private void ObserveEventType(string? eventType)
+            /// <summary>
+            /// Subscriber for <see cref="SignalIngress.SignalPosted"/>. Filters out periodic
+            /// events the host itself produces (they would self-reset the idle clock and keep
+            /// the collectors alive forever), treats everything else as "real enrollment
+            /// activity" and resets the idle clock accordingly.
+            /// </summary>
+            private void OnSignalPosted(DecisionSignalKind kind, IReadOnlyDictionary<string, string>? payload)
             {
-                if (string.IsNullOrEmpty(eventType)) return;
-                if (PeriodicEventTypes.Contains(eventType!)) return;
+                // InformationalEvents carry eventType in payload — filter those against the
+                // periodic-denylist so snapshots never mark the session as "active".
+                if (kind == DecisionSignalKind.InformationalEvent)
+                {
+                    if (payload != null
+                        && payload.TryGetValue(SignalPayloadKeys.EventType, out var eventType)
+                        && !string.IsNullOrEmpty(eventType)
+                        && PeriodicEventTypes.Contains(eventType))
+                    {
+                        return;
+                    }
+                }
+
+                // Every other signal kind — ESP phase, IME session, hello, desktop arrival,
+                // deadline fired, classifier verdict, session-lifecycle, … — is real activity
+                // that should keep the collectors running.
                 OnRealEvent();
             }
 
@@ -852,6 +880,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 lock (_sync)
                 {
                     StartCollectorsInternal();
+
+                    // Subscribe for cross-source activity BEFORE the idle timer starts so the
+                    // clock cannot be reset by an early signal we miss. Subscription is a no-op
+                    // on test fakes (_observableIngress is null).
+                    if (_observableIngress != null && _signalPostedHandler == null)
+                    {
+                        _signalPostedHandler = OnSignalPosted;
+                        _observableIngress.SignalPosted += _signalPostedHandler;
+                    }
+
                     if (_idleTimeoutMinutes > 0)
                     {
                         _idleTimer = new Timer(_ => IdleCheckTick(), state: null,
@@ -871,6 +909,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 {
                     try { _idleTimer?.Dispose(); } catch { }
                     _idleTimer = null;
+
+                    if (_observableIngress != null && _signalPostedHandler != null)
+                    {
+                        try { _observableIngress.SignalPosted -= _signalPostedHandler; }
+                        catch { /* best-effort unsubscribe during shutdown */ }
+                        _signalPostedHandler = null;
+                    }
+
                     StopCollectorsInternal();
                 }
             }
@@ -977,39 +1023,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 catch (Exception ex) { _logger.Debug($"PeriodicCollectorLifecycleHost: emit '{eventType}' threw: {ex.Message}"); }
             }
 
-            /// <summary>
-            /// Ingress sink wrapper that peeks every posted signal's <c>eventType</c> payload for
-            /// idle-activity observation, then forwards to the real ingress unchanged. Plan §5.4.
-            /// </summary>
-            private sealed class IdleActivityObservingIngressSink : ISignalIngressSink
-            {
-                private readonly ISignalIngressSink _inner;
-                private readonly Action<string?> _observeEventType;
-
-                public IdleActivityObservingIngressSink(ISignalIngressSink inner, Action<string?> observeEventType)
-                {
-                    _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-                    _observeEventType = observeEventType ?? throw new ArgumentNullException(nameof(observeEventType));
-                }
-
-                public void Post(
-                    DecisionSignalKind kind,
-                    DateTime occurredAtUtc,
-                    string sourceOrigin,
-                    Evidence evidence,
-                    IReadOnlyDictionary<string, string>? payload = null,
-                    int kindSchemaVersion = 1)
-                {
-                    string? eventType = null;
-                    if (payload != null && payload.TryGetValue(SignalPayloadKeys.EventType, out var value))
-                    {
-                        eventType = value;
-                    }
-                    try { _observeEventType(eventType); }
-                    catch { /* observer exceptions must never break the ingress pipe */ }
-                    _inner.Post(kind, occurredAtUtc, sourceOrigin, evidence, payload, kindSchemaVersion);
-                }
-            }
         }
 
         /// <summary>

@@ -395,10 +395,14 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
             // Effect parameters are the signal payload verbatim. EventTimelineEmitter extracts
             // the reserved top-level keys (eventType, source, severity, message, phase,
-            // immediateUpload) and keeps the rest as Data entries.
+            // immediateUpload) and keeps the rest as Data entries. The TypedPayload sidecar —
+            // when present — carries the original EnrollmentEvent.Data dictionary through the
+            // bus with its nested structure intact; the emitter prefers it over reconstructing
+            // Data from the string parameters (single-rail refactor plan §1.3).
             var effect = new DecisionEffect(
                 kind: DecisionEffectKind.EmitEventTimelineEntry,
-                parameters: payload);
+                parameters: payload,
+                typedPayload: signal.TypedPayload);
 
             return new DecisionStep(newState, transition, new[] { effect });
         }

@@ -21,7 +21,8 @@ namespace AutopilotMonitor.DecisionCore.Signals
             DateTime occurredAtUtc,
             string sourceOrigin,
             Evidence evidence,
-            IReadOnlyDictionary<string, string>? payload = null)
+            IReadOnlyDictionary<string, string>? payload = null,
+            object? typedPayload = null)
         {
             if (kindSchemaVersion < 1)
             {
@@ -45,6 +46,7 @@ namespace AutopilotMonitor.DecisionCore.Signals
             SourceOrigin = sourceOrigin;
             Evidence = evidence ?? throw new ArgumentNullException(nameof(evidence));
             Payload = payload;
+            TypedPayload = typedPayload;
         }
 
         /// <summary>Monotonic per SignalLog; RowKey for Azure Signals table.</summary>
@@ -65,5 +67,28 @@ namespace AutopilotMonitor.DecisionCore.Signals
         public Evidence Evidence { get; }
 
         public IReadOnlyDictionary<string, string>? Payload { get; }
+
+        /// <summary>
+        /// Optional sidecar for structured data that does not fit the string-only
+        /// <see cref="Payload"/> contract. Flows through the bus object-identity-preserving —
+        /// the reducer forwards it into a <see cref="Engine.DecisionEffect.TypedPayload"/> and
+        /// the EffectRunner hands it to the receiving consumer untouched.
+        /// <para>
+        /// Single-rail refactor (plan §1.3): informational events use this to carry their
+        /// <see cref="Shared.Models.EnrollmentEvent.Data"/> dictionary — with nested
+        /// <c>Dictionary</c> / <c>List</c> structures — from the collector through the engine
+        /// to <c>EventTimelineEmitter</c> without any intermediate serialization. Persistence
+        /// writes a JSON representation once at the disk boundary (<c>SignalSerializer</c>);
+        /// on replay the payload is restored as a <c>JObject</c> / <c>JArray</c> token that
+        /// re-serializes to the same wire shape.
+        /// </para>
+        /// <para>
+        /// Decision-relevant payload still belongs in <see cref="Payload"/> — the reducer reads
+        /// it to mutate state. <see cref="TypedPayload"/> is invisible to reducer logic by
+        /// convention; promoting an informational event to a real <see cref="DecisionSignalKind"/>
+        /// later means having the new reducer case read both fields.
+        /// </para>
+        /// </summary>
+        public object? TypedPayload { get; }
     }
 }

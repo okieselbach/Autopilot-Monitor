@@ -116,7 +116,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
                 string sourceOrigin,
                 Evidence evidence,
                 System.Collections.Generic.IReadOnlyDictionary<string, string>? payload = null,
-                int kindSchemaVersion = 1)
+                int kindSchemaVersion = 1,
+                object? typedPayload = null)
             {
                 throw new System.InvalidOperationException("ingress unavailable");
             }

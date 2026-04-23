@@ -95,7 +95,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
 
             var received = rig.EventsOfType("server_action_received").First();
             Assert.Equal("ServerActionDispatcher", received.Payload![SignalPayloadKeys.Source]);
-            Assert.Equal("rotate_config", received.Payload!["actionType"]);
+            // Event.Data (actionType etc.) now flows through the typed sidecar to preserve
+            // structure end-to-end (single-rail plan §1.3). String payload carries only the
+            // decision-relevant top-level fields.
+            var typed = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(received.TypedPayload!);
+            Assert.Equal("rotate_config", (string)typed["actionType"]);
         }
 
         [Fact]
@@ -114,7 +118,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
             Assert.Empty(rig.EventsOfType("server_action_executed"));
 
             var failed = rig.EventsOfType("server_action_failed").First();
-            Assert.Equal("config_fetch_failed", failed.Payload!["failureReason"]);
+            var typed = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(failed.TypedPayload!);
+            Assert.Equal("config_fetch_failed", (string)typed["failureReason"]);
         }
 
         [Fact]
@@ -128,7 +133,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
             });
 
             var failed = Assert.Single(rig.EventsOfType("server_action_failed"));
-            Assert.Equal("unknown_action_type", failed.Payload!["failureReason"]);
+            var typed = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(failed.TypedPayload!);
+            Assert.Equal("unknown_action_type", (string)typed["failureReason"]);
         }
 
         // ============================================================= Plan §6.2 ActionId dedup

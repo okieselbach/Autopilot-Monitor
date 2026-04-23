@@ -79,9 +79,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                     .ToList();
 
             /// <summary>
-            /// Returns the payload dictionary for the first emitted event of the given type, or null
-            /// if no such event was emitted. Payload values are already stringified by
-            /// <see cref="InformationalEventPost"/>.
+            /// Returns the string payload dictionary for the first emitted event of the given
+            /// type, or null if no such event was emitted. Only the top-level reserved fields
+            /// (eventType, source, severity, message, immediateUpload, phase) live here after
+            /// the single-rail typed-sidecar refactor.
             /// </summary>
             public IReadOnlyDictionary<string, string>? PayloadOf(string eventType) =>
                 Ingress.Posted
@@ -89,6 +90,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                     .Where(p => p.Payload!.TryGetValue(SignalPayloadKeys.EventType, out var v) &&
                                 string.Equals(v, eventType, StringComparison.Ordinal))
                     .Select(p => p.Payload)
+                    .FirstOrDefault();
+
+            /// <summary>
+            /// Returns the structured <see cref="EnrollmentEvent.Data"/> dictionary for the first
+            /// emitted event of the given type. After the single-rail typed-sidecar refactor
+            /// (plan §1.3), Data fields flow through <see cref="DecisionSignal.TypedPayload"/>
+            /// untouched — tests that previously read Data keys from the string payload must
+            /// read them from here instead.
+            /// </summary>
+            public IReadOnlyDictionary<string, object>? DataOf(string eventType) =>
+                Ingress.Posted
+                    .Where(p => p.Kind == DecisionSignalKind.InformationalEvent && p.Payload != null)
+                    .Where(p => p.Payload!.TryGetValue(SignalPayloadKeys.EventType, out var v) &&
+                                string.Equals(v, eventType, StringComparison.Ordinal))
+                    .Select(p => p.TypedPayload as IReadOnlyDictionary<string, object>)
                     .FirstOrDefault();
 
             public AgentConfiguration BuildConfig(
@@ -282,9 +298,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
 
             Assert.Contains("diagnostics_collecting", rig.EmittedEventTypes);
-            var uploaded = rig.PayloadOf("diagnostics_uploaded");
+            var uploaded = rig.DataOf("diagnostics_uploaded");
             Assert.NotNull(uploaded);
-            Assert.Equal("diag-blob.zip", uploaded!["blobName"]);
+            Assert.Equal("diag-blob.zip", (string)uploaded!["blobName"]);
             Assert.DoesNotContain("diagnostics_upload_failed", rig.EmittedEventTypes);
         }
 
@@ -300,9 +316,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
 
             Assert.Contains("diagnostics_collecting", rig.EmittedEventTypes);
-            var failed = rig.PayloadOf("diagnostics_upload_failed");
+            var failed = rig.DataOf("diagnostics_upload_failed");
             Assert.NotNull(failed);
-            Assert.Equal("upload_5xx", failed!["errorCode"]);
+            Assert.Equal("upload_5xx", (string)failed!["errorCode"]);
         }
 
         [Fact]
@@ -384,10 +400,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             var shuttingDownIdx = rig.EmittedEventTypes.ToList().IndexOf(Constants.EventTypes.AgentShuttingDown);
             Assert.True(shuttingDownIdx >= 0, "agent_shutting_down event must be emitted when self-destruct runs.");
 
-            var payload = rig.PayloadOf(Constants.EventTypes.AgentShuttingDown);
-            Assert.NotNull(payload);
-            Assert.Equal(EnrollmentTerminationOutcome.Succeeded.ToString(), payload!["outcome"]);
-            Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage.ToString(), payload["reason"]);
+            var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
+            Assert.NotNull(data);
+            Assert.Equal(EnrollmentTerminationOutcome.Succeeded.ToString(), (string)data!["outcome"]);
+            Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage.ToString(), (string)data["reason"]);
         }
 
         [Fact]

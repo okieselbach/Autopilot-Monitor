@@ -98,7 +98,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     case DecisionEffectKind.EmitEventTimelineEntry:
                         await RunTransientAsync(
                             effect,
-                            () => _emitter.Emit(effect.Parameters, stateAfterReduce, stepOccurredAtUtc),
+                            () => _emitter.Emit(effect.Parameters, stateAfterReduce, stepOccurredAtUtc, effect.TypedPayload),
                             failures,
                             cancellationToken).ConfigureAwait(false);
                         break;

@@ -60,8 +60,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         /// and dispatch <see cref="UploadResult.Actions"/> directly. Plan §4.x M4.6.ε.
         /// <para>
         /// The orchestrator already handles <see cref="UploadResult.DeviceBlocked"/> internally
-        /// (pauses the drain loop until <see cref="UploadResult.UnblockAt"/>). Handlers should
-        /// NOT call <see cref="DrainAllAsync"/> re-entrantly.
+        /// (pauses the drain loop until <see cref="UploadResult.UnblockAt"/>). Handlers are raised
+        /// <b>after</b> <see cref="DrainAllAsync"/> releases its internal drain guard, so it is
+        /// safe for a handler to run shutdown code that eventually invokes another drain (e.g.
+        /// <c>EnrollmentOrchestrator.Stop</c> → terminal drain). The backend deduplicates
+        /// (PartitionKey, RowKey), so any re-entrant drain only uploads genuinely new items.
         /// </para>
         /// </summary>
         public event EventHandler<UploadResult>? ServerResponseReceived;
@@ -85,6 +88,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             if (_disposed) throw new ObjectDisposedException(nameof(TelemetryUploadOrchestrator));
 
             await _drainGuard.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            // Signal-bearing outcomes are collected while the guard is held and raised
+            // AFTER release. Raising inline would re-enter drain logic via handlers like
+            // onTerminateRequested → orchestrator.Stop → DrainAllAsync, which blocks on the
+            // guard and deadlocks the final drain (lost agent_shutting_down). Codex Finding 1.
+            List<UploadResult>? pendingSignals = null;
+            DrainResult result;
+
             try
             {
                 int uploaded = 0;
@@ -111,8 +122,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                         _spool.MarkUploaded(batch[batch.Count - 1].TelemetryItemId);
                         uploaded += batch.Count;
 
+                        // ApplyControlSignals mutates _pausedUntilUtc synchronously so the next
+                        // iteration's IsPaused check sees the block. Event dispatch is deferred.
                         ApplyControlSignals(outcome);
-                        RaiseServerResponse(outcome);
+                        if (CarriesSignal(outcome))
+                        {
+                            (pendingSignals ??= new List<UploadResult>()).Add(outcome);
+                        }
 
                         // Stop draining immediately if the backend just quarantined the device —
                         // the next loop iteration would see IsPaused and break anyway, but there
@@ -129,13 +145,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                     }
                 }
 
-                return new DrainResult(uploaded, failedBatches, lastError);
+                result = new DrainResult(uploaded, failedBatches, lastError);
             }
             finally
             {
                 _drainGuard.Release();
             }
+
+            if (pendingSignals != null)
+            {
+                foreach (var outcome in pendingSignals)
+                {
+                    RaiseServerResponse(outcome);
+                }
+            }
+
+            return result;
         }
+
+        private static bool CarriesSignal(UploadResult outcome) =>
+            outcome.DeviceBlocked
+            || outcome.DeviceKillSignal
+            || !string.IsNullOrEmpty(outcome.AdminAction)
+            || (outcome.Actions != null && outcome.Actions.Count > 0);
 
         private void ApplyControlSignals(UploadResult outcome)
         {
@@ -149,12 +181,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
         private void RaiseServerResponse(UploadResult outcome)
         {
-            // Only raise when there is actually something to tell the subscriber.
-            var carriesSignal = outcome.DeviceBlocked
-                || outcome.DeviceKillSignal
-                || !string.IsNullOrEmpty(outcome.AdminAction)
-                || (outcome.Actions != null && outcome.Actions.Count > 0);
-            if (!carriesSignal) return;
+            if (!CarriesSignal(outcome)) return;
 
             try { ServerResponseReceived?.Invoke(this, outcome); }
             catch

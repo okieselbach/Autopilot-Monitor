@@ -415,5 +415,84 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
             Assert.Null(data["immediateUpload"]);
             Assert.Equal("-124.02", (string?)data["offsetSeconds"]);
         }
+
+        /// <summary>
+        /// Codex Finding 2 — the typed-sidecar fast path. When a caller supplies a structured
+        /// <c>Dictionary&lt;string, object&gt;</c> as <c>typedPayload</c>, the emitter uses it
+        /// directly as <c>EnrollmentEvent.Data</c>. Newtonsoft then serializes nested Dict/List
+        /// values as real JSON objects / arrays on the wire — no string round-trip, no marker,
+        /// no type-name degeneracies.
+        /// </summary>
+        [Fact]
+        public void TypedPayload_dictionary_becomes_EnrollmentEvent_Data_verbatim_on_wire()
+        {
+            using var r = new Rig();
+
+            var adapters = new List<Dictionary<string, object>>
+            {
+                new Dictionary<string, object>
+                {
+                    ["description"] = "Intel Wireless",
+                    ["macAddress"] = "AA:BB:CC:DD:EE:FF",
+                },
+                new Dictionary<string, object>
+                {
+                    ["description"] = "Loopback",
+                },
+            };
+            var typed = new Dictionary<string, object>
+            {
+                ["adapterCount"] = 2,
+                ["adapters"] = adapters,
+            };
+
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "network_adapters",
+                    ["source"] = "DeviceInfoCollector",
+                },
+                State(),
+                At,
+                typedPayload: typed);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            // Scalar int → JSON number (not "2" string).
+            Assert.Equal(JTokenType.Integer, data["adapterCount"]!.Type);
+            Assert.Equal(2, (int)data["adapterCount"]!);
+            // Nested list → JSON array of JSON objects. Full structural fidelity.
+            var adaptersToken = data["adapters"];
+            Assert.NotNull(adaptersToken);
+            Assert.Equal(JTokenType.Array, adaptersToken!.Type);
+            var array = (JArray)adaptersToken;
+            Assert.Equal(2, array.Count);
+            Assert.Equal("Intel Wireless", (string?)array[0]["description"]);
+            Assert.Equal("AA:BB:CC:DD:EE:FF", (string?)array[0]["macAddress"]);
+            Assert.Equal("Loopback", (string?)array[1]["description"]);
+        }
+
+        [Fact]
+        public void TypedPayload_missing_falls_back_to_string_parameter_reconstruction()
+        {
+            // Non-informational signals (e.g. reducer-synthesised classifier verdicts) do not
+            // supply a typed payload. The emitter must still build Data from the string-only
+            // effect parameters — same behaviour as before the sidecar existed.
+            using var r = new Rig();
+
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "decision_classifier_verdict",
+                    ["verdictId"] = "v-123",
+                },
+                State(),
+                At,
+                typedPayload: null);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            Assert.Equal("v-123", (string?)data["verdictId"]);
+        }
     }
 }

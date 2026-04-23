@@ -752,7 +752,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 string sourceOrigin,
                 Evidence evidence,
                 IReadOnlyDictionary<string, string>? payload = null,
-                int kindSchemaVersion = 1)
+                int kindSchemaVersion = 1,
+                object? typedPayload = null)
             {
                 var t = Target;
                 if (t == null)
@@ -760,7 +761,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     throw new InvalidOperationException(
                         "LazyIngressSinkRelay.Target is null — SignalIngress was not wired yet.");
                 }
-                t.Post(kind, occurredAtUtc, sourceOrigin, evidence, payload, kindSchemaVersion);
+                t.Post(kind, occurredAtUtc, sourceOrigin, evidence, payload, kindSchemaVersion, typedPayload);
             }
         }
     }

@@ -89,7 +89,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
         public void Emit(
             IReadOnlyDictionary<string, string>? parameters,
             DecisionState currentState,
-            DateTime occurredAtUtc)
+            DateTime occurredAtUtc,
+            object? typedPayload = null)
         {
             if (currentState == null) throw new ArgumentNullException(nameof(currentState));
 
@@ -111,10 +112,42 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
                 Message = BuildMessage(eventType, parameters),
                 Timestamp = DateTime.SpecifyKind(occurredAtUtc, DateTimeKind.Utc),
                 ImmediateUpload = ParseImmediateUpload(parameters),
-                Data = BuildDataDict(parameters),
+                Data = ResolveData(parameters, typedPayload),
             };
 
             _emitter.Emit(evt);
+        }
+
+        /// <summary>
+        /// Prefers a live <see cref="IReadOnlyDictionary{TKey, TValue}"/> typed payload (the
+        /// common single-rail path — collector → post → ingress → reducer → effect hands it
+        /// through without serialization). Falls back to <see cref="BuildDataDict"/> when no
+        /// typed payload is present (reducer-synthesised timeline entries from non-informational
+        /// signal kinds, or replay after a persistence round-trip that dropped the sidecar).
+        /// </summary>
+        private static Dictionary<string, object> ResolveData(
+            IReadOnlyDictionary<string, string> parameters,
+            object? typedPayload)
+        {
+            // Live path: sender's Dictionary<string, object> flows through untouched —
+            // nested List / Dict values stay as CLR references, Newtonsoft re-serializes
+            // them on the wire identically to a pre-single-rail direct emission. Copy into
+            // a fresh dict so the emitter owns it and the caller cannot mutate the wire
+            // payload after the fact.
+            if (typedPayload is IReadOnlyDictionary<string, object> roDict)
+            {
+                var copy = new Dictionary<string, object>(roDict.Count, StringComparer.Ordinal);
+                foreach (var kv in roDict) copy[kv.Key] = kv.Value;
+                return copy;
+            }
+            if (typedPayload is IDictionary<string, object> rwDict)
+            {
+                return new Dictionary<string, object>(rwDict, StringComparer.Ordinal);
+            }
+
+            // Replay path or non-informational signals: reconstruct Data from the string
+            // parameters. Same behaviour the emitter has had since M4.4.1.
+            return BuildDataDict(parameters);
         }
 
         /// <summary>
@@ -168,8 +201,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
 
         /// <summary>
         /// Returns the explicit <see cref="ImmediateUploadParamKey"/> override if it parses as
-        /// a bool literal; missing / unparsable → <c>true</c> (matches the historic reducer
-        /// default so existing terminal effects keep their immediate-upload semantics).
+        /// a bool literal; missing / unparsable → <c>true</c>.
+        /// <para>
+        /// <b>Why the default is <c>true</c>:</b> reducer-synthesised terminal events like
+        /// <c>whiteglove_complete</c>, <c>enrollment_complete</c>, <c>enrollment_failed</c>
+        /// construct their <see cref="DecisionEffect.Parameters"/> with just <c>eventType</c>
+        /// and rely on this default to be flushed immediately — session-ending signals need
+        /// to reach the backend fast. Changing this default would regress that behaviour.
+        /// </para>
+        /// <para>
+        /// <b>Finding 3 resolution:</b> the previous bug was on the helper side —
+        /// <c>InformationalEventPost</c> <i>omitted</i> the key when a caller explicitly passed
+        /// <c>immediateUpload: false</c>, and the emitter's "missing → true" default then
+        /// silently flipped the value back. The helper now writes the key both-ways
+        /// (<c>"true"</c> or <c>"false"</c>), so any caller-specified value round-trips
+        /// correctly. The default here only applies when nobody specified a value — which in
+        /// practice is only the reducer's own terminal-event emissions.
+        /// </para>
         /// </summary>
         private static bool ParseImmediateUpload(IReadOnlyDictionary<string, string> parameters)
         {

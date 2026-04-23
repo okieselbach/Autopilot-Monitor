@@ -1,7 +1,6 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
@@ -63,6 +62,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <param name="occurredAtUtc">Event time; defaults to <see cref="IClock.UtcNow"/>.</param>
         /// <param name="sourceOrigin">Identity of the posting component for the <see cref="Evidence"/> record; defaults to <paramref name="source"/>.</param>
         /// <param name="evidenceSummary">Free-text evidence summary; defaults to <paramref name="message"/> or <paramref name="eventType"/>.</param>
+        /// <param name="typedPayload">
+        /// Optional structured sidecar that flows through the bus object-identity-preserving.
+        /// Typically <see cref="EnrollmentEvent.Data"/> — the emitter uses it directly as the
+        /// final Data dictionary when it is an <see cref="IReadOnlyDictionary{TKey, TValue}"/>,
+        /// skipping the string-reconstruction path. Preserves nested <c>Dictionary</c> /
+        /// <c>List</c> values without intermediate JSON serialization. Plan §1.3.
+        /// </param>
         public void Emit(
             string eventType,
             string source,
@@ -73,7 +79,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IReadOnlyDictionary<string, string>? data = null,
             DateTime? occurredAtUtc = null,
             string? sourceOrigin = null,
-            string? evidenceSummary = null)
+            string? evidenceSummary = null,
+            object? typedPayload = null)
         {
             if (string.IsNullOrEmpty(eventType))
                 throw new ArgumentException("eventType is mandatory.", nameof(eventType));
@@ -90,8 +97,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 payload[SignalPayloadKeys.Message] = message!;
             if (severity.HasValue)
                 payload[SignalPayloadKeys.Severity] = severity.Value.ToString();
-            if (immediateUpload)
-                payload[SignalPayloadKeys.ImmediateUpload] = "true";
+            // ImmediateUpload is written both-ways so the emitter does not have to infer
+            // "missing → true" and override an explicit false. See Finding 3.
+            payload[SignalPayloadKeys.ImmediateUpload] = immediateUpload ? "true" : "false";
             if (phase.HasValue)
                 payload[PhaseParamKey] = phase.Value.ToString();
 
@@ -119,30 +127,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 occurredAtUtc: stamp,
                 sourceOrigin: !string.IsNullOrEmpty(sourceOrigin) ? sourceOrigin! : source,
                 evidence: evidence,
-                payload: payload);
+                payload: payload,
+                typedPayload: typedPayload);
         }
 
         /// <summary>
         /// Convenience overload for migration sites that already construct an
-        /// <see cref="EnrollmentEvent"/>. Decomposes the event into the primary
-        /// <see cref="Emit(string,string,string?,EventSeverity?,bool,EnrollmentPhase?,IReadOnlyDictionary{string,string}?,DateTime?,string?,string?)"/>
-        /// call so the on-wire shape matches what the legacy
-        /// <c>TelemetryEventEmitter.Emit(EnrollmentEvent)</c> path produced.
+        /// <see cref="EnrollmentEvent"/>. Routes <see cref="EnrollmentEvent.Data"/> through the
+        /// typed sidecar (plan §1.3) so nested <c>Dictionary</c> / <c>List</c> values reach
+        /// <c>EventTimelineEmitter</c> with their structure intact — no string round-trip.
         /// <para>
         /// Transport-managed fields (<see cref="EnrollmentEvent.Sequence"/>,
         /// <see cref="EnrollmentEvent.RowKey"/>, <see cref="EnrollmentEvent.SessionId"/>,
         /// <see cref="EnrollmentEvent.TenantId"/>) are ignored here — the engine assigns
         /// them once the emitted <see cref="EnrollmentEvent"/> reaches
-        /// <c>TelemetryEventEmitter</c> again. <see cref="EnrollmentEvent.Timestamp"/> is
-        /// forwarded as <c>occurredAtUtc</c> (the ctor sets it to <c>DateTime.UtcNow</c>,
-        /// so there is no default to fall back from).
+        /// <c>TelemetryEventEmitter</c>. <see cref="EnrollmentEvent.Timestamp"/> is forwarded
+        /// as <c>occurredAtUtc</c> (the ctor sets it to <c>DateTime.UtcNow</c>, so there is no
+        /// default to fall back from).
         /// </para>
         /// </summary>
         public void Emit(EnrollmentEvent evt)
         {
             if (evt == null) throw new ArgumentNullException(nameof(evt));
-
-            var data = StringifyData(evt.Data);
 
             Emit(
                 eventType: evt.EventType,
@@ -151,38 +157,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 severity: evt.Severity,
                 immediateUpload: evt.ImmediateUpload,
                 phase: evt.Phase == EnrollmentPhase.Unknown ? (EnrollmentPhase?)null : evt.Phase,
-                data: data,
-                occurredAtUtc: DateTime.SpecifyKind(evt.Timestamp, DateTimeKind.Utc));
-        }
-
-        /// <summary>
-        /// Flattens <see cref="EnrollmentEvent.Data"/> (values are <c>object</c> so they can
-        /// carry typed primitives like <c>bool</c>, <c>int</c>, <c>DateTime</c>) into the
-        /// <see cref="string"/>-valued dictionary the signal payload contract requires.
-        /// Invariant culture so <c>DateTime</c> and numeric round-trips match the legacy wire
-        /// format produced by Newtonsoft serialization.
-        /// </summary>
-        private static IReadOnlyDictionary<string, string>? StringifyData(IReadOnlyDictionary<string, object>? source)
-        {
-            if (source == null || source.Count == 0) return null;
-
-            var copy = new Dictionary<string, string>(source.Count, StringComparer.Ordinal);
-            foreach (var kv in source)
-            {
-                if (kv.Value == null)
-                {
-                    copy[kv.Key] = string.Empty;
-                    continue;
-                }
-                copy[kv.Key] = kv.Value switch
-                {
-                    string s => s,
-                    DateTime dt => dt.ToString("o", CultureInfo.InvariantCulture),
-                    IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
-                    _ => kv.Value.ToString() ?? string.Empty,
-                };
-            }
-            return copy;
+                data: null,
+                occurredAtUtc: DateTime.SpecifyKind(evt.Timestamp, DateTimeKind.Utc),
+                typedPayload: evt.Data);
         }
     }
 }

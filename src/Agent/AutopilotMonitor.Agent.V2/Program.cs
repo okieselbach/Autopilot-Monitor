@@ -721,6 +721,20 @@ namespace AutopilotMonitor.Agent.V2
                                     await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
                                 onTerminateRequested: action =>
                                 {
+                                    // Codex Finding 1 (defensive) — re-entry short-circuit. If a
+                                    // nested drain (e.g. orchestrator.Stop's terminal drain) parses
+                                    // a NEW ActionId out of a late response, the dispatcher would
+                                    // otherwise call us again on a thread that is ALREADY inside the
+                                    // shutdown sequence. That thread is responsible for setting
+                                    // shutdownComplete, so waiting on it below would self-deadlock.
+                                    // ActionId dedup in ServerActionDispatcher handles the same-id
+                                    // case; this handles pathological different-id re-entries.
+                                    if (shutdown.IsSet)
+                                    {
+                                        logger.Debug("Terminate callback: shutdown already in progress — short-circuiting re-entry.");
+                                        return Task.CompletedTask;
+                                    }
+
                                     var forceSelfDestruct = action?.Params != null
                                         && action.Params.TryGetValue("forceSelfDestruct", out var f)
                                         && string.Equals(f, "true", StringComparison.OrdinalIgnoreCase);
@@ -758,6 +772,13 @@ namespace AutopilotMonitor.Agent.V2
                                     // covers the 10s spool drain + cleanup-service launch + orchestrator
                                     // stop; if it times out the agent is misbehaving and we return
                                     // anyway rather than deadlock the ingest thread forever.
+                                    //
+                                    // Codex Finding 1: the deadlock that previously fired here came
+                                    // from TelemetryUploadOrchestrator raising ServerResponseReceived
+                                    // WHILE holding its _drainGuard. That is fixed at source — events
+                                    // are now raised AFTER guard release, so orchestrator.Stop's
+                                    // terminal DrainAllAsync on the main thread can acquire the guard
+                                    // and actually upload agent_shutting_down before we unblock.
                                     if (!shutdownComplete.Wait(TimeSpan.FromSeconds(60)))
                                     {
                                         logger.Warning("Terminate callback: shutdownComplete wait timed out after 60s — returning without confirmed shutdown.");

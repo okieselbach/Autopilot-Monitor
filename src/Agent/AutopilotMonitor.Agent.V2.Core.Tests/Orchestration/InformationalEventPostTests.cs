@@ -96,8 +96,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var payload = sink.Posted[0].Payload!;
             Assert.False(payload.ContainsKey(SignalPayloadKeys.Message));
             Assert.False(payload.ContainsKey(SignalPayloadKeys.Severity));
-            Assert.False(payload.ContainsKey(SignalPayloadKeys.ImmediateUpload));
             Assert.False(payload.ContainsKey("phase"));
+            // ImmediateUpload is written both-ways (Finding 3) — default is "false". Keeping
+            // the key present prevents the emitter from inferring "missing → true" and
+            // silently overriding an explicit false value.
+            Assert.Equal("false", payload[SignalPayloadKeys.ImmediateUpload]);
         }
 
         [Fact]
@@ -129,16 +132,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         }
 
         [Fact]
-        public void ImmediateUpload_false_does_not_add_key_to_payload()
+        public void ImmediateUpload_false_writes_explicit_false_key_to_payload()
         {
-            // Keeps the wire format minimal and matches the emitter's default (true when key is absent
-            // is handled by emitter / not contradicted here; but the helper interprets "immediateUpload:false"
-            // as "use default" — it is a passthrough convenience).
+            // Codex Finding 3 — the previous "omit on false" behaviour combined with the
+            // emitter's "missing → true" default silently flushed every performance_snapshot
+            // and agent_metrics_snapshot as RequiresImmediateFlush=true. Helper now writes
+            // the key both-ways so the emitter sees the caller's actual intent.
             var (sut, sink, _) = BuildRig();
 
             sut.Emit("agent_metrics_snapshot", "AgentSelfMetricsCollector", immediateUpload: false);
 
-            Assert.False(sink.Posted[0].Payload!.ContainsKey(SignalPayloadKeys.ImmediateUpload));
+            Assert.Equal("false", sink.Posted[0].Payload![SignalPayloadKeys.ImmediateUpload]);
         }
 
         [Fact]
@@ -214,6 +218,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         {
             var (sut, sink, _) = BuildRig();
             var explicitTime = new DateTime(2026, 4, 23, 10, 5, 0, DateTimeKind.Utc);
+            var data = new Dictionary<string, object>
+            {
+                ["agentVersion"] = "2.0.200",
+                ["awaitEnrollment"] = true,
+                ["agentMaxLifetimeMinutes"] = 360,
+            };
             var evt = new EnrollmentEvent
             {
                 EventType = "agent_started",
@@ -223,12 +233,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 Message = "Agent started",
                 Timestamp = explicitTime,
                 ImmediateUpload = true,
-                Data = new Dictionary<string, object>
-                {
-                    ["agentVersion"] = "2.0.200",
-                    ["awaitEnrollment"] = true,
-                    ["agentMaxLifetimeMinutes"] = 360,
-                },
+                Data = data,
             };
 
             sut.Emit(evt);
@@ -239,11 +244,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Equal("AutopilotMonitor.Agent.V2", payload[SignalPayloadKeys.Source]);
             Assert.Equal("Agent started", payload[SignalPayloadKeys.Message]);
             Assert.Equal("Info", payload[SignalPayloadKeys.Severity]);
+            // Finding 3: ImmediateUpload is written both-ways, not omitted when false.
             Assert.Equal("true", payload[SignalPayloadKeys.ImmediateUpload]);
-            // Data values are flattened to invariant strings so the wire shape stays deterministic.
-            Assert.Equal("2.0.200", payload["agentVersion"]);
-            Assert.Equal("True", payload["awaitEnrollment"]);
-            Assert.Equal("360", payload["agentMaxLifetimeMinutes"]);
+            // Data values live on the typed sidecar — NOT duplicated in the string payload.
+            // Keeps the decision-transitions log clean and avoids a stringify round-trip that
+            // lost nested structure (Codex Finding 2).
+            Assert.False(payload.ContainsKey("agentVersion"));
+            Assert.False(payload.ContainsKey("awaitEnrollment"));
+            Assert.False(payload.ContainsKey("agentMaxLifetimeMinutes"));
+            Assert.Same(data, posted.TypedPayload);
             // Phase=Unknown is an absent-by-default signal — helper does not leak it into payload.
             Assert.False(payload.ContainsKey("phase"));
             Assert.Equal(explicitTime, posted.OccurredAtUtc);
@@ -306,8 +315,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         }
 
         [Fact]
-        public void Emit_EnrollmentEvent_overload_stringifies_DateTime_values_with_roundtrip_format()
+        public void Emit_EnrollmentEvent_overload_passes_DateTime_as_live_object_through_typed_payload()
         {
+            // Typed sidecar preserves DateTime as a DateTime, not a stringified "o"-format
+            // value. Newtonsoft serializes it to ISO-8601 on the outbound wire anyway (via
+            // TelemetryEventEmitter.Emit → JsonConvert.SerializeObject), so the wire shape
+            // is equivalent to the pre-single-rail direct emission.
             var (sut, sink, _) = BuildRig();
             var bootTime = new DateTime(2026, 4, 23, 8, 0, 0, DateTimeKind.Utc);
             var evt = new EnrollmentEvent
@@ -322,8 +335,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 
             sut.Emit(evt);
 
-            // "o" roundtrip format — deterministic, parseable back to the same DateTime.
-            Assert.Equal("2026-04-23T08:00:00.0000000Z", sink.Posted[0].Payload!["previousBootUtc"]);
+            var typed = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(sink.Posted[0].TypedPayload!);
+            Assert.Equal(bootTime, Assert.IsType<DateTime>(typed["previousBootUtc"]));
         }
 
         [Fact]
@@ -331,6 +344,74 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         {
             var (sut, _, _) = BuildRig();
             Assert.Throws<ArgumentNullException>(() => sut.Emit((EnrollmentEvent)null!));
+        }
+
+        /// <summary>
+        /// Codex Finding 2 — nested containers (Dictionary, List) must survive the bus with
+        /// structure intact. The helper forwards <see cref="EnrollmentEvent.Data"/> through the
+        /// typed sidecar (<c>DecisionSignal.TypedPayload</c>) untouched — no intermediate
+        /// serialization. The emitter side then uses it directly as the final Data dict.
+        /// </summary>
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_forwards_Data_as_typed_payload_by_reference()
+        {
+            var (sut, sink, _) = BuildRig();
+            var adapters = new List<Dictionary<string, object>>
+            {
+                new Dictionary<string, object>
+                {
+                    ["description"] = "Intel Wireless",
+                    ["macAddress"] = "AA:BB:CC:DD:EE:FF",
+                    ["dhcpEnabled"] = "True",
+                },
+                new Dictionary<string, object>
+                {
+                    ["description"] = "Loopback",
+                    ["macAddress"] = null!,
+                },
+            };
+            var data = new Dictionary<string, object>
+            {
+                ["adapterCount"] = 2,
+                ["adapters"] = adapters,
+            };
+            var evt = new EnrollmentEvent
+            {
+                EventType = "network_adapters",
+                Source = "DeviceInfoCollector",
+                Data = data,
+            };
+
+            sut.Emit(evt);
+
+            var posted = Assert.Single(sink.Posted);
+            // typedPayload is the Data dict by reference — no copy, no stringify.
+            Assert.Same(data, posted.TypedPayload);
+
+            // The string payload does NOT duplicate Data keys (that would be a round-trip).
+            var payload = posted.Payload!;
+            Assert.False(payload.ContainsKey("adapterCount"));
+            Assert.False(payload.ContainsKey("adapters"));
+            // But top-level reserved fields are still present as strings so the reducer /
+            // emitter can parse eventType / source / severity / message / immediateUpload.
+            Assert.Equal("network_adapters", payload[SignalPayloadKeys.EventType]);
+            Assert.Equal("DeviceInfoCollector", payload[SignalPayloadKeys.Source]);
+        }
+
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_forwards_null_Data_as_null_typed_payload()
+        {
+            var (sut, sink, _) = BuildRig();
+            var evt = new EnrollmentEvent
+            {
+                EventType = "agent_started",
+                Source = "AutopilotMonitor.Agent.V2",
+                Data = null!,
+            };
+
+            sut.Emit(evt);
+
+            Assert.Null(sink.Posted[0].TypedPayload);
         }
     }
 }

@@ -37,7 +37,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
             ActiveDeadline? deadline = null,
             string? cancelDeadlineName = null,
             string? classifierId = null,
-            object? classifierSnapshot = null)
+            object? classifierSnapshot = null,
+            object? typedPayload = null)
         {
             Kind = kind;
             Parameters = parameters;
@@ -45,6 +46,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
             CancelDeadlineName = cancelDeadlineName;
             ClassifierId = classifierId;
             ClassifierSnapshot = classifierSnapshot;
+            TypedPayload = typedPayload;
         }
 
         public DecisionEffectKind Kind { get; }
@@ -62,5 +64,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>Set for <see cref="DecisionEffectKind.RunClassifier"/> — classifier-specific snapshot object.</summary>
         public object? ClassifierSnapshot { get; }
+
+        /// <summary>
+        /// Optional structured sidecar for <see cref="DecisionEffectKind.EmitEventTimelineEntry"/>.
+        /// Mirrors <see cref="Signals.DecisionSignal.TypedPayload"/>: the reducer copies the
+        /// signal's typed payload here, the EffectRunner hands it to
+        /// <c>IEventTimelineEmitter.Emit</c>, and the emitter uses it directly as
+        /// <c>EnrollmentEvent.Data</c>. Lets informational events preserve nested
+        /// <c>Dictionary</c> / <c>List</c> structure without round-tripping through the
+        /// string-only <see cref="Parameters"/> dictionary. Single-rail refactor plan §1.3.
+        /// </summary>
+        public object? TypedPayload { get; }
     }
 }

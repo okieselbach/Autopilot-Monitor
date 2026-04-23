@@ -61,6 +61,86 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Throws<JsonSerializationException>(() => SignalSerializer.Deserialize(json));
         }
 
+        /// <summary>
+        /// Single-rail typed-sidecar (plan §1.3) — when a signal carries structured
+        /// <see cref="EnrollmentEvent.Data"/> through <see cref="DecisionSignal.TypedPayload"/>,
+        /// persistence must write it to disk and restore it on read with enough fidelity that
+        /// the next <c>TelemetryEventEmitter.Emit</c> re-emits the original wire shape.
+        /// Dictionary values come back as Newtonsoft <c>JValue</c>/<c>JArray</c>/<c>JObject</c>
+        /// tokens — the same tokens Newtonsoft serializes identically on the outbound side.
+        /// </summary>
+        [Fact]
+        public void SignalSerializer_roundtrip_preserves_TypedPayload_structure()
+        {
+            var original = new DecisionSignal(
+                sessionSignalOrdinal: 7,
+                sessionTraceOrdinal: 7,
+                kind: DecisionSignalKind.InformationalEvent,
+                kindSchemaVersion: 1,
+                occurredAtUtc: new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc),
+                sourceOrigin: "DeviceInfoCollector",
+                evidence: new Evidence(
+                    kind: EvidenceKind.Raw,
+                    identifier: "informational_event:network_adapters",
+                    summary: "Network adapters configuration"),
+                payload: new Dictionary<string, string>
+                {
+                    ["eventType"] = "network_adapters",
+                    ["source"] = "DeviceInfoCollector",
+                },
+                typedPayload: new Dictionary<string, object>
+                {
+                    ["adapterCount"] = 2,
+                    ["adapters"] = new List<Dictionary<string, object>>
+                    {
+                        new Dictionary<string, object>
+                        {
+                            ["description"] = "Intel Wireless",
+                            ["macAddress"] = "AA:BB:CC:DD:EE:FF",
+                        },
+                        new Dictionary<string, object>
+                        {
+                            ["description"] = "Loopback",
+                        },
+                    },
+                });
+
+            var json = SignalSerializer.Serialize(original);
+            var roundtripped = SignalSerializer.Deserialize(json);
+
+            // TypedPayload comes back as Dictionary<string, object> with JToken values —
+            // enough for EventTimelineEmitter.ResolveData to consume it as Data, and for
+            // Newtonsoft to re-serialize it identically.
+            var typed = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(roundtripped.TypedPayload!);
+            // Scalar → JValue(Integer)
+            var adapterCount = Assert.IsType<Newtonsoft.Json.Linq.JValue>(typed["adapterCount"]);
+            Assert.Equal(2L, adapterCount.Value);
+            // Nested list → JArray of JObjects.
+            var adapters = Assert.IsType<Newtonsoft.Json.Linq.JArray>(typed["adapters"]);
+            Assert.Equal(2, adapters.Count);
+            Assert.Equal("Intel Wireless", (string?)adapters[0]["description"]);
+            Assert.Equal("AA:BB:CC:DD:EE:FF", (string?)adapters[0]["macAddress"]);
+            Assert.Equal("Loopback", (string?)adapters[1]["description"]);
+        }
+
+        [Fact]
+        public void SignalSerializer_roundtrip_null_TypedPayload_stays_null()
+        {
+            var original = new DecisionSignal(
+                sessionSignalOrdinal: 1,
+                sessionTraceOrdinal: 1,
+                kind: DecisionSignalKind.SessionStarted,
+                kindSchemaVersion: 1,
+                occurredAtUtc: new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc),
+                sourceOrigin: "test",
+                evidence: new Evidence(EvidenceKind.Synthetic, "session-start", "first signal"),
+                payload: null,
+                typedPayload: null);
+
+            var roundtripped = SignalSerializer.Deserialize(SignalSerializer.Serialize(original));
+            Assert.Null(roundtripped.TypedPayload);
+        }
+
         [Fact]
         public void UnknownFallbackEnumConverter_unknownValue_mapsToFallback()
         {
