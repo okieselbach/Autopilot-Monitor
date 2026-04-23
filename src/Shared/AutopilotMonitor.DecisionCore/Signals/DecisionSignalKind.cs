@@ -26,6 +26,7 @@ namespace AutopilotMonitor.DecisionCore.Signals
         SystemRebootObserved,
         DeviceInfoCollected,
         AutopilotProfileRead,
+        EspConfigDetected,
 
         // --- Raw — WhiteGlove Part 2 (Post-Reboot User-Sign-In) ---
         UserAadSignInComplete,

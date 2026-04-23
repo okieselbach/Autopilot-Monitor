@@ -426,8 +426,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _logger = logger;
                 var post = new InformationalEventPost(ingress, clock);
+                // Plan §6 Fix 9 — the collector also posts an EspConfigDetected decision signal
+                // when it reads the FirstSync SkipUser/SkipDevice registry values, so that Fix 8's
+                // reducer guards have the SkipUserEsp/SkipDeviceEsp state facts to read.
                 _collector = new Monitoring.Telemetry.DeviceInfo.DeviceInfoCollector(
-                    sessionId, tenantId, post, logger);
+                    sessionId, tenantId, post, logger, ingress, clock);
             }
 
             public void Start()

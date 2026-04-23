@@ -54,6 +54,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// <summary>On <c>ImeUserSessionCompleted</c>: matched pattern id.</summary>
         public const string ImePatternId = "patternId";
 
+        /// <summary>On <c>EspConfigDetected</c>: "true" / "false"; missing → fact is not set.</summary>
+        public const string SkipUserEsp = "skipUserEsp";
+
+        /// <summary>On <c>EspConfigDetected</c>: "true" / "false"; missing → fact is not set.</summary>
+        public const string SkipDeviceEsp = "skipDeviceEsp";
+
         // --- InformationalEvent payload (plan §1.3, single-rail refactor) ------------
         // Mirrors the EnrollmentEvent fields the reducer must reconstruct for the
         // EmitEventTimelineEntry effect. EventType / Source are mandatory; the rest are

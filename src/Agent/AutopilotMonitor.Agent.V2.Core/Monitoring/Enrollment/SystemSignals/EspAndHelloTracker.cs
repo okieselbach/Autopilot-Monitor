@@ -35,11 +35,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly int _modernDeploymentBackfillLookbackMinutes;
         private readonly string _stateDirectory;
         private readonly int[] _modernDeploymentHarmlessEventIds;
+        private readonly Func<(bool? skipUser, bool? skipDevice)> _skipConfigProbe;
+        private readonly Func<bool> _accountSetupActivityProbe;
 
         private HelloTracker _helloTracker;
         private ShellCoreTracker _shellCoreTracker;
         private ProvisioningStatusTracker _provisioningTracker;
         private ModernDeploymentTracker _modernDeploymentTracker;
+
+        // Plan §6 Fix 7 — lazy-cached skip-user flag from HKLM\...\FirstSync\SkipUserStatusPage.
+        // Read once per tracker lifetime on first esp_exiting forward; null until read.
+        private bool? _skipUserEspCached;
+        private bool _skipConfigProbed;
+        private readonly object _skipConfigLock = new object();
 
         /// <summary>
         /// Callback invoked when Hello provisioning completes (successfully, failed, skipped, or timeout).
@@ -121,7 +129,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             bool modernDeploymentBackfillEnabled = true,
             int modernDeploymentBackfillLookbackMinutes = 30,
             string stateDirectory = null,
-            int[] modernDeploymentHarmlessEventIds = null)
+            int[] modernDeploymentHarmlessEventIds = null,
+            Func<(bool? skipUser, bool? skipDevice)> skipConfigProbe = null,
+            Func<bool> accountSetupActivityProbe = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -134,6 +144,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             _modernDeploymentBackfillLookbackMinutes = modernDeploymentBackfillLookbackMinutes;
             _stateDirectory = stateDirectory != null ? Environment.ExpandEnvironmentVariables(stateDirectory) : null;
             _modernDeploymentHarmlessEventIds = modernDeploymentHarmlessEventIds;
+            // Test seam: allow injection of a fake skip-config reader; defaults to the real
+            // registry probe so production never has to think about this parameter.
+            _skipConfigProbe = skipConfigProbe ?? (() => EspSkipConfigurationProbe.Read(_logger));
+            // Test seam: allow injection of a fake AccountSetup-activity probe. Production uses
+            // the provisioning tracker's live registry-derived flag.
+            _accountSetupActivityProbe = accountSetupActivityProbe ?? (() => _provisioningTracker?.HasAccountSetupActivity == true);
         }
 
         // =====================================================================
@@ -296,9 +312,85 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         private void OnFinalizingSetupPhaseTriggered(object sender, string reason)
         {
+            // Plan §6 Fix 7 — on Classic V1 enrollments (SkipUser=false) Shell-Core emits TWO
+            // esp_exiting (62407) events: one when Device-ESP hands off to Account-ESP, and one
+            // at the true final exit. Forwarding the first one as EspPhaseChanged(Finalizing)
+            // drives the reducer into AwaitingHello prematurely and arms HelloSafety from the
+            // wrong baseline (see session 30410cd7 where the deadline would have fired first).
+            // Swallow the intermediate forward when SkipUser is explicitly false AND the
+            // provisioning tracker has not yet seen any AccountSetup activity.
+            if (string.Equals(reason, "esp_exiting", StringComparison.OrdinalIgnoreCase)
+                && IsIntermediateDeviceEspExit())
+            {
+                _logger.Info(
+                    "EspAndHelloTracker: swallowing intermediate Device-ESP esp_exiting (SkipUser=false, no AccountSetup activity yet) — waiting for real final exit");
+                return;
+            }
+
             try { FinalizingSetupPhaseTriggered?.Invoke(this, reason); }
             catch (Exception ex) { _logger.Error("Error forwarding FinalizingSetupPhaseTriggered", ex); }
         }
+
+        /// <summary>
+        /// Plan §6 Fix 7 — returns <c>true</c> when the current <c>esp_exiting</c> forward
+        /// should be suppressed because it is the Device-ESP intermediate exit on a Classic
+        /// (SkipUser=false) enrollment that has not yet reached the AccountSetup phase.
+        /// <para>
+        /// Returns <c>false</c> (i.e. "forward the signal") when any of the following hold:
+        /// </para>
+        /// <list type="bullet">
+        ///   <item>SkipUser is unknown or explicitly <c>true</c> (device-only / SkipUser flow —
+        ///         AwaitingHello is legitimately reachable directly after Device-ESP).</item>
+        ///   <item>The provisioning tracker has observed AccountSetup activity (registry JSON
+        ///         under <c>AccountSetupCategory.Status</c> has surfaced at least one subcategory),
+        ///         i.e. the current exit is the final post-Account-ESP one.</item>
+        /// </list>
+        /// </summary>
+        private bool IsIntermediateDeviceEspExit()
+        {
+            // If AccountSetup activity has appeared, we're at the true final exit.
+            bool accountSetupSeen;
+            try { accountSetupSeen = _accountSetupActivityProbe(); }
+            catch (Exception ex)
+            {
+                _logger.Debug($"EspAndHelloTracker: account-setup-activity probe threw: {ex.Message}");
+                accountSetupSeen = false;
+            }
+            if (accountSetupSeen) return false;
+
+            var skipUser = GetSkipUserEspCached();
+
+            // Unknown or explicitly-skipping => forward as before. Only block when we are
+            // certain the enrollment does NOT skip the user ESP (i.e. a second esp_exiting is
+            // expected).
+            return skipUser == false;
+        }
+
+        private bool? GetSkipUserEspCached()
+        {
+            lock (_skipConfigLock)
+            {
+                if (_skipConfigProbed) return _skipUserEspCached;
+                _skipConfigProbed = true;
+                try
+                {
+                    var (skipUser, _) = _skipConfigProbe();
+                    _skipUserEspCached = skipUser;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug($"EspAndHelloTracker: skip-config probe threw: {ex.Message}");
+                    _skipUserEspCached = null;
+                }
+                return _skipUserEspCached;
+            }
+        }
+
+        // Test seam — invokes the guarded forward path without driving the underlying ShellCore
+        // event-log watcher. Mirrors the arg signature of the live event handler. Internal so
+        // only the in-repo test project (InternalsVisibleTo) can use it.
+        internal void TriggerFinalizingSetupPhaseForTest(string reason) =>
+            OnFinalizingSetupPhaseTriggered(this, reason);
 
         private void OnWhiteGloveCompleted(object sender, EventArgs e)
         {

@@ -29,7 +29,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
             {
                 EnrollmentPhase.DeviceSetup => SessionStage.EspDeviceSetup,
                 EnrollmentPhase.AccountSetup => SessionStage.EspAccountSetup,
-                EnrollmentPhase.FinalizingSetup => SessionStage.AwaitingHello,
+                // Plan §6 Fix 8 — Finalizing is a synthetic phase derived from the Shell-Core
+                // esp_exiting event; on Classic V1 enrollments the first exit is the Device-ESP
+                // handoff, not the true final. Only promote to AwaitingHello when reaching it is
+                // legitimate (AccountSetup already observed, OR SkipUser flow). Otherwise keep
+                // the current stage — the signal is still recorded as a taken transition with
+                // the FinalizingEnteredUtc fact + CurrentEnrollmentPhase updated below, but the
+                // HelloSafety deadline is NOT armed.
+                EnrollmentPhase.FinalizingSetup => ShouldTransitionToAwaitingHello(state)
+                    ? SessionStage.AwaitingHello
+                    : state.Stage,
                 _ => state.Stage,
             };
 
@@ -84,6 +93,19 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 effectsList.Add(new DecisionEffect(
                     DecisionEffectKind.CancelDeadline,
                     cancelDeadlineName: DeadlineNames.DeviceOnlyEspDetection));
+
+                // Plan §6 Fix 10 — defensive belt-and-suspenders for the premature-AwaitingHello
+                // bounce-back case. If Fix 7's tracker guard or Fix 8's reducer guards ever fail
+                // and the stage reached AwaitingHello before AccountSetup (i.e. an early Finalizing
+                // synthesis armed HelloSafety from the wrong baseline), cancel the deadline here
+                // so it cannot fire from the wrong window after we resume EspAccountSetup.
+                if (state.Stage == SessionStage.AwaitingHello)
+                {
+                    builder.CancelDeadline(DeadlineNames.HelloSafety);
+                    effectsList.Add(new DecisionEffect(
+                        DecisionEffectKind.CancelDeadline,
+                        cancelDeadlineName: DeadlineNames.HelloSafety));
+                }
             }
 
             var newState = builder.Build();
@@ -100,15 +122,36 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>
         /// Handle <see cref="DecisionSignalKind.EspExiting"/>. Records
-        /// <see cref="DecisionState.EspFinalExitUtc"/>, transitions to
-        /// <see cref="SessionStage.AwaitingHello"/>, and schedules the Hello-safety deadline
-        /// so a hang on Hello doesn't strand the session.
+        /// <see cref="DecisionState.EspFinalExitUtc"/> for observability; transitions to
+        /// <see cref="SessionStage.AwaitingHello"/> and arms the Hello-safety deadline only
+        /// when <see cref="ShouldTransitionToAwaitingHello"/> holds (plan §6 Fix 8). On an
+        /// early / intermediate exit (e.g. the Device-ESP handoff on a Classic V1 enrollment)
+        /// the fact is still recorded but the stage is unchanged and no deadline is armed.
         /// </summary>
         private DecisionStep HandleEspExitingV1(DecisionState state, DecisionSignal signal)
         {
             var nextStep = state.StepIndex + 1;
-            var dueAtUtc = signal.OccurredAtUtc.Add(s_helloSafetyWindow);
+            var shouldTransition = ShouldTransitionToAwaitingHello(state);
 
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+            builder.EspFinalExitUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+
+            if (!shouldTransition)
+            {
+                // Early / intermediate esp_exiting: keep stage, no HelloSafety arm. Observability
+                // still records EspFinalExitUtc so downstream classifiers see the full picture.
+                var noopTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.EspExiting));
+                return new DecisionStep(builder.Build(), noopTransition, Array.Empty<DecisionEffect>());
+            }
+
+            var dueAtUtc = signal.OccurredAtUtc.Add(s_helloSafetyWindow);
             var helloSafety = new ActiveDeadline(
                 name: DeadlineNames.HelloSafety,
                 dueAtUtc: dueAtUtc,
@@ -118,14 +161,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     [SignalPayloadKeys.Deadline] = DeadlineNames.HelloSafety,
                 });
 
-            var builder = state.ToBuilder()
+            builder = builder
                 .WithStage(SessionStage.AwaitingHello)
-                .WithStepIndex(nextStep)
-                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .AddDeadline(helloSafety);
-            builder.EspFinalExitUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
-
-            var newState = builder.Build();
 
             var transition = BuildTakenTransition(
                 before: state,
@@ -139,7 +177,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: helloSafety),
             };
 
-            return new DecisionStep(newState, transition, effects);
+            return new DecisionStep(builder.Build(), transition, effects);
         }
 
         /// <summary>
