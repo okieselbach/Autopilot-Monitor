@@ -458,7 +458,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
                 _adapter = new ImeLogTrackerAdapter(_tracker, ingress, clock, whiteGloveSealingPatternIds);
 
-                _processWatcher = new ImeProcessWatcher(sessionId, tenantId, onEnrollmentEvent, logger);
+                var processWatcherPost = new InformationalEventPost(ingress, clock);
+                _processWatcher = new ImeProcessWatcher(sessionId, tenantId, processWatcherPost, logger);
             }
 
             public void Start()
