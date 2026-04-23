@@ -206,5 +206,131 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Throws<ArgumentNullException>(() => new InformationalEventPost(null!, new VirtualClock(At)));
             Assert.Throws<ArgumentNullException>(() => new InformationalEventPost(new FakeSignalIngressSink(), null!));
         }
+
+        // ------------------------------------------------------ Emit(EnrollmentEvent) overload
+
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_decomposes_all_top_level_fields_into_payload()
+        {
+            var (sut, sink, _) = BuildRig();
+            var explicitTime = new DateTime(2026, 4, 23, 10, 5, 0, DateTimeKind.Utc);
+            var evt = new EnrollmentEvent
+            {
+                EventType = "agent_started",
+                Source = "AutopilotMonitor.Agent.V2",
+                Severity = EventSeverity.Info,
+                Phase = EnrollmentPhase.Unknown,
+                Message = "Agent started",
+                Timestamp = explicitTime,
+                ImmediateUpload = true,
+                Data = new Dictionary<string, object>
+                {
+                    ["agentVersion"] = "2.0.200",
+                    ["awaitEnrollment"] = true,
+                    ["agentMaxLifetimeMinutes"] = 360,
+                },
+            };
+
+            sut.Emit(evt);
+
+            var posted = Assert.Single(sink.Posted);
+            var payload = posted.Payload!;
+            Assert.Equal("agent_started", payload[SignalPayloadKeys.EventType]);
+            Assert.Equal("AutopilotMonitor.Agent.V2", payload[SignalPayloadKeys.Source]);
+            Assert.Equal("Agent started", payload[SignalPayloadKeys.Message]);
+            Assert.Equal("Info", payload[SignalPayloadKeys.Severity]);
+            Assert.Equal("true", payload[SignalPayloadKeys.ImmediateUpload]);
+            // Data values are flattened to invariant strings so the wire shape stays deterministic.
+            Assert.Equal("2.0.200", payload["agentVersion"]);
+            Assert.Equal("True", payload["awaitEnrollment"]);
+            Assert.Equal("360", payload["agentMaxLifetimeMinutes"]);
+            // Phase=Unknown is an absent-by-default signal — helper does not leak it into payload.
+            Assert.False(payload.ContainsKey("phase"));
+            Assert.Equal(explicitTime, posted.OccurredAtUtc);
+        }
+
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_preserves_non_Unknown_phase()
+        {
+            var (sut, sink, _) = BuildRig();
+            var evt = new EnrollmentEvent
+            {
+                EventType = "esp_phase_changed",
+                Source = "EspAndHelloTracker",
+                Phase = EnrollmentPhase.DeviceSetup,
+                Data = new Dictionary<string, object>(),
+            };
+
+            sut.Emit(evt);
+
+            Assert.Equal("DeviceSetup", sink.Posted[0].Payload!["phase"]);
+        }
+
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_forwards_ctor_supplied_Timestamp_as_utc()
+        {
+            // EnrollmentEvent()'s ctor sets Timestamp = DateTime.UtcNow unconditionally, so
+            // there is no "default Timestamp" path — the helper forwards whatever the ctor set,
+            // interpreting Unspecified kind as UTC (wire contract is always UTC).
+            var (sut, sink, _) = BuildRig();
+            var explicitTime = new DateTime(2026, 4, 23, 9, 30, 0, DateTimeKind.Unspecified);
+            var evt = new EnrollmentEvent
+            {
+                EventType = "agent_started",
+                Source = "AutopilotMonitor.Agent.V2",
+                Timestamp = explicitTime,
+                Data = new Dictionary<string, object>(),
+            };
+
+            sut.Emit(evt);
+
+            Assert.Equal(DateTimeKind.Utc, sink.Posted[0].OccurredAtUtc.Kind);
+            Assert.Equal(explicitTime.Ticks, sink.Posted[0].OccurredAtUtc.Ticks);
+        }
+
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_omits_empty_message_from_payload()
+        {
+            var (sut, sink, _) = BuildRig();
+            var evt = new EnrollmentEvent
+            {
+                EventType = "agent_started",
+                Source = "AutopilotMonitor.Agent.V2",
+                Message = string.Empty,
+                Data = new Dictionary<string, object>(),
+            };
+
+            sut.Emit(evt);
+
+            Assert.False(sink.Posted[0].Payload!.ContainsKey(SignalPayloadKeys.Message));
+        }
+
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_stringifies_DateTime_values_with_roundtrip_format()
+        {
+            var (sut, sink, _) = BuildRig();
+            var bootTime = new DateTime(2026, 4, 23, 8, 0, 0, DateTimeKind.Utc);
+            var evt = new EnrollmentEvent
+            {
+                EventType = "agent_started",
+                Source = "AutopilotMonitor.Agent.V2",
+                Data = new Dictionary<string, object>
+                {
+                    ["previousBootUtc"] = bootTime,
+                },
+            };
+
+            sut.Emit(evt);
+
+            // "o" roundtrip format — deterministic, parseable back to the same DateTime.
+            Assert.Equal("2026-04-23T08:00:00.0000000Z", sink.Posted[0].Payload!["previousBootUtc"]);
+        }
+
+        [Fact]
+        public void Emit_EnrollmentEvent_overload_rejects_null_argument()
+        {
+            var (sut, _, _) = BuildRig();
+            Assert.Throws<ArgumentNullException>(() => sut.Emit((EnrollmentEvent)null!));
+        }
     }
 }
