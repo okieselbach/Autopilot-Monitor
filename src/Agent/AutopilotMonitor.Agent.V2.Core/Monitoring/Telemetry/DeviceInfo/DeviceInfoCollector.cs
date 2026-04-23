@@ -7,6 +7,7 @@ using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment;
@@ -25,7 +26,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
     {
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _emitEvent;
+        private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
 
         private const string RegKeyWindowsCurrentVersion = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
@@ -33,12 +34,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
         public DeviceInfoCollector(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> emitEvent,
+            InformationalEventPost post,
             AgentLogger logger)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId  = tenantId  ?? throw new ArgumentNullException(nameof(tenantId));
-            _emitEvent = emitEvent ?? throw new ArgumentNullException(nameof(emitEvent));
+            _post      = post      ?? throw new ArgumentNullException(nameof(post));
             _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         }
 

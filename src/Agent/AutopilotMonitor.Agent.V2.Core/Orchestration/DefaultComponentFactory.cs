@@ -126,6 +126,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             hosts.Add(new AadJoinHost(logger, ingress, clock));
 
+            // Single-rail refactor (plan §5.8) — DeviceInfoCollector existed in V2.Core but had
+            // no host so the Device-Details UI block was empty in V2 sessions (V1-Parity Issue #2).
+            // Kernel host: always on, not remote-config-gated; fires CollectAll on Start on a
+            // background thread so the agent's critical path is not blocked by WMI queries.
+            hosts.Add(new DeviceInfoHost(
+                sessionId: sessionId,
+                tenantId: tenantId,
+                ingress: ingress,
+                clock: clock,
+                logger: logger));
+
             // Dev / test — if --replay-log-dir is set, the tracker reads from the replay folder
             // with SimulationMode ON + the configured SpeedFactor instead of tailing the live
             // IME log folder. Production agents leave ReplayLogDir empty.
@@ -376,6 +387,75 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
                 try { _adapter.Dispose(); } catch { }
                 try { _detector.Dispose(); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// Single-rail refactor (plan §5.8) — wraps <see cref="Monitoring.Telemetry.DeviceInfo.DeviceInfoCollector"/>
+        /// to deliver the V1 "Device Details" event surface (OS / hardware / TPM / BitLocker /
+        /// AAD-Join / autopilot profile / ESP config / network / hardware spec, 14 event types).
+        /// <para>
+        /// Kernel host (not remote-config-gated). Fires <see cref="DeviceInfoCollector.CollectAll"/>
+        /// on <see cref="Start"/> on a ThreadPool task so the orchestrator's critical path is not
+        /// blocked by the underlying WMI / registry / networking probes. Exceptions from the task
+        /// are swallowed and logged; a failure in any one sub-emit must not kill the agent.
+        /// </para>
+        /// <para>
+        /// <b>Out of scope today</b>: the Legacy EnrollmentTracker also called
+        /// <c>CollectAtEnrollmentStart</c> on first DeviceSetup phase detection (re-fetches AAD
+        /// join / autopilot profile / ESP config / TPM once MDM enrollment has populated them)
+        /// and <c>CollectAtEnd</c> at termination (re-fetches BitLocker + active NIC). Hooking
+        /// those into the V2 signal timeline requires a reducer-driven subscription that does
+        /// not exist yet. The basic <see cref="Start"/> path solves Parity Issue #2 for the
+        /// dominant case; the phase-transition re-collections are a follow-up (plan §5.8 TODO).
+        /// </para>
+        /// </summary>
+        private sealed class DeviceInfoHost : ICollectorHost
+        {
+            public string Name => "DeviceInfoCollector";
+
+            private readonly Monitoring.Telemetry.DeviceInfo.DeviceInfoCollector _collector;
+            private readonly AgentLogger _logger;
+            private int _disposed;
+
+            public DeviceInfoHost(
+                string sessionId,
+                string tenantId,
+                ISignalIngressSink ingress,
+                IClock clock,
+                AgentLogger logger)
+            {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
+                _logger = logger;
+                var post = new InformationalEventPost(ingress, clock);
+                _collector = new Monitoring.Telemetry.DeviceInfo.DeviceInfoCollector(
+                    sessionId, tenantId, post, logger);
+            }
+
+            public void Start()
+            {
+                // Fire-and-forget — WMI queries can take several seconds and must not block the
+                // orchestrator's Start path. The collector emits its 13+ events into the ingress
+                // pipe as each sub-collector completes.
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try { _collector.CollectAll(); }
+                    catch (Exception ex) { _logger.Warning($"DeviceInfoHost: CollectAll threw: {ex.Message}"); }
+                });
+                _logger.Info("DeviceInfoHost: CollectAll scheduled on background thread.");
+            }
+
+            public void Stop()
+            {
+                // No background worker to stop; the scheduled Task either completed or is still
+                // running and will exit once it finishes emitting. Stop is a no-op by design.
+            }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+                // DeviceInfoCollector does not implement IDisposable — purely event-emitting.
             }
         }
 
