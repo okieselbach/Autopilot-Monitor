@@ -440,5 +440,239 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Throws<ArgumentNullException>(() => new ImeLogTrackerAdapter(f.Tracker, null!, f.Clock));
             Assert.Throws<ArgumentNullException>(() => new ImeLogTrackerAdapter(f.Tracker, f.Ingress, null!));
         }
+
+        // -- 5.9b: OnImeAgentVersion / OnDoTelemetryReceived / OnScriptCompleted --------
+
+        [Fact]
+        public void ImeAgentVersion_emits_ime_agent_version_info_event()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            adapter.TriggerImeAgentVersionFromTest("1.101.109.0");
+
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.ImeAgentVersion));
+            Assert.Equal("ImeLogTracker", info.Payload![SignalPayloadKeys.Source]);
+            Assert.Equal("1.101.109.0", info.Payload["agentVersion"]);
+            Assert.Equal("IME Agent version: 1.101.109.0", info.Payload[SignalPayloadKeys.Message]);
+        }
+
+        [Fact]
+        public void ImeAgentVersion_null_or_empty_is_skipped()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            adapter.TriggerImeAgentVersionFromTest(null!);
+            adapter.TriggerImeAgentVersionFromTest("");
+
+            Assert.Empty(f.Ingress.Posted);
+        }
+
+        [Fact]
+        public void ImeAgentVersion_same_version_twice_is_not_deduped_matches_V1_behavior()
+        {
+            // V1 reference session shows 2 ime_agent_version events for the same version
+            // in the same session (seq 24 and 60). Adapter must not dedup.
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            adapter.TriggerImeAgentVersionFromTest("1.101.109.0");
+            adapter.TriggerImeAgentVersionFromTest("1.101.109.0");
+
+            Assert.Equal(2, f.InfoEvents(SharedEventTypes.ImeAgentVersion).Count);
+        }
+
+        [Fact]
+        public void DoTelemetry_emits_do_telemetry_info_event_with_do_fields()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            var app = AppPackageState.Restore(
+                id: "0e3be4ce-790b-4081-831c-d72d92f3cc9b",
+                listPos: 0,
+                name: "SAP 2024 Patch 13",
+                runAs: AppRunAs.System,
+                intent: AppIntent.Install,
+                targeted: AppTargeted.Device,
+                dependsOn: new HashSet<string>(),
+                installationState: AppInstallationState.Downloading,
+                downloadingOrInstallingSeen: true,
+                progressPercent: 97,
+                bytesDownloaded: 185_023_504,
+                bytesTotal: 190_266_384,
+                doFileSize: 190_266_384,
+                doTotalBytesDownloaded: 190_266_384,
+                doBytesFromPeers: 0,
+                doPercentPeerCaching: 0,
+                doBytesFromHttp: 190_266_384,
+                doDownloadMode: 1,
+                doDownloadDuration: "00:01:45.159",
+                hasDoTelemetry: true);
+
+            adapter.TriggerDoTelemetryFromTest(app);
+
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.DoTelemetry));
+            Assert.Equal("ImeLogTracker", info.Payload![SignalPayloadKeys.Source]);
+            Assert.Equal(app.Id, info.Payload["appId"]);
+            Assert.Equal("SAP 2024 Patch 13", info.Payload["appName"]);
+            Assert.Equal("Downloading", info.Payload["state"]);
+            Assert.Equal("97", info.Payload["progressPercent"]);
+            Assert.Equal("185023504", info.Payload["bytesDownloaded"]);
+            Assert.Equal("190266384", info.Payload["doFileSize"]);
+            Assert.Equal("0", info.Payload["doBytesFromPeers"]);
+            Assert.Equal("190266384", info.Payload["doBytesFromHttp"]);
+            Assert.Equal("1", info.Payload["doDownloadMode"]);
+            Assert.Equal("00:01:45.159", info.Payload["doDownloadDuration"]);
+        }
+
+        [Fact]
+        public void DoTelemetry_null_app_or_empty_id_is_ignored()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            adapter.TriggerDoTelemetryFromTest(null!);
+
+            Assert.Empty(f.Ingress.Posted);
+        }
+
+        [Fact]
+        public void ScriptCompleted_platform_success_emits_script_completed_info_source_IME()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            var script = new ScriptExecutionState
+            {
+                PolicyId = "4453d1ad-8171-4459-ae6b-ad97f722ea11",
+                ScriptType = "platform",
+                ExitCode = 0,
+                RunContext = "System",
+                Result = "Success",
+                Stdout = "Script created at: C:\\ProgramData\\TPF IT\\ShowItemsOnDesktop\\ShowItemsOnDesktop.ps1",
+            };
+
+            adapter.TriggerScriptCompletedFromTest(script);
+
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.ScriptCompleted));
+            // V1 contract: Source="IME" (not "ImeLogTracker") for script_completed.
+            Assert.Equal("IME", info.Payload![SignalPayloadKeys.Source]);
+            Assert.Equal(script.PolicyId, info.Payload["policyId"]);
+            Assert.Equal("platform", info.Payload["scriptType"]);
+            Assert.Equal("0", info.Payload["exitCode"]);
+            Assert.Equal("System", info.Payload["runContext"]);
+            Assert.Equal("Success", info.Payload["result"]);
+            Assert.Equal(EventSeverity.Info.ToString(), info.Payload[SignalPayloadKeys.Severity]);
+            Assert.Contains("Platform script 4453d1ad: Success (exit: 0)", info.Payload[SignalPayloadKeys.Message]);
+        }
+
+        [Fact]
+        public void ScriptCompleted_platform_failure_marks_severity_Error()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            var script = new ScriptExecutionState
+            {
+                PolicyId = "deadbeef-0000-0000-0000-000000000000",
+                ScriptType = "platform",
+                ExitCode = 1,
+                RunContext = "System",
+                Result = "Failed",
+                Stderr = "Script failed: access denied",
+            };
+
+            adapter.TriggerScriptCompletedFromTest(script);
+
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.ScriptCompleted));
+            Assert.Equal(EventSeverity.Error.ToString(), info.Payload![SignalPayloadKeys.Severity]);
+            Assert.Equal("Failed", info.Payload["result"]);
+            Assert.Equal("1", info.Payload["exitCode"]);
+        }
+
+        [Fact]
+        public void ScriptCompleted_remediation_carries_compliance_result()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            var script = new ScriptExecutionState
+            {
+                PolicyId = "cafebabe-0000-0000-0000-000000000000",
+                ScriptType = "remediation",
+                ScriptPart = "detection",
+                ExitCode = 0,
+                RunContext = "System",
+                ComplianceResult = "True",
+            };
+
+            adapter.TriggerScriptCompletedFromTest(script);
+
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.ScriptCompleted));
+            Assert.Equal("remediation", info.Payload!["scriptType"]);
+            Assert.Equal("detection", info.Payload["scriptPart"]);
+            Assert.Equal("True", info.Payload["complianceResult"]);
+            Assert.Contains("Remediation script cafebabe: compliance=True", info.Payload[SignalPayloadKeys.Message]);
+        }
+
+        [Fact]
+        public void ScriptCompleted_null_or_empty_policyId_is_ignored()
+        {
+            using var f = new Fixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            adapter.TriggerScriptCompletedFromTest(null!);
+            adapter.TriggerScriptCompletedFromTest(new ScriptExecutionState { PolicyId = null });
+            adapter.TriggerScriptCompletedFromTest(new ScriptExecutionState { PolicyId = "" });
+
+            Assert.Empty(f.Ingress.Posted);
+        }
+
+        [Fact]
+        public void New_callbacks_preserve_prior_action_handlers_chain_invoke()
+        {
+            using var f = new Fixture();
+            int priorVersionCalls = 0;
+            int priorDoCalls = 0;
+            int priorScriptCalls = 0;
+            f.Tracker.OnImeAgentVersion = _ => priorVersionCalls++;
+            f.Tracker.OnDoTelemetryReceived = _ => priorDoCalls++;
+            f.Tracker.OnScriptCompleted = _ => priorScriptCalls++;
+
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            f.Tracker.OnImeAgentVersion("1.0.0.0");
+            f.Tracker.OnDoTelemetryReceived(new AppPackageState("app-1", 0));
+            f.Tracker.OnScriptCompleted(new ScriptExecutionState { PolicyId = "p", ScriptType = "platform" });
+
+            Assert.Equal(1, priorVersionCalls);
+            Assert.Equal(1, priorDoCalls);
+            Assert.Equal(1, priorScriptCalls);
+            Assert.Equal(3, f.AllInfoEvents().Count);
+        }
+
+        [Fact]
+        public void Dispose_restores_all_prior_action_handlers()
+        {
+            using var f = new Fixture();
+            Action<string> priorVersion = _ => { };
+            Action<AppPackageState> priorDo = _ => { };
+            Action<ScriptExecutionState> priorScript = _ => { };
+            f.Tracker.OnImeAgentVersion = priorVersion;
+            f.Tracker.OnDoTelemetryReceived = priorDo;
+            f.Tracker.OnScriptCompleted = priorScript;
+
+            var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+            Assert.NotSame(priorVersion, f.Tracker.OnImeAgentVersion);
+            Assert.NotSame(priorDo, f.Tracker.OnDoTelemetryReceived);
+            Assert.NotSame(priorScript, f.Tracker.OnScriptCompleted);
+
+            adapter.Dispose();
+            Assert.Same(priorVersion, f.Tracker.OnImeAgentVersion);
+            Assert.Same(priorDo, f.Tracker.OnDoTelemetryReceived);
+            Assert.Same(priorScript, f.Tracker.OnScriptCompleted);
+        }
     }
 }

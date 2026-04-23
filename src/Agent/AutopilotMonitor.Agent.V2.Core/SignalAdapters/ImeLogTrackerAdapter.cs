@@ -64,12 +64,18 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private readonly Action? _prevOnUserSessionCompleted;
         private readonly Action<AppPackageState, AppInstallationState, AppInstallationState>? _prevOnAppStateChanged;
         private readonly Action<string>? _prevOnPatternMatched;
+        private readonly Action<string>? _prevOnImeAgentVersion;
+        private readonly Action<AppPackageState>? _prevOnDoTelemetryReceived;
+        private readonly Action<ScriptExecutionState>? _prevOnScriptCompleted;
 
         // Our own delegate instances — stored once so Dispose can compare by reference.
         private readonly Action<string> _ourOnEspPhaseChanged;
         private readonly Action _ourOnUserSessionCompleted;
         private readonly Action<AppPackageState, AppInstallationState, AppInstallationState> _ourOnAppStateChanged;
         private readonly Action<string> _ourOnPatternMatched;
+        private readonly Action<string> _ourOnImeAgentVersion;
+        private readonly Action<AppPackageState> _ourOnDoTelemetryReceived;
+        private readonly Action<ScriptExecutionState> _ourOnScriptCompleted;
 
         // Dedup state for DecisionSignals.
         private string? _lastEspPhase;
@@ -99,6 +105,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _prevOnUserSessionCompleted = _tracker.OnUserSessionCompleted;
             _prevOnAppStateChanged = _tracker.OnAppStateChanged;
             _prevOnPatternMatched = _tracker.OnPatternMatched;
+            _prevOnImeAgentVersion = _tracker.OnImeAgentVersion;
+            _prevOnDoTelemetryReceived = _tracker.OnDoTelemetryReceived;
+            _prevOnScriptCompleted = _tracker.OnScriptCompleted;
 
             // Store our delegate instances once — implicit method-group conversions
             // create a new delegate each time, which would break Dispose's reference check.
@@ -106,11 +115,17 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _ourOnUserSessionCompleted = OnUserSessionCompleted;
             _ourOnAppStateChanged = OnAppStateChanged;
             _ourOnPatternMatched = OnPatternMatched;
+            _ourOnImeAgentVersion = OnImeAgentVersion;
+            _ourOnDoTelemetryReceived = OnDoTelemetryReceived;
+            _ourOnScriptCompleted = OnScriptCompleted;
 
             _tracker.OnEspPhaseChanged = _ourOnEspPhaseChanged;
             _tracker.OnUserSessionCompleted = _ourOnUserSessionCompleted;
             _tracker.OnAppStateChanged = _ourOnAppStateChanged;
             _tracker.OnPatternMatched = _ourOnPatternMatched;
+            _tracker.OnImeAgentVersion = _ourOnImeAgentVersion;
+            _tracker.OnDoTelemetryReceived = _ourOnDoTelemetryReceived;
+            _tracker.OnScriptCompleted = _ourOnScriptCompleted;
         }
 
         public void Dispose()
@@ -125,6 +140,12 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 _tracker.OnAppStateChanged = _prevOnAppStateChanged;
             if (ReferenceEquals(_tracker.OnPatternMatched, _ourOnPatternMatched))
                 _tracker.OnPatternMatched = _prevOnPatternMatched;
+            if (ReferenceEquals(_tracker.OnImeAgentVersion, _ourOnImeAgentVersion))
+                _tracker.OnImeAgentVersion = _prevOnImeAgentVersion;
+            if (ReferenceEquals(_tracker.OnDoTelemetryReceived, _ourOnDoTelemetryReceived))
+                _tracker.OnDoTelemetryReceived = _prevOnDoTelemetryReceived;
+            if (ReferenceEquals(_tracker.OnScriptCompleted, _ourOnScriptCompleted))
+                _tracker.OnScriptCompleted = _prevOnScriptCompleted;
         }
 
         private void OnEspPhaseChanged(string phase)
@@ -151,11 +172,32 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             MaybeEmitWhiteGloveSealingPattern(patternId);
         }
 
+        private void OnImeAgentVersion(string version)
+        {
+            _prevOnImeAgentVersion?.Invoke(version);
+            EmitImeAgentVersion(version);
+        }
+
+        private void OnDoTelemetryReceived(AppPackageState app)
+        {
+            _prevOnDoTelemetryReceived?.Invoke(app);
+            EmitDoTelemetry(app);
+        }
+
+        private void OnScriptCompleted(ScriptExecutionState script)
+        {
+            _prevOnScriptCompleted?.Invoke(script);
+            EmitScriptCompleted(script);
+        }
+
         internal void TriggerEspPhaseFromTest(string phase) => EmitEspPhase(phase);
         internal void TriggerUserSessionCompletedFromTest() => EmitUserSessionCompleted();
         internal void TriggerAppStateFromTest(AppPackageState app, AppInstallationState oldState, AppInstallationState newState) =>
             EmitAppState(app, oldState, newState);
         internal void TriggerPatternMatchedFromTest(string patternId) => MaybeEmitWhiteGloveSealingPattern(patternId);
+        internal void TriggerImeAgentVersionFromTest(string version) => EmitImeAgentVersion(version);
+        internal void TriggerDoTelemetryFromTest(AppPackageState app) => EmitDoTelemetry(app);
+        internal void TriggerScriptCompletedFromTest(ScriptExecutionState script) => EmitScriptCompleted(script);
 
         private void EmitEspPhase(string phase)
         {
@@ -335,6 +377,125 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                     [SignalPayloadKeys.ImePatternId] = patternId,
                 });
         }
+
+        private void EmitImeAgentVersion(string version)
+        {
+            if (string.IsNullOrEmpty(version)) return;
+
+            var data = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["agentVersion"] = version,
+            };
+            var patternId = _tracker.LastMatchedPatternId;
+            if (!string.IsNullOrEmpty(patternId))
+                data["patternId"] = patternId!;
+
+            _post.Emit(
+                eventType: SharedEventTypes.ImeAgentVersion,
+                source: SourceLabel,
+                message: $"IME Agent version: {version}",
+                data: data,
+                occurredAtUtc: _clock.UtcNow);
+        }
+
+        private void EmitDoTelemetry(AppPackageState app)
+        {
+            if (app == null || string.IsNullOrEmpty(app.Id)) return;
+
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            var data = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["appId"] = app.Id,
+                ["appName"] = app.Name ?? string.Empty,
+                ["state"] = app.InstallationState.ToString(),
+                ["intent"] = app.Intent.ToString(),
+                ["targeted"] = app.Targeted.ToString(),
+                ["runAs"] = app.RunAs.ToString(),
+                ["progressPercent"] = (app.ProgressPercent ?? 0).ToString(culture),
+                ["bytesDownloaded"] = app.BytesDownloaded.ToString(culture),
+                ["bytesTotal"] = app.BytesTotal.ToString(culture),
+                ["isError"] = "false",
+                ["isCompleted"] = IsCompletedState(app.InstallationState).ToString().ToLowerInvariant(),
+                ["doFileSize"] = app.DoFileSize.ToString(culture),
+                ["doTotalBytesDownloaded"] = app.DoTotalBytesDownloaded.ToString(culture),
+                ["doBytesFromPeers"] = app.DoBytesFromPeers.ToString(culture),
+                ["doPercentPeerCaching"] = app.DoPercentPeerCaching.ToString(culture),
+                ["doBytesFromLanPeers"] = app.DoBytesFromLanPeers.ToString(culture),
+                ["doBytesFromGroupPeers"] = app.DoBytesFromGroupPeers.ToString(culture),
+                ["doBytesFromInternetPeers"] = app.DoBytesFromInternetPeers.ToString(culture),
+                ["doDownloadMode"] = app.DoDownloadMode.ToString(culture),
+                ["doBytesFromHttp"] = app.DoBytesFromHttp.ToString(culture),
+            };
+            if (!string.IsNullOrEmpty(app.DoDownloadDuration)) data["doDownloadDuration"] = app.DoDownloadDuration!;
+            if (!string.IsNullOrEmpty(app.DetectionResult)) data["detectionResult"] = app.DetectionResult!;
+            var patternId = _tracker.LastMatchedPatternId;
+            if (!string.IsNullOrEmpty(patternId)) data["patternId"] = patternId!;
+
+            var label = string.IsNullOrEmpty(app.Name) ? app.Id : app.Name;
+            var msg = $"{label}: DO complete - {app.DoPercentPeerCaching}% peers, mode={app.DoDownloadMode}";
+
+            _post.Emit(
+                eventType: SharedEventTypes.DoTelemetry,
+                source: SourceLabel,
+                message: msg,
+                data: data,
+                occurredAtUtc: _clock.UtcNow);
+        }
+
+        private void EmitScriptCompleted(ScriptExecutionState script)
+        {
+            if (script == null || string.IsNullOrEmpty(script.PolicyId)) return;
+
+            // V1 contract: Source="IME" (not "ImeLogTracker"), severity derived from result.
+            var isFailure = string.Equals(script.Result, "Failed", StringComparison.OrdinalIgnoreCase)
+                            || (script.ExitCode.HasValue && script.ExitCode.Value != 0);
+            var severity = isFailure ? EventSeverity.Error : EventSeverity.Info;
+
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            var data = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["policyId"] = script.PolicyId,
+            };
+            if (!string.IsNullOrEmpty(script.ScriptType)) data["scriptType"] = script.ScriptType!;
+            if (!string.IsNullOrEmpty(script.ScriptPart)) data["scriptPart"] = script.ScriptPart!;
+            if (script.ExitCode.HasValue) data["exitCode"] = script.ExitCode.Value.ToString(culture);
+            if (!string.IsNullOrEmpty(script.RunContext)) data["runContext"] = script.RunContext!;
+            if (!string.IsNullOrEmpty(script.Result)) data["result"] = script.Result!;
+            if (!string.IsNullOrEmpty(script.ComplianceResult)) data["complianceResult"] = script.ComplianceResult!;
+            if (!string.IsNullOrEmpty(script.Stdout)) data["stdout"] = script.Stdout!;
+            if (!string.IsNullOrEmpty(script.Stderr)) data["stderr"] = script.Stderr!;
+            var patternId = _tracker.LastMatchedPatternId;
+            if (!string.IsNullOrEmpty(patternId)) data["patternId"] = patternId!;
+
+            var label = IsRemediation(script.ScriptType) ? "Remediation script" : "Platform script";
+            var shortId = script.PolicyId.Length >= 8 ? script.PolicyId.Substring(0, 8) : script.PolicyId;
+            string messageCore;
+            if (IsRemediation(script.ScriptType))
+            {
+                messageCore = !string.IsNullOrEmpty(script.ComplianceResult)
+                    ? $"compliance={script.ComplianceResult}"
+                    : script.Result ?? "";
+            }
+            else
+            {
+                messageCore = script.Result ?? "";
+            }
+            var exitSuffix = script.ExitCode.HasValue
+                ? $" (exit: {script.ExitCode.Value.ToString(culture)})"
+                : string.Empty;
+            var msg = $"{label} {shortId}: {messageCore}{exitSuffix}";
+
+            _post.Emit(
+                eventType: SharedEventTypes.ScriptCompleted,
+                source: "IME",
+                message: msg,
+                severity: severity,
+                data: data,
+                occurredAtUtc: _clock.UtcNow);
+        }
+
+        private static bool IsRemediation(string? scriptType) =>
+            string.Equals(scriptType, "remediation", StringComparison.OrdinalIgnoreCase);
 
         private static DecisionSignalKind? ClassifyTerminalState(AppInstallationState state)
         {
