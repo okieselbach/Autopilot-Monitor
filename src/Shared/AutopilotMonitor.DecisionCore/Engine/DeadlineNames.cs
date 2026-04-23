@@ -53,5 +53,30 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>On <c>ImeUserSessionCompleted</c>: matched pattern id.</summary>
         public const string ImePatternId = "patternId";
+
+        // --- InformationalEvent payload (plan §1.3, single-rail refactor) ------------
+        // Mirrors the EnrollmentEvent fields the reducer must reconstruct for the
+        // EmitEventTimelineEntry effect. EventType / Source are mandatory; the rest are
+        // optional. Missing Severity defaults to Info, missing ImmediateUpload defaults
+        // to false. DataJson, when present, is a JSON object whose properties are merged
+        // into the effect parameter dictionary as individual string entries.
+
+        /// <summary>On <c>InformationalEvent</c>: mandatory. Becomes <c>EnrollmentEvent.EventType</c>.</summary>
+        public const string EventType = "eventType";
+
+        /// <summary>On <c>InformationalEvent</c>: mandatory. Becomes <c>EnrollmentEvent.Source</c>.</summary>
+        public const string Source = "source";
+
+        /// <summary>On <c>InformationalEvent</c>: optional. Becomes <c>EnrollmentEvent.Message</c>.</summary>
+        public const string Message = "message";
+
+        /// <summary>On <c>InformationalEvent</c>: optional. Enum-name string (e.g. "Info", "Warning", "Error"); unknown / missing → Info.</summary>
+        public const string Severity = "severity";
+
+        /// <summary>On <c>InformationalEvent</c>: optional. "true" / "false"; missing → false.</summary>
+        public const string ImmediateUpload = "immediateUpload";
+
+        /// <summary>On <c>InformationalEvent</c>: optional. Pre-serialized JSON object whose top-level keys are copied into the emitted event's Data dictionary.</summary>
+        public const string DataJson = "dataJson";
     }
 }

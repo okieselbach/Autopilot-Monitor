@@ -1,0 +1,10 @@
+# InformationalEvent v1 — V2 single-rail refactor, plan §1.3.
+# Reducer handler HandleInformationalEventV1 is a pass-through: it does NOT mutate
+# DecisionState (LastAppliedSignalOrdinal + StepIndex are the only state deltas,
+# applied by the shared reducer frame). It emits exactly one EmitEventTimelineEntry
+# effect that reconstructs the full EnrollmentEvent from the payload keys defined in
+# SignalPayloadKeys (eventType, source, message, severity, immediateUpload, dataJson).
+# Missing optional keys use sensible defaults (severity=Info, immediateUpload=false).
+# Any DataJson key is merged into the effect parameter dict so BuildDataDict in
+# EventTimelineEmitter carries it into EnrollmentEvent.Data 1:1.
+{"SessionSignalOrdinal":7,"SessionTraceOrdinal":7,"Kind":"InformationalEvent","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-23T10:15:30.1234567Z","SourceOrigin":"StartupEnvironmentProbes.Ntp","Evidence":{"Kind":"Observed","Identifier":"ntp_check_result","Summary":"NTP offset -124.02s from time.windows.com."},"Payload":{"eventType":"ntp_time_check","source":"Network","message":"NTP time check: offset -124.02s from time.windows.com","severity":"Warning","immediateUpload":"false","dataJson":"{\"ntpServer\":\"time.windows.com\",\"offsetSeconds\":-124.02}"}}
