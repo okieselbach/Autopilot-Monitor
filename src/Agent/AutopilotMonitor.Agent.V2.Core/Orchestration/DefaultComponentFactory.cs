@@ -225,7 +225,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 hosts.Add(new GatherRuleExecutorHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
+                    ingress: ingress,
+                    clock: clock,
                     logger: logger,
                     rules: _remoteConfig.GatherRules,
                     imeLogPathOverride: _agentConfig.ImeLogPathOverride,
@@ -252,17 +253,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public GatherRuleExecutorHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
+                ISignalIngressSink ingress,
+                IClock clock,
                 AgentLogger logger,
                 System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule> rules,
                 string? imeLogPathOverride,
                 bool unrestrictedMode = false)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _logger = logger;
                 _rules = rules ?? new System.Collections.Generic.List<AutopilotMonitor.Shared.Models.GatherRule>();
                 _unrestrictedMode = unrestrictedMode;
+
+                // Single-rail routing (plan §5.6): the gather executor and its collectors keep
+                // their internal Action<EnrollmentEvent> signature because (a) they have no
+                // interface contract and (b) the standalone --run-gather-rules CLI mode still
+                // needs to collect raw EnrollmentEvents in-memory for the direct
+                // BackendApiClient.IngestEventsAsync upload (plan §9 orthogonal world). In
+                // session mode we wrap post.Emit so every session-mode gather event still
+                // flows through the InformationalEvent ingress pipe before hitting the
+                // telemetry spool — Rail-A semantics for ordering / replay determinism.
+                var post = new InformationalEventPost(ingress, clock);
                 _executor = new Monitoring.Telemetry.Gather.GatherRuleExecutor(
-                    sessionId, tenantId, onEnrollmentEvent, logger, imeLogPathOverride);
+                    sessionId, tenantId, evt => post.Emit(evt), logger, imeLogPathOverride);
             }
 
             public void Start()
