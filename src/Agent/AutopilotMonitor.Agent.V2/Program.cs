@@ -589,6 +589,16 @@ namespace AutopilotMonitor.Agent.V2
                     Console.CancelKeyPress += cancelHandler;
                     AppDomain.CurrentDomain.ProcessExit += processExitHandler;
 
+                    // Single-rail refactor (plan §5.1) — lifecycle events (agent_started,
+                    // agent_version_check, agent_unrestricted_mode_changed, enrollment_failed,
+                    // agent_shutdown) flow through InformationalEventPost → SignalIngress →
+                    // Reducer → EmitEventTimelineEntry effect → EventTimelineEmitter. The post
+                    // instance is constructed inside orchestrator.Start's onIngressReady callback
+                    // (ingress is not alive before Start); later-firing handlers (max-lifetime
+                    // watchdog, auth-failure watchdog) capture this variable by reference so they
+                    // see the live helper when their event fires.
+                    InformationalEventPost lifecyclePost = null;
+
                     // V1 parity — on the max-lifetime watchdog firing, emit an explicit
                     // `enrollment_failed` event with failureType=agent_timeout BEFORE the
                     // regular termination path runs. Dashboards + KQL queries key on the
@@ -597,17 +607,26 @@ namespace AutopilotMonitor.Agent.V2
                     EventHandler<EnrollmentTerminatedEventArgs> maxLifetimeEmitter = (s, e) =>
                     {
                         if (e.Reason != EnrollmentTerminationReason.MaxLifetimeExceeded) return;
+                        if (lifecyclePost == null)
+                        {
+                            logger.Warning("enrollment_failed (max_lifetime) suppressed — ingress not ready.");
+                            return;
+                        }
                         try
                         {
                             var uptimeMin = (DateTime.UtcNow - agentStartTimeUtc).TotalMinutes;
-                            orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                            // Phase stays Unknown per plan §1.4 phase-invariant — the UI timeline
+                            // buckets chronologically into the last-declared phase. This fixes the
+                            // legacy violation where enrollment_failed (max_lifetime) carried
+                            // Phase=Complete and caused a phantom phase in the UI.
+                            lifecyclePost.Emit(new EnrollmentEvent
                             {
                                 SessionId = agentConfig.SessionId,
                                 TenantId = agentConfig.TenantId,
                                 EventType = "enrollment_failed",
                                 Severity = EventSeverity.Error,
                                 Source = "EnrollmentOrchestrator",
-                                Phase = EnrollmentPhase.Complete,
+                                Phase = EnrollmentPhase.Unknown,
                                 Message = $"Agent max lifetime expired ({uptimeMin:F0} min) — enrollment did not complete in time",
                                 Data = new System.Collections.Generic.Dictionary<string, object>
                                 {
@@ -637,34 +656,41 @@ namespace AutopilotMonitor.Agent.V2
                     EventHandler<AuthFailureThresholdEventArgs> authThresholdHandler = (s, e) =>
                     {
                         logger.Error($"Auth-failure threshold exceeded ({e.Reason}) — initiating shutdown.");
-                        try
+                        if (lifecyclePost != null)
                         {
-                            orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                            try
                             {
-                                SessionId = agentConfig.SessionId,
-                                TenantId = agentConfig.TenantId,
-                                EventType = "agent_shutdown",
-                                Severity = EventSeverity.Error,
-                                Source = "AuthFailureTracker",
-                                Phase = EnrollmentPhase.Unknown,
-                                Message = $"Agent shut down after {e.ConsecutiveFailures} consecutive auth failures",
-                                Data = new System.Collections.Generic.Dictionary<string, object>
+                                lifecyclePost.Emit(new EnrollmentEvent
                                 {
-                                    { "reason", "auth_failure" },
-                                    { "consecutiveFailures", e.ConsecutiveFailures },
-                                    { "firstFailureTime", e.FirstFailureUtc.ToString("o") },
-                                    { "maxFailures", agentConfig.MaxAuthFailures },
-                                    { "timeoutMinutes", agentConfig.AuthFailureTimeoutMinutes },
-                                    { "lastOperation", e.LastOperation ?? string.Empty },
-                                    { "lastStatusCode", e.LastStatusCode },
-                                    { "thresholdReason", e.Reason ?? string.Empty },
-                                },
-                                ImmediateUpload = true,
-                            });
+                                    SessionId = agentConfig.SessionId,
+                                    TenantId = agentConfig.TenantId,
+                                    EventType = "agent_shutdown",
+                                    Severity = EventSeverity.Error,
+                                    Source = "AuthFailureTracker",
+                                    Phase = EnrollmentPhase.Unknown,
+                                    Message = $"Agent shut down after {e.ConsecutiveFailures} consecutive auth failures",
+                                    Data = new System.Collections.Generic.Dictionary<string, object>
+                                    {
+                                        { "reason", "auth_failure" },
+                                        { "consecutiveFailures", e.ConsecutiveFailures },
+                                        { "firstFailureTime", e.FirstFailureUtc.ToString("o") },
+                                        { "maxFailures", agentConfig.MaxAuthFailures },
+                                        { "timeoutMinutes", agentConfig.AuthFailureTimeoutMinutes },
+                                        { "lastOperation", e.LastOperation ?? string.Empty },
+                                        { "lastStatusCode", e.LastStatusCode },
+                                        { "thresholdReason", e.Reason ?? string.Empty },
+                                    },
+                                    ImmediateUpload = true,
+                                });
+                            }
+                            catch (Exception emitEx)
+                            {
+                                logger.Warning($"agent_shutdown emission failed: {emitEx.Message}");
+                            }
                         }
-                        catch (Exception emitEx)
+                        else
                         {
-                            logger.Warning($"agent_shutdown emission failed: {emitEx.Message}");
+                            logger.Warning("agent_shutdown (auth_failure) suppressed — ingress not ready.");
                         }
 
                         shutdown.Set();
@@ -673,7 +699,18 @@ namespace AutopilotMonitor.Agent.V2
 
                     try
                     {
-                        orchestrator.Start();
+                        // Pre-collector hook emits the lifecycle events (agent_started first so
+                        // it is Seq=1 on the wire, then version-check, then the unrestricted-mode
+                        // audit). These must land on the signal log before any collector-generated
+                        // signal — fixes the Seq=13 ordering regression from the V2 parity audit
+                        // (plan Parity Issue #1).
+                        orchestrator.Start(ingress =>
+                        {
+                            lifecyclePost = new InformationalEventPost(ingress, SystemClock.Instance);
+                            EmitAgentStartedEvent(lifecyclePost, agentConfig, previousExit, logger);
+                            EmitVersionCheckEventIfAny(lifecyclePost, agentConfig, logger);
+                            EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
+                        });
 
                         // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator parses
                         // DeviceBlocked / DeviceKillSignal / AdminAction / Actions out of the 2xx
@@ -686,21 +723,6 @@ namespace AutopilotMonitor.Agent.V2
                         // InvalidOperationException before Start() because the
                         // TelemetryUploadOrchestrator is constructed inside Start() at step 311.
                         WireTelemetryServerResponse(orchestrator, serverActionDispatcher, logger);
-
-                        // Emit the agent_version_check event now that the EventEmitter is alive.
-                        // VersionCheckEventBuilder.TryBuild is a no-op when no markers are present.
-                        EmitVersionCheckEventIfAny(orchestrator, agentConfig, logger);
-
-                        // V1 parity (MonitoringService.AuditUnrestrictedModeChange) — whenever the
-                        // remote tenant admin flips the UnrestrictedMode guardrail, emit an audit
-                        // event so the change is visible in the session timeline and downstream
-                        // alerting. Fires AFTER orchestrator.Start so the EventEmitter is alive.
-                        EmitUnrestrictedModeAuditIfChanged(orchestrator, agentConfig, configMergeResult, logger);
-
-                        // V1 parity — agent_started lifecycle event. Purely informational
-                        // (Phase=Unknown); the session timeline and downstream alerting rely on
-                        // it to classify the boot.
-                        EmitAgentStartedEvent(orchestrator, agentConfig, previousExit, logger);
 
                         // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
                         // SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge — that
@@ -870,7 +892,7 @@ namespace AutopilotMonitor.Agent.V2
         /// <c>MonitoringService.AuditUnrestrictedModeChange</c>.
         /// </summary>
         private static void EmitUnrestrictedModeAuditIfChanged(
-            EnrollmentOrchestrator orchestrator,
+            InformationalEventPost post,
             AgentConfiguration agentConfig,
             RemoteConfigMergeResult mergeResult,
             AgentLogger logger)
@@ -883,7 +905,7 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Warning(
                     $"UnrestrictedMode changed: {mergeResult.OldUnrestrictedMode} → {newValue}. Emitting audit event.");
 
-                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                post.Emit(new EnrollmentEvent
                 {
                     SessionId = agentConfig.SessionId,
                     TenantId = agentConfig.TenantId,
@@ -998,7 +1020,7 @@ namespace AutopilotMonitor.Agent.V2
         /// Phase stays <see cref="EnrollmentPhase.Unknown"/> — the event is NOT a phase declaration.
         /// </summary>
         private static void EmitAgentStartedEvent(
-            EnrollmentOrchestrator orchestrator,
+            InformationalEventPost post,
             AgentConfiguration agentConfig,
             PreviousExitSummary previousExit,
             AgentLogger logger)
@@ -1025,7 +1047,7 @@ namespace AutopilotMonitor.Agent.V2
                 if (previousExit?.LastBootUtc.HasValue == true)
                     data["previousBootUtc"] = previousExit.LastBootUtc.Value.ToString("o");
 
-                orchestrator.EventEmitter.Emit(new EnrollmentEvent
+                post.Emit(new EnrollmentEvent
                 {
                     SessionId = agentConfig.SessionId,
                     TenantId = agentConfig.TenantId,
@@ -1081,7 +1103,7 @@ namespace AutopilotMonitor.Agent.V2
         }
 
         private static void EmitVersionCheckEventIfAny(
-            EnrollmentOrchestrator orchestrator,
+            InformationalEventPost post,
             AgentConfiguration agentConfig,
             AgentLogger logger)
         {
@@ -1097,7 +1119,7 @@ namespace AutopilotMonitor.Agent.V2
 
                 if (buildResult?.Event != null)
                 {
-                    orchestrator.EventEmitter.Emit(buildResult.Event);
+                    post.Emit(buildResult.Event);
                     logger.Info($"agent_version_check emitted (outcome={buildResult.Outcome}).");
                 }
                 else if (buildResult?.Deduped == true)
