@@ -238,8 +238,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <summary>
         /// Wires all components and starts the Ingress-Worker + periodischen Drain-Loop.
         /// Idempotent per <see cref="Interlocked.Exchange(ref int, int)"/> — zweiter Aufruf wirft.
+        /// <para>
+        /// <b><paramref name="onIngressReady"/></b> (single-rail refactor, plan §5.1): an optional
+        /// caller hook invoked after the ingress worker is running but before any collector host
+        /// is started. Use this slot to post agent-lifecycle signals (e.g. <c>agent_started</c>)
+        /// so they land on the signal log — and therefore on the backend Events timeline — with
+        /// sequence numbers lower than anything the collectors produce. The callback is invoked
+        /// synchronously on the calling thread; exceptions are caught and logged so a malformed
+        /// hook cannot abort Start. The WhiteGlove Part-2 recovery bridge (when applicable) fires
+        /// first, then this hook, then collector hosts.
+        /// </para>
         /// </summary>
-        public void Start()
+        /// <param name="onIngressReady">Optional hook, invoked with the live <see cref="ISignalIngressSink"/> after ingress start and before collector start.</param>
+        public void Start(Action<ISignalIngressSink>? onIngressReady = null)
         {
             if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(EnrollmentOrchestrator));
             if (Interlocked.Exchange(ref _started, 1) == 1)
@@ -410,6 +421,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 catch (Exception ex)
                 {
                     _logger.Error("EnrollmentOrchestrator: failed to post SessionRecovered for WG Part-2 resume.", ex);
+                }
+            }
+
+            // 13b) Caller-owned pre-collector hook. Single-rail refactor uses this slot to post
+            //      agent-lifecycle signals (agent_started, agent_version_check, …) so they land
+            //      on the signal log before any collector-generated signal — fixes the seq=13
+            //      ordering regression from the V2 parity audit. Exceptions are caught so a
+            //      malformed hook cannot abort Start or prevent collectors from running.
+            if (onIngressReady != null)
+            {
+                try
+                {
+                    onIngressReady(_ingress);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("EnrollmentOrchestrator: onIngressReady hook threw — continuing startup.", ex);
                 }
             }
 
