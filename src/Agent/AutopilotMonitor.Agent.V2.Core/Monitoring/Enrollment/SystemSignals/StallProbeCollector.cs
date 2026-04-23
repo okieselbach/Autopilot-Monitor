@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
@@ -42,7 +43,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
     {
         private readonly string _sessionId;
         private readonly string _tenantId;
-        private readonly Action<EnrollmentEvent> _onEventCollected;
+        private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
         private readonly int[] _thresholdsMinutes;
         private readonly HashSet<int> _traceIndices;
@@ -126,7 +127,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public StallProbeCollector(
             string sessionId,
             string tenantId,
-            Action<EnrollmentEvent> onEventCollected,
+            InformationalEventPost post,
             AgentLogger logger,
             int[] thresholdsMinutes,
             int[] traceIndices,
@@ -136,7 +137,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
-            _onEventCollected = onEventCollected ?? throw new ArgumentNullException(nameof(onEventCollected));
+            _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _thresholdsMinutes = thresholdsMinutes ?? throw new ArgumentNullException(nameof(thresholdsMinutes));
             _traceIndices = new HashSet<int>(traceIndices ?? new int[0]);
@@ -464,7 +465,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private void EmitProbeResultEvent(ProbeResult result, EventSeverity severity)
         {
             var data = BuildDataJson(result);
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -483,7 +484,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             var summary = result.ActiveInstalls.Count > 0
                 ? $"activeInstalls={result.ActiveInstalls.Count}"
                 : "quiet";
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,
@@ -500,7 +501,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         {
             var data = BuildDataJson(result);
             data["probeIndexTriggered"] = result.ProbeIndex;
-            _onEventCollected(new EnrollmentEvent
+            _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
                 TenantId = _tenantId,

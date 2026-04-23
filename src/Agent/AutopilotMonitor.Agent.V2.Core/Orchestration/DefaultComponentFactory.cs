@@ -156,7 +156,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 hosts.Add(new StallProbeHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEnrollmentEvent: onEnrollmentEvent,
                     logger: logger,
                     ingress: ingress,
                     clock: clock,
@@ -501,7 +500,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             public StallProbeHost(
                 string sessionId,
                 string tenantId,
-                Action<EnrollmentEvent> onEnrollmentEvent,
                 AgentLogger logger,
                 ISignalIngressSink ingress,
                 IClock clock,
@@ -511,11 +509,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 int sessionStalledAfterProbeIndex,
                 int[]? harmlessModernDeploymentEventIds)
             {
+                if (ingress == null) throw new ArgumentNullException(nameof(ingress));
+                if (clock == null) throw new ArgumentNullException(nameof(clock));
                 _logger = logger;
+                var post = new InformationalEventPost(ingress, clock);
                 _collector = new StallProbeCollector(
                     sessionId: sessionId,
                     tenantId: tenantId,
-                    onEventCollected: onEnrollmentEvent,
+                    post: post,
                     logger: logger,
                     thresholdsMinutes: thresholdsMinutes ?? new[] { 2, 15, 30, 60, 180 },
                     traceIndices: traceIndices ?? new[] { 2 },
