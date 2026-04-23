@@ -27,7 +27,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
     /// </summary>
     public sealed class EventTimelineEmitter : IEventTimelineEmitter
     {
+        /// <summary>Default <see cref="EnrollmentEvent.Source"/> when no <see cref="SourceParamKey"/> override is provided.</summary>
         internal const string SourceId = "decision_engine";
+
         internal const string EventTypeParamKey = "eventType";
 
         /// <summary>
@@ -36,6 +38,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
         /// Missing key or unparsable value → <see cref="EnrollmentPhase.Unknown"/>.
         /// </summary>
         internal const string PhaseParamKey = "phase";
+
+        /// <summary>
+        /// Parameter key for the optional <see cref="EnrollmentEvent.Source"/> override. Any
+        /// non-empty string is accepted; default is <see cref="SourceId"/> so existing reducer
+        /// cases keep emitting as <c>"decision_engine"</c>. Single-rail migration uses this to
+        /// preserve the original collector's source label (e.g. <c>"Network"</c>,
+        /// <c>"ServerActionDispatcher"</c>) on the wire — otherwise the UI would lose that
+        /// fidelity when everything flows through the engine.
+        /// </summary>
+        internal const string SourceParamKey = "source";
+
+        /// <summary>
+        /// Parameter key for the optional <see cref="EnrollmentEvent.Severity"/> override.
+        /// Value must be the exact <see cref="EventSeverity"/> enum name (Ordinal match,
+        /// case-sensitive: e.g. <c>"Info"</c>, <c>"Warning"</c>, <c>"Error"</c>). Missing /
+        /// unparsable → derived from <see cref="DeriveSeverity"/> by the <c>eventType</c> suffix.
+        /// </summary>
+        internal const string SeverityParamKey = "severity";
+
+        /// <summary>
+        /// Parameter key for an explicit <see cref="EnrollmentEvent.Message"/> override.
+        /// Missing → fallback to the <c>{eventType}: {reason}</c> / <c>{eventType}</c> shape
+        /// implemented by <see cref="BuildMessage"/>.
+        /// </summary>
+        internal const string MessageParamKey = "message";
+
+        /// <summary>
+        /// Parameter key for the optional <see cref="EnrollmentEvent.ImmediateUpload"/>
+        /// override. Value must be <c>"true"</c> or <c>"false"</c>; missing / unparsable →
+        /// default <c>true</c> (reducer-emitted events have historically been
+        /// immediate-upload for timely dashboards).
+        /// </summary>
+        internal const string ImmediateUploadParamKey = "immediateUpload";
+
+        /// <summary>
+        /// Parameter key for the legacy reason-string used by <see cref="BuildMessage"/> when
+        /// no explicit <see cref="MessageParamKey"/> is provided. The value also stays in
+        /// <see cref="EnrollmentEvent.Data"/> so downstream analysis can key on the raw token.
+        /// </summary>
+        internal const string ReasonParamKey = "reason";
 
         private readonly TelemetryEventEmitter _emitter;
 
@@ -63,12 +105,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
                 SessionId = currentState.SessionId,
                 TenantId = currentState.TenantId,
                 EventType = eventType,
-                Severity = DeriveSeverity(eventType),
-                Source = SourceId,
+                Severity = ParseSeverity(parameters, eventType),
+                Source = ParseSource(parameters),
                 Phase = ParsePhase(parameters),
                 Message = BuildMessage(eventType, parameters),
                 Timestamp = DateTime.SpecifyKind(occurredAtUtc, DateTimeKind.Utc),
-                ImmediateUpload = true,     // terminal + classification events are always immediate
+                ImmediateUpload = ParseImmediateUpload(parameters),
                 Data = BuildDataDict(parameters),
             };
 
@@ -93,6 +135,52 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
                 : EnrollmentPhase.Unknown;
         }
 
+        /// <summary>
+        /// Returns the explicit <see cref="SourceParamKey"/> override if present and non-empty,
+        /// otherwise the engine default <see cref="SourceId"/>. Single-rail migration uses the
+        /// override to retain the originating collector's source label on the wire.
+        /// </summary>
+        private static string ParseSource(IReadOnlyDictionary<string, string> parameters)
+        {
+            if (parameters.TryGetValue(SourceParamKey, out var raw) && !string.IsNullOrEmpty(raw))
+            {
+                return raw;
+            }
+            return SourceId;
+        }
+
+        /// <summary>
+        /// Returns the explicit <see cref="SeverityParamKey"/> override if it is a valid
+        /// <see cref="EventSeverity"/> enum name, otherwise the eventType-suffix-derived default.
+        /// Never throws — unparsable values fall back silently so the emitter path cannot fail
+        /// on a malformed reducer case.
+        /// </summary>
+        private static EventSeverity ParseSeverity(IReadOnlyDictionary<string, string> parameters, string eventType)
+        {
+            if (parameters.TryGetValue(SeverityParamKey, out var raw)
+                && !string.IsNullOrEmpty(raw)
+                && Enum.TryParse<EventSeverity>(raw, ignoreCase: false, out var parsed))
+            {
+                return parsed;
+            }
+            return DeriveSeverity(eventType);
+        }
+
+        /// <summary>
+        /// Returns the explicit <see cref="ImmediateUploadParamKey"/> override if it parses as
+        /// a bool literal; missing / unparsable → <c>true</c> (matches the historic reducer
+        /// default so existing terminal effects keep their immediate-upload semantics).
+        /// </summary>
+        private static bool ParseImmediateUpload(IReadOnlyDictionary<string, string> parameters)
+        {
+            if (parameters.TryGetValue(ImmediateUploadParamKey, out var raw)
+                && bool.TryParse(raw, out var parsed))
+            {
+                return parsed;
+            }
+            return true;
+        }
+
         private static EventSeverity DeriveSeverity(string eventType)
         {
             if (eventType.EndsWith("_failed", StringComparison.Ordinal)) return EventSeverity.Error;
@@ -100,9 +188,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
             return EventSeverity.Info;
         }
 
+        /// <summary>
+        /// Prefers an explicit <see cref="MessageParamKey"/> override; otherwise falls back to
+        /// the legacy <c>"{eventType}: {reason}"</c> (or plain <c>{eventType}</c> if no reason)
+        /// shape. The override is how single-rail senders preserve an already-formatted human
+        /// message; the fallback keeps existing reducer cases unchanged.
+        /// </summary>
         private static string BuildMessage(string eventType, IReadOnlyDictionary<string, string> parameters)
         {
-            if (parameters.TryGetValue("reason", out var reason) && !string.IsNullOrEmpty(reason))
+            if (parameters.TryGetValue(MessageParamKey, out var explicitMessage) && !string.IsNullOrEmpty(explicitMessage))
+            {
+                return explicitMessage;
+            }
+            if (parameters.TryGetValue(ReasonParamKey, out var reason) && !string.IsNullOrEmpty(reason))
             {
                 return $"{eventType}: {reason}";
             }
@@ -114,9 +212,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
             var data = new Dictionary<string, object>(parameters.Count, StringComparer.Ordinal);
             foreach (var kv in parameters)
             {
-                // Top-level EnrollmentEvent fields (EventType, Phase) are not duplicated in Data.
+                // Top-level EnrollmentEvent fields (EventType, Phase, Source, Severity, Message,
+                // ImmediateUpload) are not duplicated in Data. `reason` intentionally stays in
+                // Data — it is informational, not a top-level field, even though BuildMessage
+                // consumes it as a fallback.
                 if (kv.Key == EventTypeParamKey) continue;
                 if (kv.Key == PhaseParamKey) continue;
+                if (kv.Key == SourceParamKey) continue;
+                if (kv.Key == SeverityParamKey) continue;
+                if (kv.Key == MessageParamKey) continue;
+                if (kv.Key == ImmediateUploadParamKey) continue;
                 data[kv.Key] = kv.Value;
             }
             return data;

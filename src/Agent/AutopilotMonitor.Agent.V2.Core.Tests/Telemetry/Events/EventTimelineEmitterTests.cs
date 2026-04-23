@@ -261,5 +261,159 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
             var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
             Assert.Equal("decision_engine", (string?)parsed["Source"]);
         }
+
+        [Fact]
+        public void Source_parameter_overrides_default_so_single_rail_events_keep_origin_label()
+        {
+            // Plan §1.3 — InformationalEvent carries the originating collector's source label.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["source"] = "Network",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("Network", (string?)parsed["Source"]);
+        }
+
+        [Fact]
+        public void Empty_source_parameter_falls_back_to_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "enrollment_complete",
+                    ["source"] = string.Empty,
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("decision_engine", (string?)parsed["Source"]);
+        }
+
+        [Fact]
+        public void Severity_parameter_overrides_suffix_derived_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["severity"] = "Warning",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("Warning", (string?)parsed["SeverityString"]);
+        }
+
+        [Fact]
+        public void Invalid_severity_parameter_falls_back_to_suffix_derived_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "enrollment_failed",
+                    ["severity"] = "NotAnEnumValue",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            // "_failed" suffix still drives the default → Error.
+            Assert.Equal("Error", (string?)parsed["SeverityString"]);
+        }
+
+        [Fact]
+        public void Message_parameter_overrides_reason_based_default()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["message"] = "NTP offset -124.02s from time.windows.com",
+                    // reason is ignored when an explicit message is provided.
+                    ["reason"] = "should_not_appear_in_message",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal("NTP offset -124.02s from time.windows.com", (string?)parsed["Message"]);
+            // reason still stays in Data even when unused by the message.
+            var data = (JObject)parsed["Data"]!;
+            Assert.Equal("should_not_appear_in_message", (string?)data["reason"]);
+        }
+
+        [Fact]
+        public void ImmediateUpload_parameter_false_opts_out_of_immediate_flush()
+        {
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "performance_snapshot",
+                    ["immediateUpload"] = "false",
+                },
+                State(),
+                At);
+
+            Assert.False(r.Transport.Enqueued[0].RequiresImmediateFlush);
+        }
+
+        [Fact]
+        public void ImmediateUpload_default_remains_true_for_reducer_effects_without_override()
+        {
+            // Regression guard — today's reducer cases do not pass immediateUpload, and the
+            // wire contract keeps immediate flush for reducer-emitted events.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string> { ["eventType"] = "whiteglove_complete" },
+                State(),
+                At);
+
+            Assert.True(r.Transport.Enqueued[0].RequiresImmediateFlush);
+        }
+
+        [Fact]
+        public void Top_level_parameters_are_not_duplicated_in_Data()
+        {
+            // Plan §1.3 — every top-level EnrollmentEvent field (eventType, phase, source,
+            // severity, message, immediateUpload) is stripped from the Data dictionary so the
+            // wire format is not self-contradicting.
+            using var r = new Rig();
+            r.Sut.Emit(
+                new Dictionary<string, string>
+                {
+                    ["eventType"] = "ntp_time_check",
+                    ["phase"] = "DeviceSetup",
+                    ["source"] = "Network",
+                    ["severity"] = "Warning",
+                    ["message"] = "NTP offset -124.02s",
+                    ["immediateUpload"] = "false",
+                    ["offsetSeconds"] = "-124.02",
+                },
+                State(),
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            var data = (JObject)parsed["Data"]!;
+            Assert.Null(data["eventType"]);
+            Assert.Null(data["phase"]);
+            Assert.Null(data["source"]);
+            Assert.Null(data["severity"]);
+            Assert.Null(data["message"]);
+            Assert.Null(data["immediateUpload"]);
+            Assert.Equal("-124.02", (string?)data["offsetSeconds"]);
+        }
     }
 }
