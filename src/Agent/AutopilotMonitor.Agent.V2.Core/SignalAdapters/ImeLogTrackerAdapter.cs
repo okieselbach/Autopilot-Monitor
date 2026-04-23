@@ -5,12 +5,14 @@ using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
+using AutopilotMonitor.Shared.Models;
+using SharedEventTypes = AutopilotMonitor.Shared.Constants.EventTypes;
 
 namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
 {
     /// <summary>
     /// Adapter for <see cref="ImeLogTracker"/> → mehrere DecisionSignalKinds.
-    /// Plan §2.1a / §2.2.
+    /// Plan §2.1a / §2.2 / §5.9 (single-rail PR #9 — V1 Parity Issue #3).
     /// <para>
     /// ImeLogTracker nutzt Action-Property-Callbacks (nicht Events). Adapter <b>ersetzt</b>
     /// diese Action-Props — Orchestrator darf die nicht parallel belegen. Dispose restauriert
@@ -18,7 +20,16 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
     /// Tracker selbst kurz vor Dispose).
     /// </para>
     /// <para>
-    /// Mapping:
+    /// <b>Dual emission</b> (Plan §5.9): jede Callback postet (a) einen spezifischen
+    /// <see cref="DecisionSignalKind"/> für Decision-Relevanz + (b) einen
+    /// <see cref="DecisionSignalKind.InformationalEvent"/> für die Events-Timeline-UI. So bleibt
+    /// die decision-Logik unverändert, während die V1-Event-Parity (app_install_started,
+    /// app_download_started, download_progress, do_telemetry, script_completed, etc.) wieder
+    /// hergestellt wird, ohne direkten <c>TelemetryEventEmitter.Emit</c>-Aufruf (Single-Rail
+    /// Invariante 1).
+    /// </para>
+    /// <para>
+    /// Mapping (DecisionSignal):
     /// <list type="bullet">
     ///   <item><c>OnEspPhaseChanged(phase)</c> → <see cref="DecisionSignalKind.EspPhaseChanged"/>
     ///     (dedup per distinct phase value — Reducer Plan §2.1a idempotenz-Anforderung).</item>
@@ -38,9 +49,12 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
     /// </summary>
     internal sealed class ImeLogTrackerAdapter : IDisposable
     {
+        private const string SourceLabel = "ImeLogTracker";
+
         private readonly ImeLogTracker _tracker;
         private readonly ISignalIngressSink _ingress;
         private readonly IClock _clock;
+        private readonly InformationalEventPost _post;
         private readonly HashSet<string> _whiteGloveSealingPatternIds;
         private readonly object _lock = new object();
 
@@ -57,7 +71,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private readonly Action<AppPackageState, AppInstallationState, AppInstallationState> _ourOnAppStateChanged;
         private readonly Action<string> _ourOnPatternMatched;
 
-        // Dedup state.
+        // Dedup state for DecisionSignals.
         private string? _lastEspPhase;
         private bool _userSessionCompletedPosted;
         private bool _sealingPatternPosted;
@@ -72,6 +86,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
             _ingress = ingress ?? throw new ArgumentNullException(nameof(ingress));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+            _post = new InformationalEventPost(ingress, clock);
 
             _whiteGloveSealingPatternIds = whiteGloveSealingPatternIds == null
                 ? new HashSet<string>(StringComparer.Ordinal)
@@ -155,10 +170,12 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 _lastEspPhase = phase;
             }
 
+            var now = _clock.UtcNow;
+
             _ingress.Post(
                 kind: DecisionSignalKind.EspPhaseChanged,
-                occurredAtUtc: _clock.UtcNow,
-                sourceOrigin: "ImeLogTracker",
+                occurredAtUtc: now,
+                sourceOrigin: SourceLabel,
                 evidence: new Evidence(
                     kind: EvidenceKind.Derived,
                     identifier: "ime-log-tracker-v1",
@@ -172,6 +189,26 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 {
                     [SignalPayloadKeys.EspPhase] = phase,
                 });
+
+            // Parity with V1: also emit an `esp_phase_changed` InformationalEvent so the
+            // Events-table / UI timeline gets the phase declaration. This is one of the two
+            // event types allowed to carry a non-Unknown Phase per feedback_phase_strategy.
+            var mappedPhase = MapEspPhaseToEnrollmentPhase(phase);
+            var data = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["espPhase"] = phase,
+            };
+            var patternId = _tracker.LastMatchedPatternId;
+            if (!string.IsNullOrEmpty(patternId))
+                data["patternId"] = patternId!;
+
+            _post.Emit(
+                eventType: SharedEventTypes.EspPhaseChanged,
+                source: SourceLabel,
+                message: $"ESP phase: {phase}",
+                phase: mappedPhase == EnrollmentPhase.Unknown ? (EnrollmentPhase?)null : mappedPhase,
+                data: data,
+                occurredAtUtc: now);
         }
 
         private void EmitUserSessionCompleted()
@@ -182,10 +219,12 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 _userSessionCompletedPosted = true;
             }
 
+            var now = _clock.UtcNow;
+
             _ingress.Post(
                 kind: DecisionSignalKind.ImeUserSessionCompleted,
-                occurredAtUtc: _clock.UtcNow,
-                sourceOrigin: "ImeLogTracker",
+                occurredAtUtc: now,
+                sourceOrigin: SourceLabel,
                 evidence: new Evidence(
                     kind: EvidenceKind.Derived,
                     identifier: "ime-log-tracker-v1",
@@ -194,43 +233,76 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                     {
                         ["detectionSource"] = "IME log pattern (UserSessionCompleted)",
                     }));
+
+            var data = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["detectedAt"] = now.ToString("o"),
+            };
+            var patternId = _tracker.LastMatchedPatternId;
+            if (!string.IsNullOrEmpty(patternId))
+                data["patternId"] = patternId!;
+
+            _post.Emit(
+                eventType: SharedEventTypes.ImeUserSessionCompleted,
+                source: SourceLabel,
+                message: "IME user session completed",
+                data: data,
+                occurredAtUtc: now);
         }
 
         private void EmitAppState(AppPackageState app, AppInstallationState oldState, AppInstallationState newState)
         {
             if (app == null || string.IsNullOrEmpty(app.Id)) return;
 
-            var terminalKind = ClassifyTerminalState(newState);
-            if (terminalKind == null) return;   // Not a terminal state — skip.
+            var now = _clock.UtcNow;
 
-            lock (_lock)
+            // (1) DecisionSignal — terminal states only, once per app.
+            var terminalKind = ClassifyTerminalState(newState);
+            if (terminalKind != null)
             {
-                if (!_appsAlreadyPostedTerminal.Add(app.Id))
+                bool fireDecisionSignal;
+                lock (_lock)
                 {
-                    return;  // Already posted terminal state for this app.
+                    fireDecisionSignal = _appsAlreadyPostedTerminal.Add(app.Id);
+                }
+
+                if (fireDecisionSignal)
+                {
+                    _ingress.Post(
+                        kind: terminalKind.Value,
+                        occurredAtUtc: now,
+                        sourceOrigin: SourceLabel,
+                        evidence: new Evidence(
+                            kind: EvidenceKind.Derived,
+                            identifier: "ime-log-tracker-v1",
+                            summary: $"App {app.Id} → {newState}",
+                            derivationInputs: new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["appId"] = app.Id,
+                                ["appName"] = app.Name ?? string.Empty,
+                                ["previousState"] = oldState.ToString(),
+                                ["newState"] = newState.ToString(),
+                            }),
+                        payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["appId"] = app.Id,
+                            ["newState"] = newState.ToString(),
+                        });
                 }
             }
 
-            _ingress.Post(
-                kind: terminalKind.Value,
-                occurredAtUtc: _clock.UtcNow,
-                sourceOrigin: "ImeLogTracker",
-                evidence: new Evidence(
-                    kind: EvidenceKind.Derived,
-                    identifier: "ime-log-tracker-v1",
-                    summary: $"App {app.Id} → {newState}",
-                    derivationInputs: new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["appId"] = app.Id,
-                        ["appName"] = app.Name ?? string.Empty,
-                        ["previousState"] = oldState.ToString(),
-                        ["newState"] = newState.ToString(),
-                    }),
-                payload: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["appId"] = app.Id,
-                    ["newState"] = newState.ToString(),
-                });
+            // (2) InformationalEvent — one per state transition matching V1's wire shape.
+            var mapped = MapAppStateToEventType(oldState, newState);
+            if (mapped == null) return;
+
+            var (eventType, severity) = mapped.Value;
+            _post.Emit(
+                eventType: eventType,
+                source: SourceLabel,
+                message: BuildAppStateMessage(app, newState, eventType),
+                severity: severity,
+                data: BuildAppStatePayload(app, newState),
+                occurredAtUtc: now);
         }
 
         private void MaybeEmitWhiteGloveSealingPattern(string patternId)
@@ -248,7 +320,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _ingress.Post(
                 kind: DecisionSignalKind.WhiteGloveSealingPatternDetected,
                 occurredAtUtc: _clock.UtcNow,
-                sourceOrigin: "ImeLogTracker",
+                sourceOrigin: SourceLabel,
                 evidence: new Evidence(
                     kind: EvidenceKind.Derived,
                     identifier: "ime-log-tracker-v1",
@@ -277,6 +349,117 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 default:
                     return null;
             }
+        }
+
+        /// <summary>
+        /// Maps an IME app state-transition tuple to the V1-compatible event-type string +
+        /// severity. Returns null when the transition is not user-visible in the timeline
+        /// (e.g. Unknown → NotInstalled intermediate states).
+        /// </summary>
+        private static (string EventType, EventSeverity Severity)? MapAppStateToEventType(
+            AppInstallationState oldState,
+            AppInstallationState newState)
+        {
+            switch (newState)
+            {
+                case AppInstallationState.Downloading:
+                    // First transition into Downloading → `app_download_started`; subsequent
+                    // byte updates (old == new == Downloading) → `download_progress` (Debug).
+                    return oldState == AppInstallationState.Downloading
+                        ? (SharedEventTypes.DownloadProgress, EventSeverity.Debug)
+                        : (SharedEventTypes.AppDownloadStarted, EventSeverity.Info);
+
+                case AppInstallationState.Installing:
+                case AppInstallationState.InProgress:
+                    return (SharedEventTypes.AppInstallStart, EventSeverity.Info);
+
+                case AppInstallationState.Installed:
+                case AppInstallationState.Skipped:
+                case AppInstallationState.Postponed:
+                    return (SharedEventTypes.AppInstallComplete, EventSeverity.Info);
+
+                case AppInstallationState.Error:
+                    return (SharedEventTypes.AppInstallFailed, EventSeverity.Error);
+
+                default:
+                    return null;
+            }
+        }
+
+        private static string BuildAppStateMessage(AppPackageState app, AppInstallationState newState, string eventType)
+        {
+            var label = string.IsNullOrEmpty(app.Name) ? app.Id : app.Name;
+            if (string.Equals(eventType, SharedEventTypes.AppInstallFailed, StringComparison.Ordinal)
+                && !string.IsNullOrEmpty(app.ErrorDetail))
+            {
+                return $"{label}: {app.ErrorDetail}";
+            }
+            if (string.Equals(eventType, SharedEventTypes.DownloadProgress, StringComparison.Ordinal))
+            {
+                return $"{label}: {(app.ProgressPercent ?? 0)}%";
+            }
+            return $"{label}: {newState}";
+        }
+
+        private static IReadOnlyDictionary<string, string> BuildAppStatePayload(
+            AppPackageState app,
+            AppInstallationState newState)
+        {
+            var data = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["appId"] = app.Id,
+                ["appName"] = app.Name ?? string.Empty,
+                ["state"] = newState.ToString(),
+                ["intent"] = app.Intent.ToString(),
+                ["targeted"] = app.Targeted.ToString(),
+                ["runAs"] = app.RunAs.ToString(),
+                ["progressPercent"] = (app.ProgressPercent ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["bytesDownloaded"] = app.BytesDownloaded.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["bytesTotal"] = app.BytesTotal.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["isError"] = (newState == AppInstallationState.Error).ToString().ToLowerInvariant(),
+                ["isCompleted"] = IsCompletedState(newState).ToString().ToLowerInvariant(),
+            };
+
+            if (!string.IsNullOrEmpty(app.AppVersion)) data["appVersion"] = app.AppVersion!;
+            if (!string.IsNullOrEmpty(app.AppType)) data["appType"] = app.AppType!;
+            if (app.AttemptNumber > 0) data["attemptNumber"] = app.AttemptNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!string.IsNullOrEmpty(app.DetectionResult)) data["detectionResult"] = app.DetectionResult!;
+
+            if (newState == AppInstallationState.Error)
+            {
+                if (!string.IsNullOrEmpty(app.ErrorPatternId)) data["errorPatternId"] = app.ErrorPatternId!;
+                if (!string.IsNullOrEmpty(app.ErrorDetail)) data["errorDetail"] = app.ErrorDetail!;
+                if (!string.IsNullOrEmpty(app.ErrorCode)) data["errorCode"] = app.ErrorCode!;
+                if (!string.IsNullOrEmpty(app.ExitCode)) data["exitCode"] = app.ExitCode!;
+                if (!string.IsNullOrEmpty(app.HResultFromWin32)) data["hresultFromWin32"] = app.HResultFromWin32!;
+            }
+
+            return data;
+        }
+
+        private static bool IsCompletedState(AppInstallationState state) =>
+            state == AppInstallationState.Installed
+            || state == AppInstallationState.Skipped
+            || state == AppInstallationState.Postponed
+            || state == AppInstallationState.Error;
+
+        /// <summary>
+        /// Mirrors <see cref="DecisionEngine.MapEspPhaseToEnrollmentPhase(string)"/> so the
+        /// adapter does not depend on the engine's <c>internal</c> helper (kept here for build
+        /// isolation; drift should be caught by an xUnit parity test in a later PR).
+        /// </summary>
+        private static EnrollmentPhase MapEspPhaseToEnrollmentPhase(string rawPhase)
+        {
+            if (string.IsNullOrEmpty(rawPhase)) return EnrollmentPhase.Unknown;
+            return rawPhase switch
+            {
+                "DeviceSetup" => EnrollmentPhase.DeviceSetup,
+                "AccountSetup" => EnrollmentPhase.AccountSetup,
+                "FinalizingSetup" => EnrollmentPhase.FinalizingSetup,
+                "Finalizing" => EnrollmentPhase.FinalizingSetup,
+                "Complete" => EnrollmentPhase.Complete,
+                _ => EnrollmentPhase.Unknown,
+            };
         }
     }
 }
