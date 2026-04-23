@@ -40,13 +40,18 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
                 _logger.LogInformation($"Marking session {sessionId} as failed for tenant {tenantId} by user {userIdentifier}");
 
-                // Update session status to Failed with manual failure reason
+                // Update session status to Failed with manual failure reason. AdminMarkedAction is
+                // the authoritative trigger for the AdminAction response-field sent to agents.
+                // FailureSource="manual" aligns this code path with the existing rule/agent
+                // attribution scheme on the SessionSummary.
                 var success = await _sessionRepo.UpdateSessionStatusAsync(
                     tenantId,
                     sessionId,
                     SessionStatus.Failed,
-                    null, // Keep current phase
-                    "Manually marked as failed by administrator"
+                    currentPhase: null, // Keep current phase
+                    failureReason: "Manually marked as failed by administrator",
+                    failureSource: "manual",
+                    adminMarkedAction: "Failed"
                 );
 
                 if (success)

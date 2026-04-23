@@ -193,6 +193,21 @@ namespace AutopilotMonitor.Shared.Models
         /// Consumers use this to render rule-based failures distinctly (badge + link to rule).
         /// </summary>
         public string FailureSource { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Non-null only when an administrator explicitly flipped the session via the portal
+        /// (MarkSessionSucceeded / MarkSessionFailed). Values: <c>null</c> (default, agent-driven),
+        /// <c>"Succeeded"</c>, <c>"Failed"</c>.
+        /// <para>
+        /// This is the authoritative source for the backend's <c>AdminAction</c> response field
+        /// sent to agents. Previously the backend inferred admin-override from "status is terminal
+        /// + current event is not a completion marker", which fired falsely on every post-completion
+        /// event the agent sent (agent_shutting_down, diagnostics_uploaded, enrollment_summary_shown).
+        /// The dedicated field eliminates that false-positive.
+        /// </para>
+        /// </summary>
+        public string? AdminMarkedAction { get; set; }
+
         public int EventCount { get; set; }
         public int? DurationSeconds { get; set; }
 

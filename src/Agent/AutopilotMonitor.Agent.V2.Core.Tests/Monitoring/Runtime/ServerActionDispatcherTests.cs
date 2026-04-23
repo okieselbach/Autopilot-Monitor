@@ -217,5 +217,52 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
             Assert.Equal(1, rig.RotateConfigCalls);
             Assert.Equal(1, rig.TerminateCalls);
         }
+
+        // ============================================================= Ingress-stopped race guard
+
+        [Fact]
+        public async Task Dispatch_with_stopped_ingress_does_not_throw_and_still_runs_handler()
+        {
+            // Race regression gate: a terminal-drain response that arrives after
+            // SignalIngress.Stop but before TelemetryUploadOrchestrator.DrainAllAsync returns
+            // must NOT surface as "InvalidOperationException: SignalIngress has been stopped"
+            // from PostEvent — the dispatcher has to stay robust during the shutdown window so
+            // any still-pending handler work (e.g. a follow-up rotate_config) can complete.
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            var stoppedPost = new InformationalEventPost(
+                new ThrowingIngressSink(),
+                new VirtualClock(new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc)));
+
+            int rotateCalls = 0;
+            var dispatcher = new ServerActionDispatcher(
+                configuration: new AgentConfiguration { SessionId = "S1", TenantId = "T1", ApiBaseUrl = "http://localhost" },
+                logger: logger,
+                rotateConfigAsync: () => { rotateCalls++; return Task.FromResult(true); },
+                uploadDiagnosticsAsync: _ => Task.FromResult(new DiagnosticsUploadResult()),
+                onTerminateRequested: _ => Task.CompletedTask,
+                post: stoppedPost);
+
+            var ex = await Record.ExceptionAsync(() => dispatcher.DispatchAsync(new List<ServerAction>
+            {
+                new ServerAction { Type = ServerActionTypes.RotateConfig, QueuedAt = DateTime.UtcNow },
+            }));
+
+            Assert.Null(ex);
+            Assert.Equal(1, rotateCalls);
+        }
+
+        private sealed class ThrowingIngressSink : ISignalIngressSink
+        {
+            public void Post(
+                DecisionSignalKind kind,
+                DateTime occurredAtUtc,
+                string sourceOrigin,
+                Evidence evidence,
+                IReadOnlyDictionary<string, string>? payload = null,
+                int kindSchemaVersion = 1,
+                object? typedPayload = null)
+                => throw new InvalidOperationException("SignalIngress has been stopped.");
+        }
     }
 }

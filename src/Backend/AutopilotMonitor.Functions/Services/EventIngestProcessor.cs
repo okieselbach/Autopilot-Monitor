@@ -426,14 +426,18 @@ namespace AutopilotMonitor.Functions.Services
                 _ = _slaBreachService.EvaluateSessionCompletionAsync(request.TenantId, updatedSession);
             }
 
-            string? adminAction = null;
-            if (updatedSession != null &&
-                classification.CompletionEvent == null && classification.FailureEvent == null &&
-                (updatedSession.Status == SessionStatus.Succeeded || updatedSession.Status == SessionStatus.Failed))
+            // AdminAction is the authoritative portal-button signal to the agent. Read
+            // SessionSummary.AdminMarkedAction, which is set EXCLUSIVELY by
+            // MarkSessionSucceededFunction / MarkSessionFailedFunction. Previously this was
+            // inferred from "status final + current event not a completion marker", which
+            // fired falsely for every post-completion agent event (agent_shutting_down,
+            // diagnostics_uploaded, enrollment_summary_shown) — making the agent believe an
+            // admin had clicked Mark-Succeeded after its own completion.
+            string? adminAction = updatedSession?.AdminMarkedAction;
+            if (!string.IsNullOrEmpty(adminAction))
             {
-                adminAction = updatedSession.Status.ToString();
                 _logger.LogInformation(
-                    "{SessionPrefix} Admin override detected — signaling agent: AdminAction={AdminAction}",
+                    "{SessionPrefix} Admin override detected (AdminMarkedAction) — signaling agent: AdminAction={AdminAction}",
                     sessionPrefix, adminAction);
             }
 

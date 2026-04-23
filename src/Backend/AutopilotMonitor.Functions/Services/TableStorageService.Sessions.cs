@@ -212,6 +212,7 @@ namespace AutopilotMonitor.Functions.Services
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
                 FailureSource = entity.GetString("FailureSource") ?? string.Empty,
+                AdminMarkedAction = entity.GetString("AdminMarkedAction"),
                 PendingActionsJson = entity.GetString("PendingActionsJson") ?? string.Empty,
                 PendingActionsQueuedAt = SafeGetDateTime(entity, "PendingActionsQueuedAt"),
                 EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
@@ -935,7 +936,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
         /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false, string? failureSource = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false, string? failureSource = null, string? adminMarkedAction = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -1078,6 +1079,15 @@ namespace AutopilotMonitor.Functions.Services
                     if (clearFailureReason)
                     {
                         update["FailureSource"] = string.Empty;
+                    }
+
+                    // AdminMarkedAction marks an administrator-driven terminal override — set only by
+                    // MarkSessionSucceededFunction / MarkSessionFailedFunction. This is the authoritative
+                    // trigger for the AdminAction response-field sent to agents: an agent-reported
+                    // terminal (status=Succeeded/Failed with this field null) does NOT fire AdminAction.
+                    if (!string.IsNullOrEmpty(adminMarkedAction))
+                    {
+                        update["AdminMarkedAction"] = adminMarkedAction;
                     }
 
                     // Set IsPreProvisioned flag atomically with the status update (WhiteGlove)
@@ -1767,6 +1777,7 @@ namespace AutopilotMonitor.Functions.Services
                 Status = status,
                 FailureReason = entity.GetString("FailureReason") ?? string.Empty,
                 FailureSource = entity.GetString("FailureSource") ?? string.Empty,
+                AdminMarkedAction = entity.GetString("AdminMarkedAction"),
                 PendingActionsJson = entity.GetString("PendingActionsJson") ?? string.Empty,
                 PendingActionsQueuedAt = SafeGetDateTime(entity, "PendingActionsQueuedAt"),
                 EventCount = SafeGetInt32(entity, "EventCount") ?? 0,

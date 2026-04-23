@@ -218,18 +218,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             // Go through the InformationalEventPost.Emit(EnrollmentEvent) overload so the wire shape
             // stays identical to the legacy Action<EnrollmentEvent> path: the emitter stringifies the
             // data dictionary preserving invariant-culture formatting.
-            _post.Emit(new EnrollmentEvent
+            try
             {
-                SessionId = _configuration.SessionId,
-                TenantId = _configuration.TenantId,
-                EventType = eventType,
-                Severity = severity,
-                Source = "ServerActionDispatcher",
-                Phase = EnrollmentPhase.Unknown,
-                Message = message,
-                Timestamp = DateTime.UtcNow,
-                Data = data,
-            });
+                _post.Emit(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = eventType,
+                    Severity = severity,
+                    Source = "ServerActionDispatcher",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = message,
+                    Timestamp = DateTime.UtcNow,
+                    Data = data,
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Race: a terminal-drain response arrived after SignalIngress.Stop completed but
+                // before TelemetryUploadOrchestrator.DrainAllAsync finished, so the ingress is
+                // disposed. Swallowing this keeps the dispatch loop alive for any follow-up
+                // actions in the same batch and prevents a nested Emit from corrupting the
+                // outer termination sequence. Dropped events are acceptable at this point —
+                // the session is being torn down.
+                _logger.Debug($"ServerActionDispatcher: event '{eventType}' emit suppressed (ingress stopped): {ex.Message}");
+            }
         }
 
         private static Dictionary<string, object> BuildTelemetryData(ServerAction action)

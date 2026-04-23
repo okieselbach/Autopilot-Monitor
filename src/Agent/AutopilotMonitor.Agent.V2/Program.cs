@@ -798,7 +798,14 @@ namespace AutopilotMonitor.Agent.V2
                         // MUST be wired AFTER Start() — orchestrator.Transport throws
                         // InvalidOperationException before Start() because the
                         // TelemetryUploadOrchestrator is constructed inside Start() at step 311.
-                        WireTelemetryServerResponse(orchestrator, serverActionDispatcher, logger);
+                        WireTelemetryServerResponse(
+                            orchestrator,
+                            serverActionDispatcher,
+                            lifecyclePost,
+                            () => terminationHandler,
+                            agentConfig,
+                            shutdownComplete,
+                            logger);
 
                         // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
                         // SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge — that
@@ -902,25 +909,57 @@ namespace AutopilotMonitor.Agent.V2
         }
 
         /// <summary>
-        /// M4.6.ε — routes <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/>
-        /// control signals through the <see cref="ServerActionDispatcher"/>. Synthesises the
-        /// same <c>terminate_session</c> <see cref="ServerAction"/>s that Legacy built in
-        /// <c>EventUploadOrchestrator.OnEventsUploaded</c> (kill-signal → force self-destruct;
-        /// admin-action → soft terminate respecting <c>SelfDestructOnComplete</c>).
+        /// Routes <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/> backend control
+        /// signals to the correct handler. Three distinct semantic paths, not one:
+        /// <list type="bullet">
+        ///   <item><b>DeviceKillSignal</b> — hard kill by administrator. Synthesises a
+        ///     <c>terminate_session</c> <see cref="ServerAction"/> with
+        ///     <c>forceSelfDestruct=true</c> and routes it through the dispatcher, overriding
+        ///     local <c>SelfDestructOnComplete=false</c>.</item>
+        ///   <item><b>AdminAction=Succeeded</b> — informational. Admin clicked Mark-Succeeded in
+        ///     the portal. Emits a single <c>admin_marked_session</c> timeline entry and lets
+        ///     the agent finish its own path. The agent does NOT repurpose the admin click as a
+        ///     termination trigger.</item>
+        ///   <item><b>AdminAction=Failed</b> — soft admin-driven shutdown. Calls the agent's own
+        ///     <see cref="EnrollmentTerminationHandler.Handle"/> with <c>outcome=Failed</c>, which
+        ///     runs the same analyzers / diagnostics / summary / self-destruct sequence as a
+        ///     locally-detected failure. Self-destruct is governed by local
+        ///     <c>SelfDestructOnComplete</c> — no forced override. Idempotent when the agent has
+        ///     already terminated (<c>_handled</c> guard in the handler).</item>
+        ///   <item><b>upload.Actions[]</b> — genuinely backend-queued <see cref="ServerAction"/>s
+        ///     (<c>rotate_config</c>, <c>request_diagnostics</c>). Still routed through the
+        ///     dispatcher because these are real actions, not admin-button echoes.</item>
+        ///   <item><b>DeviceBlocked</b> — non-terminal upload pause. Transport already reacted in
+        ///     <c>TelemetryUploadOrchestrator.ApplyControlSignals</c>; here we only log.</item>
+        /// </list>
+        /// <para>
+        /// <b>Shutdown race guard</b>: if the agent has already finished its own termination
+        /// sequence (<paramref name="shutdownComplete"/> set), the SignalIngress is disposed
+        /// and any further emit would throw <see cref="InvalidOperationException"/>. Short-circuit
+        /// up front rather than crash deep in the dispatcher / post stack.
+        /// </para>
         /// </summary>
         private static void WireTelemetryServerResponse(
             EnrollmentOrchestrator orchestrator,
             ServerActionDispatcher dispatcher,
+            InformationalEventPost post,
+            Func<EnrollmentTerminationHandler> terminationHandlerAccessor,
+            AgentConfiguration agentConfig,
+            System.Threading.ManualResetEventSlim shutdownComplete,
             AgentLogger logger)
         {
             orchestrator.Transport.ServerResponseReceived += (sender, upload) =>
             {
-                var toDispatch = new System.Collections.Generic.List<ServerAction>();
+                if (shutdownComplete.IsSet)
+                {
+                    logger.Debug("WireTelemetryServerResponse: shutdown already complete — ignoring backend control signals on this response.");
+                    return;
+                }
 
                 if (upload.DeviceKillSignal)
                 {
                     logger.Warning("Backend signalled DeviceKillSignal — synthesising terminate_session (force self-destruct).");
-                    toDispatch.Add(new ServerAction
+                    var killAction = new ServerAction
                     {
                         Type = ServerActionTypes.TerminateSession,
                         Reason = "DeviceKillSignal from administrator",
@@ -931,44 +970,123 @@ namespace AutopilotMonitor.Agent.V2
                             { "gracePeriodSeconds", "0" },
                             { "origin", "kill_signal" },
                         },
-                    });
+                    };
+                    try { dispatcher.DispatchAsync(new System.Collections.Generic.List<ServerAction> { killAction }).GetAwaiter().GetResult(); }
+                    catch (Exception ex) { logger.Error("ServerActionDispatcher.DispatchAsync (kill) threw during server-response wiring.", ex); }
                 }
                 else if (!string.IsNullOrEmpty(upload.AdminAction))
                 {
-                    logger.Warning($"Backend signalled AdminAction={upload.AdminAction} — synthesising terminate_session (soft).");
-                    toDispatch.Add(new ServerAction
+                    Func<string> stageNameAccessor = () =>
                     {
-                        Type = ServerActionTypes.TerminateSession,
-                        Reason = $"Admin marked session as {upload.AdminAction}",
-                        QueuedAt = DateTime.UtcNow,
-                        Params = new System.Collections.Generic.Dictionary<string, string>
+                        try { return orchestrator.CurrentState?.Stage.ToString(); }
+                        catch (InvalidOperationException) { return null; }
+                    };
+                    Action<EnrollmentTerminatedEventArgs> onAdminFailed = args =>
+                    {
+                        var handler = terminationHandlerAccessor();
+                        if (handler == null)
                         {
-                            { "adminOutcome", upload.AdminAction },
-                            { "gracePeriodSeconds", "0" },
-                            { "origin", "admin_action" },
-                        },
-                    });
+                            logger.Warning("AdminAction=Failed received but terminationHandler not constructed yet — ignoring.");
+                            return;
+                        }
+                        handler.Handle(sender: null, args: args);
+                    };
+                    HandleAdminAction(upload.AdminAction, stageNameAccessor, post, onAdminFailed, agentConfig, logger);
                 }
 
                 if (upload.Actions != null && upload.Actions.Count > 0)
                 {
-                    foreach (var a in upload.Actions) toDispatch.Add(a);
+                    var explicitActions = new System.Collections.Generic.List<ServerAction>(upload.Actions);
+                    try { dispatcher.DispatchAsync(explicitActions).GetAwaiter().GetResult(); }
+                    catch (Exception ex) { logger.Error("ServerActionDispatcher.DispatchAsync (explicit actions) threw during server-response wiring.", ex); }
                 }
 
                 if (upload.DeviceBlocked)
                 {
-                    // DeviceBlocked is non-terminal: the transport already paused its drain
-                    // loop in TelemetryUploadOrchestrator.ApplyControlSignals; we just log it
-                    // here so it surfaces on the console / agent log.
                     var until = upload.UnblockAt.HasValue ? $"until {upload.UnblockAt.Value:O}" : "indefinitely";
                     logger.Warning($"Backend signalled DeviceBlocked {until} — uploads paused, session remains alive.");
                 }
-
-                if (toDispatch.Count == 0) return;
-
-                try { dispatcher.DispatchAsync(toDispatch).GetAwaiter().GetResult(); }
-                catch (Exception ex) { logger.Error("ServerActionDispatcher.DispatchAsync threw during server-response wiring.", ex); }
             };
+        }
+
+        /// <summary>
+        /// Soft admin-override handling. Portal Mark-Succeeded / Mark-Failed is an echo of an
+        /// admin button click, not a ServerAction: it bypasses the dispatcher (no
+        /// <c>server_action_received / _executed</c> noise) and flows straight into the agent's
+        /// own timeline / termination pipeline.
+        /// <list type="bullet">
+        ///   <item><c>Succeeded</c>: informational timeline entry only. The agent keeps running
+        ///     its own decision path; later rules/analyzers can read the marker from the event
+        ///     stream if they need to correlate.</item>
+        ///   <item><c>Failed</c>: emits the same marker and invokes the agent's own
+        ///     <see cref="EnrollmentTerminationHandler"/> with <c>outcome=Failed</c>, never
+        ///     forcing self-destruct. Equivalent to the agent self-detecting a failure.</item>
+        /// </list>
+        /// </summary>
+        internal static void HandleAdminAction(
+            string adminAction,
+            Func<string> stageNameAccessor,
+            InformationalEventPost post,
+            Action<EnrollmentTerminatedEventArgs> onAdminFailed,
+            AgentConfiguration agentConfig,
+            AgentLogger logger)
+        {
+            var outcome = string.Equals(adminAction, "Succeeded", StringComparison.OrdinalIgnoreCase)
+                ? EnrollmentTerminationOutcome.Succeeded
+                : EnrollmentTerminationOutcome.Failed;
+
+            logger.Warning($"Backend signalled AdminAction={adminAction} — soft admin-override (outcome={outcome}).");
+
+            try
+            {
+                post.Emit(new EnrollmentEvent
+                {
+                    SessionId = agentConfig.SessionId,
+                    TenantId = agentConfig.TenantId,
+                    EventType = "admin_marked_session",
+                    Severity = outcome == EnrollmentTerminationOutcome.Succeeded ? EventSeverity.Info : EventSeverity.Warning,
+                    Source = "WireTelemetryServerResponse",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Administrator marked session as {adminAction} via portal.",
+                    Data = new System.Collections.Generic.Dictionary<string, object>
+                    {
+                        { "adminOutcome", adminAction ?? string.Empty },
+                        { "origin", "admin_action" },
+                    },
+                    ImmediateUpload = true,
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Race: SignalIngress was stopped between the shutdownComplete check above and
+                // this emit. Debug-only — the admin click will surface in the next session.
+                logger.Debug($"admin_marked_session emit suppressed (ingress stopped): {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"admin_marked_session emit failed: {ex.Message}");
+            }
+
+            if (outcome != EnrollmentTerminationOutcome.Failed) return;
+            if (onAdminFailed == null) return;
+
+            string stageName = null;
+            try { stageName = stageNameAccessor?.Invoke(); }
+            catch { /* accessor faulted — leave stageName null */ }
+
+            try
+            {
+                onAdminFailed(new EnrollmentTerminatedEventArgs(
+                    reason: EnrollmentTerminationReason.DecisionTerminalStage,
+                    outcome: EnrollmentTerminationOutcome.Failed,
+                    stageName: stageName,
+                    terminatedAtUtc: DateTime.UtcNow,
+                    details: "Admin marked session as Failed via portal."));
+            }
+            catch (Exception ex)
+            {
+                logger.Error("onAdminFailed (AdminAction=Failed) threw.", ex);
+            }
         }
 
         /// <summary>
