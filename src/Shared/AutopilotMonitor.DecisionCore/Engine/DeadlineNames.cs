@@ -76,7 +76,13 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// <summary>On <c>InformationalEvent</c>: optional. "true" / "false"; missing → false.</summary>
         public const string ImmediateUpload = "immediateUpload";
 
-        /// <summary>On <c>InformationalEvent</c>: optional. Pre-serialized JSON object whose top-level keys are copied into the emitted event's Data dictionary.</summary>
+        /// <summary>
+        /// On <c>InformationalEvent</c>: reserved for future JSON-blob expansion in the
+        /// emitter (plan §1.3). Currently pass-through — the reducer forwards this key
+        /// verbatim into the effect parameters, where it ends up as a flat string in
+        /// <c>EnrollmentEvent.Data</c>. Senders should prefer flat payload keys directly;
+        /// keeping the constant avoids churn if a later commit wires up JSON parsing.
+        /// </summary>
         public const string DataJson = "dataJson";
     }
 }
