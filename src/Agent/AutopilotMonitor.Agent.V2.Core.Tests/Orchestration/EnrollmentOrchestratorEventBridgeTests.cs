@@ -73,41 +73,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             }
         }
 
-        private sealed class Rig : IDisposable
-        {
-            public TempDirectory Tmp { get; } = new TempDirectory();
-            public VirtualClock Clock { get; } = new VirtualClock(At);
-            public AgentLogger Logger { get; }
-            public FakeBackendTelemetryUploader Uploader { get; } = new FakeBackendTelemetryUploader();
-            public List<IClassifier> Classifiers { get; } = new List<IClassifier>();
-            public FakeComponentFactory Factory { get; }
-            public string StateDir { get; }
-            public string TransportDir { get; }
-
-            public Rig(FakeComponentFactory? factory = null)
-            {
-                Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
-                StateDir = Path.Combine(Tmp.Path, "State");
-                TransportDir = Path.Combine(Tmp.Path, "Transport");
-                Factory = factory ?? new FakeComponentFactory();
-            }
-
-            public EnrollmentOrchestrator Build() =>
-                new EnrollmentOrchestrator(
-                    sessionId: "S1",
-                    tenantId: "T1",
-                    stateDirectory: StateDir,
-                    transportDirectory: TransportDir,
-                    clock: Clock,
-                    logger: Logger,
-                    uploader: Uploader,
-                    classifiers: Classifiers,
-                    componentFactory: Factory,
-                    drainInterval: TimeSpan.FromDays(1),
-                    terminalDrainTimeout: TimeSpan.FromSeconds(2));
-
-            public void Dispose() => Tmp.Dispose();
-        }
 
         [Fact]
         public void Start_without_factory_does_not_throw_and_spawns_no_hosts()
@@ -135,13 +100,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Start_with_factory_creates_all_hosts_and_starts_them()
         {
-            using var rig = new Rig();
-            var sut = rig.Build();
+            using var rig = new EnrollmentOrchestratorRig(At);
+            var factory = new FakeComponentFactory();
+            var sut = rig.Build(componentFactory: factory);
 
             sut.Start();
 
-            Assert.Equal(5, rig.Factory.Hosts.Count);
-            Assert.All(rig.Factory.Hosts, h => Assert.Equal(1, h.StartCalls));
+            Assert.Equal(5, factory.Hosts.Count);
+            Assert.All(factory.Hosts, h => Assert.Equal(1, h.StartCalls));
 
             sut.Stop();
         }
@@ -149,14 +115,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Factory_receives_ingress_and_clock_from_orchestrator()
         {
-            using var rig = new Rig();
-            var sut = rig.Build();
+            using var rig = new EnrollmentOrchestratorRig(At);
+            var factory = new FakeComponentFactory();
+            var sut = rig.Build(componentFactory: factory);
 
             sut.Start();
 
-            Assert.NotNull(rig.Factory.CapturedIngress);
-            Assert.NotNull(rig.Factory.CapturedClock);
-            Assert.Same(rig.Clock, rig.Factory.CapturedClock);
+            Assert.NotNull(factory.CapturedIngress);
+            Assert.NotNull(factory.CapturedClock);
+            Assert.Same(rig.Clock, factory.CapturedClock);
 
             sut.Stop();
         }
@@ -164,14 +131,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Stop_stops_and_disposes_all_hosts_in_creation_order()
         {
-            using var rig = new Rig();
-            var sut = rig.Build();
+            using var rig = new EnrollmentOrchestratorRig(At);
+            var factory = new FakeComponentFactory();
+            var sut = rig.Build(componentFactory: factory);
             sut.Start();
 
             sut.Stop();
 
-            Assert.All(rig.Factory.Hosts, h => Assert.Equal(1, h.StopCalls));
-            Assert.All(rig.Factory.Hosts, h => Assert.Equal(1, h.DisposeCalls));
+            Assert.All(factory.Hosts, h => Assert.Equal(1, h.StopCalls));
+            Assert.All(factory.Hosts, h => Assert.Equal(1, h.DisposeCalls));
         }
     }
 }

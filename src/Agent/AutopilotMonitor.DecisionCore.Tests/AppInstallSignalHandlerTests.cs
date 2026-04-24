@@ -68,69 +68,38 @@ namespace AutopilotMonitor.DecisionCore.Tests
 
         // ---- Completed handler -----------------------------------------------------------
 
-        [Fact]
-        public void Completed_Installed_increments_Completed_and_Installed_breakdown_only()
+        [Theory]
+        // newState payload → (Completed, Installed, Skipped, Postponed) — mapping is case-insensitive
+        // (AppInstallFacts.WithCompleted uses OrdinalIgnoreCase).
+        [InlineData("Installed", 1, 1, 0, 0)]
+        [InlineData("installed", 1, 1, 0, 0)]   // case-insensitive (NEW coverage)
+        [InlineData("Skipped",   1, 0, 1, 0)]
+        [InlineData("SKIPPED",   1, 0, 1, 0)]   // case-insensitive (NEW coverage)
+        [InlineData("Postponed", 1, 0, 0, 1)]
+        // Forward-compat: any unknown label (future adapter vocabulary, empty payload) still
+        // advances CompletedCount but does not hit any breakdown bucket.
+        [InlineData("Replaced",  1, 0, 0, 0)]
+        [InlineData("",          1, 0, 0, 0)]   // empty newState (NEW coverage)
+        public void Completed_signal_updates_breakdown_by_newState_and_records_taken_transition(
+            string newState,
+            int expectedCompleted, int expectedInstalled, int expectedSkipped, int expectedPostponed)
         {
             var engine = new DecisionEngine();
-            var state = DecisionState.CreateInitial(SessionId, TenantId);
 
-            var step = engine.Reduce(state, MakeCompleted(0, "app-1", "Installed"));
+            var step = engine.Reduce(
+                DecisionState.CreateInitial(SessionId, TenantId),
+                MakeCompleted(0, "app-1", newState));
 
             Assert.True(step.Transition.Taken);
             Assert.Null(step.Transition.DeadEndReason);
             Assert.Equal(nameof(DecisionSignalKind.AppInstallCompleted), step.Transition.Trigger);
 
             var facts = step.NewState.AppInstallFacts;
-            Assert.Equal(1, facts.CompletedCount);
-            Assert.Equal(1, facts.InstalledCount);
-            Assert.Equal(0, facts.SkippedCount);
-            Assert.Equal(0, facts.PostponedCount);
+            Assert.Equal(expectedCompleted, facts.CompletedCount);
+            Assert.Equal(expectedInstalled, facts.InstalledCount);
+            Assert.Equal(expectedSkipped, facts.SkippedCount);
+            Assert.Equal(expectedPostponed, facts.PostponedCount);
             Assert.Equal(0, facts.FailedCount);
-        }
-
-        [Fact]
-        public void Completed_Skipped_increments_Completed_and_Skipped_breakdown_only()
-        {
-            var engine = new DecisionEngine();
-            var step = engine.Reduce(
-                DecisionState.CreateInitial(SessionId, TenantId),
-                MakeCompleted(0, "app-1", "Skipped"));
-
-            var facts = step.NewState.AppInstallFacts;
-            Assert.Equal(1, facts.CompletedCount);
-            Assert.Equal(0, facts.InstalledCount);
-            Assert.Equal(1, facts.SkippedCount);
-            Assert.Equal(0, facts.PostponedCount);
-        }
-
-        [Fact]
-        public void Completed_Postponed_increments_Completed_and_Postponed_breakdown_only()
-        {
-            var engine = new DecisionEngine();
-            var step = engine.Reduce(
-                DecisionState.CreateInitial(SessionId, TenantId),
-                MakeCompleted(0, "app-1", "Postponed"));
-
-            var facts = step.NewState.AppInstallFacts;
-            Assert.Equal(1, facts.CompletedCount);
-            Assert.Equal(1, facts.PostponedCount);
-        }
-
-        [Fact]
-        public void Completed_unknown_newState_still_increments_CompletedCount_but_no_breakdown()
-        {
-            // Forward-compat: an adapter adding a future terminal label (e.g. "Replaced")
-            // should not throw; the bucket count goes up even if no breakdown matches.
-            var engine = new DecisionEngine();
-            var step = engine.Reduce(
-                DecisionState.CreateInitial(SessionId, TenantId),
-                MakeCompleted(0, "app-1", "Replaced"));
-
-            var facts = step.NewState.AppInstallFacts;
-            Assert.Equal(1, facts.CompletedCount);
-            Assert.Equal(0, facts.InstalledCount);
-            Assert.Equal(0, facts.SkippedCount);
-            Assert.Equal(0, facts.PostponedCount);
         }
 
         [Fact]

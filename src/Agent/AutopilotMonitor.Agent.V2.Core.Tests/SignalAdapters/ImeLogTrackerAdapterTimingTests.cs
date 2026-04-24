@@ -25,41 +25,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
     {
         private static readonly DateTime T0 = new DateTime(2026, 4, 24, 10, 0, 0, DateTimeKind.Utc);
 
-        private sealed class Fixture : IDisposable
-        {
-            public TempDirectory Tmp { get; } = new TempDirectory();
-            public AgentLogger Logger { get; }
-            public ImeLogTracker Tracker { get; }
-            public FakeSignalIngressSink Ingress { get; } = new FakeSignalIngressSink();
-            public VirtualClock Clock { get; } = new VirtualClock(T0);
-
-            public Fixture()
-            {
-                Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
-                Tracker = new ImeLogTracker(
-                    logFolder: Tmp.Path,
-                    patterns: new List<ImeLogPattern>(),
-                    logger: Logger);
-            }
-
-            public FakeSignalIngressSink.PostedSignal InfoEvent(string eventType) =>
-                Ingress.Posted.Single(p =>
-                    p.Kind == DecisionSignalKind.InformationalEvent
-                    && p.Payload != null
-                    && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
-                    && et == eventType);
-
-            public void Dispose()
-            {
-                Tracker.Dispose();
-                Tmp.Dispose();
-            }
-        }
-
         [Fact]
         public void First_Installing_transition_stamps_StartedAt_on_adapter_and_payload()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture(T0);
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-A", 0);
 
@@ -78,7 +47,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Downloading_transition_also_stamps_StartedAt()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture(T0);
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-D", 0);
 
@@ -92,7 +61,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Terminal_transition_stamps_CompletedAt_and_emits_DurationSeconds()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture(T0);
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-T", 0);
 
@@ -114,7 +83,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Error_transition_also_sets_CompletedAt()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture(T0);
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-E", 0);
 
@@ -130,7 +99,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Timing_is_set_once_not_overwritten_by_subsequent_same_state_events()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture(T0);
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-Z", 0);
 
@@ -150,7 +119,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppTimings_snapshot_is_an_independent_copy()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture(T0);
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             adapter.TriggerAppStateFromTest(new AppPackageState("a", 0),
                 AppInstallationState.Unknown, AppInstallationState.Installing);
@@ -172,7 +141,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         {
             // Fix 1 policy: download_progress is ImmediateUpload=true. Fix 4c must not let a
             // mid-download progress tick rewrite the earlier Downloading-start stamp.
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture(T0);
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-P", 0);
 

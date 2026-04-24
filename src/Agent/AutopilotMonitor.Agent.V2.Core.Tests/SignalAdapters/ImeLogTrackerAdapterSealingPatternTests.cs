@@ -19,36 +19,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
     /// </summary>
     public sealed class ImeLogTrackerAdapterSealingPatternTests
     {
-        private static readonly DateTime Fixed = new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc);
-
-        private sealed class Fixture : IDisposable
-        {
-            public TempDirectory Tmp { get; } = new TempDirectory();
-            public AgentLogger Logger { get; }
-            public ImeLogTracker Tracker { get; }
-            public FakeSignalIngressSink Ingress { get; } = new FakeSignalIngressSink();
-            public VirtualClock Clock { get; } = new VirtualClock(Fixed);
-
-            public Fixture()
-            {
-                Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
-                Tracker = new ImeLogTracker(
-                    logFolder: Tmp.Path,
-                    patterns: new List<ImeLogPattern>(),
-                    logger: Logger);
-            }
-
-            public void Dispose()
-            {
-                Tracker.Dispose();
-                Tmp.Dispose();
-            }
-        }
 
         [Fact]
         public void Pattern_match_in_sealing_set_emits_WhiteGloveSealingPatternDetected()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(
                 f.Tracker, f.Ingress, f.Clock,
                 whiteGloveSealingPatternIds: new[] { "IME-WG-SEAL-1", "IME-WG-SEAL-2" });
@@ -65,7 +40,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Pattern_match_NOT_in_sealing_set_does_not_emit()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(
                 f.Tracker, f.Ingress, f.Clock,
                 whiteGloveSealingPatternIds: new[] { "IME-WG-SEAL-1" });
@@ -80,7 +55,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         {
             // Default ctor — whiteGloveSealingPatternIds null → no emissions (backwards-compat
             // with pre-M4.4.4 M3 behavior).
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerPatternMatchedFromTest("IME-WG-SEAL-1");
@@ -92,7 +67,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Sealing_pattern_emission_is_fire_once_per_session()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(
                 f.Tracker, f.Ingress, f.Clock,
                 whiteGloveSealingPatternIds: new[] { "IME-WG-SEAL-1", "IME-WG-SEAL-2" });
@@ -108,7 +83,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Empty_or_null_patternId_does_not_emit()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(
                 f.Tracker, f.Ingress, f.Clock,
                 whiteGloveSealingPatternIds: new[] { "IME-WG-SEAL-1" });
@@ -125,7 +100,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             // Directly verify the hook surface on ImeLogTracker — adapter subscribes via this
             // Action. We simulate the tracker's HandlePatternMatch entry by invoking the
             // property the same way HandlePatternMatch does.
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(
                 f.Tracker, f.Ingress, f.Clock,
                 whiteGloveSealingPatternIds: new[] { "ANY" });
@@ -140,7 +115,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Previously_wired_OnPatternMatched_is_chain_preserved_and_restored_on_Dispose()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             var chainInvocations = new List<string>();
             f.Tracker.OnPatternMatched = id => chainInvocations.Add("prev:" + id);
 

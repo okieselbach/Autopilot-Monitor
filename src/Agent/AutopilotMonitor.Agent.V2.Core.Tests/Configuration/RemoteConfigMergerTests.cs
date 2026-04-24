@@ -139,44 +139,36 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Configuration
             Assert.False(agent.RebootOnComplete);
         }
 
-        [Fact]
-        public void Merge_remote_wins_over_prior_agent_log_level()
+        // ============================================================= LogLevel parsing
+
+        [Theory]
+        // Valid levels (Info/Debug/Verbose/Trace) — remote wins, case-insensitive TryParse
+        // (RemoteConfigMerger.cs:59).
+        [InlineData("Debug", AgentLogLevel.Verbose, AgentLogLevel.Debug)]
+        [InlineData("trace", AgentLogLevel.Info, AgentLogLevel.Trace)]
+        [InlineData("VERBOSE", AgentLogLevel.Info, AgentLogLevel.Verbose)]
+        [InlineData("Info", AgentLogLevel.Trace, AgentLogLevel.Info)]
+        // Invalid / empty / whitespace / null → IsNullOrWhiteSpace or TryParse-fail → keeps prior.
+        [InlineData("NotAValidLevel", AgentLogLevel.Info, AgentLogLevel.Info)]
+        [InlineData("Warning", AgentLogLevel.Info, AgentLogLevel.Info)] // not in enum → keeps
+        [InlineData("", AgentLogLevel.Info, AgentLogLevel.Info)]
+        [InlineData("   ", AgentLogLevel.Info, AgentLogLevel.Info)]
+        [InlineData(null, AgentLogLevel.Info, AgentLogLevel.Info)]
+        public void Merge_log_level_applies_valid_values_and_ignores_invalid_ones(
+            string? remoteLogLevel, AgentLogLevel priorLevel, AgentLogLevel expectedLevel)
         {
             var agent = NewAgentConfig();
-            agent.LogLevel = AgentLogLevel.Verbose;
+            agent.LogLevel = priorLevel;
 
             var remote = FullRemote();
-            remote.LogLevel = "Debug";
+            remote.LogLevel = remoteLogLevel!;
 
-            RemoteConfigMerger.Merge(agent, remote);
+            var result = RemoteConfigMerger.Merge(agent, remote);
 
-            Assert.Equal(AgentLogLevel.Debug, agent.LogLevel);
-        }
-
-        [Fact]
-        public void Merge_parses_remote_log_level_case_insensitive()
-        {
-            var agent = NewAgentConfig();
-            var remote = FullRemote();
-            remote.LogLevel = "trace";
-
-            RemoteConfigMerger.Merge(agent, remote);
-
-            Assert.Equal(AgentLogLevel.Trace, agent.LogLevel);
-        }
-
-        [Fact]
-        public void Merge_keeps_log_level_when_remote_value_is_unparseable()
-        {
-            var agent = NewAgentConfig();
-            agent.LogLevel = AgentLogLevel.Info;
-
-            var remote = FullRemote();
-            remote.LogLevel = "NotAValidLevel";
-
-            RemoteConfigMerger.Merge(agent, remote);
-
-            Assert.Equal(AgentLogLevel.Info, agent.LogLevel);
+            Assert.Equal(expectedLevel, agent.LogLevel);
+            Assert.Equal(priorLevel != expectedLevel, result.LogLevelChanged);
+            Assert.Equal(priorLevel, result.OldLogLevel);
+            Assert.Equal(expectedLevel, result.NewLogLevel);
         }
 
         [Fact]

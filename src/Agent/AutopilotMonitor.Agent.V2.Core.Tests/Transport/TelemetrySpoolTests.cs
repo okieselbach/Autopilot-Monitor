@@ -123,16 +123,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             Assert.Equal(4, remaining[1].TelemetryItemId);
         }
 
-        [Fact]
-        public void MarkUploaded_regression_is_ignored_idempotent()
+        [Theory]
+        // Cursor starts at high-water LastUploadedItemId=2; any value at or below must be a no-op
+        // so upload retries cannot rewind the spool pointer and replay already-flushed items.
+        [InlineData(0)]   // strict regression
+        [InlineData(1)]   // one below high-water
+        [InlineData(2)]   // same value (idempotent; NEW coverage)
+        [InlineData(-1)]  // negative edge value (NEW coverage)
+        [InlineData(-5)]  // deep negative
+        public void MarkUploaded_at_or_below_last_uploaded_is_ignored(int regressionValue)
         {
             using var tmp = new TempDirectory();
             var spool = new TelemetrySpool(tmp.Path, Clock());
             for (int i = 0; i < 3; i++) spool.Enqueue(EventDraft($"r{i}"));
 
             spool.MarkUploaded(2);
-            spool.MarkUploaded(0);  // regression — must be no-op
-            spool.MarkUploaded(-5);
+            spool.MarkUploaded(regressionValue);
+
             Assert.Equal(2, spool.LastUploadedItemId);
         }
 

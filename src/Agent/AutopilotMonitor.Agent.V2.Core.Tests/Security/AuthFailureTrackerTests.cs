@@ -232,35 +232,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
 
         // ============================================================= Distress dispatch (V1 parity)
 
-        [Fact]
-        public void RecordFailure_dispatches_distress_only_on_first_failure_for_401()
+        [Theory]
+        // V1 parity: 403 → DeviceNotRegistered, everything else (including 401 and any non-403
+        // error the tenant happened to misconfigure) → AuthCertificateRejected. Distress dispatch
+        // fires exactly once per tracker lifetime so we don't spam the channel with the same
+        // auth problem repeating on every request.
+        [InlineData(401, 1, DistressErrorType.AuthCertificateRejected)]
+        [InlineData(401, 3, DistressErrorType.AuthCertificateRejected)] // dedup: 3 failures → 1 dispatch
+        [InlineData(403, 1, DistressErrorType.DeviceNotRegistered)]
+        [InlineData(403, 3, DistressErrorType.DeviceNotRegistered)]     // dedup for 403 too (NEW coverage)
+        [InlineData(500, 1, DistressErrorType.AuthCertificateRejected)] // non-auth 5xx uses catch-all mapping (NEW)
+        public void RecordFailure_dispatches_distress_once_with_correct_error_type_per_http_status(
+            int statusCode, int nFailures, DistressErrorType expectedErrorType)
         {
             var clock = new FakeClock(new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc));
             var fakeDistress = new FakeDistressReporter();
-            var tracker = new AuthFailureTracker(maxFailures: 5, timeoutMinutes: 0, clock, NewLogger(), fakeDistress);
+            // maxFailures high enough that the threshold short-circuit (_thresholdFired=1 path)
+            // does not interfere with the per-call distress semantics we're exercising.
+            var tracker = new AuthFailureTracker(maxFailures: 50, timeoutMinutes: 0, clock, NewLogger(), fakeDistress);
 
-            tracker.RecordFailure(401, "agent/config");
-            tracker.RecordFailure(401, "agent/config");
-            tracker.RecordFailure(401, "agent/config");
+            for (int i = 0; i < nFailures; i++)
+                tracker.RecordFailure(statusCode, "agent/config");
 
             Assert.Single(fakeDistress.Calls);
-            Assert.Equal(DistressErrorType.AuthCertificateRejected, fakeDistress.Calls[0].ErrorType);
-            Assert.Equal(401, fakeDistress.Calls[0].HttpStatusCode);
+            Assert.Equal(expectedErrorType, fakeDistress.Calls[0].ErrorType);
+            Assert.Equal(statusCode, fakeDistress.Calls[0].HttpStatusCode);
             Assert.Contains("agent/config", fakeDistress.Calls[0].Message);
-        }
-
-        [Fact]
-        public void RecordFailure_dispatches_device_not_registered_for_403()
-        {
-            var clock = new FakeClock(new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc));
-            var fakeDistress = new FakeDistressReporter();
-            var tracker = new AuthFailureTracker(maxFailures: 5, timeoutMinutes: 0, clock, NewLogger(), fakeDistress);
-
-            tracker.RecordFailure(403, "agent/telemetry");
-
-            Assert.Single(fakeDistress.Calls);
-            Assert.Equal(DistressErrorType.DeviceNotRegistered, fakeDistress.Calls[0].ErrorType);
-            Assert.Equal(403, fakeDistress.Calls[0].HttpStatusCode);
         }
 
         [Fact]

@@ -24,43 +24,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
     {
         private static DateTime At => new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc);
 
-        private sealed class Rig : IDisposable
-        {
-            public TempDirectory Tmp { get; } = new TempDirectory();
-            public VirtualClock Clock { get; } = new VirtualClock(At);
-            public AgentLogger Logger { get; }
-            public FakeBackendTelemetryUploader Uploader { get; } = new FakeBackendTelemetryUploader();
-            public List<IClassifier> Classifiers { get; } = new List<IClassifier>();
-            public string StateDir { get; }
-            public string TransportDir { get; }
-
-            public Rig()
-            {
-                Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
-                StateDir = Path.Combine(Tmp.Path, "State");
-                TransportDir = Path.Combine(Tmp.Path, "Transport");
-            }
-
-            public EnrollmentOrchestrator Build() =>
-                new EnrollmentOrchestrator(
-                    sessionId: "S1",
-                    tenantId: "T1",
-                    stateDirectory: StateDir,
-                    transportDirectory: TransportDir,
-                    clock: Clock,
-                    logger: Logger,
-                    uploader: Uploader,
-                    classifiers: Classifiers,
-                    drainInterval: TimeSpan.FromDays(1),
-                    terminalDrainTimeout: TimeSpan.FromSeconds(2));
-
-            public void Dispose() => Tmp.Dispose();
-        }
 
         [Fact]
         public void Start_without_hook_still_succeeds_for_backward_compatibility()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var orchestrator = rig.Build();
 
             // No onIngressReady argument — existing callers must keep compiling and running.
@@ -72,7 +40,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Start_invokes_hook_synchronously_with_a_live_ingress_sink()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var orchestrator = rig.Build();
 
             ISignalIngressSink? captured = null;
@@ -98,7 +66,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             // not throw NullReferenceException or "ingress not started" on the caller thread.
             // The full signal-to-event pipeline is covered by dedicated reducer + EffectRunner
             // tests; this assertion only guards the timing contract exposed by Start.
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var orchestrator = rig.Build();
 
             Exception? captured = null;
@@ -131,7 +99,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         {
             // A broken caller hook must not brick the agent — the error is logged, Start
             // continues to launch collectors, and the orchestrator is usable afterwards.
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var orchestrator = rig.Build();
 
             orchestrator.Start(_ => throw new InvalidOperationException("boom"));
@@ -143,7 +111,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Hook_runs_exactly_once_even_if_Start_is_invoked_twice()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var orchestrator = rig.Build();
 
             int invocations = 0;

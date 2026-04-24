@@ -29,54 +29,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
     {
         private static DateTime At => new DateTime(2026, 4, 24, 10, 0, 0, DateTimeKind.Utc);
 
-        private sealed class Rig : IDisposable
+        private static IReadOnlyList<DecisionSignal> ReadSignalLog(string stateDir)
         {
-            public TempDirectory Tmp { get; } = new TempDirectory();
-            public VirtualClock Clock { get; } = new VirtualClock(At);
-            public AgentLogger Logger { get; }
-            public string StateDir { get; }
-            public string TransportDir { get; }
-
-            public Rig()
+            var path = Path.Combine(stateDir, "signal-log.jsonl");
+            if (!File.Exists(path)) return Array.Empty<DecisionSignal>();
+            var signals = new List<DecisionSignal>();
+            foreach (var line in File.ReadAllLines(path))
             {
-                Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
-                StateDir = Path.Combine(Tmp.Path, "State");
-                TransportDir = Path.Combine(Tmp.Path, "Transport");
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                signals.Add(SignalSerializer.Deserialize(line));
             }
-
-            public EnrollmentOrchestrator Build() =>
-                new EnrollmentOrchestrator(
-                    sessionId: "S1",
-                    tenantId: "T1",
-                    stateDirectory: StateDir,
-                    transportDirectory: TransportDir,
-                    clock: Clock,
-                    logger: Logger,
-                    uploader: new FakeBackendTelemetryUploader(),
-                    classifiers: new List<IClassifier>(),
-                    drainInterval: TimeSpan.FromDays(1),
-                    terminalDrainTimeout: TimeSpan.FromSeconds(2));
-
-            public IReadOnlyList<DecisionSignal> ReadSignalLog()
-            {
-                var path = Path.Combine(StateDir, "signal-log.jsonl");
-                if (!File.Exists(path)) return Array.Empty<DecisionSignal>();
-                var signals = new List<DecisionSignal>();
-                foreach (var line in File.ReadAllLines(path))
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    signals.Add(SignalSerializer.Deserialize(line));
-                }
-                return signals;
-            }
-
-            public void Dispose() => Tmp.Dispose();
+            return signals;
         }
 
         [Fact]
         public void Start_posts_EspConfigDetected_before_collectors_when_FirstSync_available()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var _ = new EspSkipConfigurationProbe.ScopedOverride(
                 _log => ((bool?)true, (bool?)false));
             using var orchestrator = rig.Build();
@@ -84,7 +53,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             orchestrator.Start();
             orchestrator.Stop();
 
-            var signals = rig.ReadSignalLog();
+            var signals = ReadSignalLog(rig.StateDir);
             var espConfig = Assert.Single(signals, s => s.Kind == DecisionSignalKind.EspConfigDetected);
             Assert.Equal("EnrollmentOrchestrator", espConfig.SourceOrigin);
             Assert.Equal("true", espConfig.Payload![SignalPayloadKeys.SkipUserEsp]);
@@ -97,7 +66,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             // Defensive: on a machine where FirstSync has not yet been populated (edge case on
             // very early boot) the bootstrap no-ops so the SignalLog does not carry a
             // meaningless signal. The collector's later CollectAll is the backup path.
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var _ = new EspSkipConfigurationProbe.ScopedOverride(
                 _log => ((bool?)null, (bool?)null));
             using var orchestrator = rig.Build();
@@ -105,7 +74,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             orchestrator.Start();
             orchestrator.Stop();
 
-            var signals = rig.ReadSignalLog();
+            var signals = ReadSignalLog(rig.StateDir);
             Assert.DoesNotContain(signals, s => s.Kind == DecisionSignalKind.EspConfigDetected);
         }
 
@@ -115,7 +84,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             // Partial payload is valid — the reducer's per-fact set-once fills in SkipUserEsp
             // later from a subsequent post (DeviceInfoCollector.CollectEspConfiguration or
             // CollectAtEnrollmentStart).
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var _ = new EspSkipConfigurationProbe.ScopedOverride(
                 _log => ((bool?)null, (bool?)false));
             using var orchestrator = rig.Build();
@@ -123,7 +92,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             orchestrator.Start();
             orchestrator.Stop();
 
-            var signals = rig.ReadSignalLog();
+            var signals = ReadSignalLog(rig.StateDir);
             var espConfig = Assert.Single(signals, s => s.Kind == DecisionSignalKind.EspConfigDetected);
             Assert.False(espConfig.Payload!.ContainsKey(SignalPayloadKeys.SkipUserEsp));
             Assert.Equal("false", espConfig.Payload[SignalPayloadKeys.SkipDeviceEsp]);
@@ -137,7 +106,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             // bootstrap signal's SessionSignalOrdinal must be the lowest among any signal whose
             // kind could drive Classic stage promotion. SessionStarted itself is always first
             // (ordinal 0); EspConfigDetected should come right after.
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             using var _ = new EspSkipConfigurationProbe.ScopedOverride(
                 _log => ((bool?)true, (bool?)false));
             using var orchestrator = rig.Build();
@@ -145,7 +114,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             orchestrator.Start();
             orchestrator.Stop();
 
-            var signals = rig.ReadSignalLog();
+            var signals = ReadSignalLog(rig.StateDir);
             var espConfig = signals.First(s => s.Kind == DecisionSignalKind.EspConfigDetected);
 
             // Nothing of Kind EspPhaseChanged or EspExiting may precede EspConfigDetected.
