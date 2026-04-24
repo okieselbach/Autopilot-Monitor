@@ -11,16 +11,21 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 {
     /// <summary>
     /// <c>GET /api/sessions/{sessionId}/reducer-verification</c> — admin/ops endpoint that
-    /// runs structural verification on a session's persisted SignalLog + DecisionTransitions
-    /// journal (Plan §M5). Not tenant-exposed: gated by <c>GlobalAdminOnly</c> in the
-    /// <c>EndpointAccessPolicyCatalog</c>.
+    /// runs structural + semantic verification on a session's persisted SignalLog +
+    /// DecisionTransitions journal (Plan §M5). Not tenant-exposed: gated by
+    /// <c>GlobalAdminOnly</c> in the <c>EndpointAccessPolicyCatalog</c>.
     /// <para>
-    /// <b>Why structural only (not full engine replay)?</b> A full replay requires deserialising
-    /// the polymorphic <c>DecisionSignal.Evidence</c> from <c>SignalRecord.PayloadJson</c>,
-    /// which is a non-trivial refactor beyond the scope of this commit. The structural checks
-    /// catch the realistic release-gate failure modes (corruption, ReducerVersion drift, orphan
-    /// references) and give ops a usable tool today; a dedicated follow-up can add engine
-    /// replay once the Evidence deserialisation contract is pinned down.
+    /// <b>Structural checks</b> — always run: ordinal contiguity, step-index contiguity,
+    /// ReducerVersion drift, orphaned <c>SignalOrdinalRef</c>.
+    /// </para>
+    /// <para>
+    /// <b>Semantic replay</b> (Codex follow-up #6) — folds the persisted signal stream
+    /// through the live backend <c>DecisionEngine</c> via <c>SignalSerializer.Deserialize</c>
+    /// and compares the produced transitions to the stored journal on the semantic fields
+    /// (Trigger / FromStage / ToStage / Taken / DeadEndReason / StepIndex). Skipped
+    /// automatically when the stored ReducerVersion differs, the signal stream has gaps,
+    /// or deserialisation fails at the head — those are structural conditions where a
+    /// replay would not be meaningful.
     /// </para>
     /// </summary>
     public class GetSessionReducerVerificationFunction

@@ -52,6 +52,40 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int OrphanedTransitionCount { get; set; }
 
+        // ---- Semantic replay (Codex follow-up #6) ----------------------------------------
+
+        /// <summary>
+        /// True when the verifier re-played the persisted signal stream through the live
+        /// backend <c>DecisionEngine</c> and compared the produced transitions to the stored
+        /// journal. False when the replay was skipped — see <see cref="SemanticReplaySkipReason"/>.
+        /// </summary>
+        public bool SemanticReplayPerformed { get; set; }
+
+        /// <summary>
+        /// Discriminator when <see cref="SemanticReplayPerformed"/> is false. Known values:
+        /// <c>"empty_session"</c>, <c>"reducer_version_drift"</c>, <c>"non_contiguous_signal_ordinals"</c>,
+        /// <c>"non_contiguous_step_indices"</c>, <c>"deserialization_failure"</c>.
+        /// </summary>
+        public string? SemanticReplaySkipReason { get; set; }
+
+        /// <summary>
+        /// True when the replayed <see cref="DecisionCore.State.DecisionState.Stage"/> matches
+        /// the <c>ToStage</c> of the last stored transition. Only meaningful when
+        /// <see cref="SemanticReplayPerformed"/> is true.
+        /// </summary>
+        public bool SemanticReplayFinalStageMatches { get; set; }
+
+        /// <summary>The stage the replay arrived at (stringified <c>SessionStage</c>); null on skip.</summary>
+        public string? ReplayedFinalStage { get; set; }
+
+        /// <summary>
+        /// Number of positions where the replayed transition diverged from the stored one on
+        /// the compared fields (Trigger, FromStage, ToStage, Taken, DeadEndReason, StepIndex).
+        /// 0 means perfect agreement. Individual divergences are emitted as
+        /// <c>replay_divergence</c> <see cref="VerificationIssue"/>s up to a cap of 20.
+        /// </summary>
+        public int TransitionDivergenceCount { get; set; }
+
         /// <summary>Human-readable issue stream for the Inspector's verification panel.</summary>
         public List<VerificationIssue> Issues { get; set; } = new List<VerificationIssue>();
     }

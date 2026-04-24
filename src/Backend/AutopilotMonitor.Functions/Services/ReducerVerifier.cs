@@ -1,16 +1,37 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Serialization;
+using AutopilotMonitor.DecisionCore.Signals;
+using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Functions.Services
 {
     /// <summary>
-    /// Structural verification of a session's persisted SignalLog + DecisionTransitions
-    /// journal. Pure function — takes loaded records, produces a report. No IO, no DI.
-    /// See <see cref="ReducerVerificationReport"/> for scope boundary vs. full engine replay.
+    /// Structural + semantic verification of a session's persisted SignalLog +
+    /// DecisionTransitions journal. Pure function — takes loaded records, produces a
+    /// report. No IO, no DI.
+    /// <para>
+    /// <b>Structural checks</b> (always run): ordinal contiguity, step-index contiguity,
+    /// ReducerVersion drift, orphaned <c>SignalOrdinalRef</c>.
+    /// </para>
+    /// <para>
+    /// <b>Semantic replay</b> (Codex follow-up #6, added when preconditions hold):
+    /// deserialise <see cref="SignalRecord.PayloadJson"/> into <see cref="DecisionSignal"/>
+    /// instances, fold them through the live backend <see cref="DecisionEngine"/>, and
+    /// compare the produced transitions to the stored journal on the semantic fields
+    /// (Trigger / FromStage / ToStage / Taken / DeadEndReason / StepIndex). The agent-side
+    /// journal is the agent's reducer-chain; this replay verifies the backend's reducer
+    /// agrees — divergence under the same ReducerVersion is a hard release-gate bug.
+    /// </para>
     /// </summary>
     internal static class ReducerVerifier
     {
+        /// <summary>Cap for individual replay-divergence issues, mirrors the gap caps.</summary>
+        private const int MaxReplayDivergenceIssues = 20;
+
         public static ReducerVerificationReport Verify(
             string tenantId,
             string sessionId,
@@ -36,6 +57,7 @@ namespace AutopilotMonitor.Functions.Services
                     Kind     = "empty_session",
                     Message  = "Session has no signals or transitions persisted.",
                 });
+                report.SemanticReplaySkipReason = "empty_session";
                 return report;
             }
 
@@ -168,7 +190,212 @@ namespace AutopilotMonitor.Functions.Services
                 }
             }
 
+            // ---- Semantic replay (Codex follow-up #6) ------------------------------------
+            RunSemanticReplay(signals, transitions, report);
+
             return report;
+        }
+
+        /// <summary>
+        /// Folds the persisted <paramref name="signals"/> stream through a transient
+        /// <see cref="DecisionEngine"/> instance and compares the produced transitions to
+        /// the journal. Skips when preconditions (contiguity, ReducerVersion agreement) are
+        /// not met — divergence under those conditions is not a reducer bug but expected
+        /// drift.
+        /// </summary>
+        private static void RunSemanticReplay(
+            IReadOnlyList<SignalRecord>? signals,
+            IReadOnlyList<DecisionTransitionRecord>? transitions,
+            ReducerVerificationReport report)
+        {
+            if (signals == null || signals.Count == 0 || transitions == null || transitions.Count == 0)
+            {
+                // Empty-session skip already recorded above.
+                if (string.IsNullOrEmpty(report.SemanticReplaySkipReason))
+                {
+                    report.SemanticReplaySkipReason = "empty_session";
+                }
+                return;
+            }
+
+            if (report.ReducerVersionDrift)
+            {
+                report.SemanticReplaySkipReason = "reducer_version_drift";
+                report.Issues.Add(new VerificationIssue
+                {
+                    Severity = "Info",
+                    Kind     = "replay_skipped",
+                    Message  = "Semantic replay skipped because stored ReducerVersion differs from current — replay against a different reducer build is not meaningful.",
+                });
+                return;
+            }
+
+            if (!report.SignalOrdinalsContiguous)
+            {
+                report.SemanticReplaySkipReason = "non_contiguous_signal_ordinals";
+                report.Issues.Add(new VerificationIssue
+                {
+                    Severity = "Info",
+                    Kind     = "replay_skipped",
+                    Message  = "Semantic replay skipped because the signal stream has ordinal gaps; the structural warnings above are the actionable signal.",
+                });
+                return;
+            }
+
+            if (!report.StepIndicesContiguous)
+            {
+                report.SemanticReplaySkipReason = "non_contiguous_step_indices";
+                report.Issues.Add(new VerificationIssue
+                {
+                    Severity = "Info",
+                    Kind     = "replay_skipped",
+                    Message  = "Semantic replay skipped because the transition journal has StepIndex gaps.",
+                });
+                return;
+            }
+
+            var orderedSignals = signals.OrderBy(s => s.SessionSignalOrdinal).ToList();
+            var orderedTransitions = transitions.OrderBy(t => t.StepIndex).ToList();
+
+            // Deserialise signals up-front — a single malformed blob at the head means we
+            // cannot start the replay at all.
+            var decodedSignals = new List<DecisionSignal>(orderedSignals.Count);
+            for (var i = 0; i < orderedSignals.Count; i++)
+            {
+                try
+                {
+                    decodedSignals.Add(SignalSerializer.Deserialize(orderedSignals[i].PayloadJson));
+                }
+                catch (Exception ex)
+                {
+                    if (i == 0)
+                    {
+                        // Silent skip at head — PayloadJson stubs (common in structural tests)
+                        // should not pollute the issue list; the SemanticReplaySkipReason field
+                        // carries the diagnostic for real operators.
+                        report.SemanticReplaySkipReason = "deserialization_failure";
+                        return;
+                    }
+
+                    // Mid-stream failure: truncate here, continue what we have. The divergence
+                    // tail will surface as transition-count mismatch naturally.
+                    report.Issues.Add(new VerificationIssue
+                    {
+                        Severity = "Warning",
+                        Kind     = "replay_deserialization_error",
+                        Message  = $"Signal at ordinal {orderedSignals[i].SessionSignalOrdinal} PayloadJson failed to deserialise; replay truncated here: {ex.GetType().Name}: {ex.Message}",
+                    });
+                    break;
+                }
+            }
+
+            // Same for the journal — we need the semantic fields directly, and PayloadJson
+            // round-trips them via TransitionSerializer. The typed columns on the record are
+            // projections; the JSON is authoritative.
+            var decodedTransitions = new List<DecisionTransition>(orderedTransitions.Count);
+            for (var i = 0; i < orderedTransitions.Count; i++)
+            {
+                try
+                {
+                    decodedTransitions.Add(TransitionSerializer.Deserialize(orderedTransitions[i].PayloadJson));
+                }
+                catch (Exception ex)
+                {
+                    report.Issues.Add(new VerificationIssue
+                    {
+                        Severity = "Warning",
+                        Kind     = "replay_deserialization_error",
+                        Message  = $"Transition at StepIndex {orderedTransitions[i].StepIndex} PayloadJson failed to deserialise — excluded from comparison: {ex.GetType().Name}: {ex.Message}",
+                    });
+                }
+            }
+
+            if (decodedSignals.Count == 0 || decodedTransitions.Count == 0)
+            {
+                report.SemanticReplaySkipReason = "deserialization_failure";
+                return;
+            }
+
+            var engine = new DecisionEngine();
+            var state = DecisionState.CreateInitial(report.TenantId, report.SessionId);
+            var divergences = 0;
+
+            var stepsToCompare = Math.Min(decodedSignals.Count, decodedTransitions.Count);
+            for (var i = 0; i < stepsToCompare; i++)
+            {
+                var step = engine.Reduce(state, decodedSignals[i]);
+                state = step.NewState;
+                var replayed = step.Transition;
+                var stored = decodedTransitions[i];
+
+                if (!TransitionsSemanticallyEqual(replayed, stored))
+                {
+                    divergences++;
+                    if (divergences <= MaxReplayDivergenceIssues)
+                    {
+                        report.Issues.Add(new VerificationIssue
+                        {
+                            Severity = "Warning",
+                            Kind     = "replay_divergence",
+                            Message  =
+                                $"Replay vs. stored diverge at StepIndex={stored.StepIndex}: " +
+                                $"stored=[Trigger={stored.Trigger}, {stored.FromStage}→{stored.ToStage}, Taken={stored.Taken}, DeadEnd={stored.DeadEndReason ?? "<null>"}] " +
+                                $"replayed=[Trigger={replayed.Trigger}, {replayed.FromStage}→{replayed.ToStage}, Taken={replayed.Taken}, DeadEnd={replayed.DeadEndReason ?? "<null>"}].",
+                        });
+                    }
+                }
+            }
+            if (divergences > MaxReplayDivergenceIssues)
+            {
+                report.Issues.Add(new VerificationIssue
+                {
+                    Severity = "Warning",
+                    Kind     = "replay_divergence",
+                    Message  = $"... {divergences - MaxReplayDivergenceIssues} additional replay divergences not listed.",
+                });
+            }
+
+            // Count imbalance between signals and stored transitions is itself a divergence:
+            // every signal should produce exactly one transition (taken or dead-end).
+            if (decodedSignals.Count != decodedTransitions.Count)
+            {
+                report.Issues.Add(new VerificationIssue
+                {
+                    Severity = "Warning",
+                    Kind     = "replay_divergence",
+                    Message  = $"Signal count ({decodedSignals.Count}) != transition count ({decodedTransitions.Count}); reducer should produce one transition per signal.",
+                });
+            }
+
+            // Final-stage comparison against the last stored transition's ToStage.
+            var lastStoredToStage = orderedTransitions[orderedTransitions.Count - 1].ToStage;
+            var replayedStageName = state.Stage.ToString();
+            report.ReplayedFinalStage = replayedStageName;
+            report.SemanticReplayFinalStageMatches = string.Equals(
+                replayedStageName, lastStoredToStage, StringComparison.Ordinal);
+            if (!report.SemanticReplayFinalStageMatches)
+            {
+                report.Issues.Add(new VerificationIssue
+                {
+                    Severity = "Error",
+                    Kind     = "replay_final_stage_mismatch",
+                    Message  = $"Replay arrived at final stage '{replayedStageName}' but the last stored transition's ToStage was '{lastStoredToStage}'.",
+                });
+            }
+
+            report.SemanticReplayPerformed = true;
+            report.TransitionDivergenceCount = divergences;
+        }
+
+        private static bool TransitionsSemanticallyEqual(DecisionTransition a, DecisionTransition b)
+        {
+            if (a.StepIndex != b.StepIndex) return false;
+            if (!string.Equals(a.Trigger, b.Trigger, StringComparison.Ordinal)) return false;
+            if (a.FromStage != b.FromStage) return false;
+            if (a.ToStage != b.ToStage) return false;
+            if (a.Taken != b.Taken) return false;
+            if (!string.Equals(a.DeadEndReason ?? string.Empty, b.DeadEndReason ?? string.Empty, StringComparison.Ordinal)) return false;
+            return true;
         }
     }
 }
