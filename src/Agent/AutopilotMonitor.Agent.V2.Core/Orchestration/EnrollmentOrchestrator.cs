@@ -257,47 +257,120 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // 1) Persistenz. Writer scannen bestehende Files im Ctor (LastOrdinal / LastStepIndex).
             var snapshotPath = Path.Combine(_stateDirectory, "snapshot.json");
-            _signalLog = new SignalLogWriter(Path.Combine(_stateDirectory, "signal-log.jsonl"));
-            _journal = new JournalWriter(Path.Combine(_stateDirectory, "journal.jsonl"));
+            var signalLogPath = Path.Combine(_stateDirectory, "signal-log.jsonl");
+            var journalPath = Path.Combine(_stateDirectory, "journal.jsonl");
+            var eventSequencePath = Path.Combine(_stateDirectory, "event-sequence.json");
+            _signalLog = new SignalLogWriter(signalLogPath);
+            _journal = new JournalWriter(journalPath, () => _clock.UtcNow);
             _snapshot = new SnapshotPersistence(snapshotPath, () => _clock.UtcNow);
-            _eventSequencePersistence = new EventSequencePersistence(Path.Combine(_stateDirectory, "event-sequence.json"));
+            _eventSequencePersistence = new EventSequencePersistence(eventSequencePath);
 
-            // 2) Recovery (Plan §2.7 Sonderfälle 1+2).
+            // 2) Recovery (Plan §2.7 Sonderfälle 1+2, Codex follow-up #1).
+            //
+            //    Invariant: the SignalLog is authoritative truth, the Snapshot is a cache.
+            //    Therefore on every recovery we prefer reconstructing state from the log over
+            //    trusting a stale/corrupt snapshot. ReducerReplay.Replay (Phase 1) performs the
+            //    pure fold; this method decides the seed + which signals to feed it.
+            //
+            //    Branches:
+            //      a) Snapshot present but corrupt → quarantine the snapshot ONLY (not the log!)
+            //         and rebuild from the full SignalLog. If the log itself is head-corrupt
+            //         (file non-empty but ReadAll yields zero signals) we escalate to a total-
+            //         loss quarantine of the log segments and start fresh.
+            //      b) Snapshot loaded cleanly → replay any SignalLog tail past the snapshot's
+            //         LastAppliedSignalOrdinal so a pre-crash Journal/Snapshot lag is closed.
+            //      c) No snapshot → fresh initial state.
+            //
+            //    After the seed is chosen we ensure the Journal tail is not AHEAD of the
+            //    replayed state — if a crash left phantom transitions on disk (Journal flushed,
+            //    Snapshot not) the next live Append would throw a monotonicity violation and
+            //    eventually quarantine-escalate. TruncateAfter moves the phantoms to a
+            //    forensic bucket and realigns.
             var snapshotFileExistsPreLoad = File.Exists(snapshotPath);
             var loadedState = _snapshot.Load();
             DecisionState initialState;
 
+            // Reducer is stateless — a transient instance is enough for the pure replay below.
+            // The live ingress pipeline creates its own instance further down the Start() body.
+            var replayEngine = new DecisionEngine();
+
             if (loadedState == null && snapshotFileExistsPreLoad)
             {
-                // Sonderfall 2: Snapshot-File existiert, Load lieferte null → Checksum-Mismatch
-                // oder Deserialize-Failure. Plan §2.7c: Snapshot ist Cache, nicht Wahrheit —
-                // Snapshot + Log-Segmente in Quarantäne, frisch starten.
+                // Branch (a) — Snapshot corrupt. Quarantine the snapshot and attempt log replay.
                 _logger.Error(
-                    "EnrollmentOrchestrator: snapshot present but Load returned null (checksum mismatch or parse error) — quarantining state.");
-                const string reason = "checksum-mismatch-on-startup";
-                _snapshot.Quarantine(reason);
-                SegmentQuarantine.QuarantineAll(_stateDirectory, reason, () => _clock.UtcNow);
+                    "EnrollmentOrchestrator: snapshot present but Load returned null (checksum mismatch or parse error) — quarantining snapshot and attempting SignalLog replay.");
+                _snapshot.Quarantine("checksum-mismatch-on-startup");
 
-                // Writer halten Pfade, nicht Handles — aber ihre in-memory Counter (LastOrdinal,
-                // LastStepIndex) sind jetzt stale gegenüber den entfernten Files. Recreate, damit
-                // Counter bei -1 starten.
-                _signalLog = new SignalLogWriter(Path.Combine(_stateDirectory, "signal-log.jsonl"));
-                _journal = new JournalWriter(Path.Combine(_stateDirectory, "journal.jsonl"));
-                _eventSequencePersistence = new EventSequencePersistence(Path.Combine(_stateDirectory, "event-sequence.json"));
+                var loggedSignals = _signalLog.ReadAll();
+                var logFileInfo = new FileInfo(signalLogPath);
+                var logIsHeadCorrupt =
+                    logFileInfo.Exists && logFileInfo.Length > 0 && loggedSignals.Count == 0;
 
-                initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
+                if (logIsHeadCorrupt)
+                {
+                    _logger.Warning(
+                        "EnrollmentOrchestrator: SignalLog unreadable from the first line — escalating to total-loss quarantine.");
+                    SegmentQuarantine.QuarantineAll(
+                        _stateDirectory, "log-head-corrupt-after-snapshot-loss", () => _clock.UtcNow);
+
+                    // Writer hold paths, not handles — but their in-memory counters are stale
+                    // after the quarantine move. Recreate to reset them to -1.
+                    _signalLog = new SignalLogWriter(signalLogPath);
+                    _journal = new JournalWriter(journalPath, () => _clock.UtcNow);
+                    _eventSequencePersistence = new EventSequencePersistence(eventSequencePath);
+
+                    initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
+                }
+                else
+                {
+                    _logger.Info(
+                        $"EnrollmentOrchestrator: rebuilding state via ReducerReplay over {loggedSignals.Count} SignalLog entries.");
+                    initialState = ReducerReplay.Replay(
+                        engine: replayEngine,
+                        seed: DecisionState.CreateInitial(_sessionId, _tenantId),
+                        signals: loggedSignals);
+                }
+
                 _wasStartupQuarantine = true;
             }
             else if (loadedState != null)
             {
-                initialState = loadedState;
-                _logger.Info(
-                    $"EnrollmentOrchestrator: recovered state from snapshot (stage={loadedState.Stage}, stepIndex={loadedState.StepIndex}).");
+                // Branch (b) — Snapshot loaded. Catch up any SignalLog tail past the snapshot.
+                var tail = CollectSignalLogTailAfter(loadedState.LastAppliedSignalOrdinal);
+
+                if (tail.Count > 0)
+                {
+                    _logger.Info(
+                        $"EnrollmentOrchestrator: snapshot at ordinal={loadedState.LastAppliedSignalOrdinal}; " +
+                        $"replaying {tail.Count} SignalLog tail signal(s) to catch up.");
+                    initialState = ReducerReplay.Replay(replayEngine, loadedState, tail);
+                }
+                else
+                {
+                    initialState = loadedState;
+                    _logger.Info(
+                        $"EnrollmentOrchestrator: recovered state from snapshot (stage={loadedState.Stage}, stepIndex={loadedState.StepIndex}).");
+                }
             }
             else
             {
+                // Branch (c) — no prior state.
                 initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
                 _logger.Info($"EnrollmentOrchestrator: fresh initial state for session {_sessionId}.");
+            }
+
+            // Post-recovery alignment (plan §5.1): truncate Journal phantom suffix if the file
+            // is ahead of the replayed state. After a normal Reduce the Journal holds entries
+            // with StepIndex = [0 .. state.StepIndex - 1]; anything beyond is a leftover from a
+            // pre-crash Journal-flushed-but-snapshot-not path.
+            if (_journal.LastStepIndex >= initialState.StepIndex)
+            {
+                var boundary = initialState.StepIndex - 1;
+                _logger.Warning(
+                    $"EnrollmentOrchestrator: Journal tail ahead of replayed state " +
+                    $"(journal.LastStepIndex={_journal.LastStepIndex}, state.StepIndex={initialState.StepIndex}) — " +
+                    $"truncating phantom transitions to boundary={boundary}.");
+                _journal.TruncateAfter(boundary);
             }
 
             // Sonderfall 1 Detection: WG Part 1 -> Reboot -> Part 2 Resume.
@@ -571,6 +644,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             try { Terminated?.Invoke(this, terminatedArgs); }
             catch (Exception ex) { _logger.Error("EnrollmentOrchestrator: Terminated handler threw.", ex); }
+        }
+
+        /// <summary>
+        /// <summary>
+        /// Recovery helper — collect all SignalLog entries whose <c>SessionSignalOrdinal</c>
+        /// is strictly greater than the snapshot's last-consumed ordinal. Signals equal-or-less
+        /// are already baked into the seed state and must never be re-applied.
+        /// </summary>
+        private IReadOnlyList<DecisionSignal> CollectSignalLogTailAfter(long lastConsumedOrdinal)
+        {
+            var all = _signalLog!.ReadAll();
+            var tail = new List<DecisionSignal>();
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (all[i].SessionSignalOrdinal > lastConsumedOrdinal)
+                {
+                    tail.Add(all[i]);
+                }
+            }
+            return tail;
         }
 
         /// <summary>

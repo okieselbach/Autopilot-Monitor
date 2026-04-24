@@ -177,5 +177,100 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Persistence
             var w2 = new JournalWriter(path);
             Assert.Equal(77, w2.LastTraceOrdinal);
         }
+
+        // ============================================================ TruncateAfter (Codex #1 / plan §5.1)
+
+        [Fact]
+        public void TruncateAfter_DropsPhantomSuffix_KeepsValidPrefix()
+        {
+            using var tmp = new TempDirectory();
+            var path = tmp.File("journal.jsonl");
+            var fixedClock = new DateTime(2026, 4, 24, 12, 0, 0, DateTimeKind.Utc);
+            var w = new JournalWriter(path, () => fixedClock);
+
+            w.Append(Step(0));
+            w.Append(Step(1));
+            w.Append(Step(2));   // phantom beyond expected state
+            w.Append(Step(3));   // phantom beyond expected state
+
+            w.TruncateAfter(lastValidStepIndex: 1);
+
+            Assert.Equal(1, w.LastStepIndex);
+            var remaining = w.ReadAll();
+            Assert.Equal(2, remaining.Count);
+            Assert.Equal(0, remaining[0].StepIndex);
+            Assert.Equal(1, remaining[1].StepIndex);
+
+            // Dropped suffix preserved under .quarantine for forensics.
+            var quarantineRoot = Path.Combine(Path.GetDirectoryName(path)!, ".quarantine");
+            Assert.True(Directory.Exists(quarantineRoot));
+            var buckets = Directory.GetDirectories(quarantineRoot);
+            Assert.Single(buckets);
+            var phantomFile = Path.Combine(buckets[0], "journal-phantom-tail.jsonl");
+            Assert.True(File.Exists(phantomFile));
+            Assert.Equal(2, File.ReadAllLines(phantomFile).Length);
+        }
+
+        [Fact]
+        public void TruncateAfter_BoundaryEqualsLastStepIndex_IsNoOp()
+        {
+            using var tmp = new TempDirectory();
+            var path = tmp.File("journal.jsonl");
+            var w = new JournalWriter(path);
+
+            w.Append(Step(0));
+            w.Append(Step(1));
+            var sizeBefore = new FileInfo(path).Length;
+
+            w.TruncateAfter(lastValidStepIndex: 1);
+
+            Assert.Equal(1, w.LastStepIndex);
+            Assert.Equal(sizeBefore, new FileInfo(path).Length);
+            var quarantineRoot = Path.Combine(Path.GetDirectoryName(path)!, ".quarantine");
+            Assert.False(Directory.Exists(quarantineRoot));
+        }
+
+        [Fact]
+        public void TruncateAfter_BoundaryAboveLastStepIndex_Throws()
+        {
+            using var tmp = new TempDirectory();
+            var w = new JournalWriter(tmp.File("journal.jsonl"));
+
+            w.Append(Step(0));
+
+            Assert.Throws<InvalidOperationException>(() => w.TruncateAfter(5));
+        }
+
+        [Fact]
+        public void TruncateAfter_MinusOne_EmptiesJournal_KeepsForensicCopy()
+        {
+            using var tmp = new TempDirectory();
+            var path = tmp.File("journal.jsonl");
+            var fixedClock = new DateTime(2026, 4, 24, 12, 0, 0, DateTimeKind.Utc);
+            var w = new JournalWriter(path, () => fixedClock);
+
+            w.Append(Step(0));
+            w.Append(Step(1));
+
+            w.TruncateAfter(lastValidStepIndex: -1);
+
+            Assert.Equal(-1, w.LastStepIndex);
+            Assert.Empty(w.ReadAll());
+
+            // The file itself is still on disk (empty), and both dropped entries are quarantined.
+            var quarantineRoot = Path.Combine(Path.GetDirectoryName(path)!, ".quarantine");
+            var phantomFile = Path.Combine(Directory.GetDirectories(quarantineRoot)[0], "journal-phantom-tail.jsonl");
+            Assert.Equal(2, File.ReadAllLines(phantomFile).Length);
+        }
+
+        [Fact]
+        public void TruncateAfter_EmptyJournal_IsNoOp()
+        {
+            using var tmp = new TempDirectory();
+            var w = new JournalWriter(tmp.File("journal.jsonl"));
+
+            w.TruncateAfter(-1); // no-op — nothing to truncate, boundary matches empty state
+            Assert.Equal(-1, w.LastStepIndex);
+        }
     }
 }

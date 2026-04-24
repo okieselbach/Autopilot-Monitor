@@ -61,5 +61,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         }
 
         public IReadOnlyList<DecisionTransition> ReadAll() => _appended.ToArray();
+
+        public void TruncateAfter(int lastValidStepIndex)
+        {
+            if (lastValidStepIndex < -1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(lastValidStepIndex));
+            }
+            if (lastValidStepIndex > LastStepIndex)
+            {
+                throw new InvalidOperationException(
+                    $"FakeJournalWriter.TruncateAfter: boundary {lastValidStepIndex} exceeds " +
+                    $"current LastStepIndex {LastStepIndex}.");
+            }
+            _appended.RemoveAll(t => t.StepIndex > lastValidStepIndex);
+        }
     }
 }

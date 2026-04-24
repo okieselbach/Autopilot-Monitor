@@ -186,6 +186,182 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             sut.Stop();
         }
 
+        // ============================================================ Codex #1 — ReducerReplay recovery paths
+
+        private static DecisionSignal MakeSignal(
+            long ordinal,
+            DecisionSignalKind kind = DecisionSignalKind.AppInstallCompleted)
+        {
+            return new DecisionSignal(
+                sessionSignalOrdinal: ordinal,
+                sessionTraceOrdinal: ordinal,
+                kind: kind,
+                kindSchemaVersion: 1,
+                occurredAtUtc: At.AddSeconds(ordinal),
+                sourceOrigin: "recovery-tests",
+                evidence: new Evidence(
+                    EvidenceKind.Synthetic,
+                    $"recovery:ord-{ordinal}",
+                    "test signal"));
+        }
+
+        private static DecisionTransition MakeTransition(int stepIndex, long signalRef)
+        {
+            return new DecisionTransition(
+                stepIndex: stepIndex,
+                sessionTraceOrdinal: stepIndex,
+                signalOrdinalRef: signalRef,
+                occurredAtUtc: At.AddSeconds(stepIndex),
+                trigger: "TestTrigger",
+                fromStage: SessionStage.SessionStarted,
+                toStage: SessionStage.SessionStarted,
+                taken: true,
+                deadEndReason: null,
+                reducerVersion: "2.0.0.0");
+        }
+
+        [Fact]
+        public void Snapshot_plus_pending_tail_replays_tail_onto_snapshot()
+        {
+            // Crash-lag scenario: SignalLog has caught up to ordinal 1 but the Snapshot was only
+            // flushed after the ordinal-0 reduce. On restart the orchestrator must replay the
+            // tail (ordinal 1) on top of the snapshot to reach the real post-crash state.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Seed two signals on the log.
+            var signalLogPath = Path.Combine(rig.StateDir, "signal-log.jsonl");
+            var seedLog = new SignalLogWriter(signalLogPath);
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+            };
+            foreach (var s in sigs) seedLog.Append(s);
+
+            // Compute the expected final state by folding through the real reducer.
+            var engine = new DecisionEngine();
+            var expected = ReducerReplay.Replay(
+                engine, DecisionState.CreateInitial("S1", "T1"), sigs);
+
+            // Persist a snapshot that lags one step behind (only ordinal 0 consumed).
+            var snapshotState = engine.Reduce(
+                DecisionState.CreateInitial("S1", "T1"), sigs[0]).NewState;
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(snapshotState);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            Assert.False(sut.WasStartupQuarantine);
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+            Assert.Equal(expected.Stage, sut.CurrentState.Stage);
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Corrupt_snapshot_with_intact_log_replays_full_log_without_quarantining_log()
+        {
+            // Snapshot corrupt (checksum fails) but the SignalLog is fine: the orchestrator
+            // quarantines the snapshot only and rebuilds state from the full log.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Write a valid-looking snapshot file with a wrong checksum.
+            File.WriteAllText(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                "{\"Checksum\":\"deadbeef\",\"State\":{\"SessionId\":\"S1\",\"TenantId\":\"T1\"}}",
+                Encoding.UTF8);
+
+            // Seed a parseable SignalLog with real signals.
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+                MakeSignal(2, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            var engine = new DecisionEngine();
+            var expected = ReducerReplay.Replay(
+                engine, DecisionState.CreateInitial("S1", "T1"), sigs);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            // Snapshot quarantined, log survived, state reflects the full replay.
+            Assert.True(sut.WasStartupQuarantine);
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+
+            var signalLogPath = Path.Combine(rig.StateDir, "signal-log.jsonl");
+            Assert.True(File.Exists(signalLogPath));
+            Assert.True(new FileInfo(signalLogPath).Length > 0); // log NOT quarantined
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Journal_ahead_of_replayed_state_triggers_phantom_truncate()
+        {
+            // Pathological crash scenario: the Journal flushed step N but the Snapshot saved
+            // only step N-1 and a later SignalLog append was never actually persisted (log
+            // tail physically shorter than journal). On recovery the journal suffix is a
+            // phantom — TruncateAfter moves it to .quarantine and realigns so the next live
+            // append does not violate monotonicity.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Step 1: SignalLog has ordinals 0 + 1 only.
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            // Step 2: Snapshot lags behind — state after only the first reduce.
+            var engine = new DecisionEngine();
+            var snapshotState = engine.Reduce(
+                DecisionState.CreateInitial("S1", "T1"), sigs[0]).NewState;
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(snapshotState);
+
+            // Step 3: Journal has 3 transitions on disk (StepIndex 0, 1, 2) — the StepIndex-2
+            // entry is the phantom (its signal was never flushed to the log).
+            var journalPath = Path.Combine(rig.StateDir, "journal.jsonl");
+            var seedJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow);
+            seedJournal.Append(MakeTransition(0, signalRef: 0));
+            seedJournal.Append(MakeTransition(1, signalRef: 1));
+            seedJournal.Append(MakeTransition(2, signalRef: 99)); // phantom
+
+            // Expected post-recovery state: replay tail [sig1] → StepIndex=2, LastApplied=1.
+            var expected = ReducerReplay.Replay(engine, snapshotState, new[] { sigs[1] });
+            Assert.Equal(2, expected.StepIndex);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+
+            // Phantom file captured in the quarantine bucket.
+            var quarantineRoot = Path.Combine(rig.StateDir, ".quarantine");
+            Assert.True(Directory.Exists(quarantineRoot));
+            var phantomFiles = Directory.GetFiles(
+                quarantineRoot, "journal-phantom-tail.jsonl", SearchOption.AllDirectories);
+            Assert.Single(phantomFiles);
+            Assert.Single(File.ReadAllLines(phantomFiles[0]), l => !string.IsNullOrWhiteSpace(l));
+
+            sut.Stop();
+        }
+
         // ================================================================= Sonderfall 3: Transport-Resume
 
         [Fact]
