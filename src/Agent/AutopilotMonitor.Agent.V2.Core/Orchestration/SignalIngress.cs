@@ -368,19 +368,45 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 && effectResult.SessionMustAbort
                 && signal.Kind != DecisionSignalKind.EffectInfrastructureFailure)
             {
-                ProcessInlineAbortSignal(effectResult.AbortReason, signal.OccurredAtUtc);
+                // Extract the failing critical effect kind from the result so the synthetic
+                // signal payload matches the v1 contract (reason + failingEffect). The
+                // critical failure is always the LAST entry that was appended before
+                // EffectRunner returned with SessionMustAbort — transient failures before
+                // it are harmless observability. Fall back to any non-transient failure if
+                // ordering ever changes.
+                DecisionEffectKind? failingEffect = null;
+                for (var i = effectResult.Failures.Count - 1; i >= 0; i--)
+                {
+                    if (!effectResult.Failures[i].IsTransient)
+                    {
+                        failingEffect = effectResult.Failures[i].EffectKind;
+                        break;
+                    }
+                }
+
+                ProcessInlineAbortSignal(effectResult.AbortReason, signal.OccurredAtUtc, failingEffect);
             }
         }
 
         /// <summary>
         /// Synthesise + durably persist + reduce a <c>EffectInfrastructureFailure</c> signal
         /// inline within the current worker iteration. See ProcessItem for the rationale —
-        /// this closes the crash-window identified by Codex follow-up post-#50 #B.
+        /// this closes the crash-window identified by Codex follow-up post-#50 #B. The
+        /// signal payload matches the v1 contract documented on
+        /// <see cref="DecisionSignalKind.EffectInfrastructureFailure"/>:
+        /// <c>{ reason, failingEffect }</c>, with source/evidence identifying the critical
+        /// effect kind that triggered the abort so forensic consumers can distinguish
+        /// ScheduleDeadline-vs-CancelDeadline failures.
         /// </summary>
-        private void ProcessInlineAbortSignal(string? abortReason, DateTime occurredAtUtc)
+        private void ProcessInlineAbortSignal(
+            string? abortReason,
+            DateTime occurredAtUtc,
+            DecisionEffectKind? failingEffect)
         {
             long signalOrdinal = _nextSignalOrdinal;
             long traceOrdinal = _traceCounter.Next();
+
+            var failingEffectLabel = failingEffect?.ToString() ?? "Unknown";
 
             DecisionSignal syntheticSignal;
             try
@@ -391,14 +417,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     kind: DecisionSignalKind.EffectInfrastructureFailure,
                     kindSchemaVersion: 1,
                     occurredAtUtc: occurredAtUtc,
-                    sourceOrigin: "signal-ingress:inline-abort",
+                    sourceOrigin: $"effectrunner:critical:{failingEffectLabel}",
                     evidence: new Evidence(
                         kind: EvidenceKind.Synthetic,
-                        identifier: "effect_infrastructure_failure:inline",
-                        summary: $"Inline abort synthesised by SignalIngress: {abortReason ?? "<unspecified>"}"),
+                        identifier: $"effect_infrastructure_failure:{failingEffectLabel}",
+                        summary: $"Critical effect {failingEffectLabel} failed: {abortReason ?? "<unspecified>"}"),
                     payload: new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["reason"] = abortReason ?? string.Empty,
+                        ["failingEffect"] = failingEffectLabel,
                     });
             }
             catch

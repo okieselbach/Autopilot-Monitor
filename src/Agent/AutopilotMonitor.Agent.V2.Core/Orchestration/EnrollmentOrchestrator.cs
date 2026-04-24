@@ -80,6 +80,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly TimeSpan _terminalDrainTimeout;
         private readonly TimeSpan? _agentMaxLifetime;
 
+        // Test-only override so tests can drive rehydrate-failure via FakeDeadlineScheduler.
+        // Production always passes null → Start() creates the real DeadlineScheduler.
+        private readonly IDeadlineScheduler? _schedulerOverride;
+
         // Max-lifetime watchdog (M4.6.α). Timer is armed in Start() when _agentMaxLifetime != null.
         private System.Threading.Timer? _maxLifetimeTimer;
         private int _terminatedFired;
@@ -97,7 +101,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private TelemetryTransitionEmitter? _transitionEmitter;
         private EventTimelineEmitter? _timelineEmitter;
         private BackPressureEventObserver? _backPressureObserver;
-        private DeadlineScheduler? _scheduler;
+        private IDeadlineScheduler? _scheduler;
         private ClassifierRegistry? _classifierRegistry;
         private LazyIngressSinkRelay? _sinkRelay;
         private EffectRunner? _effectRunner;
@@ -140,7 +144,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             int quarantineThreshold = DecisionStepProcessor.DefaultQuarantineThreshold,
             TimeSpan? drainInterval = null,
             TimeSpan? terminalDrainTimeout = null,
-            TimeSpan? agentMaxLifetime = null)
+            TimeSpan? agentMaxLifetime = null,
+            IDeadlineScheduler? schedulerOverride = null)
         {
             if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("SessionId is mandatory.", nameof(sessionId));
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("TenantId is mandatory.", nameof(tenantId));
@@ -174,6 +179,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (agentMaxLifetime.HasValue && agentMaxLifetime.Value <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(agentMaxLifetime), "AgentMaxLifetime must be positive when set.");
             _agentMaxLifetime = agentMaxLifetime;
+            _schedulerOverride = schedulerOverride;
         }
 
         /// <summary>
@@ -434,7 +440,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _backPressureObserver = new BackPressureEventObserver(eventEmitter, _clock);
 
             // 5) Deadlines + Classifiers.
-            _scheduler = new DeadlineScheduler(_clock);
+            _scheduler = _schedulerOverride ?? new DeadlineScheduler(_clock);
             _classifierRegistry = new ClassifierRegistry(_classifiers);
 
             // 6) Relay — EffectRunner braucht ISignalIngressSink, aber Ingress wird erst später
@@ -522,13 +528,41 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 }
                 catch (Exception ex)
                 {
-                    // Codex follow-up #2 will convert this into a synthetic
-                    // EffectInfrastructureFailure → enrollment_failed transition. For now
-                    // we log at error so operators see the symptom — the max-lifetime
-                    // watchdog remains the last-resort termination path.
+                    // Codex follow-up (post-#50 #E): rehydrate failure is the same class of
+                    // phantom-deadline hang as live ScheduleDeadline/CancelDeadline failures.
+                    // DecisionState.Deadlines still claims the deadline exists, but the live
+                    // scheduler never registered it — so only the max-lifetime watchdog would
+                    // ever terminate the session. Post a synthetic EffectInfrastructureFailure
+                    // with the v1 contract payload so the reducer transitions cleanly to
+                    // Failed / EnrollmentFailed on the next worker tick. Ingress is already
+                    // running at this point in Start(), so the signal gets the normal
+                    // durable SignalLog.Append + Reduce treatment.
                     _logger.Error(
-                        "EnrollmentOrchestrator: deadline rehydration failed; session running without some deadlines.",
+                        "EnrollmentOrchestrator: deadline rehydration failed; posting EffectInfrastructureFailure to terminate the session.",
                         ex);
+                    try
+                    {
+                        var reason = $"deadline_rehydrate_failure: {ex.GetType().Name}: {ex.Message}";
+                        _ingress.Post(
+                            kind: DecisionSignalKind.EffectInfrastructureFailure,
+                            occurredAtUtc: _clock.UtcNow,
+                            sourceOrigin: "effectrunner:critical:ScheduleDeadline",
+                            evidence: new Evidence(
+                                kind: EvidenceKind.Synthetic,
+                                identifier: "effect_infrastructure_failure:ScheduleDeadline",
+                                summary: $"Critical effect ScheduleDeadline failed: {reason}"),
+                            payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["reason"] = reason,
+                                ["failingEffect"] = nameof(DecisionEffectKind.ScheduleDeadline),
+                            });
+                    }
+                    catch (Exception postEx)
+                    {
+                        _logger.Error(
+                            "EnrollmentOrchestrator: failed to post EffectInfrastructureFailure after rehydrate failure — max-lifetime watchdog remains the last-resort terminator.",
+                            postEx);
+                    }
                 }
             }
 

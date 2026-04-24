@@ -40,7 +40,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 TransportDir = Path.Combine(Tmp.Path, "Transport");
             }
 
-            public EnrollmentOrchestrator Build() =>
+            public EnrollmentOrchestrator Build(IDeadlineScheduler? schedulerOverride = null) =>
                 new EnrollmentOrchestrator(
                     sessionId: "S1",
                     tenantId: "T1",
@@ -51,7 +51,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                     uploader: Uploader,
                     classifiers: new List<IClassifier>(),
                     drainInterval: TimeSpan.FromDays(1),
-                    terminalDrainTimeout: TimeSpan.FromSeconds(2));
+                    terminalDrainTimeout: TimeSpan.FromSeconds(2),
+                    schedulerOverride: schedulerOverride);
 
             public void Dispose() => Tmp.Dispose();
         }
@@ -473,6 +474,67 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                     quarantineRoot, "journal-phantom-tail.jsonl", SearchOption.AllDirectories);
                 Assert.Empty(phantomFiles);
             }
+
+            sut.Stop();
+        }
+
+        // ============================================================ Codex post-#50 #E — rehydrate-failure terminal path
+
+        [Fact]
+        public void Rehydrate_failure_posts_EffectInfrastructureFailure_and_session_terminates_to_Failed()
+        {
+            // Codex follow-up (post-#50 #E): if the scheduler can't re-arm a persisted
+            // deadline during recovery (ScheduleDeadline throws), DecisionState still claims
+            // the deadline is active — same phantom-deadline hang class as the live
+            // ScheduleDeadline/CancelDeadline failures. The orchestrator must post a
+            // synthetic EffectInfrastructureFailure (v1 payload) so the reducer terminates
+            // the session to Stage=Failed / Outcome=EnrollmentFailed rather than waiting
+            // out the max-lifetime watchdog.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Seed a snapshot with ONE persisted deadline so rehydrate runs.
+            var persistedDeadline = new ActiveDeadline(
+                name: "safety_rearm_target",
+                dueAtUtc: At.AddMinutes(30), // future, so the scheduler would normally schedule it
+                firesSignalKind: DecisionSignalKind.DeadlineFired);
+            var seed = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.AwaitingHello)
+                .WithStepIndex(3)
+                .WithLastAppliedSignalOrdinal(2)
+                .AddDeadline(persistedDeadline)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(seed);
+
+            // Broken scheduler — throws on every Schedule call, which is what
+            // RehydrateFromSnapshot drives internally.
+            var brokenScheduler = new FakeDeadlineScheduler
+            {
+                ThrowOnSchedule = new InvalidOperationException("timer-subsystem-dead"),
+            };
+
+            var sut = rig.Build(schedulerOverride: brokenScheduler);
+            sut.Start();
+
+            // Expected terminal state: reducer handles EffectInfrastructureFailure →
+            // Stage.Failed, Outcome.EnrollmentFailed, ClearDeadlines.
+            Assert.True(
+                SpinWait.SpinUntil(() => sut.CurrentState.Stage == SessionStage.Failed, 5000),
+                $"Expected terminal Failed stage after rehydrate failure; stuck at {sut.CurrentState.Stage}.");
+            Assert.Equal(SessionOutcome.EnrollmentFailed, sut.CurrentState.Outcome);
+
+            // Signal landed durably on the SignalLog with the v1 contract payload.
+            var signalLog = GetSignalLog(sut);
+            var failureSignal = signalLog.ReadAll()
+                .FirstOrDefault(s => s.Kind == DecisionSignalKind.EffectInfrastructureFailure);
+            Assert.NotNull(failureSignal);
+            Assert.NotNull(failureSignal!.Payload);
+            Assert.Contains("deadline_rehydrate_failure", failureSignal.Payload!["reason"]);
+            Assert.Equal("ScheduleDeadline", failureSignal.Payload["failingEffect"]);
+            Assert.Equal("effectrunner:critical:ScheduleDeadline", failureSignal.SourceOrigin);
 
             sut.Stop();
         }
