@@ -126,6 +126,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 };
             }
 
+            public IReadOnlyDictionary<string, AppInstallTiming>? AppTimingsOverride { get; set; }
+
             public EnrollmentTerminationHandler Build(AgentConfiguration? config = null)
             {
                 config ??= BuildConfig();
@@ -156,7 +158,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                     // Zero out the timing ceremony for tests — production paths are covered by
                     // the dedicated V1-parity tests below which opt back in via their own Rig.
                     lateEventGracePeriod: TimeSpan.Zero,
-                    spoolDrainPeriod: TimeSpan.Zero);
+                    spoolDrainPeriod: TimeSpan.Zero,
+                    appTimingsAccessor: () => AppTimingsOverride ?? new Dictionary<string, AppInstallTiming>());
             }
 
             public void Dispose() => Tmp.Dispose();
@@ -435,6 +438,142 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             // agent_shutting_down acknowledgement either.
             Assert.Equal(0, rig.CleanupService.Invocations);
             Assert.DoesNotContain(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+        }
+
+        // ============================================================================
+        // Plan §5 Fix 4b — app_tracking_summary event
+        // ============================================================================
+
+        /// <summary>Reflection helper: AppPackageState.Targeted has a private setter.</summary>
+        private static void SetTargeted(AppPackageState pkg, AppTargeted t) =>
+            typeof(AppPackageState).GetProperty(nameof(AppPackageState.Targeted))!.SetValue(pkg, t);
+
+        [Fact]
+        public void Handle_emits_app_tracking_summary_with_counts_and_per_phase_breakdown()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+
+            // AppPackageState.UpdateState has an inverse-detection guard: Installed without a
+            // prior DownloadingOrInstallingSeen=true flip is rewritten to Skipped. Seed the
+            // lifecycle via Installing first so the terminal state sticks.
+            var installed = new AppPackageState("app-installed", 0);
+            installed.UpdateState(AppInstallationState.Installing);
+            installed.UpdateState(AppInstallationState.Installed);
+            SetTargeted(installed, AppTargeted.Device);
+            rig.Packages.Add(installed);
+
+            var failed = new AppPackageState("app-failed", 1);
+            failed.UpdateState(AppInstallationState.Error);
+            SetTargeted(failed, AppTargeted.User);
+            rig.Packages.Add(failed);
+
+            var skipped = new AppPackageState("app-skipped", 2);
+            skipped.UpdateState(AppInstallationState.Skipped);
+            SetTargeted(skipped, AppTargeted.User);
+            rig.Packages.Add(skipped);
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            Assert.Contains(Constants.EventTypes.AppTrackingSummary, rig.EmittedEventTypes);
+
+            var data = rig.DataOf(Constants.EventTypes.AppTrackingSummary);
+            Assert.NotNull(data);
+            Assert.Equal(3, Convert.ToInt32(data!["totalApps"]));
+            Assert.Equal(3, Convert.ToInt32(data["completedApps"]));
+            Assert.Equal(1, Convert.ToInt32(data["installedApps"]));
+            Assert.Equal(1, Convert.ToInt32(data["skippedApps"]));
+            Assert.Equal(1, Convert.ToInt32(data["failedApps"]));
+
+            var byPhase = (IReadOnlyDictionary<string, Dictionary<string, int>>)data["byPhase"];
+            Assert.Equal(1, byPhase["Device"]["total"]);
+            Assert.Equal(2, byPhase["User"]["total"]);
+            Assert.Equal(1, byPhase["User"]["failed"]);
+            Assert.Equal(1, byPhase["User"]["skipped"]);
+        }
+
+        [Fact]
+        public void Handle_app_tracking_summary_includes_per_app_timing_when_provided()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+
+            var app = new AppPackageState("app-1", 0);
+            app.UpdateState(AppInstallationState.Installing);
+            app.UpdateState(AppInstallationState.Installed);
+            SetTargeted(app, AppTargeted.Device);
+            rig.Packages.Add(app);
+
+            rig.AppTimingsOverride = new Dictionary<string, AppInstallTiming>
+            {
+                ["app-1"] = new AppInstallTiming(StartUtc.AddSeconds(30), StartUtc.AddSeconds(90)),
+            };
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            var data = rig.DataOf(Constants.EventTypes.AppTrackingSummary);
+            Assert.NotNull(data);
+            var perApp = (List<Dictionary<string, object>>)data!["perApp"];
+            var entry = Assert.Single(perApp);
+            Assert.Equal("app-1", entry["appId"]);
+            Assert.Equal("Device", entry["phase"]);
+            Assert.Equal("Installed", entry["finalState"]);
+            Assert.Equal(StartUtc.AddSeconds(30).ToString("o"), entry["startedAt"]);
+            Assert.Equal(StartUtc.AddSeconds(90).ToString("o"), entry["completedAt"]);
+            Assert.Equal(60.0, Convert.ToDouble(entry["durationSeconds"]));
+        }
+
+        [Fact]
+        public void Handle_app_tracking_summary_omits_timing_when_adapter_has_none()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+
+            var app = new AppPackageState("untimed", 0);
+            app.UpdateState(AppInstallationState.Installing);
+            app.UpdateState(AppInstallationState.Installed);
+            SetTargeted(app, AppTargeted.Device);
+            rig.Packages.Add(app);
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            var data = rig.DataOf(Constants.EventTypes.AppTrackingSummary);
+            var perApp = (List<Dictionary<string, object>>)data!["perApp"];
+            var entry = Assert.Single(perApp);
+            Assert.False(entry.ContainsKey("startedAt"));
+            Assert.False(entry.ContainsKey("completedAt"));
+            Assert.False(entry.ContainsKey("durationSeconds"));
+        }
+
+        [Fact]
+        public void Handle_does_not_emit_app_tracking_summary_on_whiteglove_part1_exit()
+        {
+            // Part 1 runs pre-provisioning — no apps have installed yet; the summary event
+            // would be vacuous and misleading.
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.WhiteGloveSealed }.Build();
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.WhiteGloveSealed));
+
+            Assert.DoesNotContain(Constants.EventTypes.AppTrackingSummary, rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void Handle_app_tracking_summary_marked_immediate_upload()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            var payload = rig.PayloadOf(Constants.EventTypes.AppTrackingSummary);
+            Assert.NotNull(payload);
+            Assert.Equal("true", payload![SignalPayloadKeys.ImmediateUpload]);
         }
     }
 }

@@ -73,6 +73,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// </summary>
         public Monitoring.Enrollment.Ime.AppPackageStateList? ImePackageStates => _imeLogHost?.PackageStates;
 
+        /// <summary>
+        /// Plan §5 Fix 4c — per-app install-lifecycle timings (StartedAt / CompletedAt /
+        /// DurationSeconds) captured by <c>ImeLogTrackerAdapter</c>. Returns <c>null</c> before
+        /// <see cref="CreateCollectorHosts"/> has been called (Orchestrator start order).
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyDictionary<string, Monitoring.Enrollment.Ime.AppInstallTiming>? ImeAppTimings => _imeLogHost?.AppTimings;
+
         public DefaultComponentFactory(
             AgentConfiguration agentConfig,
             AgentConfigResponse remoteConfig,
@@ -501,6 +508,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             /// (M4.6.β <c>FinalStatusBuilder</c>, M4.6.γ <c>DeliveryOptimizationHost</c>).
             /// </summary>
             public Monitoring.Enrollment.Ime.AppPackageStateList PackageStates => _tracker.PackageStates;
+
+            /// <summary>
+            /// Plan §5 Fix 4c — per-app install-lifecycle timings captured by the adapter,
+            /// read-only snapshot. Consumed by <c>FinalStatusBuilder</c> (adds StartedAt/
+            /// CompletedAt/DurationSeconds rows) and by the <c>app_tracking_summary</c>
+            /// emission in <c>EnrollmentTerminationHandler</c>.
+            /// </summary>
+            public System.Collections.Generic.IReadOnlyDictionary<string, Monitoring.Enrollment.Ime.AppInstallTiming> AppTimings => _adapter.AppTimings;
 
             /// <summary>
             /// Reference to the wrapped IME tracker for co-collector wiring. Used by

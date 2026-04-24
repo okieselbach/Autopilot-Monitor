@@ -48,6 +48,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         private readonly string? _bootstrapToken;
         private readonly string? _agentVersion;
         private readonly AuthFailureTracker? _authFailureTracker;
+        private readonly Logging.AgentLogger? _logger;
 
         public BackendTelemetryUploader(
             HttpClient httpClient,
@@ -58,7 +59,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             string? serialNumber = null,
             string? bootstrapToken = null,
             string? agentVersion = null,
-            AuthFailureTracker? authFailureTracker = null)
+            AuthFailureTracker? authFailureTracker = null,
+            Logging.AgentLogger? logger = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             if (string.IsNullOrEmpty(baseUrl)) throw new ArgumentException("BaseUrl is mandatory.", nameof(baseUrl));
@@ -72,6 +74,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             _bootstrapToken = bootstrapToken;
             _agentVersion = agentVersion;
             _authFailureTracker = authFailureTracker;
+            _logger = logger;
         }
 
         public async Task<UploadResult> UploadBatchAsync(
@@ -91,6 +94,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             // MtlsHttpClientFactory — we only need to compress outbound here.
             var body = SerializeBatch(items);
             var compressedBody = CompressWithGzip(body);
+
+            // Plan §5 Fix 5 — upload-cadence logging. First line users see when diagnosing
+            // "why didn't my event arrive" — records batch size + sent-bytes pre-response.
+            _logger?.Info(
+                $"BackendTelemetryUploader: flushing {items.Count} item(s) (bytes={compressedBody.Length}, firstId={items[0].TelemetryItemId}, lastId={items[items.Count - 1].TelemetryItemId}).");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
             using (var request = new HttpRequestMessage(HttpMethod.Post, _endpointUrl))
             {
                 request.Content = new ByteArrayContent(compressedBody);
@@ -111,19 +121,39 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 }
                 catch (TaskCanceledException ex)
                 {
+                    sw.Stop();
+                    _logger?.Warning($"BackendTelemetryUploader: ingest TIMEOUT after {sw.ElapsedMilliseconds}ms (items={items.Count}): {ex.Message}");
                     // HttpClient timeout (not caller cancellation) surfaces as TaskCanceledException
                     // with cancellationToken.IsCancellationRequested == false.
                     return UploadResult.Transient($"timeout: {ex.Message}");
                 }
                 catch (HttpRequestException ex)
                 {
+                    sw.Stop();
+                    _logger?.Warning($"BackendTelemetryUploader: ingest NETWORK fail after {sw.ElapsedMilliseconds}ms (items={items.Count}): {ex.Message}");
                     // DNS failure, socket error, etc. — network-layer is retryable.
                     return UploadResult.Transient($"network: {ex.Message}");
                 }
 
                 using (response)
                 {
-                    return await MapResponseAsync(response).ConfigureAwait(false);
+                    var result = await MapResponseAsync(response).ConfigureAwait(false);
+                    sw.Stop();
+
+                    if (result.Success)
+                    {
+                        _logger?.Info($"BackendTelemetryUploader: ingest OK (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}).");
+                    }
+                    else if (result.IsTransient)
+                    {
+                        _logger?.Warning($"BackendTelemetryUploader: ingest TRANSIENT (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}): {result.ErrorReason}");
+                    }
+                    else
+                    {
+                        _logger?.Error($"BackendTelemetryUploader: ingest PERMANENT fail (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}): {result.ErrorReason}");
+                    }
+
+                    return result;
                 }
             }
         }

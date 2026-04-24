@@ -28,12 +28,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             DecisionState state,
             EnrollmentTerminatedEventArgs terminated,
             AppPackageStateList? packageStates,
-            DateTime agentStartTimeUtc)
+            DateTime agentStartTimeUtc,
+            IReadOnlyDictionary<string, AppInstallTiming>? appTimings = null)
         {
             if (state == null) throw new ArgumentNullException(nameof(state));
             if (terminated == null) throw new ArgumentNullException(nameof(terminated));
 
             var uptimeSeconds = Math.Max(0, (terminated.TerminatedAtUtc - agentStartTimeUtc).TotalSeconds);
+            var timings = appTimings ?? new Dictionary<string, AppInstallTiming>();
 
             var status = new FinalStatus
             {
@@ -45,7 +47,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 AgentUptimeSeconds = uptimeSeconds,
                 SignalsSeen = BuildSignalsSeen(state),
                 AppSummary = BuildAppSummary(packageStates),
-                PackageStatesByPhase = BuildPackageStatesByPhase(packageStates),
+                PackageStatesByPhase = BuildPackageStatesByPhase(packageStates, timings),
             };
 
             return status;
@@ -109,7 +111,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         }
 
         private static Dictionary<string, List<FinalStatusPackageInfo>> BuildPackageStatesByPhase(
-            AppPackageStateList? packageStates)
+            AppPackageStateList? packageStates,
+            IReadOnlyDictionary<string, AppInstallTiming> timings)
         {
             var result = new Dictionary<string, List<FinalStatusPackageInfo>>();
             if (packageStates == null) return result;
@@ -123,6 +126,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     result[phaseKey] = bucket;
                 }
 
+                timings.TryGetValue(pkg.Id, out var timing);
+
                 bucket.Add(new FinalStatusPackageInfo
                 {
                     AppName = string.IsNullOrEmpty(pkg.Name) ? pkg.Id : pkg.Name,
@@ -130,6 +135,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     IsError = pkg.InstallationState == AppInstallationState.Error,
                     IsCompleted = IsCompleted(pkg.InstallationState),
                     Targeted = pkg.Targeted.ToString(),
+                    StartedAt = timing?.StartedAtUtc?.ToString("o"),
+                    CompletedAt = timing?.CompletedAtUtc?.ToString("o"),
+                    DurationSeconds = timing?.DurationSeconds,
                 });
             }
 

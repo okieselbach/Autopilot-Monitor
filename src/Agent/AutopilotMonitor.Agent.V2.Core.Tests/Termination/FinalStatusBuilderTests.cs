@@ -173,6 +173,74 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
         }
 
         [Fact]
+        public void Build_includes_per_app_timing_when_app_timings_provided()
+        {
+            // Plan §5 Fix 4a — FinalStatusBuilder surfaces StartedAt / CompletedAt /
+            // DurationSeconds on per-app package rows when the adapter's timing snapshot is
+            // available. Null snapshot → timing fields stay null (dialog distinguishes the two).
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            var list = new AppPackageStateList(logger);
+            var installed = new AppPackageState("app-timed", 0);
+            installed.UpdateState(AppInstallationState.Installed);
+            TestHelpers.SetTargeted(installed, AppTargeted.Device);
+            list.Add(installed);
+            var untimed = new AppPackageState("app-untimed", 1);
+            untimed.UpdateState(AppInstallationState.Installed);
+            TestHelpers.SetTargeted(untimed, AppTargeted.Device);
+            list.Add(untimed);
+
+            var timings = new System.Collections.Generic.Dictionary<string, AppInstallTiming>
+            {
+                ["app-timed"] = new AppInstallTiming(StartUtc.AddMinutes(2), StartUtc.AddMinutes(3)),
+                // app-untimed intentionally absent — builder should omit fields
+            };
+
+            var status = FinalStatusBuilder.Build(
+                StateWith(SessionStage.Completed),
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed),
+                packageStates: list,
+                agentStartTimeUtc: StartUtc,
+                appTimings: timings);
+
+            var timedInfo = status.PackageStatesByPhase["Device"].Single(p => p.AppName == "app-timed");
+            Assert.Equal(StartUtc.AddMinutes(2).ToString("o"), timedInfo.StartedAt);
+            Assert.Equal(StartUtc.AddMinutes(3).ToString("o"), timedInfo.CompletedAt);
+            Assert.Equal(60.0, timedInfo.DurationSeconds);
+
+            var untimedInfo = status.PackageStatesByPhase["Device"].Single(p => p.AppName == "app-untimed");
+            Assert.Null(untimedInfo.StartedAt);
+            Assert.Null(untimedInfo.CompletedAt);
+            Assert.Null(untimedInfo.DurationSeconds);
+        }
+
+        [Fact]
+        public void Build_with_null_app_timings_still_produces_package_states()
+        {
+            // Backward-compat: when appTimings is not passed (older call sites / tests), the
+            // builder uses an empty timing map and the timing fields stay null on every row.
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            var list = new AppPackageStateList(logger);
+            var app = new AppPackageState("a", 0);
+            app.UpdateState(AppInstallationState.Installed);
+            TestHelpers.SetTargeted(app, AppTargeted.Device);
+            list.Add(app);
+
+            var status = FinalStatusBuilder.Build(
+                StateWith(SessionStage.Completed),
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed),
+                packageStates: list,
+                agentStartTimeUtc: StartUtc,
+                appTimings: null);
+
+            var info = status.PackageStatesByPhase["Device"].Single();
+            Assert.Null(info.StartedAt);
+            Assert.Null(info.CompletedAt);
+            Assert.Null(info.DurationSeconds);
+        }
+
+        [Fact]
         public void Build_serializes_to_json_with_expected_property_names()
         {
             var state = StateWith(SessionStage.Completed);

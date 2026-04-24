@@ -80,5 +80,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
         [JsonProperty("targeted")]
         public string Targeted { get; set; }
+
+        // Plan §5 Fix 4a / 4c — per-app install-lifecycle timestamps. Omitted from the
+        // JSON when not yet captured (e.g. agent started mid-install), so the dialog can
+        // distinguish "not tracked" from "stamp=epoch".
+        [JsonProperty("startedAt", NullValueHandling = NullValueHandling.Ignore)]
+        public string StartedAt { get; set; }
+
+        [JsonProperty("completedAt", NullValueHandling = NullValueHandling.Ignore)]
+        public string CompletedAt { get; set; }
+
+        [JsonProperty("durationSeconds", NullValueHandling = NullValueHandling.Ignore)]
+        public double? DurationSeconds { get; set; }
     }
 }

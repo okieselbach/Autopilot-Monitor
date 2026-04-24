@@ -313,7 +313,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
 
             // 3) Telemetry-Transport.
-            _spool = new TelemetrySpool(_transportDirectory, _clock);
+            _spool = new TelemetrySpool(_transportDirectory, _clock, _logger);
             _transport = new TelemetryUploadOrchestrator(_spool, _uploader, _clock);
 
             // 4) Event-Emitter-Kette. Single-rail (Plan §5.10): der TelemetryEventEmitter wird

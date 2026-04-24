@@ -88,6 +88,14 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         // AppsDevice once, "AccountSetup" -> AppsUser once).
         private readonly HashSet<string> _subPhaseDeclarationsEmitted = new HashSet<string>(StringComparer.Ordinal);
 
+        // Plan §5 Fix 4c — per-app install-lifecycle timing captured from state transitions.
+        // StartedAtUtc on first Downloading/Installing/InProgress transition (set-once);
+        // CompletedAtUtc on first terminal transition (Installed/Skipped/Postponed/Error).
+        // Surfaced via <see cref="AppTimings"/> to peripheral consumers (FinalStatusBuilder,
+        // app_tracking_summary emission in EnrollmentTerminationHandler).
+        private readonly Dictionary<string, (DateTime? Started, DateTime? Completed)> _appTimings =
+            new Dictionary<string, (DateTime?, DateTime?)>(StringComparer.Ordinal);
+
         public ImeLogTrackerAdapter(
             ImeLogTracker tracker,
             ISignalIngressSink ingress,
@@ -312,6 +320,10 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             // boundary before the app entry inside it.
             MaybeEmitSubPhaseDeclaration(now);
 
+            // Plan §5 Fix 4c — set-once per-app timing. Start stamp on the first Downloading/
+            // Installing/InProgress transition, complete stamp on the first terminal state.
+            var timing = UpdateAppTiming(app.Id, newState, now);
+
             // (1) DecisionSignal — terminal states only, once per app.
             var terminalKind = ClassifyTerminalState(newState);
             if (terminalKind != null)
@@ -362,9 +374,63 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 message: BuildAppStateMessage(app, newState, eventType),
                 severity: severity,
                 immediateUpload: true,
-                data: BuildAppStatePayload(app, newState),
+                data: BuildAppStatePayload(app, newState, timing),
                 occurredAtUtc: now);
         }
+
+        /// <summary>
+        /// Plan §5 Fix 4c — set-once per-app install-lifecycle timing. Called for every
+        /// state transition, no-op for duplicate stamps. Returns the up-to-date
+        /// <see cref="AppInstallTiming"/> so the emitter can inline the values on the
+        /// current event's payload without a second dictionary lookup.
+        /// </summary>
+        private AppInstallTiming UpdateAppTiming(string appId, AppInstallationState newState, DateTime now)
+        {
+            lock (_lock)
+            {
+                _appTimings.TryGetValue(appId, out var current);
+
+                // First lifecycle-active transition → record StartedAt.
+                if (current.Started == null && IsLifecycleActive(newState))
+                {
+                    current.Started = now;
+                }
+
+                // First terminal transition → record CompletedAt.
+                if (current.Completed == null && IsCompletedState(newState))
+                {
+                    current.Completed = now;
+                }
+
+                _appTimings[appId] = current;
+                return new AppInstallTiming(current.Started, current.Completed);
+            }
+        }
+
+        /// <summary>
+        /// Snapshot of per-app install timings captured during this agent run. Fire-once
+        /// stamps, safe to read concurrently with adapter emissions.
+        /// </summary>
+        public IReadOnlyDictionary<string, AppInstallTiming> AppTimings
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    var snapshot = new Dictionary<string, AppInstallTiming>(_appTimings.Count, StringComparer.Ordinal);
+                    foreach (var kv in _appTimings)
+                    {
+                        snapshot[kv.Key] = new AppInstallTiming(kv.Value.Started, kv.Value.Completed);
+                    }
+                    return snapshot;
+                }
+            }
+        }
+
+        private static bool IsLifecycleActive(AppInstallationState state) =>
+            state == AppInstallationState.Downloading
+            || state == AppInstallationState.Installing
+            || state == AppInstallationState.InProgress;
 
         /// <summary>
         /// Plan §5 Fix 2 — emit a <c>phase_transition</c> declaration event the first time we
@@ -636,8 +702,10 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
 
         private static IReadOnlyDictionary<string, string> BuildAppStatePayload(
             AppPackageState app,
-            AppInstallationState newState)
+            AppInstallationState newState,
+            AppInstallTiming timing)
         {
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
             var data = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["appId"] = app.Id,
@@ -646,17 +714,28 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 ["intent"] = app.Intent.ToString(),
                 ["targeted"] = app.Targeted.ToString(),
                 ["runAs"] = app.RunAs.ToString(),
-                ["progressPercent"] = (app.ProgressPercent ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["bytesDownloaded"] = app.BytesDownloaded.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["bytesTotal"] = app.BytesTotal.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["progressPercent"] = (app.ProgressPercent ?? 0).ToString(culture),
+                ["bytesDownloaded"] = app.BytesDownloaded.ToString(culture),
+                ["bytesTotal"] = app.BytesTotal.ToString(culture),
                 ["isError"] = (newState == AppInstallationState.Error).ToString().ToLowerInvariant(),
                 ["isCompleted"] = IsCompletedState(newState).ToString().ToLowerInvariant(),
             };
 
             if (!string.IsNullOrEmpty(app.AppVersion)) data["appVersion"] = app.AppVersion!;
             if (!string.IsNullOrEmpty(app.AppType)) data["appType"] = app.AppType!;
-            if (app.AttemptNumber > 0) data["attemptNumber"] = app.AttemptNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (app.AttemptNumber > 0) data["attemptNumber"] = app.AttemptNumber.ToString(culture);
             if (!string.IsNullOrEmpty(app.DetectionResult)) data["detectionResult"] = app.DetectionResult!;
+
+            // Plan §5 Fix 4c — per-app install-lifecycle timing. StartedAt appears on the
+            // first Downloading/Installing/InProgress event; CompletedAt + DurationSeconds
+            // light up on the terminal event. Values are omitted when not yet known so the
+            // UI can distinguish "not yet started" from "stamp=epoch".
+            if (timing.StartedAtUtc.HasValue)
+                data["startedAt"] = timing.StartedAtUtc.Value.ToString("o", culture);
+            if (timing.CompletedAtUtc.HasValue)
+                data["completedAt"] = timing.CompletedAtUtc.Value.ToString("o", culture);
+            if (timing.DurationSeconds.HasValue)
+                data["durationSeconds"] = timing.DurationSeconds.Value.ToString("F2", culture);
 
             if (newState == AppInstallationState.Error)
             {
