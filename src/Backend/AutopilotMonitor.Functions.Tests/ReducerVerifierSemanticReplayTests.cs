@@ -40,7 +40,7 @@ public class ReducerVerifierSemanticReplayTests
         };
 
         var engine = new DecisionEngine();
-        var state = DecisionState.CreateInitial(TenantId, SessionId);
+        var state = DecisionState.CreateInitial(SessionId, TenantId);
         var transitionRecords = new DecisionTransitionRecord[sigs.Length];
 
         for (var i = 0; i < sigs.Length; i++)
@@ -183,6 +183,29 @@ public class ReducerVerifierSemanticReplayTests
         Assert.False(report.SemanticReplayFinalStageMatches);
         Assert.Contains(report.Issues,
             i => i.Kind == "replay_final_stage_mismatch" && i.Severity == "Error");
+    }
+
+    [Fact]
+    public void Replay_seed_preserves_session_and_tenant_identity_distinctly()
+    {
+        // Codex follow-up (post-#50 #D) regression: seeding CreateInitial with swapped
+        // (tenantId, sessionId) used to produce a state with mirrored IDs, yet all tests
+        // passed because the fixture AND the verifier agreed on the swap. Using sentinel
+        // IDs where the tenant and session tokens are distinguishable (different prefixes)
+        // catches the swap at the identity-check step the verifier now performs.
+        var (signals, transitions, _) = BuildAgreedStream();
+
+        var report = ReducerVerifier.Verify(TenantId, SessionId, signals, transitions, CurrentReducerVersion);
+
+        Assert.True(report.SemanticReplayPerformed);
+        Assert.Equal(TenantId, report.TenantId);
+        Assert.Equal(SessionId, report.SessionId);
+        Assert.DoesNotContain(report.Issues, i => i.Kind == "replay_identity_mismatch");
+        // Sanity on the sentinel prefixes (keeps the regression explicit if someone edits
+        // the constants and accidentally mirrors them).
+        Assert.StartsWith("a1b2", TenantId);
+        Assert.StartsWith("b2c3", SessionId);
+        Assert.NotEqual(TenantId, SessionId);
     }
 
     [Fact]

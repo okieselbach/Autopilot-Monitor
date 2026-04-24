@@ -317,7 +317,10 @@ namespace AutopilotMonitor.Functions.Services
             }
 
             var engine = new DecisionEngine();
-            var state = DecisionState.CreateInitial(report.TenantId, report.SessionId);
+            // Codex follow-up (post-#50 #D): DecisionState.CreateInitial signature is
+            // (sessionId, tenantId); callers must pass them in that order so a replay seed
+            // carries the correct identity end-to-end.
+            var state = DecisionState.CreateInitial(report.SessionId, report.TenantId);
             var divergences = 0;
 
             var stepsToCompare = Math.Min(decodedSignals.Count, decodedTransitions.Count);
@@ -364,6 +367,21 @@ namespace AutopilotMonitor.Functions.Services
                     Severity = "Warning",
                     Kind     = "replay_divergence",
                     Message  = $"Signal count ({decodedSignals.Count}) != transition count ({decodedTransitions.Count}); reducer should produce one transition per signal.",
+                });
+            }
+
+            // Codex follow-up (post-#50 #D): defensive identity assertion. The final state
+            // must still carry the same SessionId/TenantId as the report — a drift here
+            // signals a swapped CreateInitial(...) seed upstream, which would otherwise slip
+            // through because TransitionsSemanticallyEqual is identity-insensitive.
+            if (!string.Equals(state.SessionId, report.SessionId, StringComparison.Ordinal)
+                || !string.Equals(state.TenantId, report.TenantId, StringComparison.Ordinal))
+            {
+                report.Issues.Add(new VerificationIssue
+                {
+                    Severity = "Error",
+                    Kind     = "replay_identity_mismatch",
+                    Message  = $"Replay seed identity drift: final state (session={state.SessionId}, tenant={state.TenantId}) != report (session={report.SessionId}, tenant={report.TenantId}).",
                 });
             }
 

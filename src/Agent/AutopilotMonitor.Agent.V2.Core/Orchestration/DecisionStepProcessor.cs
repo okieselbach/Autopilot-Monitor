@@ -98,7 +98,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <summary>Test-Observability — anzahl aufeinanderfolgender Journal-Failures.</summary>
         public int ConsecutiveJournalFailureCount => _consecutiveJournalFailures;
 
-        public void ApplyStep(DecisionStep step, DecisionSignal signal)
+        public EffectRunResult ApplyStep(DecisionStep step, DecisionSignal signal)
         {
             if (step == null) throw new ArgumentNullException(nameof(step));
             if (signal == null) throw new ArgumentNullException(nameof(signal));
@@ -160,35 +160,43 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             if (effectResult.SessionMustAbort)
             {
-                // Codex follow-up #2: EffectRunner has already posted a synthetic
-                // EffectInfrastructureFailure signal to the ingress. The reducer will
-                // transition the session to Failed / EnrollmentFailed on the next
-                // dispatched step — our job here is purely observability.
+                // Codex follow-up (post-#50 #B): the phantom state must NOT be snapshotted
+                // because its ActiveDeadline was never actually armed on the live scheduler.
+                // Recovery from a phantom snapshot would try to re-arm and re-fail, leaving
+                // the session dangling for the max-lifetime watchdog. Responsibility for
+                // flipping the session to EnrollmentFailed lives with the caller
+                // (SignalIngress): it synthesises + DURABLY appends the
+                // EffectInfrastructureFailure signal, re-enters ApplyStep, and the terminal
+                // step's snapshot replaces the stale N-1 snapshot.
                 _logger.Error(
                     $"DecisionStepProcessor: effect run signaled session abort " +
                     $"(reason='{effectResult.AbortReason}') for signal ordinal={signal.SessionSignalOrdinal}; " +
-                    $"EffectInfrastructureFailure signal enqueued, reducer will terminate next step.");
+                    $"skipping snapshot of phantom state — caller will synthesise EffectInfrastructureFailure durably.");
             }
-            else if (effectResult.Failures.Count > 0)
+            else
             {
-                _logger.Warning(
-                    $"DecisionStepProcessor: effect run completed with {effectResult.Failures.Count} non-fatal failure(s) " +
-                    $"for signal ordinal={signal.SessionSignalOrdinal}.");
+                if (effectResult.Failures.Count > 0)
+                {
+                    _logger.Warning(
+                        $"DecisionStepProcessor: effect run completed with {effectResult.Failures.Count} non-fatal failure(s) " +
+                        $"for signal ordinal={signal.SessionSignalOrdinal}.");
+                }
+
+                // 3) Snapshot — best-effort. Journal ist die Wahrheit, Snapshot ist Cache.
+                try
+                {
+                    _snapshot.Save(step.NewState);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning(
+                        $"DecisionStepProcessor: snapshot save failed (transient, not escalated) " +
+                        $"for signal ordinal={signal.SessionSignalOrdinal}: {ex.Message}");
+                }
             }
 
-            // 3) Snapshot — best-effort. Journal ist die Wahrheit, Snapshot ist Cache.
-            try
-            {
-                _snapshot.Save(step.NewState);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning(
-                    $"DecisionStepProcessor: snapshot save failed (transient, not escalated) " +
-                    $"for signal ordinal={signal.SessionSignalOrdinal}: {ex.Message}");
-            }
-
-            // 4) State-Forward + Counter-Reset.
+            // 4) State-Forward + Counter-Reset. Happens regardless of abort so the caller's
+            //    follow-up synthetic signal reduces FROM the correct pre-terminal state.
             _currentState = step.NewState;
             _consecutiveJournalFailures = 0;
 
@@ -208,6 +216,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                         ex);
                 }
             }
+
+            return effectResult;
         }
 
         private void TryTriggerQuarantine(string reason)

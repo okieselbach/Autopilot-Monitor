@@ -54,6 +54,31 @@ namespace AutopilotMonitor.DecisionCore.Engine
             IDecisionEngine engine,
             DecisionState seed,
             IEnumerable<DecisionSignal> signals)
+            => Replay(engine, seed, signals, onTransition: null);
+
+        /// <summary>
+        /// Fold variant that exposes each intermediate <see cref="DecisionTransition"/> to
+        /// the caller via <paramref name="onTransition"/>. Used by the orchestrator's
+        /// recovery path (Codex follow-up post-#50 #C) to rematerialise the Journal when a
+        /// crash left the SignalLog ahead of the Journal: the snapshot is reached by the
+        /// pure fold, then the same fold re-emits every tail transition so the Journal
+        /// can backfill missing <see cref="DecisionTransition.StepIndex"/> entries.
+        /// Determinism-contract is unchanged; the callback is side-effect-free from
+        /// <see cref="ReducerReplay"/>'s perspective — any exception it throws propagates
+        /// out and aborts replay.
+        /// </summary>
+        /// <param name="engine">Reducer kernel. Stateless — may be shared across calls.</param>
+        /// <param name="seed">Starting state (see other overload).</param>
+        /// <param name="signals">Ordered signal sequence (see other overload).</param>
+        /// <param name="onTransition">Optional per-step callback; receives the transition
+        /// produced by the current signal BEFORE <c>state</c> is advanced to the next
+        /// signal. Null = no callback (behaves identically to the 3-arg overload).</param>
+        /// <returns>The reduced state after applying every signal.</returns>
+        public static DecisionState Replay(
+            IDecisionEngine engine,
+            DecisionState seed,
+            IEnumerable<DecisionSignal> signals,
+            Action<DecisionTransition>? onTransition)
         {
             if (engine == null) throw new ArgumentNullException(nameof(engine));
             if (seed == null) throw new ArgumentNullException(nameof(seed));
@@ -80,6 +105,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 }
 
                 var step = engine.Reduce(state, signal);
+                onTransition?.Invoke(step.Transition);
                 state = step.NewState;
                 lastOrdinal = signal.SessionSignalOrdinal;
             }

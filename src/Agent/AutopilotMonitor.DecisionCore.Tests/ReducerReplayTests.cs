@@ -176,6 +176,82 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
+        public void Replay_OnTransitionCallback_InvokedOncePerSignalInOrder()
+        {
+            // Codex follow-up (post-#50 #C): the onTransition overload exposes each step's
+            // transition to callers so they can rematerialise downstream artefacts (e.g.,
+            // the JournalWriter tail after a BEHIND-the-log crash). Invocation contract:
+            //   1. exactly one callback per signal,
+            //   2. invoked BEFORE the state advances to the next signal,
+            //   3. StepIndex strictly increasing with the signal order.
+            var engine = new DecisionEngine();
+            var seed = DecisionState.CreateInitial("s", "t");
+            var signals = MakeCanonicalStream();
+
+            var captured = new List<DecisionTransition>();
+            var result = ReducerReplay.Replay(
+                engine, seed, signals, onTransition: captured.Add);
+
+            Assert.Equal(signals.Count, captured.Count);
+            for (var i = 0; i < captured.Count; i++)
+            {
+                // Transitions come out in signal order and ordinals are strictly increasing.
+                if (i > 0)
+                {
+                    Assert.True(
+                        captured[i].StepIndex > captured[i - 1].StepIndex,
+                        $"StepIndex regression between captured[{i - 1}]={captured[i - 1].StepIndex} and captured[{i}]={captured[i].StepIndex}.");
+                }
+                Assert.Equal(signals[i].SessionSignalOrdinal, captured[i].SignalOrdinalRef);
+            }
+
+            // Final state after the callback-capturing fold matches the plain 3-arg fold.
+            var plain = ReducerReplay.Replay(engine, seed, signals);
+            Assert.Equal(plain.StepIndex, result.StepIndex);
+            Assert.Equal(plain.LastAppliedSignalOrdinal, result.LastAppliedSignalOrdinal);
+            Assert.Equal(plain.Stage, result.Stage);
+        }
+
+        [Fact]
+        public void Replay_OnTransitionCallback_NullIsEquivalentTo3ArgOverload()
+        {
+            // The nullable callback must behave like the 3-arg overload when omitted,
+            // preserving zero-side-effect determinism for callers that only need state.
+            var engine = new DecisionEngine();
+            var seed = DecisionState.CreateInitial("s", "t");
+            var signals = MakeCanonicalStream();
+
+            var withCallback = ReducerReplay.Replay(engine, seed, signals, onTransition: null);
+            var without = ReducerReplay.Replay(engine, seed, signals);
+
+            Assert.Equal(without.StepIndex, withCallback.StepIndex);
+            Assert.Equal(without.LastAppliedSignalOrdinal, withCallback.LastAppliedSignalOrdinal);
+            Assert.Equal(without.Stage, withCallback.Stage);
+        }
+
+        [Fact]
+        public void Replay_OnTransitionCallbackThrows_AbortsReplayAndPropagates()
+        {
+            // Callback exceptions must not be swallowed — they indicate a downstream
+            // persistence failure (e.g., journal disk full during rebuild). The caller
+            // decides whether to escalate to quarantine or retry.
+            var engine = new DecisionEngine();
+            var seed = DecisionState.CreateInitial("s", "t");
+            var signals = MakeCanonicalStream();
+
+            var invocations = 0;
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                ReducerReplay.Replay(engine, seed, signals, onTransition: _ =>
+                {
+                    invocations++;
+                    if (invocations == 2) throw new InvalidOperationException("simulated disk-full");
+                }));
+
+            Assert.Contains("simulated disk-full", ex.Message);
+            Assert.Equal(2, invocations); // aborted before the 3rd signal
+        }
+
+        [Fact]
         public void Replay_NullArgs_ThrowArgumentNullException()
         {
             var engine = new DecisionEngine();

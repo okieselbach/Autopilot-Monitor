@@ -34,10 +34,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <list type="number">
         ///   <item>Transition ins Journal appenden (Sofort-Flush)</item>
         ///   <item>Effekte mittels <see cref="IEffectRunner"/> ausführen</item>
+        ///   <item>Snapshot der <see cref="DecisionStep.NewState"/> speichern — ABER nur wenn
+        ///         <see cref="EffectRunResult.SessionMustAbort"/> false ist (sonst wäre der
+        ///         Snapshot ein phantom-Zustand mit einer Deadline, die der live Scheduler
+        ///         nie arm-en konnte — siehe Codex follow-up post-#50 #B).</item>
         ///   <item><see cref="CurrentState"/> auf <see cref="DecisionStep.NewState"/> fortsetzen</item>
         /// </list>
-        /// Darf werfen — Ingress fängt ab und loggt, verstummt aber nicht.
+        /// Gibt das <see cref="EffectRunResult"/> zurück, damit der Caller (typischerweise
+        /// <see cref="SignalIngress"/>) entscheiden kann, ob ein synthetisches
+        /// <see cref="DecisionSignalKind.EffectInfrastructureFailure"/> inline nachgeschoben
+        /// werden muss. Darf werfen — Ingress fängt ab und loggt, verstummt aber nicht.
         /// </summary>
-        void ApplyStep(DecisionStep step, DecisionSignal signal);
+        EffectRunResult ApplyStep(DecisionStep step, DecisionSignal signal);
     }
 }

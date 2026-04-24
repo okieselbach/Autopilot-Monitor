@@ -279,13 +279,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             //         loss quarantine of the log segments and start fresh.
             //      b) Snapshot loaded cleanly → replay any SignalLog tail past the snapshot's
             //         LastAppliedSignalOrdinal so a pre-crash Journal/Snapshot lag is closed.
-            //      c) No snapshot → fresh initial state.
+            //      c) No snapshot file — two sub-cases (Codex follow-up post-#50 #A):
+            //         c1) SignalLog also empty → genuinely fresh start.
+            //         c2) SignalLog has entries → crash before the first snapshot save ever
+            //             landed; rebuild from the full SignalLog like branch (a) does after
+            //             snapshot quarantine. Anything else would keep stale log entries on
+            //             disk while state resets to StepIndex=0 and break monotonicity on
+            //             the next append.
             //
-            //    After the seed is chosen we ensure the Journal tail is not AHEAD of the
-            //    replayed state — if a crash left phantom transitions on disk (Journal flushed,
-            //    Snapshot not) the next live Append would throw a monotonicity violation and
-            //    eventually quarantine-escalate. TruncateAfter moves the phantoms to a
-            //    forensic bucket and realigns.
+            //    After the seed + replay-stream are selected the Journal is aligned AHEAD-OF
+            //    replay (phantom suffix beyond seed.StepIndex-1 goes to the forensic bucket)
+            //    and backfilled DURING replay via the onTransition callback. This closes two
+            //    crash windows in one mechanism (Codex follow-up post-#50 #C):
+            //      • AHEAD — Journal was flushed but Snapshot not; phantom transitions beyond
+            //        the seed get quarantined before replay so live Append monotonicity holds.
+            //      • BEHIND — SignalLog was flushed but Journal not; the replay callback
+            //        rematerialises the missing StepIndex entries onto the Journal so it
+            //        ends up in exact lockstep with initialState.
             var snapshotFileExistsPreLoad = File.Exists(snapshotPath);
             var loadedState = _snapshot.Load();
             DecisionState initialState;
@@ -293,6 +303,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // Reducer is stateless — a transient instance is enough for the pure replay below.
             // The live ingress pipeline creates its own instance further down the Start() body.
             var replayEngine = new DecisionEngine();
+
+            // Dispatch: pick the seed + signal stream per branch. Null seed is impossible past
+            // this block (every path assigns it), but the compiler needs the explicit init.
+            DecisionState seed = DecisionState.CreateInitial(_sessionId, _tenantId);
+            IReadOnlyList<DecisionSignal> signalsToReplay = Array.Empty<DecisionSignal>();
+            string branchTag;
 
             if (loadedState == null && snapshotFileExistsPreLoad)
             {
@@ -319,16 +335,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     _journal = new JournalWriter(journalPath, () => _clock.UtcNow);
                     _eventSequencePersistence = new EventSequencePersistence(eventSequencePath);
 
-                    initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
+                    branchTag = "a-total-loss";
                 }
                 else
                 {
-                    _logger.Info(
-                        $"EnrollmentOrchestrator: rebuilding state via ReducerReplay over {loggedSignals.Count} SignalLog entries.");
-                    initialState = ReducerReplay.Replay(
-                        engine: replayEngine,
-                        seed: DecisionState.CreateInitial(_sessionId, _tenantId),
-                        signals: loggedSignals);
+                    signalsToReplay = loggedSignals;
+                    branchTag = "a-full-log-replay";
                 }
 
                 _wasStartupQuarantine = true;
@@ -336,42 +348,62 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             else if (loadedState != null)
             {
                 // Branch (b) — Snapshot loaded. Catch up any SignalLog tail past the snapshot.
-                var tail = CollectSignalLogTailAfter(loadedState.LastAppliedSignalOrdinal);
-
-                if (tail.Count > 0)
-                {
-                    _logger.Info(
-                        $"EnrollmentOrchestrator: snapshot at ordinal={loadedState.LastAppliedSignalOrdinal}; " +
-                        $"replaying {tail.Count} SignalLog tail signal(s) to catch up.");
-                    initialState = ReducerReplay.Replay(replayEngine, loadedState, tail);
-                }
-                else
-                {
-                    initialState = loadedState;
-                    _logger.Info(
-                        $"EnrollmentOrchestrator: recovered state from snapshot (stage={loadedState.Stage}, stepIndex={loadedState.StepIndex}).");
-                }
+                seed = loadedState;
+                signalsToReplay = CollectSignalLogTailAfter(loadedState.LastAppliedSignalOrdinal);
+                branchTag = signalsToReplay.Count > 0 ? "b-tail-replay" : "b-snapshot-current";
             }
             else
             {
-                // Branch (c) — no prior state.
-                initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
-                _logger.Info($"EnrollmentOrchestrator: fresh initial state for session {_sessionId}.");
+                // Branch (c) — no snapshot on disk. Two sub-cases:
+                //   (c1) SignalLog also empty → genuinely fresh start.
+                //   (c2) SignalLog has entries (crash BEFORE first snapshot save) → full
+                //        log replay from CreateInitial (Codex follow-up post-#50 #A).
+                var loggedSignals = _signalLog.ReadAll();
+                if (loggedSignals.Count == 0)
+                {
+                    branchTag = "c1-fresh";
+                }
+                else
+                {
+                    signalsToReplay = loggedSignals;
+                    _wasStartupQuarantine = true;
+                    branchTag = "c2-full-log-replay";
+                }
             }
 
-            // Post-recovery alignment (plan §5.1): truncate Journal phantom suffix if the file
-            // is ahead of the replayed state. After a normal Reduce the Journal holds entries
-            // with StepIndex = [0 .. state.StepIndex - 1]; anything beyond is a leftover from a
-            // pre-crash Journal-flushed-but-snapshot-not path.
-            if (_journal.LastStepIndex >= initialState.StepIndex)
+            // Align Journal AHEAD phantoms before replay. Engine semantics: a transition
+            // produced for state at StepIndex=K carries StepIndex=K+1 (see
+            // DecisionEngine.BuildTakenTransition); after K reduces from initial the journal
+            // holds entries [1..K] with LastStepIndex=K. So any on-disk entry beyond
+            // seed.StepIndex is a phantom from a crash between Journal.Append and
+            // Snapshot.Save. Truncating first lets the replay callback Append monotonically
+            // from seed.StepIndex+1 without colliding.
+            var journalBoundary = seed.StepIndex;
+            if (_journal.LastStepIndex > journalBoundary)
             {
-                var boundary = initialState.StepIndex - 1;
                 _logger.Warning(
-                    $"EnrollmentOrchestrator: Journal tail ahead of replayed state " +
-                    $"(journal.LastStepIndex={_journal.LastStepIndex}, state.StepIndex={initialState.StepIndex}) — " +
-                    $"truncating phantom transitions to boundary={boundary}.");
-                _journal.TruncateAfter(boundary);
+                    $"EnrollmentOrchestrator: Journal ahead of seed state " +
+                    $"(journal.LastStepIndex={_journal.LastStepIndex}, seed.StepIndex={seed.StepIndex}) — " +
+                    $"truncating phantom transitions to boundary={journalBoundary}.");
+                _journal.TruncateAfter(journalBoundary);
             }
+
+            // Replay + Journal backfill via the onTransition callback (Codex follow-up
+            // post-#50 #C). For BEHIND crashes (SignalLog flushed, Journal not) this
+            // rematerialises every missing StepIndex. For no-replay branches the callback
+            // is simply never invoked; the journal stays aligned from the pre-replay
+            // truncate step above.
+            initialState = ReducerReplay.Replay(
+                engine: replayEngine,
+                seed: seed,
+                signals: signalsToReplay,
+                onTransition: _journal.Append);
+
+            _logger.Info(
+                $"EnrollmentOrchestrator: recovery branch={branchTag}, " +
+                $"stage={initialState.Stage}, stepIndex={initialState.StepIndex}, " +
+                $"signalsReplayed={signalsToReplay.Count}, " +
+                $"journal.LastStepIndex={_journal.LastStepIndex}.");
 
             // Sonderfall 1 Detection: WG Part 1 -> Reboot -> Part 2 Resume.
             // Self-destruct bleibt AUS (Caller ist zuständig — die Info wird via

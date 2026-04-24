@@ -263,6 +263,50 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         }
 
         [Fact]
+        public void No_snapshot_with_intact_log_rebuilds_state_via_full_log_replay()
+        {
+            // Codex follow-up (post-#50 #A): the snapshot was never written (either an
+            // abnormal first-session crash or post-quarantine wipe) BUT the SignalLog
+            // already has entries. Branch (c) must NOT fall through to CreateInitial —
+            // that would reset StepIndex=0 while the log continues at its original
+            // ordinals, breaking monotonicity on the next live append.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Seed three signals on the log, NO snapshot file on disk.
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+                MakeSignal(2, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            Assert.False(File.Exists(Path.Combine(rig.StateDir, "snapshot.json")));
+
+            var engine = new DecisionEngine();
+            var expected = ReducerReplay.Replay(
+                engine, DecisionState.CreateInitial("S1", "T1"), sigs);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            // Full-log replay produced the post-crash state — step/ordinal both at tail.
+            Assert.True(sut.WasStartupQuarantine);
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+            Assert.Equal(expected.Stage, sut.CurrentState.Stage);
+
+            // SignalLog was NOT quarantined — only the absent snapshot path triggered replay.
+            var signalLogPath = Path.Combine(rig.StateDir, "signal-log.jsonl");
+            Assert.True(File.Exists(signalLogPath));
+            Assert.True(new FileInfo(signalLogPath).Length > 0);
+
+            sut.Stop();
+        }
+
+        [Fact]
         public void Corrupt_snapshot_with_intact_log_replays_full_log_without_quarantining_log()
         {
             // Snapshot corrupt (checksum fails) but the SignalLog is fine: the orchestrator
@@ -308,15 +352,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Journal_ahead_of_replayed_state_triggers_phantom_truncate()
         {
-            // Pathological crash scenario: the Journal flushed step N but the Snapshot saved
-            // only step N-1 and a later SignalLog append was never actually persisted (log
-            // tail physically shorter than journal). On recovery the journal suffix is a
-            // phantom — TruncateAfter moves it to .quarantine and realigns so the next live
-            // append does not violate monotonicity.
+            // AHEAD crash scenario: the Journal flushed step for sig1, then also a phantom
+            // step for a signal the SignalLog never persisted, while the Snapshot saved
+            // only step for sig0. On recovery everything beyond seed.StepIndex goes to the
+            // phantom bucket and the replay callback (Codex follow-up post-#50 #C) rebuilds
+            // the authoritative tail bit-for-bit in lockstep with state advancement.
             using var rig = new Rig();
             Directory.CreateDirectory(rig.StateDir);
 
-            // Step 1: SignalLog has ordinals 0 + 1 only.
+            // Step 1: SignalLog has sig0 + sig1.
             var sigs = new[]
             {
                 MakeSignal(0, DecisionSignalKind.SessionStarted),
@@ -325,21 +369,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
             foreach (var s in sigs) seedLog.Append(s);
 
-            // Step 2: Snapshot lags behind — state after only the first reduce.
+            // Step 2: Produce real engine transitions for sig0 + sig1 — engine semantics
+            // say their StepIndex is 1 and 2 (state.StepIndex + 1). Snapshot only captures
+            // post-sig0 state; the phantom transition for a non-existent sig beyond has
+            // StepIndex=3.
             var engine = new DecisionEngine();
-            var snapshotState = engine.Reduce(
-                DecisionState.CreateInitial("S1", "T1"), sigs[0]).NewState;
+            var step0 = engine.Reduce(DecisionState.CreateInitial("S1", "T1"), sigs[0]);
+            var step1 = engine.Reduce(step0.NewState, sigs[1]);
+            var snapshotState = step0.NewState; // StepIndex=1
             new SnapshotPersistence(
                 Path.Combine(rig.StateDir, "snapshot.json"),
                 () => rig.Clock.UtcNow).Save(snapshotState);
 
-            // Step 3: Journal has 3 transitions on disk (StepIndex 0, 1, 2) — the StepIndex-2
-            // entry is the phantom (its signal was never flushed to the log).
+            // Step 3: Journal has 3 transitions on disk — the StepIndex=3 one is phantom
+            // (no backing signal in the log).
             var journalPath = Path.Combine(rig.StateDir, "journal.jsonl");
             var seedJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow);
-            seedJournal.Append(MakeTransition(0, signalRef: 0));
-            seedJournal.Append(MakeTransition(1, signalRef: 1));
-            seedJournal.Append(MakeTransition(2, signalRef: 99)); // phantom
+            seedJournal.Append(step0.Transition);                // StepIndex=1
+            seedJournal.Append(step1.Transition);                // StepIndex=2 — pre-crash flushed
+            seedJournal.Append(MakeTransition(3, signalRef: 99)); // StepIndex=3 — phantom
 
             // Expected post-recovery state: replay tail [sig1] → StepIndex=2, LastApplied=1.
             var expected = ReducerReplay.Replay(engine, snapshotState, new[] { sigs[1] });
@@ -351,13 +399,80 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
             Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
 
-            // Phantom file captured in the quarantine bucket.
+            // Phantom bucket contains the two entries beyond seed.StepIndex=1 (StepIndex 2 + 3):
+            // the pre-crash-flushed real transition AND the signal-less phantom. The replay
+            // then rebuilt StepIndex=2 from sig1 via the onTransition callback so the live
+            // journal ends in lockstep with state at [1, 2].
             var quarantineRoot = Path.Combine(rig.StateDir, ".quarantine");
             Assert.True(Directory.Exists(quarantineRoot));
             var phantomFiles = Directory.GetFiles(
                 quarantineRoot, "journal-phantom-tail.jsonl", SearchOption.AllDirectories);
             Assert.Single(phantomFiles);
-            Assert.Single(File.ReadAllLines(phantomFiles[0]), l => !string.IsNullOrWhiteSpace(l));
+            Assert.Equal(2, File.ReadAllLines(phantomFiles[0])
+                .Count(l => !string.IsNullOrWhiteSpace(l)));
+
+            var liveJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow).ReadAll();
+            Assert.Equal(2, liveJournal.Count);
+            Assert.Equal(1, liveJournal[0].StepIndex);
+            Assert.Equal(2, liveJournal[1].StepIndex);
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Signal_log_ahead_of_journal_rebuilds_missing_journal_entries_during_replay()
+        {
+            // Codex follow-up (post-#50 #C): BEHIND scenario. A crash landed between
+            // SignalLog.Append(sig1) and Journal.Append(step1.Transition), so the log is one
+            // step ahead of the journal while the snapshot already captures the pre-sig1
+            // state. Recovery must NOT leave the journal with a gap — the onTransition
+            // callback on ReducerReplay.Replay backfills the missing StepIndex in lockstep.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            var engine = new DecisionEngine();
+            var step0 = engine.Reduce(DecisionState.CreateInitial("S1", "T1"), sigs[0]);
+            var snapshotState = step0.NewState; // StepIndex=1, LastApplied=0
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(snapshotState);
+
+            // Journal only has the sig0 transition — the sig1 transition was never flushed
+            // before the crash. LastStepIndex=1 matches snapshotState.StepIndex, so no
+            // AHEAD-truncation fires; recovery must backfill StepIndex=2 via the callback.
+            var journalPath = Path.Combine(rig.StateDir, "journal.jsonl");
+            var seedJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow);
+            seedJournal.Append(step0.Transition); // StepIndex=1
+
+            var expected = ReducerReplay.Replay(engine, snapshotState, new[] { sigs[1] });
+
+            var sut = rig.Build();
+            sut.Start();
+
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+
+            var liveJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow).ReadAll();
+            Assert.Equal(2, liveJournal.Count);
+            Assert.Equal(1, liveJournal[0].StepIndex);
+            Assert.Equal(2, liveJournal[1].StepIndex);
+
+            // No phantom quarantine happened — nothing was beyond the seed boundary.
+            var quarantineRoot = Path.Combine(rig.StateDir, ".quarantine");
+            if (Directory.Exists(quarantineRoot))
+            {
+                var phantomFiles = Directory.GetFiles(
+                    quarantineRoot, "journal-phantom-tail.jsonl", SearchOption.AllDirectories);
+                Assert.Empty(phantomFiles);
+            }
 
             sut.Stop();
         }

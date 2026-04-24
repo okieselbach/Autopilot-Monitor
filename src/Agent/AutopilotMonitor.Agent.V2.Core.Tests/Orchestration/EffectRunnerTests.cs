@@ -91,11 +91,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         }
 
         [Fact]
-        public async Task ScheduleDeadline_failure_posts_EffectInfrastructureFailure_signal_to_ingress()
+        public async Task ScheduleDeadline_failure_does_not_post_signal_from_EffectRunner()
         {
-            // Codex follow-up #2 — critical deadline failure must surface in the decision
-            // world, not just the log. EffectRunner posts a synthetic signal that the
-            // reducer picks up on the next step.
+            // Codex follow-up (post-#50 #B): responsibility for synthesising the durable
+            // EffectInfrastructureFailure signal moved from EffectRunner to SignalIngress
+            // (see SignalIngressTests.Abort_signal_is_synthesised_*). The EffectRunner's
+            // contract is now "return an abort result; do not touch the ingress queue".
             var rig = new Rig();
             rig.Scheduler.ThrowOnSchedule = new InvalidOperationException("timer-broken");
             var sut = rig.Build();
@@ -106,18 +107,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var result = await sut.RunAsync(new[] { effect }, InitialState(), At);
 
             Assert.True(result.SessionMustAbort);
-            Assert.Single(rig.Ingress.Posted);
-            var posted = rig.Ingress.Posted[0];
-            Assert.Equal(DecisionSignalKind.EffectInfrastructureFailure, posted.Kind);
-            Assert.Equal(At, posted.OccurredAtUtc);
-            Assert.Equal("effectrunner:critical:ScheduleDeadline", posted.SourceOrigin);
-            Assert.NotNull(posted.Payload);
-            Assert.Equal(result.AbortReason, posted.Payload!["reason"]);
-            Assert.Equal("ScheduleDeadline", posted.Payload["failingEffect"]);
+            Assert.Contains("timer_infrastructure_failure", result.AbortReason);
+            Assert.Empty(rig.Ingress.Posted); // no longer the EffectRunner's job
         }
 
         [Fact]
-        public async Task CancelDeadline_failure_posts_EffectInfrastructureFailure_signal_to_ingress()
+        public async Task CancelDeadline_failure_does_not_post_signal_from_EffectRunner()
         {
             var rig = new Rig();
             rig.Scheduler.ThrowOnCancel = new InvalidOperationException("timer-broken");
@@ -129,31 +124,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var result = await sut.RunAsync(new[] { effect }, InitialState(), At);
 
             Assert.True(result.SessionMustAbort);
-            Assert.Single(rig.Ingress.Posted);
-            var posted = rig.Ingress.Posted[0];
-            Assert.Equal(DecisionSignalKind.EffectInfrastructureFailure, posted.Kind);
-            Assert.Equal("effectrunner:critical:CancelDeadline", posted.SourceOrigin);
-            Assert.Equal("CancelDeadline", posted.Payload!["failingEffect"]);
-        }
-
-        [Fact]
-        public async Task Critical_failure_post_tolerates_ingress_exceptions()
-        {
-            // The max-lifetime watchdog is the last-resort safety net — if the synthetic
-            // post itself throws (e.g. channel closed), the EffectRunner must still
-            // return cleanly rather than crashing the ingress worker.
-            var rig = new Rig();
-            rig.Scheduler.ThrowOnSchedule = new InvalidOperationException("timer-broken");
-            rig.Ingress.ThrowOnPost = new InvalidOperationException("ingress-full");
-            var sut = rig.Build();
-            var effect = new DecisionEffect(
-                DecisionEffectKind.ScheduleDeadline,
-                deadline: Deadline("x", At.AddMinutes(1)));
-
-            var result = await sut.RunAsync(new[] { effect }, InitialState(), At);
-
-            Assert.True(result.SessionMustAbort);
-            // Ingress-Post throw was swallowed — no unhandled exception here.
+            Assert.Empty(rig.Ingress.Posted);
         }
 
         [Fact]
