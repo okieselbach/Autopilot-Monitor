@@ -160,9 +160,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             if (effectResult.SessionMustAbort)
             {
+                // Codex follow-up #2: EffectRunner has already posted a synthetic
+                // EffectInfrastructureFailure signal to the ingress. The reducer will
+                // transition the session to Failed / EnrollmentFailed on the next
+                // dispatched step — our job here is purely observability.
                 _logger.Error(
                     $"DecisionStepProcessor: effect run signaled session abort " +
-                    $"(reason='{effectResult.AbortReason}') for signal ordinal={signal.SessionSignalOrdinal}.");
+                    $"(reason='{effectResult.AbortReason}') for signal ordinal={signal.SessionSignalOrdinal}; " +
+                    $"EffectInfrastructureFailure signal enqueued, reducer will terminate next step.");
             }
             else if (effectResult.Failures.Count > 0)
             {

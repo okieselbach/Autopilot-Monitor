@@ -109,6 +109,57 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         /// <summary>
+        /// Handle <see cref="DecisionSignalKind.EffectInfrastructureFailure"/>. Codex
+        /// follow-up #2 — posted synchronously by the EffectRunner when a critical
+        /// effect (ScheduleDeadline / CancelDeadline) cannot reach the scheduler.
+        /// Without this reducer branch, <see cref="EffectRunResult.SessionMustAbort"/>
+        /// would be observable only in the log and the session could hang on a
+        /// phantom deadline that was never actually armed.
+        /// <para>
+        /// Transition shape mirrors <see cref="HandleSessionAbortedV1"/>: stage →
+        /// <see cref="SessionStage.Failed"/>, outcome →
+        /// <see cref="SessionOutcome.EnrollmentFailed"/> (distinguishes an
+        /// infrastructure-induced failure from a user/operator-initiated
+        /// <see cref="SessionOutcome.Aborted"/>), all <c>ActiveDeadlines</c> cleared.
+        /// One <see cref="DecisionEffectKind.EmitEventTimelineEntry"/> effect
+        /// publishes <c>enrollment_failed</c> so backend + UI see a proper terminal
+        /// record with the failure reason from the signal payload.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleEffectInfrastructureFailureV1(DecisionState state, DecisionSignal signal)
+        {
+            var reason = signal.Payload != null && signal.Payload.TryGetValue("reason", out var r) && !string.IsNullOrEmpty(r)
+                ? r
+                : "effect_infrastructure_failure";
+
+            var nextStep = state.StepIndex + 1;
+            var newState = state.ToBuilder()
+                .WithStage(SessionStage.Failed)
+                .WithOutcome(SessionOutcome.EnrollmentFailed)
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .ClearDeadlines()
+                .Build();
+
+            var failEffect = new DecisionEffect(
+                DecisionEffectKind.EmitEventTimelineEntry,
+                parameters: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["eventType"] = "enrollment_failed",
+                    ["reason"] = reason,
+                });
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: SessionStage.Failed,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.EffectInfrastructureFailure));
+
+            return new DecisionStep(newState, transition, new[] { failEffect });
+        }
+
+        /// <summary>
         /// Handle <see cref="DecisionSignalKind.SessionAborted"/>.
         /// <para>
         /// Emitted by the orchestrator, never by a collector. Stage transitions to

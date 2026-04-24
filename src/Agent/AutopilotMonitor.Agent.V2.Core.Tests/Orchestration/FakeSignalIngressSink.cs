@@ -14,6 +14,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 
         public IReadOnlyList<PostedSignal> Posted => _posted;
 
+        /// <summary>When non-null, <see cref="Post"/> throws instead of capturing.</summary>
+        public Exception? ThrowOnPost { get; set; }
+
         public void Post(
             DecisionSignalKind kind,
             DateTime occurredAtUtc,
@@ -23,6 +26,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             int kindSchemaVersion = 1,
             object? typedPayload = null)
         {
+            if (ThrowOnPost != null) throw ThrowOnPost;
             _posted.Add(new PostedSignal(kind, occurredAtUtc, sourceOrigin, evidence, payload, kindSchemaVersion, typedPayload));
         }
 

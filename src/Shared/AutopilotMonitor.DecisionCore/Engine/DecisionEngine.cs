@@ -61,6 +61,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.SessionAborted, 1)           => HandleSessionAbortedV1(state, signal),
                 (DecisionSignalKind.AdminPreemptionDetected, 1)  => HandleAdminPreemptionDetectedV1(state, signal),
                 (DecisionSignalKind.DeadlineFired, 1)            => HandleDeadlineFiredV1(state, signal),
+                (DecisionSignalKind.EffectInfrastructureFailure, 1) => HandleEffectInfrastructureFailureV1(state, signal),
 
                 // ----- Classic UserDriven-v1 (DecisionEngine.Classic.cs) -----
                 (DecisionSignalKind.EspPhaseChanged, 1)          => HandleEspPhaseChangedV1(state, signal),

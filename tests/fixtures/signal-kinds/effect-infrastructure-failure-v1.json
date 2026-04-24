@@ -1,0 +1,6 @@
+# EffectInfrastructureFailure v1 — Codex follow-up #2.
+# Posted by the EffectRunner when a critical deadline effect fails to reach the
+# scheduler (ScheduleDeadline / CancelDeadline). Reducer:
+# HandleEffectInfrastructureFailureV1 → Stage.Failed, Outcome=EnrollmentFailed,
+# ClearDeadlines, emits enrollment_failed timeline entry with the reason.
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EffectInfrastructureFailure","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-24T10:00:00.0000000Z","SourceOrigin":"effectrunner:critical:ScheduleDeadline","Evidence":{"Kind":"Synthetic","Identifier":"effect_infrastructure_failure:ScheduleDeadline","Summary":"Critical effect ScheduleDeadline failed: timer_infrastructure_failure: InvalidOperationException: timer-broken"},"Payload":{"reason":"timer_infrastructure_failure: InvalidOperationException: timer-broken","failingEffect":"ScheduleDeadline"}}

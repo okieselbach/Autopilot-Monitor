@@ -79,9 +79,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                         if (criticalFail != null)
                         {
                             failures.Add(criticalFail);
+                            var abortReason = $"timer_infrastructure_failure: {criticalFail.ErrorReason}";
+
+                            // Codex follow-up #2: post a synthetic EffectInfrastructureFailure
+                            // signal so the reducer can transition cleanly to Failed /
+                            // EnrollmentFailed on the next step. Without this the flag would
+                            // only surface in logs and the session could hang on a phantom
+                            // deadline that was never actually armed.
+                            PostEffectInfrastructureFailureSignal(effect.Kind, abortReason, stepOccurredAtUtc);
+
                             return new EffectRunResult(
                                 sessionMustAbort: true,
-                                abortReason: $"timer_infrastructure_failure: {criticalFail.ErrorReason}",
+                                abortReason: abortReason,
                                 failures: failures,
                                 classifierInvocations: invocations,
                                 classifierSkippedByAntiLoop: skipped);
@@ -218,6 +227,41 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             PostClassifierVerdictSignal(verdict, effect.ClassifierId!, stepOccurredAtUtc);
             return new ClassifierEffectOutcome(invoked: true, skippedByAntiLoop: false, failure: null);
+        }
+
+        /// <summary>
+        /// Codex follow-up #2 — synthesise an <see cref="DecisionSignalKind.EffectInfrastructureFailure"/>
+        /// signal when a critical deadline effect cannot be delivered. The reducer's
+        /// <c>HandleEffectInfrastructureFailureV1</c> picks this up next tick and transitions the
+        /// session to <see cref="SessionStage.Failed"/> / <see cref="SessionOutcome.EnrollmentFailed"/>.
+        /// Any exception from the ingress (full channel / disposed) is swallowed: the
+        /// max-lifetime watchdog remains the last-resort termination path.
+        /// </summary>
+        private void PostEffectInfrastructureFailureSignal(
+            DecisionEffectKind failingEffect,
+            string abortReason,
+            DateTime stepOccurredAtUtc)
+        {
+            try
+            {
+                _ingress.Post(
+                    kind: DecisionSignalKind.EffectInfrastructureFailure,
+                    occurredAtUtc: stepOccurredAtUtc,
+                    sourceOrigin: $"effectrunner:critical:{failingEffect}",
+                    evidence: new Evidence(
+                        kind: EvidenceKind.Synthetic,
+                        identifier: $"effect_infrastructure_failure:{failingEffect}",
+                        summary: $"Critical effect {failingEffect} failed: {abortReason}"),
+                    payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["reason"] = abortReason,
+                        ["failingEffect"] = failingEffect.ToString(),
+                    });
+            }
+            catch
+            {
+                // Intentionally swallowed — see method doc.
+            }
         }
 
         private void PostClassifierVerdictSignal(ClassifierVerdict verdict, string classifierId, DateTime stepOccurredAtUtc)
