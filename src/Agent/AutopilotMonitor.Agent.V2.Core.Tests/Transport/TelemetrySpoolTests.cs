@@ -193,5 +193,50 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             var next = s2.Enqueue(EventDraft("next"));
             Assert.Equal(1, next.TelemetryItemId);
         }
+
+        [Fact]
+        public void Enqueue_with_RequiresImmediateFlush_raises_ImmediateFlushRequested()
+        {
+            // Regression guard for the "30 s gap at session start" first-session bug. Before
+            // this wakeup, RequiresImmediateFlush=true items were persisted but the drain loop
+            // still slept the full _drainInterval before picking them up. If this event ever
+            // stops firing the delay comes back, and critical lifecycle items (agent_started,
+            // enrollment_failed on auth-failure, …) will again wait up to 30 s before upload.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+
+            var signalled = 0;
+            spool.ImmediateFlushRequested += (s, e) => System.Threading.Interlocked.Increment(ref signalled);
+
+            var immediate = new TelemetryItemDraft(
+                kind: TelemetryItemKind.Event,
+                partitionKey: "tenant_session",
+                rowKey: "immediate",
+                payloadJson: "{\"EventType\":\"agent_started\"}",
+                isSessionScoped: true,
+                requiresImmediateFlush: true);
+
+            spool.Enqueue(immediate);
+
+            Assert.Equal(1, System.Threading.Volatile.Read(ref signalled));
+        }
+
+        [Fact]
+        public void Enqueue_without_RequiresImmediateFlush_does_not_raise_ImmediateFlushRequested()
+        {
+            // Batched items (performance_snapshot, routine signal/transition JSONL) must not
+            // wake the drain loop — otherwise the wakeup degenerates into a tight loop and the
+            // periodic-drain cadence loses its purpose.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+
+            var signalled = 0;
+            spool.ImmediateFlushRequested += (s, e) => System.Threading.Interlocked.Increment(ref signalled);
+
+            spool.Enqueue(EventDraft("batched"));      // requiresImmediateFlush defaults to false
+            spool.Enqueue(SignalDraft("0000000001"));
+
+            Assert.Equal(0, System.Threading.Volatile.Read(ref signalled));
+        }
     }
 }

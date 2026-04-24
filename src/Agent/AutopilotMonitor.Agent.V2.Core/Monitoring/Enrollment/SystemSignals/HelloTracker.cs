@@ -456,11 +456,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             switch (eventId)
             {
                 case EventId_ProvisioningWillLaunch: // 358
-                    eventType = "hello_provisioning_willlaunch";
-                    severity = EventSeverity.Info;
-                    message = "Windows Hello for Business provisioning will launch - prerequisites passed (snapshot only, not a final state)";
-                    _logger.Info("Windows Hello provisioning will launch - prerequisites passed (snapshot only, not a final state)");
-                    break;
+                    // EventID 358 is a prerequisites-passed SNAPSHOT that flips multiple times
+                    // during a single enrollment (see session 9ed7021e: 358 fired 6×, including
+                    // three times within 232 ms around desktop arrival). Per project memory
+                    // `project_hello_willlaunch_unreliable` this must NEVER be used as Hello
+                    // resolution evidence, and the DecisionEngine already ignores it — the
+                    // event only fueled UI-timeline noise. Keep the debug log line so the
+                    // sequence is still reconstructible from agent-logs during diagnostics,
+                    // but do not emit a backend event.
+                    _logger.Debug("Hello EventID 358 (willlaunch) observed — snapshot only, suppressed");
+                    return;
 
                 case EventId_NgcKeyRegistered: // 300
                     eventType = "hello_provisioning_completed";
@@ -479,12 +484,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     break;
 
                 case EventId_ProvisioningWillNotLaunch: // 360
-                    eventType = "hello_provisioning_willnotlaunch";
-                    severity = EventSeverity.Warning;
-                    message = "Windows Hello for Business provisioning prerequisites not met (snapshot only, not a final state)";
-                    // DO NOT mark Hello as completed - event 360 is just a snapshot and can change
-                    _logger.Info("Windows Hello provisioning prerequisites not met (snapshot, not terminal)");
-                    break;
+                    // Sibling of 358 — also a snapshot flag. DecisionEngine does not treat it
+                    // as terminal either, so suppress for the same noise-reduction reason.
+                    _logger.Debug("Hello EventID 360 (willnotlaunch) observed — snapshot only, suppressed");
+                    return;
 
                 case EventId_ProvisioningBlocked: // 362
                     eventType = "hello_provisioning_blocked";

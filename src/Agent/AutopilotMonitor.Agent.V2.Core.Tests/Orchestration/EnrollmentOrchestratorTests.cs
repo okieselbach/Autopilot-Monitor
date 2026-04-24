@@ -196,18 +196,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 sourceOrigin: "Test",
                 evidence: new Evidence(EvidenceKind.Synthetic, "test", "test"));
 
-            // Wait until the worker applied it.
+            // Wait until the worker applied it (StepIndex > 0 at minimum).
             Assert.True(SpinWait.SpinUntil(() => sut.CurrentState.StepIndex > 0, 2000));
             var stepIndexBeforeStop = sut.CurrentState.StepIndex;
 
             sut.Stop();
 
-            // Snapshot file must exist + contain the final state.
+            // Snapshot file must exist + contain the state AT STOP. SessionStarted may cascade
+            // through additional reducer steps (ClassifierTick arm/fire, bootstrap effects,
+            // now that the P0 fix actually lets deadlines run instead of dead-ending), so the
+            // final StepIndex is >= the value observed before Stop. Stop drains the ingress
+            // synchronously before saving the snapshot — so the saved StepIndex matches the
+            // state at the moment Save is called, which is what this test is really asserting.
             var snapshotPath = Path.Combine(rig.StateDir, "snapshot.json");
             Assert.True(File.Exists(snapshotPath));
             var reloaded = new SnapshotPersistence(snapshotPath).Load();
             Assert.NotNull(reloaded);
-            Assert.Equal(stepIndexBeforeStop, reloaded!.StepIndex);
+            Assert.Equal(sut.CurrentState.StepIndex, reloaded!.StepIndex);
+            Assert.True(reloaded!.StepIndex >= stepIndexBeforeStop,
+                $"Snapshot StepIndex ({reloaded.StepIndex}) regressed below observed ({stepIndexBeforeStop}).");
         }
 
         // ========================================================================= Dispose

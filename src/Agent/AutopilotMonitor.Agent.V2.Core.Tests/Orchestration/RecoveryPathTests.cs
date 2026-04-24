@@ -153,8 +153,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var signalLogPath = Path.Combine(rig.StateDir, "signal-log.jsonl");
             if (File.Exists(signalLogPath))
             {
-                // Fresh file should be empty (writer reinstantiated).
-                Assert.True(new FileInfo(signalLogPath).Length == 0);
+                // Fresh writer: the stale content MUST be gone. A non-empty fresh log is fine —
+                // Start() posts bootstrap signals (EspConfigDetected, deadline fires now that
+                // the P0 payload-key fix lets them transition cleanly, classifier ticks) and
+                // those legitimately land on the new log. What we assert here is strictly that
+                // the pre-quarantine "fake stale signal" line did NOT survive into the fresh log.
+                //
+                // Use FileShare.ReadWrite to avoid racing with an in-flight Append() from the
+                // ingress worker: SignalLogWriter.Append opens with FileShare.Read, which
+                // disallows a second writer but allows a reader that also grants FileShare.Write.
+                // File.ReadAllText uses FileShare.Read, which occasionally throws IOException
+                // exactly in the microseconds the writer holds the handle. A manual read with
+                // FileShare.ReadWrite is concurrency-safe for our snapshot-of-content check.
+                string fresh;
+                using (var fs = new FileStream(signalLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var sr = new StreamReader(fs, Encoding.UTF8))
+                {
+                    fresh = sr.ReadToEnd();
+                }
+                Assert.DoesNotContain("fake", fresh);
+                Assert.DoesNotContain("stale signal", fresh);
             }
 
             var quarantineRoot = Path.Combine(rig.StateDir, ".quarantine");
@@ -539,6 +557,70 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             sut.Stop();
         }
 
+        // ============================================================ First-session regression — deadline payload key
+
+        [Fact]
+        public void Past_due_FinalizingGrace_deadline_advances_stage_to_Completed()
+        {
+            // Regression guard for session 9ed7021e: the orchestrator's DeadlineFired bridge
+            // used to post payload `["deadlineName"]=...` while the reducer reads under
+            // SignalPayloadKeys.Deadline. Result: every deadline (FinalizingGrace, HelloSafety,
+            // ClassifierTick, …) dead-ended as "deadline_fired_without_name" — FinalizingGrace
+            // specifically left every Classic session hanging in Stage=Finalizing forever and
+            // blocked enrollment_complete emission, log flush, and diagnostics upload.
+            //
+            // This test seeds a state that mirrors the real failure: Stage=Finalizing with an
+            // already-past-due FinalizingGrace deadline (DueAt = UtcNow - 5m). After Start()
+            // rehydrates the deadline the scheduler fires it synchronously via ThreadPool; the
+            // bridge must forward ActiveDeadline.FiresPayload verbatim so the reducer can
+            // route to HandleFinalizingGraceDeadlineFired and transition Finalizing→Completed.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var pastDueFinalizing = new ActiveDeadline(
+                name: DeadlineNames.FinalizingGrace,
+                dueAtUtc: At.AddMinutes(-5),
+                firesSignalKind: DecisionSignalKind.DeadlineFired,
+                firesPayload: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [SignalPayloadKeys.Deadline] = DeadlineNames.FinalizingGrace,
+                });
+            var finalizingSeed = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.Finalizing)
+                .WithStepIndex(10)
+                .WithLastAppliedSignalOrdinal(9)
+                .AddDeadline(pastDueFinalizing)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(finalizingSeed);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            Assert.True(
+                SpinWait.SpinUntil(() => sut.CurrentState.Stage == SessionStage.Completed, 5000),
+                $"Expected Stage=Completed after past-due FinalizingGrace fired; stuck at {sut.CurrentState.Stage}.");
+            Assert.Equal(SessionOutcome.EnrollmentComplete, sut.CurrentState.Outcome);
+
+            // Paranoid belt-and-braces: the posted DeadlineFired signal must carry the deadline
+            // name under SignalPayloadKeys.Deadline (the key the reducer reads). Absence of this
+            // key is precisely how the bug manifested — dead-end "deadline_fired_without_name".
+            var signalLog = GetSignalLog(sut);
+            var fired = signalLog.ReadAll()
+                .FirstOrDefault(s => s.Kind == DecisionSignalKind.DeadlineFired);
+            Assert.NotNull(fired);
+            Assert.NotNull(fired!.Payload);
+            Assert.True(
+                fired.Payload!.TryGetValue(SignalPayloadKeys.Deadline, out var name)
+                    && name == DeadlineNames.FinalizingGrace,
+                $"Expected payload[{SignalPayloadKeys.Deadline}]={DeadlineNames.FinalizingGrace}; " +
+                $"got keys=[{string.Join(",", fired.Payload.Keys)}].");
+
+            sut.Stop();
+        }
+
         // ============================================================ Codex #1 Phase 3 — deadline re-arm
 
         [Fact]
@@ -556,7 +638,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 firesSignalKind: DecisionSignalKind.DeadlineFired,
                 firesPayload: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["deadlineName"] = "hello_safety",
+                    [SignalPayloadKeys.Deadline] = "hello_safety",
                 });
             var seed = DecisionState.CreateInitial("S1", "T1")
                 .ToBuilder()
@@ -578,7 +660,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                     () => signalLog.ReadAll().Any(s =>
                         s.Kind == DecisionSignalKind.DeadlineFired &&
                         s.Payload != null &&
-                        s.Payload.TryGetValue("deadlineName", out var n) &&
+                        s.Payload.TryGetValue(SignalPayloadKeys.Deadline, out var n) &&
                         n == "hello_safety"),
                     3000),
                 "Expected DeadlineFired signal for re-armed past-due deadline.");

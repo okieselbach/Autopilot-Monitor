@@ -16,9 +16,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring
     /// policy-level Hello event that must reach the backend within seconds
     /// (<c>hello_policy_detected</c>) and on terminal events
     /// (<c>hello_provisioning_completed/failed/blocked</c>, <c>hello_skipped</c>); and stays
-    /// false on snapshot-type events that can flip multiple times
-    /// (<c>hello_provisioning_willlaunch</c>, <c>hello_provisioning_willnotlaunch</c>,
-    /// <c>hello_pin_status</c>) so transient re-registrations don't trigger a flush each time.
+    /// false on the snapshot-type <c>hello_pin_status</c> ticker so transient re-registrations
+    /// don't trigger a flush each time.
+    /// <para>
+    /// The <c>willlaunch</c> / <c>willnotlaunch</c> snapshots (EventID 358/360) are no longer
+    /// emitted at all — they flip multiple times per session, create pure timeline noise, and
+    /// are documented as non-evidence in <c>project_hello_willlaunch_unreliable</c>. Suppression
+    /// is asserted below.
+    /// </para>
     /// </summary>
     public sealed class HelloTrackerImmediateUploadTests
     {
@@ -69,18 +74,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring
         }
 
         [Fact]
-        public void ProcessHelloEvent_358_willlaunch_stays_batched()
+        public void ProcessHelloEvent_358_willlaunch_is_suppressed()
         {
             using var f = new Fixture();
 
-            // Event 358 = ProvisioningWillLaunch. Snapshot-only prerequisites-passed flag
-            // (project_hello_willlaunch_unreliable): flips between willlaunch/willnotlaunch
-            // multiple times per session and is not decision-relevant. Keep batched so each
-            // flip doesn't trigger a flush.
+            // Event 358 = ProvisioningWillLaunch. Snapshot-only prerequisites-passed flag per
+            // project_hello_willlaunch_unreliable — flips multiple times per session (session
+            // 9ed7021e saw 6× 358, three within 232 ms) and is never decision-relevant. The
+            // tracker now suppresses the backend event entirely; only a DEBUG log line remains
+            // so diagnostics can still reconstruct the sequence.
             f.Tracker.ProcessHelloEvent(358, Fixed, providerName: "prov", isBackfill: false);
 
-            var info = f.InfoEvent("hello_provisioning_willlaunch");
-            Assert.Equal("false", info.Payload![SignalPayloadKeys.ImmediateUpload]);
+            Assert.DoesNotContain(f.Ingress.Posted, p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == "hello_provisioning_willlaunch");
         }
 
         [Fact]
@@ -108,17 +117,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring
         }
 
         [Fact]
-        public void ProcessHelloEvent_360_willnotlaunch_stays_batched()
+        public void ProcessHelloEvent_360_willnotlaunch_is_suppressed()
         {
             using var f = new Fixture();
 
-            // Event 360 = ProvisioningWillNotLaunch — snapshot-only, can flip back; keep batched
-            // to avoid flushing a transient state. (See project_hello_willlaunch_unreliable memory:
-            // willlaunch/willnotlaunch flip multiple times — expensive to flush each transition.)
+            // Event 360 = ProvisioningWillNotLaunch — same snapshot-only character as 358, and
+            // suppressed for the same reason. No backend event emitted.
             f.Tracker.ProcessHelloEvent(360, Fixed, providerName: "prov", isBackfill: false);
 
-            var info = f.InfoEvent("hello_provisioning_willnotlaunch");
-            Assert.Equal("false", info.Payload![SignalPayloadKeys.ImmediateUpload]);
+            Assert.DoesNotContain(f.Ingress.Posted, p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == "hello_provisioning_willnotlaunch");
         }
 
         [Fact]

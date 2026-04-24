@@ -66,16 +66,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             get { lock (_lock) return _lastUploadedItemId; }
         }
 
+        public event EventHandler? ImmediateFlushRequested;
+
         public TelemetryItem Enqueue(TelemetryItemDraft draft)
         {
             if (draft == null) throw new ArgumentNullException(nameof(draft));
 
+            TelemetryItem item;
             lock (_lock)
             {
                 var itemId = _lastAssignedItemId + 1;
                 long? traceOrdinal = draft.IsSessionScoped ? itemId : (long?)null;
 
-                var item = new TelemetryItem(
+                item = new TelemetryItem(
                     kind: draft.Kind,
                     partitionKey: draft.PartitionKey,
                     rowKey: draft.RowKey,
@@ -105,8 +108,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 // event flows; users can enable at troubleshoot-time).
                 _logger?.Debug(
                     $"TelemetrySpool: enqueued itemId={itemId} kind={item.Kind} immediate={item.RequiresImmediateFlush} pending={itemId - _lastUploadedItemId}.");
-                return item;
             }
+
+            // Fire outside the lock — subscribers must not be able to re-enter Enqueue or
+            // hold the write path while waking the drain loop. Swallow handler exceptions:
+            // a buggy subscriber must not break telemetry persistence.
+            if (draft.RequiresImmediateFlush)
+            {
+                try { ImmediateFlushRequested?.Invoke(this, EventArgs.Empty); }
+                catch (Exception ex)
+                {
+                    _logger?.Warning($"TelemetrySpool: ImmediateFlushRequested handler threw: {ex.Message}");
+                }
+            }
+
+            return item;
         }
 
         public IReadOnlyList<TelemetryItem> Peek(int max)

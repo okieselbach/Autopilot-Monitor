@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
 
 namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
@@ -42,5 +43,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
         /// <summary>Cursor: bis zu dieser ID inklusive wurde bereits erfolgreich hochgeladen; -1 initial.</summary>
         long LastUploadedItemId { get; }
+
+        /// <summary>
+        /// Raised after <see cref="Enqueue"/> persists an item whose <see cref="TelemetryItemDraft.RequiresImmediateFlush"/>
+        /// was <c>true</c>. The orchestrator uses this to wake the drain loop early — without a
+        /// wakeup, <c>ImmediateUpload=true</c> items wait for the full periodic drain interval
+        /// (default 30 s) before reaching the backend, making the first burst of lifecycle events
+        /// (<c>agent_started</c>, <c>enrollment_type_detected</c>, first <c>esp_phase_changed</c>, …)
+        /// appear as a 30 s gap in the UI timeline.
+        /// </summary>
+        event EventHandler? ImmediateFlushRequested;
     }
 }
