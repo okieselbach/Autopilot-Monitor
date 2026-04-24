@@ -40,8 +40,8 @@ namespace AutopilotMonitor.Agent.V2
     ///   <item><see cref="DetectPreviousExit"/> — reads markers + event log to classify last shutdown</item>
     ///   <item>Resolve TenantId (registry → bootstrap-config.json fallback)</item>
     ///   <item>Build <see cref="AgentConfiguration"/> (CLI args + persisted bootstrap / await-enrollment config)</item>
-    ///   <item>Get/create SessionId via <see cref="SessionIdPersistence"/> — <b>before</b> the guards, matching Legacy boot order. The ghost-restart guard keys on <c>session.id</c> absence to detect "self-destruct ran but Scheduled Task survived"; creating the session after the guard would misdiagnose every first-run-after-install as a ghost restart and trigger self-destruct before the remote-config fetch.</item>
-    ///   <item><see cref="CheckEnrollmentCompleteMarker"/> — ghost-restart detection + cleanup retry</item>
+    ///   <item>Get/create SessionId via <see cref="SessionIdPersistence"/></item>
+    ///   <item><see cref="CheckEnrollmentCompleteMarker"/> — file-based enrollment-complete-marker detection + cleanup retry</item>
     ///   <item><see cref="CheckSessionAgeEmergencyBreak"/> — absolute session-age watchdog</item>
     ///   <item>(Optional) Wait for MDM certificate in <c>--await-enrollment</c> mode</item>
     ///   <item>Build <see cref="BackendApiClient"/> + <see cref="RemoteConfigService"/> → fetch config</item>
@@ -201,13 +201,6 @@ namespace AutopilotMonitor.Agent.V2
 
             var agentConfig = BuildAgentConfiguration(args, tenantId, sessionId: null, bootstrapConfig, awaitConfig);
 
-            // Create/recover SessionId BEFORE the startup guards. Legacy-parity boot order —
-            // the ghost-restart guard below keys on session.id absence to detect
-            // "self-destruct ran but Scheduled Task survived". Creating the session after the
-            // guard would misdiagnose every first-run-after-install (Deployed registry marker
-            // set by --install, no session.id yet) as a ghost restart and trigger
-            // ExecuteSelfDestruct before the remote-config fetch, deleting the ProgramData
-            // directory on every fresh deployment.
             var sessionPersistence = new SessionIdPersistence(dataDirectory);
             if (args.Contains("--new-session"))
             {
@@ -227,7 +220,7 @@ namespace AutopilotMonitor.Agent.V2
             Func<CleanupService> cleanupServiceFactory = () => new CleanupService(agentConfig, logger);
 
             if (CheckEnrollmentCompleteMarker(
-                    dataDirectory, stateSubdir,
+                    stateSubdir,
                     agentConfig.SelfDestructOnComplete, cleanupServiceFactory, logger, consoleMode))
             {
                 logger.Info("Enrollment-complete marker handled — agent exiting.");

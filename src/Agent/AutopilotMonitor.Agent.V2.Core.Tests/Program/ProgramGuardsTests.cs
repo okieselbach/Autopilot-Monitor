@@ -78,12 +78,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         // ================================================================= CheckEnrollmentCompleteMarker
 
         [Fact]
-        public void CheckEnrollmentCompleteMarker_returns_false_on_first_run_after_install_when_session_exists()
+        public void CheckEnrollmentCompleteMarker_returns_false_when_marker_file_is_absent()
         {
-            // Regression guard for the first-run-after-install bug: Program.cs must create the
-            // SessionId BEFORE invoking this guard, so a fresh install (Deployed registry marker
-            // written by --install, no prior session) does not get misdiagnosed as a ghost
-            // restart and trigger self-destruct before FetchConfigAsync.
+            // No enrollment-complete.marker present → guard must stay silent and leave the
+            // agent to proceed with normal startup, whether or not a SessionId exists.
             using var tmp = new TempDirectory();
             var logger = NewLogger(tmp.Path);
             new SessionIdPersistence(tmp.Path).GetOrCreate(logger);
@@ -91,7 +89,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             var factoryCalls = 0;
 
             var shouldExit = AutopilotMonitor.Agent.V2.Program.CheckEnrollmentCompleteMarker(
-                dataDirectory: tmp.Path,
                 stateDirectory: stateDir,
                 selfDestructOnComplete: true, // worst case — cleanup armed
                 cleanupServiceFactory: () =>
@@ -121,7 +118,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             var factoryCalls = 0;
 
             var shouldExit = AutopilotMonitor.Agent.V2.Program.CheckEnrollmentCompleteMarker(
-                dataDirectory: tmp.Path,
                 stateDirectory: stateDir,
                 selfDestructOnComplete: false,
                 cleanupServiceFactory: () =>
@@ -152,7 +148,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             var factoryCalls = 0;
 
             var shouldExit = AutopilotMonitor.Agent.V2.Program.CheckEnrollmentCompleteMarker(
-                dataDirectory: tmp.Path,
                 stateDirectory: stateDir,
                 selfDestructOnComplete: true,
                 cleanupServiceFactory: () =>
