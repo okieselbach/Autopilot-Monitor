@@ -115,6 +115,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         // Drain-Loop
         private CancellationTokenSource? _drainCts;
         private Task? _drainTask;
+        // Set by TelemetrySpool.ImmediateFlushRequested. Replaced with a fresh instance at the
+        // start of each drain iteration so wakeups don't leak across iterations. Swapped via
+        // Volatile.Read/Write because producer (spool thread) and consumer (drain loop) run on
+        // different threads.
+        private TaskCompletionSource<bool>? _immediateFlushSignal;
+        private EventHandler? _immediateFlushBridge;
 
         // Lifecycle
         private int _started;
@@ -226,6 +232,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <summary>Exposed für Sub-c-Wiring (SignalAdapters + Collector-Callbacks).</summary>
         public ISignalIngressSink IngressSink =>
             (ISignalIngressSink?)_ingress ?? throw new InvalidOperationException("Orchestrator not started.");
+
+        /// <summary>
+        /// Test-only accessor for the internal <see cref="ITelemetrySpool"/>. Used by the
+        /// drain-wakeup regression tests to enqueue an immediate-flush item directly and
+        /// assert the drain loop wakes up early (without having to drive a real collector).
+        /// Production callers never need this — the orchestrator manages the spool lifecycle.
+        /// </summary>
+        internal ITelemetrySpool? SpoolForTests => _spool;
 
         /// <summary>
         /// Exposed so Program.cs can subscribe to <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/>
@@ -426,6 +440,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // 3) Telemetry-Transport.
             _spool = new TelemetrySpool(_transportDirectory, _clock, _logger);
             _transport = new TelemetryUploadOrchestrator(_spool, _uploader, _clock);
+
+            // 3a) Immediate-flush wakeup — lifecycle-critical items (agent_started, hello wizard,
+            //     auth-failure shutdown, version-check, enrollment_failed on max-lifetime, …)
+            //     enqueue with RequiresImmediateFlush=true. Without this bridge they would sit in
+            //     the spool for up to _drainInterval before the periodic loop uploads them,
+            //     producing the ~30 s "session-register then silence" gap at session start.
+            //
+            //     The signal TCS is installed BEFORE the subscription — and both BEFORE the drain
+            //     task starts at step 15 — so any Enqueue fired during the rest of Start() (e.g.
+            //     the EspConfigDetected bootstrap at step 13c or the synchronous Classifier-Start
+            //     at step 11.5) sets the current signal rather than hitting a null field.
+            _immediateFlushSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _immediateFlushBridge = OnImmediateFlushRequested;
+            _spool.ImmediateFlushRequested += _immediateFlushBridge;
 
             // 4) Event-Emitter-Kette. Single-rail (Plan §5.10): der TelemetryEventEmitter wird
             //    lokal gebaut und nur in die zwei erlaubten Caller (EventTimelineEmitter,
@@ -838,6 +866,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
             catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: unsubscribe scheduler failed: {ex.Message}"); }
 
+            // 1a) Immediate-flush-Bridge abmelden — spätere Enqueues sollen den Drain-Loop nicht
+            //     wecken wenn wir ihn gerade terminieren.
+            try
+            {
+                if (_spool != null && _immediateFlushBridge != null)
+                {
+                    _spool.ImmediateFlushRequested -= _immediateFlushBridge;
+                }
+            }
+            catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: unsubscribe immediate-flush failed: {ex.Message}"); }
+
             // 2) Scheduler disposen — stoppt alle aktiven Timer.
             try { _scheduler?.Dispose(); }
             catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: scheduler dispose failed: {ex.Message}"); }
@@ -937,10 +976,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     identifier: e.Deadline.Name,
                     summary: $"deadline '{e.Deadline.Name}' fired at {e.Deadline.DueAtUtc:O}");
 
-                var payload = new Dictionary<string, string>(StringComparer.Ordinal)
+                // The reducer reads the deadline name under SignalPayloadKeys.Deadline
+                // (see HandleDeadlineFiredV1 in DecisionEngine.Shared). Forward the
+                // originating ActiveDeadline.FiresPayload — it already carries that key
+                // (see e.g. DecisionEngine.Classic.TransitionToFinalizing). Using a
+                // different key here dead-ends every deadline with "deadline_fired_without_name".
+                var payload = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (e.Deadline.FiresPayload != null)
                 {
-                    ["deadlineName"] = e.Deadline.Name,
-                };
+                    foreach (var kv in e.Deadline.FiresPayload)
+                    {
+                        payload[kv.Key] = kv.Value;
+                    }
+                }
+
+                if (!payload.ContainsKey(SignalPayloadKeys.Deadline))
+                {
+                    payload[SignalPayloadKeys.Deadline] = e.Deadline.Name;
+                }
 
                 // OccurredAtUtc = DueAtUtc (not firedAt) — replay-determinism per DeadlineFiredEventArgs doc.
                 _ingress.Post(
@@ -957,22 +1010,56 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
         }
 
+        private void OnImmediateFlushRequested(object? sender, EventArgs e)
+        {
+            // Release the drain loop's current iteration early. Multiple rapid wakeups coalesce
+            // naturally into a single drain (WhenAny returns once; the next iteration installs a
+            // fresh TCS). TrySetResult is idempotent, so the second wakeup is a no-op.
+            Volatile.Read(ref _immediateFlushSignal)?.TrySetResult(true);
+        }
+
         private async Task DrainLoopAsync(CancellationToken ct)
         {
             try
             {
                 while (!ct.IsCancellationRequested)
                 {
+                    // Read the current wakeup signal. Step 3a installs the very first TCS
+                    // BEFORE subscribing the bridge and before the drain task starts; every
+                    // subsequent iteration receives a freshly-installed TCS from the drain
+                    // that just completed below. OnImmediateFlushRequested races with
+                    // Task.Delay so RequiresImmediateFlush=true items reach the backend within
+                    // milliseconds instead of waiting for the full _drainInterval window.
+                    var signal = Volatile.Read(ref _immediateFlushSignal);
+                    if (signal == null)
+                    {
+                        // Defensive: if Start() didn't seed the TCS (should never happen), fall
+                        // back to a periodic-only drain so the loop still makes progress.
+                        signal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        Volatile.Write(ref _immediateFlushSignal, signal);
+                    }
+
                     try
                     {
                         // Wall-clock delay, NOT _clock.Delay: drain is a real network cadence
                         // independent of the decision-engine's logical time. VirtualClock.Delay
                         // returns immediately and would cause a tight loop in unit tests.
-                        await Task.Delay(_drainInterval, ct).ConfigureAwait(false);
+                        var delayTask = Task.Delay(_drainInterval, ct);
+                        await Task.WhenAny(delayTask, signal.Task).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) { return; }
 
                     if (ct.IsCancellationRequested) return;
+
+                    // Swap in a fresh TCS BEFORE draining so wakeups raised during this drain
+                    // land on the next iteration's signal rather than on the stale completed
+                    // TCS (which TrySetResult is a no-op for, losing the wakeup). The tiny
+                    // window between WhenAny returning and this Volatile.Write is acceptable:
+                    // a wakeup there sees the just-completed TCS, is dropped, but we're
+                    // already about to drain in the same iteration — so the item ships anyway.
+                    Volatile.Write(
+                        ref _immediateFlushSignal,
+                        new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
 
                     try
                     {

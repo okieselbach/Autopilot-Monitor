@@ -1,7 +1,12 @@
+using System;
 using System.Linq;
+using System.Threading;
+using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.State;
 using Xunit;
+
+#pragma warning disable xUnit1031 // SpinWait.SpinUntil for uploader-batch-arrival assertion
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
 {
@@ -254,17 +259,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
         public void Full_pipeline_enqueues_telemetry_items_for_terminal_events()
         {
             // Verifies that beyond state-shape, the EffectRunner emitted at least one
-            // EmitEventTimelineEntry effect (e.g. enrollment_complete) that reached the Spool.
+            // EmitEventTimelineEntry effect (e.g. enrollment_complete) that flowed through
+            // the Spool into the uploader. Before the P1 "immediate-flush wakeup" fix this
+            // test inspected pending items in the spool directly — but now the drain loop
+            // wakes up on each RequiresImmediateFlush=true enqueue and uploads the item
+            // immediately, so terminal enrollment_complete no longer sits in the pending
+            // queue. The uploader's Received batches are the authoritative "left the agent"
+            // signal and are stable across both pre-fix and post-fix behavior.
             using var f = new EnrollmentOrchestratorFixture();
             f.Start();
             f.PostFixture("userdriven-happy-v1.jsonl");
 
             Assert.True(f.WaitForStage(DefaultTerminalTimeoutMs, SessionStage.Completed));
 
-            var eventItems = f.AllEventItemsInSpool();
-            Assert.NotEmpty(eventItems);
-            // At least one item should be a terminal enrollment_complete event.
-            Assert.Contains(eventItems, i => i.PayloadJson.Contains("enrollment_complete"));
+            // Give the drain loop time to finish the post-completion flush — this test runs
+            // in parallel with other orchestrator tests and the ThreadPool can be saturated,
+            // so use a generous timeout. Stop() below also performs a terminal drain, but we
+            // want to see the wakeup-driven upload here explicitly because that is the P1
+            // behavior under test (EnrollmentOrchestrator.OnImmediateFlushRequested).
+            Assert.True(
+                SpinWait.SpinUntil(
+                    () => f.Uploader.Received
+                        .SelectMany(batch => batch)
+                        .Any(i => i.Kind == TelemetryItemKind.Event
+                                  && i.PayloadJson.Contains("enrollment_complete")),
+                    10000),
+                "Expected enrollment_complete event to reach the uploader after Stage=Completed.");
 
             f.Stop();
         }
