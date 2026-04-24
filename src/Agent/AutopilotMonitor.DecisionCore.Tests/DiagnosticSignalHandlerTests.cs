@@ -48,9 +48,10 @@ namespace AutopilotMonitor.DecisionCore.Tests
             var step = engine.Reduce(midFlight, MakeSignal(kind, ordinal: 10));
 
             Assert.Equal(SessionStage.EspAccountSetup, step.NewState.Stage);
-            Assert.Same(midFlight.EnrollmentType, step.NewState.EnrollmentType);
-            Assert.Same(midFlight.WhiteGloveSealing, step.NewState.WhiteGloveSealing);
-            Assert.Same(midFlight.DeviceOnlyDeployment, step.NewState.DeviceOnlyDeployment);
+            // Diagnostic signals must not change any of the typed aggregates.
+            Assert.Same(midFlight.ScenarioProfile, step.NewState.ScenarioProfile);
+            Assert.Same(midFlight.ScenarioObservations, step.NewState.ScenarioObservations);
+            Assert.Same(midFlight.ClassifierOutcomes, step.NewState.ClassifierOutcomes);
         }
 
         [Theory]

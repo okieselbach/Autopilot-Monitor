@@ -23,10 +23,6 @@ namespace AutopilotMonitor.DecisionCore.State
             TenantId = source.TenantId;
             Stage = source.Stage;
             Outcome = source.Outcome;
-            EnrollmentType = source.EnrollmentType;
-            WhiteGloveSealing = source.WhiteGloveSealing;
-            WhiteGlovePart2Completion = source.WhiteGlovePart2Completion;
-            DeviceOnlyDeployment = source.DeviceOnlyDeployment;
             CurrentEnrollmentPhase = source.CurrentEnrollmentPhase;
             DeviceSetupEnteredUtc = source.DeviceSetupEnteredUtc;
             AccountSetupEnteredUtc = source.AccountSetupEnteredUtc;
@@ -36,20 +32,18 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloResolvedUtc = source.HelloResolvedUtc;
             SystemRebootUtc = source.SystemRebootUtc;
             HelloOutcome = source.HelloOutcome;
-            AadJoinedWithUser = source.AadJoinedWithUser;
             ImeMatchedPatternId = source.ImeMatchedPatternId;
-            ShellCoreWhiteGloveSuccessSeen = source.ShellCoreWhiteGloveSuccessSeen;
-            WhiteGloveSealingPatternSeen = source.WhiteGloveSealingPatternSeen;
             UserAadSignInCompleteUtc = source.UserAadSignInCompleteUtc;
             HelloResolvedPart2Utc = source.HelloResolvedPart2Utc;
             DesktopArrivedPart2Utc = source.DesktopArrivedPart2Utc;
             AccountSetupCompletedPart2Utc = source.AccountSetupCompletedPart2Utc;
-            SkipUserEsp = source.SkipUserEsp;
-            SkipDeviceEsp = source.SkipDeviceEsp;
             Deadlines = new List<ActiveDeadline>(source.Deadlines);
             LastAppliedSignalOrdinal = source.LastAppliedSignalOrdinal;
             StepIndex = source.StepIndex;
             AppInstallFacts = source.AppInstallFacts;
+            ScenarioProfile = source.ScenarioProfile;
+            ScenarioObservations = source.ScenarioObservations;
+            ClassifierOutcomes = source.ClassifierOutcomes;
             SchemaVersion = source.SchemaVersion;
         }
 
@@ -57,10 +51,6 @@ namespace AutopilotMonitor.DecisionCore.State
         public string TenantId { get; set; }
         public SessionStage Stage { get; set; }
         public SessionOutcome? Outcome { get; set; }
-        public Hypothesis EnrollmentType { get; set; }
-        public Hypothesis WhiteGloveSealing { get; set; }
-        public Hypothesis WhiteGlovePart2Completion { get; set; }
-        public Hypothesis DeviceOnlyDeployment { get; set; }
         public SignalFact<EnrollmentPhase>? CurrentEnrollmentPhase { get; set; }
         public SignalFact<DateTime>? DeviceSetupEnteredUtc { get; set; }
         public SignalFact<DateTime>? AccountSetupEnteredUtc { get; set; }
@@ -70,20 +60,18 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<DateTime>? HelloResolvedUtc { get; set; }
         public SignalFact<DateTime>? SystemRebootUtc { get; set; }
         public SignalFact<string>? HelloOutcome { get; set; }
-        public SignalFact<bool>? AadJoinedWithUser { get; set; }
         public SignalFact<string>? ImeMatchedPatternId { get; set; }
-        public SignalFact<bool>? ShellCoreWhiteGloveSuccessSeen { get; set; }
-        public SignalFact<bool>? WhiteGloveSealingPatternSeen { get; set; }
         public SignalFact<DateTime>? UserAadSignInCompleteUtc { get; set; }
         public SignalFact<DateTime>? HelloResolvedPart2Utc { get; set; }
         public SignalFact<DateTime>? DesktopArrivedPart2Utc { get; set; }
         public SignalFact<DateTime>? AccountSetupCompletedPart2Utc { get; set; }
-        public SignalFact<bool>? SkipUserEsp { get; set; }
-        public SignalFact<bool>? SkipDeviceEsp { get; set; }
         public List<ActiveDeadline> Deadlines { get; set; }
         public long LastAppliedSignalOrdinal { get; set; }
         public int StepIndex { get; set; }
         public AppInstallFacts AppInstallFacts { get; set; } = AppInstallFacts.Empty;
+        public EnrollmentScenarioProfile ScenarioProfile { get; set; } = EnrollmentScenarioProfile.Empty;
+        public EnrollmentScenarioObservations ScenarioObservations { get; set; } = EnrollmentScenarioObservations.Empty;
+        public ClassifierOutcomes ClassifierOutcomes { get; set; } = ClassifierOutcomes.Empty;
         public string SchemaVersion { get; set; }
 
         // ---------- fluent helpers for the most common reducer operations ----------
@@ -133,16 +121,30 @@ namespace AutopilotMonitor.DecisionCore.State
             return this;
         }
 
+        public DecisionStateBuilder WithScenarioProfile(EnrollmentScenarioProfile profile)
+        {
+            ScenarioProfile = profile ?? throw new ArgumentNullException(nameof(profile));
+            return this;
+        }
+
+        public DecisionStateBuilder WithScenarioObservations(EnrollmentScenarioObservations observations)
+        {
+            ScenarioObservations = observations ?? throw new ArgumentNullException(nameof(observations));
+            return this;
+        }
+
+        public DecisionStateBuilder WithClassifierOutcomes(ClassifierOutcomes outcomes)
+        {
+            ClassifierOutcomes = outcomes ?? throw new ArgumentNullException(nameof(outcomes));
+            return this;
+        }
+
         public DecisionState Build() =>
             new DecisionState(
                 sessionId: SessionId,
                 tenantId: TenantId,
                 stage: Stage,
                 outcome: Outcome,
-                enrollmentType: EnrollmentType,
-                whiteGloveSealing: WhiteGloveSealing,
-                whiteGlovePart2Completion: WhiteGlovePart2Completion,
-                deviceOnlyDeployment: DeviceOnlyDeployment,
                 currentEnrollmentPhase: CurrentEnrollmentPhase,
                 deviceSetupEnteredUtc: DeviceSetupEnteredUtc,
                 accountSetupEnteredUtc: AccountSetupEnteredUtc,
@@ -152,20 +154,18 @@ namespace AutopilotMonitor.DecisionCore.State
                 helloResolvedUtc: HelloResolvedUtc,
                 systemRebootUtc: SystemRebootUtc,
                 helloOutcome: HelloOutcome,
-                aadJoinedWithUser: AadJoinedWithUser,
                 imeMatchedPatternId: ImeMatchedPatternId,
-                shellCoreWhiteGloveSuccessSeen: ShellCoreWhiteGloveSuccessSeen,
-                whiteGloveSealingPatternSeen: WhiteGloveSealingPatternSeen,
                 userAadSignInCompleteUtc: UserAadSignInCompleteUtc,
                 helloResolvedPart2Utc: HelloResolvedPart2Utc,
                 desktopArrivedPart2Utc: DesktopArrivedPart2Utc,
                 accountSetupCompletedPart2Utc: AccountSetupCompletedPart2Utc,
-                skipUserEsp: SkipUserEsp,
-                skipDeviceEsp: SkipDeviceEsp,
                 deadlines: Deadlines.ToArray(),
                 lastAppliedSignalOrdinal: LastAppliedSignalOrdinal,
                 stepIndex: StepIndex,
                 appInstallFacts: AppInstallFacts,
+                scenarioProfile: ScenarioProfile,
+                scenarioObservations: ScenarioObservations,
+                classifierOutcomes: ClassifierOutcomes,
                 schemaVersion: SchemaVersion);
     }
 }

@@ -25,18 +25,19 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             // No user-presence facts should have been produced.
             Assert.Null(result.FinalState.HelloResolvedUtc);
             Assert.Null(result.FinalState.DesktopArrivedUtc);
-            Assert.Null(result.FinalState.AadJoinedWithUser);
+            Assert.Null(result.FinalState.ScenarioObservations.AadUserJoinWithUserObserved);
             Assert.Null(result.FinalState.AccountSetupEnteredUtc);
 
             // DeviceOnly hypothesis confirmed as DeviceOnly (no user presence seen).
-            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.DeviceOnlyDeployment.Level);
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Level);
             Assert.Equal(
                 DecisionEngine.DeviceOnlyReasons.DeviceOnly,
-                result.FinalState.DeviceOnlyDeployment.Reason);
+                result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Reason);
 
-            // EnrollmentType upgraded to Strong by the SelfDeploying handler.
-            Assert.Equal(HypothesisLevel.Strong, result.FinalState.EnrollmentType.Level);
-            Assert.Equal("selfdeploying_provisioning_complete", result.FinalState.EnrollmentType.Reason);
+            // Profile upgraded to Mode=SelfDeploying @ High by the SelfDeploying handler.
+            Assert.Equal(EnrollmentMode.SelfDeploying, result.FinalState.ScenarioProfile.Mode);
+            Assert.Equal(ProfileConfidence.High, result.FinalState.ScenarioProfile.Confidence);
+            Assert.Equal("selfdeploying_provisioning_complete", result.FinalState.ScenarioProfile.Reason);
 
             Assert.Equal(3, result.Transitions.Count);
             Assert.All(result.Transitions, t => Assert.True(t.Taken));
@@ -67,10 +68,10 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(SessionOutcome.EnrollmentComplete, result.FinalState.Outcome);
 
             // DeviceOnlyDeployment goes through Strong (by deadline) -> Confirmed (by provisioning).
-            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.DeviceOnlyDeployment.Level);
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Level);
             Assert.Equal(
                 DecisionEngine.DeviceOnlyReasons.DeviceOnly,
-                result.FinalState.DeviceOnlyDeployment.Reason);
+                result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Reason);
 
             // The deadline transition is present and taken (hypothesis update without stage change).
             var deadlineTransition = Assert.Single(
@@ -98,7 +99,7 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.DoesNotContain(
                 result.FinalState.Deadlines,
                 d => d.Name == DeadlineNames.DeviceOnlyEspDetection);
-            Assert.Equal(HypothesisLevel.Unknown, result.FinalState.DeviceOnlyDeployment.Level);
+            Assert.Equal(HypothesisLevel.Unknown, result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Level);
         }
     }
 }

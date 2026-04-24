@@ -30,9 +30,12 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(EnrollmentPhase.AccountSetup, result.FinalState.CurrentEnrollmentPhase!.Value);
             Assert.Empty(result.FinalState.Deadlines);
 
-            // EnrollmentType should reach Strong after ImeUserSessionCompleted.
-            Assert.Equal(HypothesisLevel.Strong, result.FinalState.EnrollmentType.Level);
-            Assert.Equal("ime_user_session_completed", result.FinalState.EnrollmentType.Reason);
+            // Codex follow-up #5 — the legacy Hypothesis EnrollmentType was absorbed into
+            // ScenarioProfile. Mode=Classic @ High confidence is the equivalent of the old
+            // "Strong" level after ImeUserSessionCompleted.
+            Assert.Equal(EnrollmentMode.Classic, result.FinalState.ScenarioProfile.Mode);
+            Assert.Equal(ProfileConfidence.High, result.FinalState.ScenarioProfile.Confidence);
+            Assert.Equal("ime_user_session_completed", result.FinalState.ScenarioProfile.Reason);
 
             // 7 fixture signals + 1 auto-fired FinalizingGrace deadline (plan §5 Fix 6 — the
             // reducer now parks in Finalizing after both prerequisites resolve; the harness
@@ -92,19 +95,20 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(SessionOutcome.EnrollmentComplete, result.FinalState.Outcome);
             Assert.Equal("Success", result.FinalState.HelloOutcome!.Value);
 
-            // AadJoinedWithUser fact is recorded from the Late-AADJ signal.
-            Assert.NotNull(result.FinalState.AadJoinedWithUser);
-            Assert.True(result.FinalState.AadJoinedWithUser!.Value);
+            // AadUserJoinWithUserObserved fact is recorded from the Late-AADJ signal.
+            Assert.NotNull(result.FinalState.ScenarioObservations.AadUserJoinWithUserObserved);
+            Assert.True(result.FinalState.ScenarioObservations.AadUserJoinWithUserObserved!.Value);
 
-            // EnrollmentType reason carries the late-AADJ annotation (set by the handler),
-            // and then advances to "ime_user_session_completed" on the IME signal.
-            Assert.Equal("ime_user_session_completed", result.FinalState.EnrollmentType.Reason);
+            // Profile reason carries the last-strengthening reason token — after the IME
+            // signal that is "ime_user_session_completed", not the prior late-AADJ annotation.
+            Assert.Equal("ime_user_session_completed", result.FinalState.ScenarioProfile.Reason);
 
-            // Hypothesis chain:
-            //   1. EspPhaseChanged(AccountSetup) -> Weak / account_setup_observed
-            //   2. AadUserJoinedLate -> Weak / late_aadj_observed (stage unchanged)
-            //   3. ImeUserSessionCompleted -> Strong / ime_user_session_completed
-            Assert.Equal(HypothesisLevel.Strong, result.FinalState.EnrollmentType.Level);
+            // Profile chain:
+            //   1. EspPhaseChanged(AccountSetup) -> Mode=Classic @ Medium / account_setup_observed
+            //   2. AadUserJoinedLate -> reason annotation only, stage unchanged
+            //   3. ImeUserSessionCompleted -> Mode=Classic @ High / ime_user_session_completed
+            Assert.Equal(EnrollmentMode.Classic, result.FinalState.ScenarioProfile.Mode);
+            Assert.Equal(ProfileConfidence.High, result.FinalState.ScenarioProfile.Confidence);
 
             // Critical regression guard: the AadUserJoinedLate transition did NOT take the
             // session to a terminal stage (stayed on EspAccountSetup). It is taken=true (the
@@ -166,7 +170,7 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(SessionStage.EspAccountSetup, provTransition.ToStage);
 
             // DeviceOnlyDeployment hypothesis must stay Unknown — this is a Classic UserDriven path.
-            Assert.Equal(HypothesisLevel.Unknown, result.FinalState.DeviceOnlyDeployment.Level);
+            Assert.Equal(HypothesisLevel.Unknown, result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Level);
         }
     }
 }

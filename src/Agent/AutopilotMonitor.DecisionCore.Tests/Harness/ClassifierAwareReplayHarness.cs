@@ -180,8 +180,8 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
                 state.Outcome?.ToString() ?? "null",
                 state.StepIndex.ToString(),
                 state.LastAppliedSignalOrdinal.ToString(),
-                state.WhiteGloveSealing.Level.ToString(),
-                state.WhiteGloveSealing.Score.ToString());
+                state.ClassifierOutcomes.WhiteGloveSealing.Level.ToString(),
+                state.ClassifierOutcomes.WhiteGloveSealing.Score.ToString());
 
             using (var sha = System.Security.Cryptography.SHA256.Create())
             {

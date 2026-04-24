@@ -86,7 +86,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
             Assert.True(f.WaitForStage(DefaultTerminalTimeoutMs, SessionStage.Completed));
             Assert.Equal(SessionOutcome.EnrollmentComplete, f.Orchestrator.CurrentState.Outcome);
             // DeviceOnlyDeployment hypothesis should have climbed from Unknown → Strong/Confirmed.
-            Assert.NotEqual(HypothesisLevel.Unknown, f.Orchestrator.CurrentState.DeviceOnlyDeployment.Level);
+            Assert.NotEqual(HypothesisLevel.Unknown, f.Orchestrator.CurrentState.ClassifierOutcomes.DeviceOnlyDeployment.Level);
 
             f.Stop();
         }
@@ -101,7 +101,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
             f.PostFixture("whiteglove-inline-v1.jsonl");
 
             Assert.True(f.WaitForStage(DefaultTerminalTimeoutMs, SessionStage.WhiteGloveSealed));
-            Assert.Equal(HypothesisLevel.Confirmed, f.Orchestrator.CurrentState.WhiteGloveSealing.Level);
+            Assert.Equal(HypothesisLevel.Confirmed, f.Orchestrator.CurrentState.ClassifierOutcomes.WhiteGloveSealing.Level);
 
             f.Stop();
         }
@@ -116,7 +116,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
             f.PostFixture("whiteglove-signal-correlated-v1.jsonl");
 
             Assert.True(f.WaitForStage(DefaultTerminalTimeoutMs, SessionStage.WhiteGloveSealed));
-            Assert.Equal(HypothesisLevel.Confirmed, f.Orchestrator.CurrentState.WhiteGloveSealing.Level);
+            Assert.Equal(HypothesisLevel.Confirmed, f.Orchestrator.CurrentState.ClassifierOutcomes.WhiteGloveSealing.Level);
 
             f.Stop();
         }
@@ -153,7 +153,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
             // Late-AADJ rejects the WG hypothesis; session still completes via the classic path.
             Assert.True(f.WaitForStage(DefaultTerminalTimeoutMs, SessionStage.Completed));
             Assert.Equal(SessionOutcome.EnrollmentComplete, f.Orchestrator.CurrentState.Outcome);
-            Assert.NotEqual(HypothesisLevel.Confirmed, f.Orchestrator.CurrentState.WhiteGloveSealing.Level);
+            Assert.NotEqual(HypothesisLevel.Confirmed, f.Orchestrator.CurrentState.ClassifierOutcomes.WhiteGloveSealing.Level);
 
             f.Stop();
         }

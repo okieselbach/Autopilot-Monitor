@@ -188,7 +188,8 @@ namespace AutopilotMonitor.DecisionCore.Tests
                     [SignalPayloadKeys.SkipDeviceEsp] = "false",
                 });
             var afterConfig = engine.Reduce(seed, espConfig).NewState;
-            Assert.True(afterConfig.SkipUserEsp!.Value);
+            Assert.True(afterConfig.ScenarioObservations.SkipUserEsp!.Value);
+            Assert.Equal(EspConfig.DeviceEspOnly, afterConfig.ScenarioProfile.EspConfig);
 
             // Step 2 — EspPhaseChanged(FinalizingSetup) from EspAndHelloTrackerAdapter.
             var finalizing = MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 2);
@@ -231,7 +232,20 @@ namespace AutopilotMonitor.DecisionCore.Tests
                 .WithStage(stage)
                 .WithStepIndex(2)
                 .WithLastAppliedSignalOrdinal(1);
-            if (skipUser.HasValue) builder.SkipUserEsp = new SignalFact<bool>(skipUser.Value, 0);
+            // Codex follow-up #5: the guard reads from Profile.EspConfig now. SkipUser=true
+            // without a skipDevice observation would leave EspConfig=Unknown — so tests that
+            // pre-seed "SkipUser=true" must also pre-seed skipDevice=false to land at
+            // DeviceEspOnly (the semantic equivalent of the legacy "SkipUserEsp.Value == true").
+            if (skipUser.HasValue)
+            {
+                builder.ScenarioObservations = builder.ScenarioObservations
+                    .WithSkipUserEsp(skipUser.Value, sourceSignalOrdinal: 0)
+                    .WithSkipDeviceEsp(value: false, sourceSignalOrdinal: 0);
+                builder.ScenarioProfile = builder.ScenarioProfile.With(
+                    espConfig: EnrollmentScenarioProfileUpdater.DeriveEspConfig(skipUser.Value, false),
+                    confidence: ProfileConfidence.Medium,
+                    evidenceOrdinal: 0);
+            }
             if (accountSetupEntered) builder.AccountSetupEnteredUtc = new SignalFact<DateTime>(Fixed.AddMinutes(-1), 1);
             return builder.Build();
         }

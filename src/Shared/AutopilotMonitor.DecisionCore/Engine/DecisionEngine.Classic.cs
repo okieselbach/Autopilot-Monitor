@@ -72,15 +72,13 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 builder.FinalizingEnteredUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
             }
 
-            // Weak UserDriven-v1 hypothesis — seeing AccountSetup is the canonical tell.
-            if (enrollmentPhase == EnrollmentPhase.AccountSetup &&
-                state.EnrollmentType.Level == HypothesisLevel.Unknown)
+            // Classic UserDriven-v1 tell — seeing AccountSetup promotes the scenario profile.
+            // Codex follow-up #5: Mode promotion is delegated to EnrollmentScenarioProfileUpdater
+            // so the monotonic-confidence rule stays in one place.
+            if (enrollmentPhase == EnrollmentPhase.AccountSetup)
             {
-                builder.EnrollmentType = state.EnrollmentType.With(
-                    level: HypothesisLevel.Weak,
-                    reason: "account_setup_observed",
-                    score: 40,
-                    lastUpdatedUtc: signal.OccurredAtUtc);
+                builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyAccountSetupObserved(
+                    builder.ScenarioProfile, signal);
             }
 
             // Device-Only ESP detection (plan §2.7): arm on first DeviceSetup, cancel on AccountSetup.
@@ -297,15 +295,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 builder.ImeMatchedPatternId = new SignalFact<string>(patternId!, signal.SessionSignalOrdinal);
             }
 
-            // Strengthen UserDriven-v1 hypothesis on user-session-complete.
-            if (state.EnrollmentType.Level < HypothesisLevel.Strong)
-            {
-                builder.EnrollmentType = state.EnrollmentType.With(
-                    level: HypothesisLevel.Strong,
-                    reason: "ime_user_session_completed",
-                    score: 75,
-                    lastUpdatedUtc: signal.OccurredAtUtc);
-            }
+            // Classic High-confidence promotion on user-session-complete. Codex follow-up #5:
+            // delegate to the updater for monotonicity.
+            builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyImeUserSessionCompleted(
+                builder.ScenarioProfile, signal);
 
             var newState = builder.Build();
 
@@ -320,14 +313,15 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         /// <summary>
-        /// Handle <see cref="DecisionSignalKind.AadUserJoinedLate"/> — hypothesis-only update.
+        /// Handle <see cref="DecisionSignalKind.AadUserJoinedLate"/> — observation-only update.
         /// <para>
         /// Per project memory <c>feedback_aad_joined_late_not_completion</c>: this signal is a
         /// classifier-state update ONLY — never a completion trigger. Stage is unchanged, no
-        /// terminal event is emitted, but <see cref="DecisionState.AadJoinedWithUser"/> is set
-        /// and the <see cref="DecisionState.EnrollmentType"/> hypothesis records the late-AADJ
-        /// reason so downstream classifiers (WhiteGlovePart2CompletionClassifier in M3.4) can
-        /// factor it in.
+        /// terminal event is emitted. Codex follow-up #5: the user-presence flag lives in
+        /// <see cref="EnrollmentScenarioObservations.AadUserJoinWithUserObserved"/> (NOT
+        /// <see cref="EnrollmentScenarioProfile.JoinMode"/> — that is strictly the
+        /// <c>SessionStarted.payload.isHybridJoin</c> value), and the profile's
+        /// <see cref="EnrollmentScenarioProfile.Reason"/> is annotated without touching Mode.
         /// </para>
         /// </summary>
         private DecisionStep HandleAadUserJoinedLateV1(DecisionState state, DecisionSignal signal)
@@ -340,12 +334,11 @@ namespace AutopilotMonitor.DecisionCore.Engine
             var builder = state.ToBuilder()
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
-            builder.AadJoinedWithUser = new SignalFact<bool>(withUser, signal.SessionSignalOrdinal);
 
-            // Annotate the EnrollmentType hypothesis reason without bumping level up.
-            builder.EnrollmentType = state.EnrollmentType.With(
-                reason: $"late_aadj_observed:withUser={withUser.ToString().ToLowerInvariant()}",
-                lastUpdatedUtc: signal.OccurredAtUtc);
+            builder.ScenarioObservations = builder.ScenarioObservations.WithAadUserJoinWithUserObserved(
+                value: withUser, sourceSignalOrdinal: signal.SessionSignalOrdinal);
+            builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyAadUserJoinedLate(
+                builder.ScenarioProfile, signal, withUser);
 
             var newState = builder.Build();
 

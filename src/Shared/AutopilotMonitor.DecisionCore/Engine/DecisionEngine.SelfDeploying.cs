@@ -64,8 +64,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
             }
 
             // SelfDeploying / Device-Only terminal path.
+            // Codex follow-up #5: user-presence is now an observation-level check (late-AADJ
+            // user flag + signal-level Hello/Desktop facts) — NOT the legacy AadJoinedWithUser
+            // state field. Observations replace the legacy per-fact nullable bool.
             var hasUserPresence =
-                (state.AadJoinedWithUser != null && state.AadJoinedWithUser.Value) ||
+                (state.ScenarioObservations.AadUserJoinWithUserObserved != null
+                 && state.ScenarioObservations.AadUserJoinWithUserObserved.Value) ||
                 state.HelloResolvedUtc != null ||
                 state.DesktopArrivedUtc != null;
 
@@ -73,7 +77,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 ? DeviceOnlyReasons.UserPresent
                 : DeviceOnlyReasons.DeviceOnly;
 
-            var updatedHypothesis = state.DeviceOnlyDeployment.With(
+            var updatedDeviceOnly = state.ClassifierOutcomes.DeviceOnlyDeployment.With(
                 level: HypothesisLevel.Confirmed,
                 reason: deviceOnlyReason,
                 score: 100,
@@ -85,18 +89,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .ClearDeadlines();
-            builder.DeviceOnlyDeployment = updatedHypothesis;
+            builder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(updatedDeviceOnly);
 
-            // Strengthen EnrollmentType: observing DeviceSetupProvisioningComplete without
-            // preceding AccountSetup strongly implies SelfDeploying-v1.
-            if (state.EnrollmentType.Level < HypothesisLevel.Strong)
-            {
-                builder.EnrollmentType = state.EnrollmentType.With(
-                    level: HypothesisLevel.Strong,
-                    reason: "selfdeploying_provisioning_complete",
-                    score: 80,
-                    lastUpdatedUtc: signal.OccurredAtUtc);
-            }
+            // Strengthen Mode: observing DeviceSetupProvisioningComplete without preceding
+            // AccountSetup strongly implies SelfDeploying-v1. Delegated to the updater.
+            builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyDeviceSetupProvisioningComplete(
+                builder.ScenarioProfile, signal);
 
             var newState = builder.Build();
 
@@ -127,11 +125,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .CancelDeadline(DeadlineNames.DeviceOnlyEspDetection);
 
-            builder.DeviceOnlyDeployment = state.DeviceOnlyDeployment.With(
+            var strongDeviceOnly = state.ClassifierOutcomes.DeviceOnlyDeployment.With(
                 level: HypothesisLevel.Strong,
                 reason: DeviceOnlyReasons.DeviceOnly,
                 score: 70,
                 lastUpdatedUtc: signal.OccurredAtUtc);
+            builder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(strongDeviceOnly);
 
             var newState = builder.Build();
 

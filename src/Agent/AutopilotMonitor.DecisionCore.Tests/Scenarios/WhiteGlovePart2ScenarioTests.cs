@@ -29,8 +29,8 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
 
             Assert.Equal(SessionStage.WhiteGloveCompletedPart2, result.FinalState.Stage);
             Assert.Equal(SessionOutcome.WhiteGlovePart2Complete, result.FinalState.Outcome);
-            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.WhiteGlovePart2Completion.Level);
-            Assert.Equal(100, result.FinalState.WhiteGlovePart2Completion.Score);
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGlovePart2Completion.Level);
+            Assert.Equal(100, result.FinalState.ClassifierOutcomes.WhiteGlovePart2Completion.Score);
 
             // All four Part-2 facts should be present.
             Assert.NotNull(result.FinalState.UserAadSignInCompleteUtc);
@@ -39,7 +39,7 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.NotNull(result.FinalState.AccountSetupCompletedPart2Utc);
 
             // Part-1 hypothesis still Confirmed (not reset by the Part-2 transition).
-            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.WhiteGloveSealing.Level);
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
 
             // SystemReboot fact recorded from SessionRecovered.
             Assert.NotNull(result.FinalState.SystemRebootUtc);
@@ -55,8 +55,8 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
 
             Assert.Equal(SessionStage.Failed, result.FinalState.Stage);
             Assert.Equal(SessionOutcome.EnrollmentFailed, result.FinalState.Outcome);
-            Assert.Equal(HypothesisLevel.Rejected, result.FinalState.WhiteGlovePart2Completion.Level);
-            Assert.Equal("part2_user_absent", result.FinalState.WhiteGlovePart2Completion.Reason);
+            Assert.Equal(HypothesisLevel.Rejected, result.FinalState.ClassifierOutcomes.WhiteGlovePart2Completion.Level);
+            Assert.Equal("part2_user_absent", result.FinalState.ClassifierOutcomes.WhiteGlovePart2Completion.Reason);
 
             // No user-signal facts captured.
             Assert.Null(result.FinalState.UserAadSignInCompleteUtc);
@@ -65,7 +65,7 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Null(result.FinalState.AccountSetupCompletedPart2Utc);
 
             // Part 1 verdict remains Confirmed even as Part 2 failed.
-            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.WhiteGloveSealing.Level);
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
             Assert.Empty(result.FinalState.Deadlines);
         }
 

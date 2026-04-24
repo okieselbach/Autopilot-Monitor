@@ -99,7 +99,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 Stage = SessionStage.Completed,
                 HelloResolvedUtc = new SignalFact<DateTime>(StartUtc.AddMinutes(5), 1),
                 DesktopArrivedUtc = new SignalFact<DateTime>(StartUtc.AddMinutes(10), 2),
-                AadJoinedWithUser = new SignalFact<bool>(true, 3),
+                ScenarioObservations = EnrollmentScenarioObservations.Empty.WithAadUserJoinWithUserObserved(value: true, sourceSignalOrdinal: 3),
                 ImeMatchedPatternId = new SignalFact<string>("esp_done", 4),
             }.Build();
 

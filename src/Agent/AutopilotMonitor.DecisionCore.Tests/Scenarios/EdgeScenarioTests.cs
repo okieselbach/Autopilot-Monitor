@@ -39,8 +39,8 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             // Stage flow: EspDeviceSetup -> (Reboot) preserved -> EspResumed preserved ->
             // EspAccountSetup on next EspPhaseChanged -> AwaitingHello -> Completed.
             // Importantly, no WhiteGloveSealed — reboot alone doesn't imply WG.
-            Assert.NotEqual(HypothesisLevel.Confirmed, result.FinalState.WhiteGloveSealing.Level);
-            Assert.Null(result.FinalState.ShellCoreWhiteGloveSuccessSeen);
+            Assert.NotEqual(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
+            Assert.Null(result.FinalState.ScenarioObservations.ShellCoreWhiteGloveSuccessSeen);
         }
 
         [Fact]
