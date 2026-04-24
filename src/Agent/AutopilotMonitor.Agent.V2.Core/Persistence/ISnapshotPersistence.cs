@@ -8,8 +8,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
     /// <para>
     /// Snapshot ist Cache, nicht Wahrheit — bei Inkonsistenz oder Korruption wird er
     /// verworfen, nicht repariert (L.3, §2.7c). Der Orchestrator ruft bei Mismatch
-    /// <see cref="Quarantine"/> auf und rekonstruiert via <c>Reducer.Replay(signals)</c>
-    /// aus dem SignalLog.
+    /// <see cref="Quarantine"/> auf und rekonstruiert via
+    /// <c>AutopilotMonitor.DecisionCore.Engine.ReducerReplay.Replay</c> aus dem SignalLog.
+    /// Ein gültiges Snapshot dient als Seed; ReducerReplay spielt nur den
+    /// SignalLog-Tail ab <c>LastAppliedSignalOrdinal</c> darauf (Codex follow-up #1,
+    /// Phase 2).
     /// </para>
     /// </summary>
     public interface ISnapshotPersistence
