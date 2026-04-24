@@ -22,31 +22,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
     {
         private static DateTime At => new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc);
 
-        private static EnrollmentOrchestrator Build(
-            TempDirectory tmp,
-            TimeSpan? agentMaxLifetime)
-        {
-            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
-            return new EnrollmentOrchestrator(
-                sessionId: "S1",
-                tenantId: "T1",
-                stateDirectory: Path.Combine(tmp.Path, "State"),
-                transportDirectory: Path.Combine(tmp.Path, "Transport"),
-                clock: new VirtualClock(At),
-                logger: logger,
-                uploader: new FakeBackendTelemetryUploader(),
-                classifiers: new List<IClassifier>(),
-                componentFactory: null,
-                drainInterval: TimeSpan.FromDays(1),
-                terminalDrainTimeout: TimeSpan.FromSeconds(2),
-                agentMaxLifetime: agentMaxLifetime);
-        }
-
         [Fact]
         public void Terminated_fires_once_when_max_lifetime_elapses()
         {
-            using var tmp = new TempDirectory();
-            var sut = Build(tmp, agentMaxLifetime: TimeSpan.FromMilliseconds(200));
+            using var rig = new EnrollmentOrchestratorRig(At);
+            var sut = rig.Build(agentMaxLifetime: TimeSpan.FromMilliseconds(200));
 
             using var fired = new ManualResetEventSlim(false);
             EnrollmentTerminatedEventArgs? captured = null;
@@ -78,8 +58,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Terminated_not_fired_when_max_lifetime_is_null()
         {
-            using var tmp = new TempDirectory();
-            var sut = Build(tmp, agentMaxLifetime: null);
+            using var rig = new EnrollmentOrchestratorRig(At);
+            var sut = rig.Build(agentMaxLifetime: null);
 
             var fireCount = 0;
             sut.Terminated += (_, _) => Interlocked.Increment(ref fireCount);
@@ -91,19 +71,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Equal(0, fireCount);
         }
 
-        [Fact]
-        public void Ctor_rejects_non_positive_max_lifetime()
+        [Theory]
+        [InlineData(0)]   // TimeSpan.Zero — must reject
+        [InlineData(-1)]  // negative ms — must reject
+        public void Ctor_rejects_non_positive_max_lifetime(int milliseconds)
         {
-            using var tmp = new TempDirectory();
-            Assert.Throws<ArgumentOutOfRangeException>(() => Build(tmp, agentMaxLifetime: TimeSpan.Zero));
-            Assert.Throws<ArgumentOutOfRangeException>(() => Build(tmp, agentMaxLifetime: TimeSpan.FromMilliseconds(-1)));
+            using var rig = new EnrollmentOrchestratorRig(At);
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                rig.Build(agentMaxLifetime: TimeSpan.FromMilliseconds(milliseconds)));
         }
 
         [Fact]
         public void Stop_before_lifetime_elapses_silences_the_watchdog()
         {
-            using var tmp = new TempDirectory();
-            var sut = Build(tmp, agentMaxLifetime: TimeSpan.FromSeconds(5));
+            using var rig = new EnrollmentOrchestratorRig(At);
+            var sut = rig.Build(agentMaxLifetime: TimeSpan.FromSeconds(5));
 
             var fireCount = 0;
             sut.Terminated += (_, _) => Interlocked.Increment(ref fireCount);

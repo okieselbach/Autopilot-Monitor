@@ -16,53 +16,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
 {
     public sealed class ImeLogTrackerAdapterTests
     {
-        private static readonly DateTime Fixed = new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc);
-
-        private sealed class Fixture : IDisposable
-        {
-            public TempDirectory Tmp { get; } = new TempDirectory();
-            public AgentLogger Logger { get; }
-            public ImeLogTracker Tracker { get; }
-            public FakeSignalIngressSink Ingress { get; } = new FakeSignalIngressSink();
-            public VirtualClock Clock { get; } = new VirtualClock(Fixed);
-
-            public Fixture()
-            {
-                Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
-                Tracker = new ImeLogTracker(
-                    logFolder: Tmp.Path,
-                    patterns: new List<ImeLogPattern>(),
-                    logger: Logger);
-            }
-
-            public IReadOnlyList<FakeSignalIngressSink.PostedSignal> DecisionSignals(DecisionSignalKind kind) =>
-                Ingress.Posted.Where(p => p.Kind == kind).ToList();
-
-            public IReadOnlyList<FakeSignalIngressSink.PostedSignal> InfoEvents(string eventType) =>
-                Ingress.Posted
-                    .Where(p => p.Kind == DecisionSignalKind.InformationalEvent
-                                && p.Payload != null
-                                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
-                                && et == eventType)
-                    .ToList();
-
-            public IReadOnlyList<FakeSignalIngressSink.PostedSignal> AllInfoEvents() =>
-                Ingress.Posted.Where(p => p.Kind == DecisionSignalKind.InformationalEvent).ToList();
-
-            public IReadOnlyList<FakeSignalIngressSink.PostedSignal> NonInfoSignals() =>
-                Ingress.Posted.Where(p => p.Kind != DecisionSignalKind.InformationalEvent).ToList();
-
-            public void Dispose()
-            {
-                Tracker.Dispose();
-                Tmp.Dispose();
-            }
-        }
 
         [Fact]
         public void EspPhaseChanged_first_phase_emits_decision_signal_with_phase_in_payload()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerEspPhaseFromTest("DeviceSetup");
@@ -72,51 +30,40 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Equal("DeviceSetup", decisionPost.Payload![SignalPayloadKeys.EspPhase]);
         }
 
-        [Fact]
-        public void EspPhaseChanged_first_phase_also_emits_esp_phase_changed_informational_event()
+        [Theory]
+        // Known raw phases → mapped to matching EnrollmentPhase enum string on info-event payload.
+        // Mapping table lives in ImeLogTrackerAdapter.MapEspPhaseToEnrollmentPhase (near the end
+        // of the file); this Theory is the regression guard against drift in that table.
+        [InlineData("DeviceSetup", "DeviceSetup")]
+        [InlineData("AccountSetup", "AccountSetup")]
+        [InlineData("FinalizingSetup", "FinalizingSetup")]
+        [InlineData("Finalizing", "FinalizingSetup")] // V1 legacy alias → same enum
+        [InlineData("Complete", "Complete")]
+        // Unknown raw phases → omit the "phase" key entirely so the event downstream defaults
+        // to EnrollmentPhase.Unknown (feedback_phase_strategy).
+        [InlineData("SomethingElse", null)]
+        [InlineData("preboot", null)]
+        public void EspPhaseChanged_info_event_maps_raw_phase_to_enrollment_phase_enum(
+            string rawPhase, string? expectedMappedPhase)
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
-            adapter.TriggerEspPhaseFromTest("DeviceSetup");
+            adapter.TriggerEspPhaseFromTest(rawPhase);
 
             var info = Assert.Single(f.InfoEvents(SharedEventTypes.EspPhaseChanged));
             Assert.Equal("ImeLogTracker", info.Payload![SignalPayloadKeys.Source]);
-            Assert.Equal("DeviceSetup", info.Payload["espPhase"]);
-            // Phase-declaration event — carries non-Unknown EnrollmentPhase.
-            Assert.Equal(EnrollmentPhase.DeviceSetup.ToString(), info.Payload["phase"]);
-        }
-
-        [Fact]
-        public void EspPhaseChanged_AccountSetup_maps_phase_to_AccountSetup_enum()
-        {
-            using var f = new Fixture();
-            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
-
-            adapter.TriggerEspPhaseFromTest("AccountSetup");
-
-            var info = Assert.Single(f.InfoEvents(SharedEventTypes.EspPhaseChanged));
-            Assert.Equal(EnrollmentPhase.AccountSetup.ToString(), info.Payload!["phase"]);
-        }
-
-        [Fact]
-        public void EspPhaseChanged_unknown_phase_omits_phase_override()
-        {
-            using var f = new Fixture();
-            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
-
-            adapter.TriggerEspPhaseFromTest("SomethingElse");
-
-            var info = Assert.Single(f.InfoEvents(SharedEventTypes.EspPhaseChanged));
-            // Unknown mapping → no phase override, emitter will default to EnrollmentPhase.Unknown.
-            Assert.False(info.Payload!.ContainsKey("phase"));
-            Assert.Equal("SomethingElse", info.Payload["espPhase"]);
+            Assert.Equal(rawPhase, info.Payload["espPhase"]);
+            if (expectedMappedPhase is null)
+                Assert.False(info.Payload.ContainsKey("phase"));
+            else
+                Assert.Equal(expectedMappedPhase, info.Payload["phase"]);
         }
 
         [Fact]
         public void EspPhaseChanged_same_phase_repeated_is_deduped_for_both_rails()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerEspPhaseFromTest("DeviceSetup");
@@ -130,7 +77,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void EspPhaseChanged_distinct_phases_emit_separate_signals_and_info_events()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerEspPhaseFromTest("DeviceSetup");
@@ -151,7 +98,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void EspPhaseChanged_null_or_empty_phase_is_skipped()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerEspPhaseFromTest(null!);
@@ -163,7 +110,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void UserSessionCompleted_emits_decision_signal_fire_once()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerUserSessionCompletedFromTest();
@@ -175,7 +122,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void UserSessionCompleted_also_emits_ime_user_session_completed_info_event()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerUserSessionCompletedFromTest();
@@ -193,7 +140,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         public void AppStateChange_to_terminal_state_emits_correct_decision_signal_kind(
             AppInstallationState newState, DecisionSignalKind expectedKind)
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState($"app-{newState}", listPos: 0);
 
@@ -214,7 +161,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         public void AppStateChange_transition_emits_matching_informational_event_type(
             AppInstallationState newState, string expectedEventType)
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState($"app-{newState}", listPos: 0);
 
@@ -228,7 +175,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_into_Downloading_emits_app_download_started()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-a", 0);
 
@@ -242,7 +189,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_Downloading_to_Downloading_emits_download_progress_debug()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-a", 0);
 
@@ -255,7 +202,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_to_Unknown_or_NotInstalled_emits_nothing()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-x", 0);
 
@@ -268,7 +215,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_terminal_decision_signal_is_fire_once_per_app()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = new AppPackageState("app-1", 0);
 
@@ -285,7 +232,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_different_apps_emit_independent_decision_signals()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerAppStateFromTest(new AppPackageState("a", 0), AppInstallationState.Installing, AppInstallationState.Installed);
@@ -304,7 +251,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_null_app_is_ignored()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerAppStateFromTest(null!, AppInstallationState.Installing, AppInstallationState.Installed);
@@ -315,7 +262,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_payload_carries_V1_compatible_fields()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             // Build a fully-populated package via Restore to exercise all optional fields.
             var app = AppPackageState.Restore(
@@ -363,7 +310,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void AppStateChange_Error_payload_carries_error_fields()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
             var app = AppPackageState.Restore(
                 id: "app-err",
@@ -399,7 +346,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Adapter_preserves_prior_Action_handlers_chain_invoke()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             int priorEspCalls = 0;
             int priorUserCalls = 0;
             f.Tracker.OnEspPhaseChanged = _ => priorEspCalls++;
@@ -420,7 +367,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Dispose_restores_prior_Action_handlers()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             int priorCalls = 0;
             Action<string> priorAction = _ => priorCalls++;
             f.Tracker.OnEspPhaseChanged = priorAction;
@@ -435,7 +382,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Ctor_null_args_throw()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             Assert.Throws<ArgumentNullException>(() => new ImeLogTrackerAdapter(null!, f.Ingress, f.Clock));
             Assert.Throws<ArgumentNullException>(() => new ImeLogTrackerAdapter(f.Tracker, null!, f.Clock));
             Assert.Throws<ArgumentNullException>(() => new ImeLogTrackerAdapter(f.Tracker, f.Ingress, null!));
@@ -446,7 +393,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void ImeAgentVersion_emits_ime_agent_version_info_event()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerImeAgentVersionFromTest("1.101.109.0");
@@ -460,7 +407,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void ImeAgentVersion_null_or_empty_is_skipped()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerImeAgentVersionFromTest(null!);
@@ -474,7 +421,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         {
             // V1 reference session shows 2 ime_agent_version events for the same version
             // in the same session (seq 24 and 60). Adapter must not dedup.
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerImeAgentVersionFromTest("1.101.109.0");
@@ -486,7 +433,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void DoTelemetry_emits_do_telemetry_info_event_with_do_fields()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             var app = AppPackageState.Restore(
@@ -530,7 +477,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void DoTelemetry_null_app_or_empty_id_is_ignored()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerDoTelemetryFromTest(null!);
@@ -541,7 +488,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void ScriptCompleted_platform_success_emits_script_completed_info_source_IME()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             var script = new ScriptExecutionState
@@ -571,7 +518,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void ScriptCompleted_platform_failure_marks_severity_Error()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             var script = new ScriptExecutionState
@@ -595,7 +542,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void ScriptCompleted_remediation_carries_compliance_result()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             var script = new ScriptExecutionState
@@ -620,7 +567,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void ScriptCompleted_null_or_empty_policyId_is_ignored()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
 
             adapter.TriggerScriptCompletedFromTest(null!);
@@ -633,7 +580,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void New_callbacks_preserve_prior_action_handlers_chain_invoke()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             int priorVersionCalls = 0;
             int priorDoCalls = 0;
             int priorScriptCalls = 0;
@@ -656,7 +603,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [Fact]
         public void Dispose_restores_all_prior_action_handlers()
         {
-            using var f = new Fixture();
+            using var f = new ImeLogTrackerAdapterFixture();
             Action<string> priorVersion = _ => { };
             Action<AppPackageState> priorDo = _ => { };
             Action<ScriptExecutionState> priorScript = _ => { };

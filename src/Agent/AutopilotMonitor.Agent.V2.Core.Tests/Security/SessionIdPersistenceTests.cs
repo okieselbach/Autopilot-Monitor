@@ -86,12 +86,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
             Assert.True(Guid.TryParse(id, out _));
         }
 
-        [Fact]
-        public void Ctor_rejects_null_or_empty_data_directory()
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        public void Ctor_rejects_null_empty_or_whitespace_data_directory(string? dataDirectory)
         {
-            Assert.Throws<ArgumentNullException>(() => new SessionIdPersistence(null!));
-            Assert.Throws<ArgumentNullException>(() => new SessionIdPersistence(""));
-            Assert.Throws<ArgumentNullException>(() => new SessionIdPersistence("   "));
+            Assert.Throws<ArgumentNullException>(() => new SessionIdPersistence(dataDirectory!));
         }
 
         [Fact]
@@ -124,18 +125,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
             Assert.Equal(DateTimeKind.Utc, parsed!.Value.Kind);
         }
 
-        [Fact]
-        public void LoadSessionCreatedAt_returns_null_when_file_missing()
+        [Theory]
+        // null content sentinel → do NOT write the file (tests the "missing file" path).
+        // Any other value is written verbatim; LoadSessionCreatedAt must return null unless
+        // the content round-trips through DateTime.TryParse RoundtripKind.
+        [InlineData(null)]           // file missing
+        [InlineData("not-a-date")]   // unparseable garbage
+        [InlineData("")]             // empty file (NEW coverage — Trim → "" → TryParse fails)
+        [InlineData("   ")]          // whitespace only (NEW coverage — Trim → "" → TryParse fails)
+        [InlineData("2026-13-45")]   // out-of-range date components (NEW coverage)
+        public void LoadSessionCreatedAt_returns_null_when_file_missing_or_unparseable(string? fileContent)
         {
             using var tmp = new TempDirectory();
-            Assert.Null(new SessionIdPersistence(tmp.Path).LoadSessionCreatedAt());
-        }
+            if (fileContent != null)
+                File.WriteAllText(Path.Combine(tmp.Path, "session.created"), fileContent);
 
-        [Fact]
-        public void LoadSessionCreatedAt_returns_null_when_file_is_corrupt()
-        {
-            using var tmp = new TempDirectory();
-            File.WriteAllText(Path.Combine(tmp.Path, "session.created"), "not-a-date");
             Assert.Null(new SessionIdPersistence(tmp.Path).LoadSessionCreatedAt());
         }
 

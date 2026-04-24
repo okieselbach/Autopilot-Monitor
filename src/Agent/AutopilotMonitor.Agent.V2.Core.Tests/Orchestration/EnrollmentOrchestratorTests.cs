@@ -22,46 +22,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
     {
         private static DateTime At => new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc);
 
-        private sealed class Rig : IDisposable
-        {
-            public TempDirectory Tmp { get; } = new TempDirectory();
-            public VirtualClock Clock { get; } = new VirtualClock(At);
-            public AgentLogger Logger { get; }
-            public FakeBackendTelemetryUploader Uploader { get; } = new FakeBackendTelemetryUploader();
-            public List<IClassifier> Classifiers { get; } = new List<IClassifier>();
-            public string StateDir { get; }
-            public string TransportDir { get; }
-
-            public Rig()
-            {
-                Logger = new AgentLogger(Tmp.Path, AgentLogLevel.Info);
-                StateDir = Path.Combine(Tmp.Path, "State");
-                TransportDir = Path.Combine(Tmp.Path, "Transport");
-            }
-
-            public EnrollmentOrchestrator Build(TimeSpan? drainInterval = null) =>
-                new EnrollmentOrchestrator(
-                    sessionId: "S1",
-                    tenantId: "T1",
-                    stateDirectory: StateDir,
-                    transportDirectory: TransportDir,
-                    clock: Clock,
-                    logger: Logger,
-                    uploader: Uploader,
-                    classifiers: Classifiers,
-                    // Default drain-interval = 1 day → periodic drain won't fire during short tests.
-                    drainInterval: drainInterval ?? TimeSpan.FromDays(1),
-                    terminalDrainTimeout: TimeSpan.FromSeconds(2));
-
-            public void Dispose() => Tmp.Dispose();
-        }
 
         // ========================================================================= Ctor
 
         [Fact]
         public void Ctor_rejects_empty_required_strings()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             Assert.Throws<ArgumentException>(() => new EnrollmentOrchestrator(
                 "", "T1", rig.StateDir, rig.TransportDir, rig.Clock, rig.Logger, rig.Uploader, rig.Classifiers));
             Assert.Throws<ArgumentException>(() => new EnrollmentOrchestrator(
@@ -75,7 +42,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Ctor_rejects_null_dependencies()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             Assert.Throws<ArgumentNullException>(() => new EnrollmentOrchestrator(
                 "S1", "T1", rig.StateDir, rig.TransportDir, null!, rig.Logger, rig.Uploader, rig.Classifiers));
             Assert.Throws<ArgumentNullException>(() => new EnrollmentOrchestrator(
@@ -89,7 +56,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Observability_before_start_throws()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             Assert.Throws<InvalidOperationException>(() => sut.CurrentState);
             Assert.Throws<InvalidOperationException>(() => sut.IngressSink);
@@ -102,7 +69,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Transport_is_available_after_start()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
             Assert.NotNull(sut.Transport);
@@ -113,7 +80,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Start_instantiates_pipeline_no_exception()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
 
             sut.Start();
@@ -130,7 +97,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Start_creates_state_and_transport_directories()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             Assert.False(Directory.Exists(rig.StateDir));
             Assert.False(Directory.Exists(rig.TransportDir));
 
@@ -146,7 +113,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Start_creates_initial_state_when_no_snapshot()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
 
@@ -159,7 +126,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Start_loads_recovered_snapshot_when_file_exists()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             Directory.CreateDirectory(rig.StateDir);
             // Seed a snapshot with a non-initial stage so recovery is detectable.
             var persistedState = DecisionState.CreateInitial("S1", "T1")
@@ -183,7 +150,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Start_twice_throws()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
 
@@ -197,7 +164,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Stop_before_start_is_noop()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
 
             sut.Stop();   // does not throw
@@ -206,7 +173,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Stop_is_idempotent()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
 
@@ -217,7 +184,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Stop_flushes_final_snapshot_with_current_state()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
 
@@ -248,7 +215,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Dispose_stops_orchestrator()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
 
@@ -264,7 +231,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void Deadline_fired_posts_DeadlineFired_signal_to_ingress()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
 
@@ -292,7 +259,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         [Fact]
         public void TriggerQuarantine_sets_flag_and_reason()
         {
-            using var rig = new Rig();
+            using var rig = new EnrollmentOrchestratorRig(At);
             var sut = rig.Build();
             sut.Start();
 

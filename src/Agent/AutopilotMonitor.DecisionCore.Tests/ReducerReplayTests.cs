@@ -251,18 +251,20 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Equal(2, invocations); // aborted before the 3rd signal
         }
 
-        [Fact]
-        public void Replay_NullArgs_ThrowArgumentNullException()
+        [Theory]
+        // Each row nulls exactly one required argument; all three must throw ArgumentNullException.
+        // Splitting into a Theory gives per-argument failure isolation so a regression that only
+        // affects one parameter position is identified at once.
+        [InlineData(0)] // engine
+        [InlineData(1)] // seed
+        [InlineData(2)] // signals
+        public void Replay_NullArgs_ThrowArgumentNullException(int nullPosition)
         {
-            var engine = new DecisionEngine();
-            var seed = DecisionState.CreateInitial("s", "t");
+            var engine = nullPosition == 0 ? null : new DecisionEngine();
+            var seed = nullPosition == 1 ? null : DecisionState.CreateInitial("s", "t");
+            var signals = nullPosition == 2 ? null : Array.Empty<DecisionSignal>();
 
-            Assert.Throws<ArgumentNullException>(() =>
-                ReducerReplay.Replay(null!, seed, Array.Empty<DecisionSignal>()));
-            Assert.Throws<ArgumentNullException>(() =>
-                ReducerReplay.Replay(engine, null!, Array.Empty<DecisionSignal>()));
-            Assert.Throws<ArgumentNullException>(() =>
-                ReducerReplay.Replay(engine, seed, null!));
+            Assert.Throws<ArgumentNullException>(() => ReducerReplay.Replay(engine!, seed!, signals!));
         }
     }
 }

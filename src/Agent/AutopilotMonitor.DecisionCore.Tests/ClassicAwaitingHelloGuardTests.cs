@@ -26,131 +26,72 @@ namespace AutopilotMonitor.DecisionCore.Tests
     {
         private static readonly DateTime Fixed = new DateTime(2026, 4, 23, 18, 57, 45, DateTimeKind.Utc);
 
-        // ========================================================= EspPhaseChanged (Finalizing)
+        // ======================================================= Guard matrix (shared contract)
+        // The AwaitingHello guard applies the SAME unlock logic to both EspPhaseChanged
+        // (FinalizingSetup) and EspExiting:
+        //     unlock ⇔ (skipUser == true)  OR  (accountSetupEntered)
+        // The two theories below exercise every cell of the 3×2 matrix (skipUser ∈
+        // {true, false, null} × accountSetupEntered ∈ {false, true}) for each signal.
+        // Rows marked NEW fill pre-existing coverage gaps (both-unlock combinations, and the
+        // "null skipUser but AccountSetup-entered" unlock path that wasn't tested before).
 
-        [Fact]
-        public void EspPhaseChanged_FinalizingSetup_withSkipUserTrue_transitionsToAwaitingHello()
+        [Theory]
+        [InlineData(true,  false, SessionStage.AwaitingHello)]    // skipUser unlocks
+        [InlineData(true,  true,  SessionStage.AwaitingHello)]    // both unlocks present — NEW coverage
+        [InlineData(false, false, SessionStage.EspDeviceSetup)]   // neither unlock → guard blocks
+        [InlineData(false, true,  SessionStage.AwaitingHello)]    // accountSetup unlocks
+        [InlineData(null,  false, SessionStage.EspDeviceSetup)]   // skipUser unknown → guard blocks
+        [InlineData(null,  true,  SessionStage.AwaitingHello)]    // accountSetup overrides unknown skipUser — NEW coverage
+        public void EspPhaseChanged_FinalizingSetup_guard_applies_skipUser_and_accountSetup_unlock_matrix(
+            bool? skipUser, bool accountSetupEntered, SessionStage expectedStage)
         {
             var engine = new DecisionEngine();
-            var state = BuildState(stage: SessionStage.EspDeviceSetup, skipUser: true);
+            var initialStage = accountSetupEntered ? SessionStage.EspAccountSetup : SessionStage.EspDeviceSetup;
+            var state = BuildState(stage: initialStage, skipUser: skipUser, accountSetupEntered: accountSetupEntered);
 
             var step = engine.Reduce(state, MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 5));
 
-            Assert.Equal(SessionStage.AwaitingHello, step.NewState.Stage);
+            Assert.Equal(expectedStage, step.NewState.Stage);
             Assert.True(step.Transition.Taken);
-            Assert.Equal(SessionStage.EspDeviceSetup, step.Transition.FromStage);
-            Assert.Equal(SessionStage.AwaitingHello, step.Transition.ToStage);
+            // Observability is recorded regardless of the guard outcome.
             Assert.NotNull(step.NewState.FinalizingEnteredUtc);
             Assert.Equal(EnrollmentPhase.FinalizingSetup, step.NewState.CurrentEnrollmentPhase!.Value);
-        }
-
-        [Fact]
-        public void EspPhaseChanged_FinalizingSetup_withSkipUserFalse_beforeAccountSetup_keepsStage()
-        {
-            // Classic intermediate Device-ESP exit synthesized as FinalizingSetup. Guard blocks
-            // the AwaitingHello promotion; the stage stays on EspDeviceSetup.
-            var engine = new DecisionEngine();
-            var state = BuildState(stage: SessionStage.EspDeviceSetup, skipUser: false);
-
-            var step = engine.Reduce(state, MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 5));
-
-            Assert.Equal(SessionStage.EspDeviceSetup, step.NewState.Stage);
-            Assert.True(step.Transition.Taken);
-            Assert.Equal(step.Transition.FromStage, step.Transition.ToStage);
-            // Observability is still recorded.
-            Assert.NotNull(step.NewState.FinalizingEnteredUtc);
-            Assert.Equal(EnrollmentPhase.FinalizingSetup, step.NewState.CurrentEnrollmentPhase!.Value);
-            // No HelloSafety on this path (HandleEspPhaseChangedV1 never arms it — but verify
-            // anyway for belt-and-suspenders).
+            // EspPhaseChanged never arms HelloSafety (only EspExiting does — see sibling theory).
             Assert.DoesNotContain(step.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
         }
 
-        [Fact]
-        public void EspPhaseChanged_FinalizingSetup_withSkipUserFalse_afterAccountSetup_transitionsToAwaitingHello()
-        {
-            // Post-Account-ESP final exit: guard allows promotion.
-            var engine = new DecisionEngine();
-            var state = BuildState(stage: SessionStage.EspAccountSetup, skipUser: false, accountSetupEntered: true);
-
-            var step = engine.Reduce(state, MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 9));
-
-            Assert.Equal(SessionStage.AwaitingHello, step.NewState.Stage);
-            Assert.NotNull(step.NewState.FinalizingEnteredUtc);
-        }
-
-        [Fact]
-        public void EspPhaseChanged_FinalizingSetup_withSkipUserUnknown_beforeAccountSetup_keepsStage()
-        {
-            // Defensive: unknown SkipUser does NOT unlock AwaitingHello. Otherwise a missing
-            // EspConfigDetected signal (e.g. registry race at enrollment start) would reopen the
-            // original bug.
-            var engine = new DecisionEngine();
-            var state = BuildState(stage: SessionStage.EspDeviceSetup, skipUser: null);
-
-            var step = engine.Reduce(state, MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 3));
-
-            Assert.Equal(SessionStage.EspDeviceSetup, step.NewState.Stage);
-        }
-
-        // =============================================================== EspExiting (real arm)
-
-        [Fact]
-        public void EspExiting_withSkipUserTrue_transitionsToAwaitingHello_armsHelloSafety()
+        [Theory]
+        [InlineData(true,  false, SessionStage.AwaitingHello,   true)]
+        [InlineData(true,  true,  SessionStage.AwaitingHello,   true)]    // NEW coverage
+        [InlineData(false, false, SessionStage.EspDeviceSetup,  false)]
+        [InlineData(false, true,  SessionStage.AwaitingHello,   true)]
+        [InlineData(null,  false, SessionStage.EspDeviceSetup,  false)]
+        [InlineData(null,  true,  SessionStage.AwaitingHello,   true)]    // NEW coverage
+        public void EspExiting_guard_controls_AwaitingHello_transition_and_arms_HelloSafety_only_on_unlock(
+            bool? skipUser, bool accountSetupEntered, SessionStage expectedStage, bool expectHelloSafetyArm)
         {
             var engine = new DecisionEngine();
-            var state = BuildState(stage: SessionStage.EspDeviceSetup, skipUser: true);
+            var initialStage = accountSetupEntered ? SessionStage.EspAccountSetup : SessionStage.EspDeviceSetup;
+            var state = BuildState(stage: initialStage, skipUser: skipUser, accountSetupEntered: accountSetupEntered);
 
             var step = engine.Reduce(state, MakeExitingSignal(ordinal: 5));
 
-            Assert.Equal(SessionStage.AwaitingHello, step.NewState.Stage);
-            Assert.NotNull(step.NewState.EspFinalExitUtc);
-            Assert.Contains(step.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
-            Assert.Contains(step.Effects,
-                e => e.Kind == DecisionEffectKind.ScheduleDeadline && e.Deadline?.Name == DeadlineNames.HelloSafety);
-        }
-
-        [Fact]
-        public void EspExiting_withSkipUserFalse_beforeAccountSetup_staysInStage_noHelloSafety_butRecordsFact()
-        {
-            // Device-ESP intermediate exit. Classic's HandleEspExitingV1 must preserve the
-            // EspFinalExitUtc fact for observability but block the stage change + deadline arm.
-            var engine = new DecisionEngine();
-            var state = BuildState(stage: SessionStage.EspDeviceSetup, skipUser: false);
-
-            var step = engine.Reduce(state, MakeExitingSignal(ordinal: 5));
-
-            Assert.Equal(SessionStage.EspDeviceSetup, step.NewState.Stage);
-            Assert.NotNull(step.NewState.EspFinalExitUtc);
-            Assert.Empty(step.NewState.Deadlines);
-            Assert.Empty(step.Effects);
+            Assert.Equal(expectedStage, step.NewState.Stage);
             Assert.True(step.Transition.Taken);
-        }
+            // EspFinalExitUtc is always recorded for observability — even when the guard blocks.
+            Assert.NotNull(step.NewState.EspFinalExitUtc);
 
-        [Fact]
-        public void EspExiting_withSkipUserFalse_afterAccountSetup_transitionsToAwaitingHello_armsHelloSafety()
-        {
-            var engine = new DecisionEngine();
-            var state = BuildState(
-                stage: SessionStage.EspAccountSetup,
-                skipUser: false,
-                accountSetupEntered: true);
-
-            var step = engine.Reduce(state, MakeExitingSignal(ordinal: 9));
-
-            Assert.Equal(SessionStage.AwaitingHello, step.NewState.Stage);
-            Assert.Contains(step.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
-        }
-
-        [Fact]
-        public void EspExiting_withSkipUserUnknown_beforeAccountSetup_staysInStage()
-        {
-            var engine = new DecisionEngine();
-            var state = BuildState(stage: SessionStage.EspDeviceSetup, skipUser: null);
-
-            var step = engine.Reduce(state, MakeExitingSignal(ordinal: 5));
-
-            Assert.Equal(SessionStage.EspDeviceSetup, step.NewState.Stage);
-            Assert.Empty(step.NewState.Deadlines);
+            if (expectHelloSafetyArm)
+            {
+                Assert.Contains(step.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
+                Assert.Contains(step.Effects,
+                    e => e.Kind == DecisionEffectKind.ScheduleDeadline && e.Deadline?.Name == DeadlineNames.HelloSafety);
+            }
+            else
+            {
+                Assert.Empty(step.NewState.Deadlines);
+                Assert.Empty(step.Effects);
+            }
         }
 
         // ====================================================== Codex review — ordering contract

@@ -171,37 +171,37 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Equal("-124.02", payload["offsetSeconds"]);
         }
 
-        [Fact]
-        public void Evidence_summary_prefers_explicit_argument_then_message_then_eventType()
+        [Theory]
+        // Precedence: explicit evidenceSummary > message > eventType fallback. The helper uses
+        // string.IsNullOrEmpty (not IsNullOrWhiteSpace), so a whitespace-only explicit value is
+        // treated as "present" and passed through unchanged.
+        [InlineData("explicit", "the_message", "ntp_time_check", "explicit")]
+        [InlineData(null, "fallback_message", "ntp_time_check", "fallback_message")]
+        [InlineData(null, null, "ntp_time_check", "ntp_time_check")]
+        // Empty ("") evidenceSummary is treated as absent (IsNullOrEmpty) → fall through to message.
+        [InlineData("", "fallback_message", "ntp_time_check", "fallback_message")]
+        public void Evidence_summary_prefers_explicit_argument_then_message_then_eventType(
+            string? evidenceSummary, string? message, string eventType, string expectedSummary)
         {
             var (sut, sink, _) = BuildRig();
 
-            sut.Emit("ntp_time_check", "Network", evidenceSummary: "explicit");
-            Assert.Equal("explicit", sink.Posted.Last().Evidence.Summary);
+            sut.Emit(eventType, "Network", message: message, evidenceSummary: evidenceSummary);
 
-            sut.Emit("ntp_time_check", "Network", message: "fallback_message");
-            Assert.Equal("fallback_message", sink.Posted.Last().Evidence.Summary);
-
-            sut.Emit("ntp_time_check", "Network");
-            Assert.Equal("ntp_time_check", sink.Posted.Last().Evidence.Summary);
+            Assert.Equal(expectedSummary, sink.Posted.Last().Evidence.Summary);
         }
 
-        [Fact]
-        public void Empty_eventType_throws()
+        [Theory]
+        // Empty / null eventType or source must be rejected eagerly — callers writing payloads
+        // without either of these end up with a signal the reducer cannot interpret.
+        [InlineData("", "Network")]
+        [InlineData(null, "Network")]
+        [InlineData("x", "")]
+        [InlineData("x", null)]
+        public void Emit_throws_on_empty_or_null_eventType_or_source(string? eventType, string? source)
         {
             var (sut, _, _) = BuildRig();
 
-            Assert.Throws<ArgumentException>(() => sut.Emit(eventType: "", source: "Network"));
-            Assert.Throws<ArgumentException>(() => sut.Emit(eventType: null!, source: "Network"));
-        }
-
-        [Fact]
-        public void Empty_source_throws()
-        {
-            var (sut, _, _) = BuildRig();
-
-            Assert.Throws<ArgumentException>(() => sut.Emit(eventType: "x", source: ""));
-            Assert.Throws<ArgumentException>(() => sut.Emit(eventType: "x", source: null!));
+            Assert.Throws<ArgumentException>(() => sut.Emit(eventType: eventType!, source: source!));
         }
 
         [Fact]
