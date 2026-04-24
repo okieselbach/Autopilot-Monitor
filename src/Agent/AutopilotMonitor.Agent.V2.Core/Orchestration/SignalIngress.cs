@@ -341,15 +341,133 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // IDecisionEngine.Reduce ist fail-safe (DecisionEngine.cs:39-47): wirft nicht.
             var step = _engine.Reduce(state, signal);
 
+            EffectRunResult? effectResult = null;
             try
             {
-                _processor.ApplyStep(step, signal);
+                effectResult = _processor.ApplyStep(step, signal);
             }
             catch
             {
                 // Processor-Fehler (z.B. Journal-Write, Effect-Transient-Exhaust) werden in
                 // M4.4.5 vom Orchestrator geloggt + ggf. Quarantine ausgelöst. M4.4.0
                 // verschluckt bewusst, damit der Ingress-Worker nicht verstummt.
+            }
+
+            // Codex follow-up (post-#50 #B): inline durable-abort path. When the step's
+            // effects signal a critical infrastructure failure (e.g. timer scheduler died)
+            // we must land a synthetic EffectInfrastructureFailure signal on the SignalLog
+            // BEFORE returning to the worker loop — otherwise a crash between here and the
+            // next Post() would leave recovery replaying the phantom deadline state with no
+            // terminal signal to bridge it to SessionStage.Failed.
+            //
+            // The recursion guard prevents processing an abort that the synthetic signal's
+            // own reducer handler might somehow report (shouldn't happen — HandleEffect-
+            // InfrastructureFailureV1 transitions to terminal without queuing critical
+            // effects — but the guard makes that invariant failure-safe).
+            if (effectResult != null
+                && effectResult.SessionMustAbort
+                && signal.Kind != DecisionSignalKind.EffectInfrastructureFailure)
+            {
+                // Extract the failing critical effect kind from the result so the synthetic
+                // signal payload matches the v1 contract (reason + failingEffect). The
+                // critical failure is always the LAST entry that was appended before
+                // EffectRunner returned with SessionMustAbort — transient failures before
+                // it are harmless observability. Fall back to any non-transient failure if
+                // ordering ever changes.
+                DecisionEffectKind? failingEffect = null;
+                for (var i = effectResult.Failures.Count - 1; i >= 0; i--)
+                {
+                    if (!effectResult.Failures[i].IsTransient)
+                    {
+                        failingEffect = effectResult.Failures[i].EffectKind;
+                        break;
+                    }
+                }
+
+                ProcessInlineAbortSignal(effectResult.AbortReason, signal.OccurredAtUtc, failingEffect);
+            }
+        }
+
+        /// <summary>
+        /// Synthesise + durably persist + reduce a <c>EffectInfrastructureFailure</c> signal
+        /// inline within the current worker iteration. See ProcessItem for the rationale —
+        /// this closes the crash-window identified by Codex follow-up post-#50 #B. The
+        /// signal payload matches the v1 contract documented on
+        /// <see cref="DecisionSignalKind.EffectInfrastructureFailure"/>:
+        /// <c>{ reason, failingEffect }</c>, with source/evidence identifying the critical
+        /// effect kind that triggered the abort so forensic consumers can distinguish
+        /// ScheduleDeadline-vs-CancelDeadline failures.
+        /// </summary>
+        private void ProcessInlineAbortSignal(
+            string? abortReason,
+            DateTime occurredAtUtc,
+            DecisionEffectKind? failingEffect)
+        {
+            long signalOrdinal = _nextSignalOrdinal;
+            long traceOrdinal = _traceCounter.Next();
+
+            var failingEffectLabel = failingEffect?.ToString() ?? "Unknown";
+
+            DecisionSignal syntheticSignal;
+            try
+            {
+                syntheticSignal = new DecisionSignal(
+                    sessionSignalOrdinal: signalOrdinal,
+                    sessionTraceOrdinal: traceOrdinal,
+                    kind: DecisionSignalKind.EffectInfrastructureFailure,
+                    kindSchemaVersion: 1,
+                    occurredAtUtc: occurredAtUtc,
+                    sourceOrigin: $"effectrunner:critical:{failingEffectLabel}",
+                    evidence: new Evidence(
+                        kind: EvidenceKind.Synthetic,
+                        identifier: $"effect_infrastructure_failure:{failingEffectLabel}",
+                        summary: $"Critical effect {failingEffectLabel} failed: {abortReason ?? "<unspecified>"}"),
+                    payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["reason"] = abortReason ?? string.Empty,
+                        ["failingEffect"] = failingEffectLabel,
+                    });
+            }
+            catch
+            {
+                // DecisionSignal ctor validation must not fail for a locally-constructed
+                // signal, but defensively bail — the max-lifetime watchdog remains the
+                // last-resort termination path.
+                return;
+            }
+
+            try
+            {
+                _signalLog.Append(syntheticSignal);
+            }
+            catch
+            {
+                // Persist-Failure — we must NOT advance the ordinal (log gap) and cannot
+                // safely reduce. Recovery will see the phantom state; the watchdog will
+                // clean up the hung session.
+                return;
+            }
+
+            _nextSignalOrdinal = signalOrdinal + 1;
+
+            if (_signalEmitter != null)
+            {
+                try { _signalEmitter.Emit(syntheticSignal); }
+                catch { /* best-effort upload */ }
+            }
+
+            var state = _processor.CurrentState;
+            var step = _engine.Reduce(state, syntheticSignal);
+
+            try
+            {
+                _processor.ApplyStep(step, syntheticSignal);
+            }
+            catch
+            {
+                // Processor fault on the terminal transition — Journal has the abort
+                // transition committed (reducer produces Stage=Failed unconditionally).
+                // Swallowed by convention; worker must not die from this path.
             }
         }
 

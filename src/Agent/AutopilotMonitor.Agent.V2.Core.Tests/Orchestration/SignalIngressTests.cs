@@ -233,10 +233,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 
             public DecisionCore.State.DecisionState CurrentState => _state;
 
-            public void ApplyStep(DecisionStep step, DecisionSignal signal)
+            public EffectRunResult ApplyStep(DecisionStep step, DecisionSignal signal)
             {
                 _inspect(step, signal, _log.LastOrdinal);
                 _state = step.NewState;
+                return EffectRunResult.Empty();
             }
         }
 
@@ -280,6 +281,131 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.True(WaitFor(() => rig.Processor.ApplyCallCount == 2));
             ing.Stop();
 
+            Assert.Equal(2, rig.SignalLog.ReadAll().Count);
+        }
+
+        // ============================================================ Codex follow-up post-#50 #B — durable inline abort
+
+        [Fact]
+        public void SessionMustAbort_synthesises_EffectInfrastructureFailure_signal_durably_before_worker_returns()
+        {
+            // When the processor returns SessionMustAbort=true, the ingress must:
+            //  (1) append a synthetic EffectInfrastructureFailure signal to the SignalLog,
+            //  (2) invoke the processor with that signal a second time (terminal transition),
+            // all within the current worker iteration — so a crash after the iteration
+            // returns can recover to a terminal state, not a phantom deadline state.
+            //
+            // The synthetic signal MUST match the v1 payload contract defined on
+            // DecisionSignalKind.EffectInfrastructureFailure (Codex follow-up post-#50 #F):
+            // { reason, failingEffect }, sourceOrigin "effectrunner:critical:<EffectKind>",
+            // Evidence.Identifier "effect_infrastructure_failure:<EffectKind>".
+            using var rig = new Rig();
+            var critical = new EffectFailure(
+                effectKind: DecisionEffectKind.ScheduleDeadline,
+                errorReason: "timer-broken",
+                isTransient: false,
+                exhaustedRetries: false);
+            var abort = new EffectRunResult(
+                sessionMustAbort: true,
+                abortReason: "timer_infrastructure_failure: timer-broken",
+                failures: new[] { critical },
+                classifierInvocations: 0,
+                classifierSkippedByAntiLoop: 0);
+            rig.Processor.ScriptResult(abort);
+
+            var ing = rig.Build();
+            ing.Start();
+            ing.Post(DecisionSignalKind.SessionStarted, At, "Collector", RawEvidence("original"));
+
+            // Wait for BOTH the original apply and the synthetic abort apply to land.
+            Assert.True(WaitFor(() => rig.Processor.ApplyCallCount >= 2, timeoutMs: 5000));
+            ing.Stop();
+
+            // SignalLog has [original, synthetic] — both durable, monotone ordinals.
+            var logged = rig.SignalLog.ReadAll();
+            Assert.Equal(2, logged.Count);
+            Assert.Equal(DecisionSignalKind.SessionStarted, logged[0].Kind);
+            Assert.Equal(DecisionSignalKind.EffectInfrastructureFailure, logged[1].Kind);
+            Assert.Equal(0L, logged[0].SessionSignalOrdinal);
+            Assert.Equal(1L, logged[1].SessionSignalOrdinal);
+
+            // v1 contract: payload carries reason AND failingEffect.
+            Assert.NotNull(logged[1].Payload);
+            Assert.Equal(abort.AbortReason, logged[1].Payload!["reason"]);
+            Assert.Equal("ScheduleDeadline", logged[1].Payload!["failingEffect"]);
+            // sourceOrigin + evidence discriminate between ScheduleDeadline and CancelDeadline
+            // failures so forensic parsers (and the v1 fixture file) see a consistent shape.
+            Assert.Equal("effectrunner:critical:ScheduleDeadline", logged[1].SourceOrigin);
+            Assert.Equal("effect_infrastructure_failure:ScheduleDeadline", logged[1].Evidence.Identifier);
+
+            // Processor received both signals, in order, with matching signals.
+            var calls = rig.Processor.Calls;
+            Assert.True(calls.Count >= 2);
+            Assert.Equal(DecisionSignalKind.SessionStarted, calls[0].Signal.Kind);
+            Assert.Equal(DecisionSignalKind.EffectInfrastructureFailure, calls[1].Signal.Kind);
+        }
+
+        [Fact]
+        public void SessionMustAbort_CancelDeadline_failure_labels_signal_with_CancelDeadline_kind()
+        {
+            // Same contract as the ScheduleDeadline case but for the CancelDeadline variant,
+            // so forensic queries can distinguish the two failure modes by sourceOrigin alone.
+            using var rig = new Rig();
+            var critical = new EffectFailure(
+                effectKind: DecisionEffectKind.CancelDeadline,
+                errorReason: "cancel-failed",
+                isTransient: false,
+                exhaustedRetries: false);
+            var abort = new EffectRunResult(
+                sessionMustAbort: true,
+                abortReason: "timer_infrastructure_failure: cancel-failed",
+                failures: new[] { critical },
+                classifierInvocations: 0,
+                classifierSkippedByAntiLoop: 0);
+            rig.Processor.ScriptResult(abort);
+
+            var ing = rig.Build();
+            ing.Start();
+            ing.Post(DecisionSignalKind.SessionStarted, At, "Collector", RawEvidence("original"));
+            Assert.True(WaitFor(() => rig.Processor.ApplyCallCount >= 2, timeoutMs: 5000));
+            ing.Stop();
+
+            var logged = rig.SignalLog.ReadAll();
+            Assert.Equal(2, logged.Count);
+            Assert.Equal("CancelDeadline", logged[1].Payload!["failingEffect"]);
+            Assert.Equal("effectrunner:critical:CancelDeadline", logged[1].SourceOrigin);
+            Assert.Equal("effect_infrastructure_failure:CancelDeadline", logged[1].Evidence.Identifier);
+        }
+
+        [Fact]
+        public void Synthetic_abort_signal_itself_reporting_abort_does_not_recurse()
+        {
+            // Defence-in-depth against infinite recursion: if ApplyStep for the synthetic
+            // EffectInfrastructureFailure signal were (wrongly) to report another abort,
+            // ingress must NOT produce a third synthetic signal — the reducer's terminal
+            // handler is trusted as the end of the abort chain.
+            using var rig = new Rig();
+            var abortEverything = new EffectRunResult(
+                sessionMustAbort: true,
+                abortReason: "simulated: every step aborts",
+                failures: Array.Empty<EffectFailure>(),
+                classifierInvocations: 0,
+                classifierSkippedByAntiLoop: 0);
+            // Two scripted abort results: one for the original signal, one for the
+            // synthetic. The third call (if any) would use the default Empty result.
+            rig.Processor.ScriptResult(abortEverything, count: 2);
+
+            var ing = rig.Build();
+            ing.Start();
+            ing.Post(DecisionSignalKind.SessionStarted, At, "Collector", RawEvidence("original"));
+
+            Assert.True(WaitFor(() => rig.Processor.ApplyCallCount >= 2, timeoutMs: 5000));
+            // Give the worker a moment to potentially recurse (it must not).
+            Thread.Sleep(150);
+            ing.Stop();
+
+            // Exactly 2 apply calls — original + one synthetic. No recursion.
+            Assert.Equal(2, rig.Processor.ApplyCallCount);
             Assert.Equal(2, rig.SignalLog.ReadAll().Count);
         }
 

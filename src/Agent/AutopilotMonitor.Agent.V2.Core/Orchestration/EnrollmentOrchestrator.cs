@@ -80,6 +80,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly TimeSpan _terminalDrainTimeout;
         private readonly TimeSpan? _agentMaxLifetime;
 
+        // Test-only override so tests can drive rehydrate-failure via FakeDeadlineScheduler.
+        // Production always passes null → Start() creates the real DeadlineScheduler.
+        private readonly IDeadlineScheduler? _schedulerOverride;
+
         // Max-lifetime watchdog (M4.6.α). Timer is armed in Start() when _agentMaxLifetime != null.
         private System.Threading.Timer? _maxLifetimeTimer;
         private int _terminatedFired;
@@ -97,7 +101,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private TelemetryTransitionEmitter? _transitionEmitter;
         private EventTimelineEmitter? _timelineEmitter;
         private BackPressureEventObserver? _backPressureObserver;
-        private DeadlineScheduler? _scheduler;
+        private IDeadlineScheduler? _scheduler;
         private ClassifierRegistry? _classifierRegistry;
         private LazyIngressSinkRelay? _sinkRelay;
         private EffectRunner? _effectRunner;
@@ -140,7 +144,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             int quarantineThreshold = DecisionStepProcessor.DefaultQuarantineThreshold,
             TimeSpan? drainInterval = null,
             TimeSpan? terminalDrainTimeout = null,
-            TimeSpan? agentMaxLifetime = null)
+            TimeSpan? agentMaxLifetime = null,
+            IDeadlineScheduler? schedulerOverride = null)
         {
             if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("SessionId is mandatory.", nameof(sessionId));
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("TenantId is mandatory.", nameof(tenantId));
@@ -174,6 +179,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (agentMaxLifetime.HasValue && agentMaxLifetime.Value <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(agentMaxLifetime), "AgentMaxLifetime must be positive when set.");
             _agentMaxLifetime = agentMaxLifetime;
+            _schedulerOverride = schedulerOverride;
         }
 
         /// <summary>
@@ -257,48 +263,153 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // 1) Persistenz. Writer scannen bestehende Files im Ctor (LastOrdinal / LastStepIndex).
             var snapshotPath = Path.Combine(_stateDirectory, "snapshot.json");
-            _signalLog = new SignalLogWriter(Path.Combine(_stateDirectory, "signal-log.jsonl"));
-            _journal = new JournalWriter(Path.Combine(_stateDirectory, "journal.jsonl"));
+            var signalLogPath = Path.Combine(_stateDirectory, "signal-log.jsonl");
+            var journalPath = Path.Combine(_stateDirectory, "journal.jsonl");
+            var eventSequencePath = Path.Combine(_stateDirectory, "event-sequence.json");
+            _signalLog = new SignalLogWriter(signalLogPath);
+            _journal = new JournalWriter(journalPath, () => _clock.UtcNow);
             _snapshot = new SnapshotPersistence(snapshotPath, () => _clock.UtcNow);
-            _eventSequencePersistence = new EventSequencePersistence(Path.Combine(_stateDirectory, "event-sequence.json"));
+            _eventSequencePersistence = new EventSequencePersistence(eventSequencePath);
 
-            // 2) Recovery (Plan §2.7 Sonderfälle 1+2).
+            // 2) Recovery (Plan §2.7 Sonderfälle 1+2, Codex follow-up #1).
+            //
+            //    Invariant: the SignalLog is authoritative truth, the Snapshot is a cache.
+            //    Therefore on every recovery we prefer reconstructing state from the log over
+            //    trusting a stale/corrupt snapshot. ReducerReplay.Replay (Phase 1) performs the
+            //    pure fold; this method decides the seed + which signals to feed it.
+            //
+            //    Branches:
+            //      a) Snapshot present but corrupt → quarantine the snapshot ONLY (not the log!)
+            //         and rebuild from the full SignalLog. If the log itself is head-corrupt
+            //         (file non-empty but ReadAll yields zero signals) we escalate to a total-
+            //         loss quarantine of the log segments and start fresh.
+            //      b) Snapshot loaded cleanly → replay any SignalLog tail past the snapshot's
+            //         LastAppliedSignalOrdinal so a pre-crash Journal/Snapshot lag is closed.
+            //      c) No snapshot file — two sub-cases (Codex follow-up post-#50 #A):
+            //         c1) SignalLog also empty → genuinely fresh start.
+            //         c2) SignalLog has entries → crash before the first snapshot save ever
+            //             landed; rebuild from the full SignalLog like branch (a) does after
+            //             snapshot quarantine. Anything else would keep stale log entries on
+            //             disk while state resets to StepIndex=0 and break monotonicity on
+            //             the next append.
+            //
+            //    After the seed + replay-stream are selected the Journal is aligned AHEAD-OF
+            //    replay (phantom suffix beyond seed.StepIndex-1 goes to the forensic bucket)
+            //    and backfilled DURING replay via the onTransition callback. This closes two
+            //    crash windows in one mechanism (Codex follow-up post-#50 #C):
+            //      • AHEAD — Journal was flushed but Snapshot not; phantom transitions beyond
+            //        the seed get quarantined before replay so live Append monotonicity holds.
+            //      • BEHIND — SignalLog was flushed but Journal not; the replay callback
+            //        rematerialises the missing StepIndex entries onto the Journal so it
+            //        ends up in exact lockstep with initialState.
             var snapshotFileExistsPreLoad = File.Exists(snapshotPath);
             var loadedState = _snapshot.Load();
             DecisionState initialState;
 
+            // Reducer is stateless — a transient instance is enough for the pure replay below.
+            // The live ingress pipeline creates its own instance further down the Start() body.
+            var replayEngine = new DecisionEngine();
+
+            // Dispatch: pick the seed + signal stream per branch. Null seed is impossible past
+            // this block (every path assigns it), but the compiler needs the explicit init.
+            DecisionState seed = DecisionState.CreateInitial(_sessionId, _tenantId);
+            IReadOnlyList<DecisionSignal> signalsToReplay = Array.Empty<DecisionSignal>();
+            string branchTag;
+
             if (loadedState == null && snapshotFileExistsPreLoad)
             {
-                // Sonderfall 2: Snapshot-File existiert, Load lieferte null → Checksum-Mismatch
-                // oder Deserialize-Failure. Plan §2.7c: Snapshot ist Cache, nicht Wahrheit —
-                // Snapshot + Log-Segmente in Quarantäne, frisch starten.
+                // Branch (a) — Snapshot corrupt. Quarantine the snapshot and attempt log replay.
                 _logger.Error(
-                    "EnrollmentOrchestrator: snapshot present but Load returned null (checksum mismatch or parse error) — quarantining state.");
-                const string reason = "checksum-mismatch-on-startup";
-                _snapshot.Quarantine(reason);
-                SegmentQuarantine.QuarantineAll(_stateDirectory, reason, () => _clock.UtcNow);
+                    "EnrollmentOrchestrator: snapshot present but Load returned null (checksum mismatch or parse error) — quarantining snapshot and attempting SignalLog replay.");
+                _snapshot.Quarantine("checksum-mismatch-on-startup");
 
-                // Writer halten Pfade, nicht Handles — aber ihre in-memory Counter (LastOrdinal,
-                // LastStepIndex) sind jetzt stale gegenüber den entfernten Files. Recreate, damit
-                // Counter bei -1 starten.
-                _signalLog = new SignalLogWriter(Path.Combine(_stateDirectory, "signal-log.jsonl"));
-                _journal = new JournalWriter(Path.Combine(_stateDirectory, "journal.jsonl"));
-                _eventSequencePersistence = new EventSequencePersistence(Path.Combine(_stateDirectory, "event-sequence.json"));
+                var loggedSignals = _signalLog.ReadAll();
+                var logFileInfo = new FileInfo(signalLogPath);
+                var logIsHeadCorrupt =
+                    logFileInfo.Exists && logFileInfo.Length > 0 && loggedSignals.Count == 0;
 
-                initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
+                if (logIsHeadCorrupt)
+                {
+                    _logger.Warning(
+                        "EnrollmentOrchestrator: SignalLog unreadable from the first line — escalating to total-loss quarantine.");
+                    SegmentQuarantine.QuarantineAll(
+                        _stateDirectory, "log-head-corrupt-after-snapshot-loss", () => _clock.UtcNow);
+
+                    // Writer hold paths, not handles — but their in-memory counters are stale
+                    // after the quarantine move. Recreate to reset them to -1.
+                    _signalLog = new SignalLogWriter(signalLogPath);
+                    _journal = new JournalWriter(journalPath, () => _clock.UtcNow);
+                    _eventSequencePersistence = new EventSequencePersistence(eventSequencePath);
+
+                    branchTag = "a-total-loss";
+                }
+                else
+                {
+                    signalsToReplay = loggedSignals;
+                    branchTag = "a-full-log-replay";
+                }
+
                 _wasStartupQuarantine = true;
             }
             else if (loadedState != null)
             {
-                initialState = loadedState;
-                _logger.Info(
-                    $"EnrollmentOrchestrator: recovered state from snapshot (stage={loadedState.Stage}, stepIndex={loadedState.StepIndex}).");
+                // Branch (b) — Snapshot loaded. Catch up any SignalLog tail past the snapshot.
+                seed = loadedState;
+                signalsToReplay = CollectSignalLogTailAfter(loadedState.LastAppliedSignalOrdinal);
+                branchTag = signalsToReplay.Count > 0 ? "b-tail-replay" : "b-snapshot-current";
             }
             else
             {
-                initialState = DecisionState.CreateInitial(_sessionId, _tenantId);
-                _logger.Info($"EnrollmentOrchestrator: fresh initial state for session {_sessionId}.");
+                // Branch (c) — no snapshot on disk. Two sub-cases:
+                //   (c1) SignalLog also empty → genuinely fresh start.
+                //   (c2) SignalLog has entries (crash BEFORE first snapshot save) → full
+                //        log replay from CreateInitial (Codex follow-up post-#50 #A).
+                var loggedSignals = _signalLog.ReadAll();
+                if (loggedSignals.Count == 0)
+                {
+                    branchTag = "c1-fresh";
+                }
+                else
+                {
+                    signalsToReplay = loggedSignals;
+                    _wasStartupQuarantine = true;
+                    branchTag = "c2-full-log-replay";
+                }
             }
+
+            // Align Journal AHEAD phantoms before replay. Engine semantics: a transition
+            // produced for state at StepIndex=K carries StepIndex=K+1 (see
+            // DecisionEngine.BuildTakenTransition); after K reduces from initial the journal
+            // holds entries [1..K] with LastStepIndex=K. So any on-disk entry beyond
+            // seed.StepIndex is a phantom from a crash between Journal.Append and
+            // Snapshot.Save. Truncating first lets the replay callback Append monotonically
+            // from seed.StepIndex+1 without colliding.
+            var journalBoundary = seed.StepIndex;
+            if (_journal.LastStepIndex > journalBoundary)
+            {
+                _logger.Warning(
+                    $"EnrollmentOrchestrator: Journal ahead of seed state " +
+                    $"(journal.LastStepIndex={_journal.LastStepIndex}, seed.StepIndex={seed.StepIndex}) — " +
+                    $"truncating phantom transitions to boundary={journalBoundary}.");
+                _journal.TruncateAfter(journalBoundary);
+            }
+
+            // Replay + Journal backfill via the onTransition callback (Codex follow-up
+            // post-#50 #C). For BEHIND crashes (SignalLog flushed, Journal not) this
+            // rematerialises every missing StepIndex. For no-replay branches the callback
+            // is simply never invoked; the journal stays aligned from the pre-replay
+            // truncate step above.
+            initialState = ReducerReplay.Replay(
+                engine: replayEngine,
+                seed: seed,
+                signals: signalsToReplay,
+                onTransition: _journal.Append);
+
+            _logger.Info(
+                $"EnrollmentOrchestrator: recovery branch={branchTag}, " +
+                $"stage={initialState.Stage}, stepIndex={initialState.StepIndex}, " +
+                $"signalsReplayed={signalsToReplay.Count}, " +
+                $"journal.LastStepIndex={_journal.LastStepIndex}.");
 
             // Sonderfall 1 Detection: WG Part 1 -> Reboot -> Part 2 Resume.
             // Self-destruct bleibt AUS (Caller ist zuständig — die Info wird via
@@ -329,7 +440,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _backPressureObserver = new BackPressureEventObserver(eventEmitter, _clock);
 
             // 5) Deadlines + Classifiers.
-            _scheduler = new DeadlineScheduler(_clock);
+            _scheduler = _schedulerOverride ?? new DeadlineScheduler(_clock);
             _classifierRegistry = new ClassifierRegistry(_classifiers);
 
             // 6) Relay — EffectRunner braucht ISignalIngressSink, aber Ingress wird erst später
@@ -394,6 +505,66 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // 13) Ingress-Worker starten (vor Collectors — sonst race-prone).
             _ingress.Start();
+
+            // 13.5) Codex follow-up #1 / plan §3 Phase 3 — re-arm persisted deadlines.
+            //       Without this any deadline armed pre-crash (HelloSafety, Part2Safety,
+            //       FinalizingGrace, ClassifierTick, …) would silently disappear on restart
+            //       and the session could hang forever. Must run AFTER _scheduler.Fired
+            //       subscription (step 12) AND AFTER _ingress.Start (step 13) because
+            //       past-due deadlines fire immediately via ThreadPool and the bridge
+            //       handler posts synthetic DeadlineFired signals through _ingress. Running
+            //       it before either one would either lose the fire (no subscriber) or drop
+            //       the signal (OnDeadlineFired returns early when _ingress is null).
+            //       Sits before the WG Part-2 bridge and before collectors start so
+            //       rehydrated past-due fires precede any fresh adapter-generated signals.
+            if (initialState.Deadlines.Count > 0)
+            {
+                _logger.Info(
+                    $"EnrollmentOrchestrator: re-arming {initialState.Deadlines.Count} " +
+                    $"persisted deadline(s) post-recovery.");
+                try
+                {
+                    _scheduler.RehydrateFromSnapshot(initialState.Deadlines);
+                }
+                catch (Exception ex)
+                {
+                    // Codex follow-up (post-#50 #E): rehydrate failure is the same class of
+                    // phantom-deadline hang as live ScheduleDeadline/CancelDeadline failures.
+                    // DecisionState.Deadlines still claims the deadline exists, but the live
+                    // scheduler never registered it — so only the max-lifetime watchdog would
+                    // ever terminate the session. Post a synthetic EffectInfrastructureFailure
+                    // with the v1 contract payload so the reducer transitions cleanly to
+                    // Failed / EnrollmentFailed on the next worker tick. Ingress is already
+                    // running at this point in Start(), so the signal gets the normal
+                    // durable SignalLog.Append + Reduce treatment.
+                    _logger.Error(
+                        "EnrollmentOrchestrator: deadline rehydration failed; posting EffectInfrastructureFailure to terminate the session.",
+                        ex);
+                    try
+                    {
+                        var reason = $"deadline_rehydrate_failure: {ex.GetType().Name}: {ex.Message}";
+                        _ingress.Post(
+                            kind: DecisionSignalKind.EffectInfrastructureFailure,
+                            occurredAtUtc: _clock.UtcNow,
+                            sourceOrigin: "effectrunner:critical:ScheduleDeadline",
+                            evidence: new Evidence(
+                                kind: EvidenceKind.Synthetic,
+                                identifier: "effect_infrastructure_failure:ScheduleDeadline",
+                                summary: $"Critical effect ScheduleDeadline failed: {reason}"),
+                            payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["reason"] = reason,
+                                ["failingEffect"] = nameof(DecisionEffectKind.ScheduleDeadline),
+                            });
+                    }
+                    catch (Exception postEx)
+                    {
+                        _logger.Error(
+                            "EnrollmentOrchestrator: failed to post EffectInfrastructureFailure after rehydrate failure — max-lifetime watchdog remains the last-resort terminator.",
+                            postEx);
+                    }
+                }
+            }
 
             // 13a) Recovery Sonderfall 1: WG Part-1 → Part-2 bridge zünden. Das Signal muss
             //      nach _ingress.Start laufen, aber VOR Collectors/Adapters — so sieht der
@@ -571,6 +742,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             try { Terminated?.Invoke(this, terminatedArgs); }
             catch (Exception ex) { _logger.Error("EnrollmentOrchestrator: Terminated handler threw.", ex); }
+        }
+
+        /// <summary>
+        /// <summary>
+        /// Recovery helper — collect all SignalLog entries whose <c>SessionSignalOrdinal</c>
+        /// is strictly greater than the snapshot's last-consumed ordinal. Signals equal-or-less
+        /// are already baked into the seed state and must never be re-applied.
+        /// </summary>
+        private IReadOnlyList<DecisionSignal> CollectSignalLogTailAfter(long lastConsumedOrdinal)
+        {
+            var all = _signalLog!.ReadAll();
+            var tail = new List<DecisionSignal>();
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (all[i].SessionSignalOrdinal > lastConsumedOrdinal)
+                {
+                    tail.Add(all[i]);
+                }
+            }
+            return tail;
         }
 
         /// <summary>

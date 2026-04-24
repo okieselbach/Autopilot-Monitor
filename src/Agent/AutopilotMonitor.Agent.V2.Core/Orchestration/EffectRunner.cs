@@ -79,9 +79,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                         if (criticalFail != null)
                         {
                             failures.Add(criticalFail);
+                            var abortReason = $"timer_infrastructure_failure: {criticalFail.ErrorReason}";
+
+                            // Codex follow-up (post-#50 #B): responsibility for posting the
+                            // synthetic EffectInfrastructureFailure signal moved to SignalIngress
+                            // so it can DURABLY append + reduce inline within the same worker
+                            // iteration, closing the crash-window between in-memory post and
+                            // SignalLog persistence. EffectRunner just signals the abort here.
                             return new EffectRunResult(
                                 sessionMustAbort: true,
-                                abortReason: $"timer_infrastructure_failure: {criticalFail.ErrorReason}",
+                                abortReason: abortReason,
                                 failures: failures,
                                 classifierInvocations: invocations,
                                 classifierSkippedByAntiLoop: skipped);

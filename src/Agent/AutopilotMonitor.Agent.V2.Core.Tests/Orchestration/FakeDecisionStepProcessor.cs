@@ -17,6 +17,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
     {
         private readonly object _lock = new object();
         private readonly Queue<Exception?> _script = new Queue<Exception?>();
+        private readonly Queue<EffectRunResult> _resultScript = new Queue<EffectRunResult>();
         private readonly List<ApplyCall> _calls = new List<ApplyCall>();
         private DecisionState _currentState;
         private int _failedApplyCount;
@@ -62,7 +63,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             return this;
         }
 
-        public void ApplyStep(DecisionStep step, DecisionSignal signal)
+        /// <summary>
+        /// Script a specific <see cref="EffectRunResult"/> for the next ApplyStep call(s) —
+        /// lets tests drive the SignalIngress inline-abort path (Codex post-#50 #B).
+        /// </summary>
+        public FakeDecisionStepProcessor ScriptResult(EffectRunResult result, int count = 1)
+        {
+            lock (_lock)
+            {
+                for (int i = 0; i < count; i++) _resultScript.Enqueue(result);
+            }
+            return this;
+        }
+
+        public EffectRunResult ApplyStep(DecisionStep step, DecisionSignal signal)
         {
             BlockHandle?.Wait();
 
@@ -79,6 +93,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 }
                 _calls.Add(new ApplyCall(step, signal));
                 _currentState = step.NewState;
+                return _resultScript.Count > 0 ? _resultScript.Dequeue() : EffectRunResult.Empty();
             }
         }
 

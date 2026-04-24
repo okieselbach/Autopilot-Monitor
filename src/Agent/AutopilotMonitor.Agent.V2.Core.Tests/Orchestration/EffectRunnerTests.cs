@@ -91,6 +91,43 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         }
 
         [Fact]
+        public async Task ScheduleDeadline_failure_does_not_post_signal_from_EffectRunner()
+        {
+            // Codex follow-up (post-#50 #B): responsibility for synthesising the durable
+            // EffectInfrastructureFailure signal moved from EffectRunner to SignalIngress
+            // (see SignalIngressTests.Abort_signal_is_synthesised_*). The EffectRunner's
+            // contract is now "return an abort result; do not touch the ingress queue".
+            var rig = new Rig();
+            rig.Scheduler.ThrowOnSchedule = new InvalidOperationException("timer-broken");
+            var sut = rig.Build();
+            var effect = new DecisionEffect(
+                DecisionEffectKind.ScheduleDeadline,
+                deadline: Deadline("hello_safety", At.AddMinutes(1)));
+
+            var result = await sut.RunAsync(new[] { effect }, InitialState(), At);
+
+            Assert.True(result.SessionMustAbort);
+            Assert.Contains("timer_infrastructure_failure", result.AbortReason);
+            Assert.Empty(rig.Ingress.Posted); // no longer the EffectRunner's job
+        }
+
+        [Fact]
+        public async Task CancelDeadline_failure_does_not_post_signal_from_EffectRunner()
+        {
+            var rig = new Rig();
+            rig.Scheduler.ThrowOnCancel = new InvalidOperationException("timer-broken");
+            var sut = rig.Build();
+            var effect = new DecisionEffect(
+                DecisionEffectKind.CancelDeadline,
+                cancelDeadlineName: "hello_safety");
+
+            var result = await sut.RunAsync(new[] { effect }, InitialState(), At);
+
+            Assert.True(result.SessionMustAbort);
+            Assert.Empty(rig.Ingress.Posted);
+        }
+
+        [Fact]
         public async Task ScheduleDeadline_abort_stops_processing_subsequent_effects()
         {
             var rig = new Rig();

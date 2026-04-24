@@ -40,7 +40,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 TransportDir = Path.Combine(Tmp.Path, "Transport");
             }
 
-            public EnrollmentOrchestrator Build() =>
+            public EnrollmentOrchestrator Build(IDeadlineScheduler? schedulerOverride = null) =>
                 new EnrollmentOrchestrator(
                     sessionId: "S1",
                     tenantId: "T1",
@@ -51,7 +51,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                     uploader: Uploader,
                     classifiers: new List<IClassifier>(),
                     drainInterval: TimeSpan.FromDays(1),
-                    terminalDrainTimeout: TimeSpan.FromSeconds(2));
+                    terminalDrainTimeout: TimeSpan.FromSeconds(2),
+                    schedulerOverride: schedulerOverride);
 
             public void Dispose() => Tmp.Dispose();
         }
@@ -186,6 +187,446 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             sut.Stop();
         }
 
+        // ============================================================ Codex #1 — ReducerReplay recovery paths
+
+        private static DecisionSignal MakeSignal(
+            long ordinal,
+            DecisionSignalKind kind = DecisionSignalKind.AppInstallCompleted)
+        {
+            return new DecisionSignal(
+                sessionSignalOrdinal: ordinal,
+                sessionTraceOrdinal: ordinal,
+                kind: kind,
+                kindSchemaVersion: 1,
+                occurredAtUtc: At.AddSeconds(ordinal),
+                sourceOrigin: "recovery-tests",
+                evidence: new Evidence(
+                    EvidenceKind.Synthetic,
+                    $"recovery:ord-{ordinal}",
+                    "test signal"));
+        }
+
+        private static DecisionTransition MakeTransition(int stepIndex, long signalRef)
+        {
+            return new DecisionTransition(
+                stepIndex: stepIndex,
+                sessionTraceOrdinal: stepIndex,
+                signalOrdinalRef: signalRef,
+                occurredAtUtc: At.AddSeconds(stepIndex),
+                trigger: "TestTrigger",
+                fromStage: SessionStage.SessionStarted,
+                toStage: SessionStage.SessionStarted,
+                taken: true,
+                deadEndReason: null,
+                reducerVersion: "2.0.0.0");
+        }
+
+        [Fact]
+        public void Snapshot_plus_pending_tail_replays_tail_onto_snapshot()
+        {
+            // Crash-lag scenario: SignalLog has caught up to ordinal 1 but the Snapshot was only
+            // flushed after the ordinal-0 reduce. On restart the orchestrator must replay the
+            // tail (ordinal 1) on top of the snapshot to reach the real post-crash state.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Seed two signals on the log.
+            var signalLogPath = Path.Combine(rig.StateDir, "signal-log.jsonl");
+            var seedLog = new SignalLogWriter(signalLogPath);
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+            };
+            foreach (var s in sigs) seedLog.Append(s);
+
+            // Compute the expected final state by folding through the real reducer.
+            var engine = new DecisionEngine();
+            var expected = ReducerReplay.Replay(
+                engine, DecisionState.CreateInitial("S1", "T1"), sigs);
+
+            // Persist a snapshot that lags one step behind (only ordinal 0 consumed).
+            var snapshotState = engine.Reduce(
+                DecisionState.CreateInitial("S1", "T1"), sigs[0]).NewState;
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(snapshotState);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            Assert.False(sut.WasStartupQuarantine);
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+            Assert.Equal(expected.Stage, sut.CurrentState.Stage);
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void No_snapshot_with_intact_log_rebuilds_state_via_full_log_replay()
+        {
+            // Codex follow-up (post-#50 #A): the snapshot was never written (either an
+            // abnormal first-session crash or post-quarantine wipe) BUT the SignalLog
+            // already has entries. Branch (c) must NOT fall through to CreateInitial —
+            // that would reset StepIndex=0 while the log continues at its original
+            // ordinals, breaking monotonicity on the next live append.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Seed three signals on the log, NO snapshot file on disk.
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+                MakeSignal(2, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            Assert.False(File.Exists(Path.Combine(rig.StateDir, "snapshot.json")));
+
+            var engine = new DecisionEngine();
+            var expected = ReducerReplay.Replay(
+                engine, DecisionState.CreateInitial("S1", "T1"), sigs);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            // Full-log replay produced the post-crash state — step/ordinal both at tail.
+            Assert.True(sut.WasStartupQuarantine);
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+            Assert.Equal(expected.Stage, sut.CurrentState.Stage);
+
+            // SignalLog was NOT quarantined — only the absent snapshot path triggered replay.
+            var signalLogPath = Path.Combine(rig.StateDir, "signal-log.jsonl");
+            Assert.True(File.Exists(signalLogPath));
+            Assert.True(new FileInfo(signalLogPath).Length > 0);
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Corrupt_snapshot_with_intact_log_replays_full_log_without_quarantining_log()
+        {
+            // Snapshot corrupt (checksum fails) but the SignalLog is fine: the orchestrator
+            // quarantines the snapshot only and rebuilds state from the full log.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Write a valid-looking snapshot file with a wrong checksum.
+            File.WriteAllText(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                "{\"Checksum\":\"deadbeef\",\"State\":{\"SessionId\":\"S1\",\"TenantId\":\"T1\"}}",
+                Encoding.UTF8);
+
+            // Seed a parseable SignalLog with real signals.
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+                MakeSignal(2, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            var engine = new DecisionEngine();
+            var expected = ReducerReplay.Replay(
+                engine, DecisionState.CreateInitial("S1", "T1"), sigs);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            // Snapshot quarantined, log survived, state reflects the full replay.
+            Assert.True(sut.WasStartupQuarantine);
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+
+            var signalLogPath = Path.Combine(rig.StateDir, "signal-log.jsonl");
+            Assert.True(File.Exists(signalLogPath));
+            Assert.True(new FileInfo(signalLogPath).Length > 0); // log NOT quarantined
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Journal_ahead_of_replayed_state_triggers_phantom_truncate()
+        {
+            // AHEAD crash scenario: the Journal flushed step for sig1, then also a phantom
+            // step for a signal the SignalLog never persisted, while the Snapshot saved
+            // only step for sig0. On recovery everything beyond seed.StepIndex goes to the
+            // phantom bucket and the replay callback (Codex follow-up post-#50 #C) rebuilds
+            // the authoritative tail bit-for-bit in lockstep with state advancement.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Step 1: SignalLog has sig0 + sig1.
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            // Step 2: Produce real engine transitions for sig0 + sig1 — engine semantics
+            // say their StepIndex is 1 and 2 (state.StepIndex + 1). Snapshot only captures
+            // post-sig0 state; the phantom transition for a non-existent sig beyond has
+            // StepIndex=3.
+            var engine = new DecisionEngine();
+            var step0 = engine.Reduce(DecisionState.CreateInitial("S1", "T1"), sigs[0]);
+            var step1 = engine.Reduce(step0.NewState, sigs[1]);
+            var snapshotState = step0.NewState; // StepIndex=1
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(snapshotState);
+
+            // Step 3: Journal has 3 transitions on disk — the StepIndex=3 one is phantom
+            // (no backing signal in the log).
+            var journalPath = Path.Combine(rig.StateDir, "journal.jsonl");
+            var seedJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow);
+            seedJournal.Append(step0.Transition);                // StepIndex=1
+            seedJournal.Append(step1.Transition);                // StepIndex=2 — pre-crash flushed
+            seedJournal.Append(MakeTransition(3, signalRef: 99)); // StepIndex=3 — phantom
+
+            // Expected post-recovery state: replay tail [sig1] → StepIndex=2, LastApplied=1.
+            var expected = ReducerReplay.Replay(engine, snapshotState, new[] { sigs[1] });
+            Assert.Equal(2, expected.StepIndex);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+
+            // Phantom bucket contains the two entries beyond seed.StepIndex=1 (StepIndex 2 + 3):
+            // the pre-crash-flushed real transition AND the signal-less phantom. The replay
+            // then rebuilt StepIndex=2 from sig1 via the onTransition callback so the live
+            // journal ends in lockstep with state at [1, 2].
+            var quarantineRoot = Path.Combine(rig.StateDir, ".quarantine");
+            Assert.True(Directory.Exists(quarantineRoot));
+            var phantomFiles = Directory.GetFiles(
+                quarantineRoot, "journal-phantom-tail.jsonl", SearchOption.AllDirectories);
+            Assert.Single(phantomFiles);
+            Assert.Equal(2, File.ReadAllLines(phantomFiles[0])
+                .Count(l => !string.IsNullOrWhiteSpace(l)));
+
+            var liveJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow).ReadAll();
+            Assert.Equal(2, liveJournal.Count);
+            Assert.Equal(1, liveJournal[0].StepIndex);
+            Assert.Equal(2, liveJournal[1].StepIndex);
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Signal_log_ahead_of_journal_rebuilds_missing_journal_entries_during_replay()
+        {
+            // Codex follow-up (post-#50 #C): BEHIND scenario. A crash landed between
+            // SignalLog.Append(sig1) and Journal.Append(step1.Transition), so the log is one
+            // step ahead of the journal while the snapshot already captures the pre-sig1
+            // state. Recovery must NOT leave the journal with a gap — the onTransition
+            // callback on ReducerReplay.Replay backfills the missing StepIndex in lockstep.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var sigs = new[]
+            {
+                MakeSignal(0, DecisionSignalKind.SessionStarted),
+                MakeSignal(1, DecisionSignalKind.AppInstallCompleted),
+            };
+            var seedLog = new SignalLogWriter(Path.Combine(rig.StateDir, "signal-log.jsonl"));
+            foreach (var s in sigs) seedLog.Append(s);
+
+            var engine = new DecisionEngine();
+            var step0 = engine.Reduce(DecisionState.CreateInitial("S1", "T1"), sigs[0]);
+            var snapshotState = step0.NewState; // StepIndex=1, LastApplied=0
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(snapshotState);
+
+            // Journal only has the sig0 transition — the sig1 transition was never flushed
+            // before the crash. LastStepIndex=1 matches snapshotState.StepIndex, so no
+            // AHEAD-truncation fires; recovery must backfill StepIndex=2 via the callback.
+            var journalPath = Path.Combine(rig.StateDir, "journal.jsonl");
+            var seedJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow);
+            seedJournal.Append(step0.Transition); // StepIndex=1
+
+            var expected = ReducerReplay.Replay(engine, snapshotState, new[] { sigs[1] });
+
+            var sut = rig.Build();
+            sut.Start();
+
+            Assert.Equal(expected.StepIndex, sut.CurrentState.StepIndex);
+            Assert.Equal(expected.LastAppliedSignalOrdinal, sut.CurrentState.LastAppliedSignalOrdinal);
+
+            var liveJournal = new JournalWriter(journalPath, () => rig.Clock.UtcNow).ReadAll();
+            Assert.Equal(2, liveJournal.Count);
+            Assert.Equal(1, liveJournal[0].StepIndex);
+            Assert.Equal(2, liveJournal[1].StepIndex);
+
+            // No phantom quarantine happened — nothing was beyond the seed boundary.
+            var quarantineRoot = Path.Combine(rig.StateDir, ".quarantine");
+            if (Directory.Exists(quarantineRoot))
+            {
+                var phantomFiles = Directory.GetFiles(
+                    quarantineRoot, "journal-phantom-tail.jsonl", SearchOption.AllDirectories);
+                Assert.Empty(phantomFiles);
+            }
+
+            sut.Stop();
+        }
+
+        // ============================================================ Codex post-#50 #E — rehydrate-failure terminal path
+
+        [Fact]
+        public void Rehydrate_failure_posts_EffectInfrastructureFailure_and_session_terminates_to_Failed()
+        {
+            // Codex follow-up (post-#50 #E): if the scheduler can't re-arm a persisted
+            // deadline during recovery (ScheduleDeadline throws), DecisionState still claims
+            // the deadline is active — same phantom-deadline hang class as the live
+            // ScheduleDeadline/CancelDeadline failures. The orchestrator must post a
+            // synthetic EffectInfrastructureFailure (v1 payload) so the reducer terminates
+            // the session to Stage=Failed / Outcome=EnrollmentFailed rather than waiting
+            // out the max-lifetime watchdog.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Seed a snapshot with ONE persisted deadline so rehydrate runs.
+            var persistedDeadline = new ActiveDeadline(
+                name: "safety_rearm_target",
+                dueAtUtc: At.AddMinutes(30), // future, so the scheduler would normally schedule it
+                firesSignalKind: DecisionSignalKind.DeadlineFired);
+            var seed = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.AwaitingHello)
+                .WithStepIndex(3)
+                .WithLastAppliedSignalOrdinal(2)
+                .AddDeadline(persistedDeadline)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(seed);
+
+            // Broken scheduler — throws on every Schedule call, which is what
+            // RehydrateFromSnapshot drives internally.
+            var brokenScheduler = new FakeDeadlineScheduler
+            {
+                ThrowOnSchedule = new InvalidOperationException("timer-subsystem-dead"),
+            };
+
+            var sut = rig.Build(schedulerOverride: brokenScheduler);
+            sut.Start();
+
+            // Expected terminal state: reducer handles EffectInfrastructureFailure →
+            // Stage.Failed, Outcome.EnrollmentFailed, ClearDeadlines.
+            Assert.True(
+                SpinWait.SpinUntil(() => sut.CurrentState.Stage == SessionStage.Failed, 5000),
+                $"Expected terminal Failed stage after rehydrate failure; stuck at {sut.CurrentState.Stage}.");
+            Assert.Equal(SessionOutcome.EnrollmentFailed, sut.CurrentState.Outcome);
+
+            // Signal landed durably on the SignalLog with the v1 contract payload.
+            var signalLog = GetSignalLog(sut);
+            var failureSignal = signalLog.ReadAll()
+                .FirstOrDefault(s => s.Kind == DecisionSignalKind.EffectInfrastructureFailure);
+            Assert.NotNull(failureSignal);
+            Assert.NotNull(failureSignal!.Payload);
+            Assert.Contains("deadline_rehydrate_failure", failureSignal.Payload!["reason"]);
+            Assert.Equal("ScheduleDeadline", failureSignal.Payload["failingEffect"]);
+            Assert.Equal("effectrunner:critical:ScheduleDeadline", failureSignal.SourceOrigin);
+
+            sut.Stop();
+        }
+
+        // ============================================================ Codex #1 Phase 3 — deadline re-arm
+
+        [Fact]
+        public void Snapshot_with_past_due_deadline_fires_DeadlineFired_signal_on_start()
+        {
+            // Past-due re-arm: a deadline whose DueAtUtc lies before clock.UtcNow must fire
+            // immediately on rehydrate. The scheduler's past-due path queues to ThreadPool,
+            // the Fired bridge synthesises a DeadlineFired signal, and it lands on the log.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var pastDue = new ActiveDeadline(
+                name: "hello_safety",
+                dueAtUtc: At.AddMinutes(-5),
+                firesSignalKind: DecisionSignalKind.DeadlineFired,
+                firesPayload: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["deadlineName"] = "hello_safety",
+                });
+            var seed = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.AwaitingHello)
+                .WithStepIndex(3)
+                .WithLastAppliedSignalOrdinal(2)
+                .AddDeadline(pastDue)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(seed);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            var signalLog = GetSignalLog(sut);
+            Assert.True(
+                SpinWait.SpinUntil(
+                    () => signalLog.ReadAll().Any(s =>
+                        s.Kind == DecisionSignalKind.DeadlineFired &&
+                        s.Payload != null &&
+                        s.Payload.TryGetValue("deadlineName", out var n) &&
+                        n == "hello_safety"),
+                    3000),
+                "Expected DeadlineFired signal for re-armed past-due deadline.");
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Snapshot_with_future_deadline_is_scheduled_but_not_yet_fired()
+        {
+            // Future re-arm: the rehydrated deadline is live on the scheduler (IsScheduled=true)
+            // but no DeadlineFired signal has been emitted because its wall-clock due time
+            // has not arrived.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var future = new ActiveDeadline(
+                name: "part2_safety",
+                dueAtUtc: DateTime.UtcNow.AddHours(2), // real wall-clock future (scheduler uses wall clock)
+                firesSignalKind: DecisionSignalKind.DeadlineFired);
+            var seed = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.WhiteGloveSealed)
+                .WithStepIndex(5)
+                .WithLastAppliedSignalOrdinal(4)
+                .AddDeadline(future)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(seed);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            // Scheduler must know about the re-armed deadline.
+            var scheduler = GetScheduler(sut);
+            Assert.True(scheduler.IsScheduled("part2_safety"),
+                "Future-due persisted deadline was not re-armed on the scheduler.");
+
+            // Give the ThreadPool a moment to prove we don't fire it prematurely.
+            Thread.Sleep(100);
+            var signalLog = GetSignalLog(sut);
+            Assert.DoesNotContain(signalLog.ReadAll(),
+                s => s.Kind == DecisionSignalKind.DeadlineFired);
+
+            sut.Stop();
+        }
+
         // ================================================================= Sonderfall 3: Transport-Resume
 
         [Fact]
@@ -235,6 +676,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 "_signalLog",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
             return (ISignalLogWriter)field!.GetValue(sut)!;
+        }
+
+        private static IDeadlineScheduler GetScheduler(EnrollmentOrchestrator sut)
+        {
+            var field = typeof(EnrollmentOrchestrator).GetField(
+                "_scheduler",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            return (IDeadlineScheduler)field!.GetValue(sut)!;
         }
 
         private static DrainResult InvokeDrain(EnrollmentOrchestrator sut)

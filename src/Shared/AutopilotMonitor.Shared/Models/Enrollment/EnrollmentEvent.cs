@@ -144,6 +144,25 @@ namespace AutopilotMonitor.Shared.Models
         [JsonPropertyName("rowKey")]
         public string RowKey { get; set; } = default!;
 
+        /// <summary>
+        /// Reducer <c>StepIndex</c> of the <c>DecisionTransition</c> whose
+        /// <c>EmitEventTimelineEntry</c> effect produced this event. Nullable for
+        /// forward-compat (events that pre-date Codex follow-up #3 or that are emitted
+        /// outside the reducer pipeline). Together with <see cref="CausedBySignalOrdinal"/>
+        /// this replaces the always-empty <c>DecisionTransition.EmittedEventSequences</c>
+        /// — the forward link lives on the event side because the event's <c>Sequence</c>
+        /// is assigned after the journal record is already on disk.
+        /// </summary>
+        public long? CausedByTransitionStepIndex { get; set; }
+
+        /// <summary>
+        /// <c>SessionSignalOrdinal</c> of the signal that drove the transition which emitted
+        /// this event. Nullable for the same reason as
+        /// <see cref="CausedByTransitionStepIndex"/>. Lets the Inspector jump
+        /// "event → causing signal" without joining through the transitions table.
+        /// </summary>
+        public long? CausedBySignalOrdinal { get; set; }
+
         public EnrollmentEvent()
         {
             EventId = Guid.NewGuid().ToString();

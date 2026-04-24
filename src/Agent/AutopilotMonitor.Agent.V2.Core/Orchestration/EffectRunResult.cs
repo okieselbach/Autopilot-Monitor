@@ -9,7 +9,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
     /// <para>
     /// Der Orchestrator (M4.4) liest:
     /// <list type="bullet">
-    ///   <item><see cref="SessionMustAbort"/> → emittiert <c>enrollment_failed(reason=&lt;AbortReason&gt;)</c></item>
+    ///   <item><see cref="SessionMustAbort"/> → ist rein Observability. Codex follow-up #2:
+    ///         beim Setzen dieses Flags hat der EffectRunner bereits ein synthetisches
+    ///         <c>EffectInfrastructureFailure</c>-Signal an den Ingress gestellt; der Reducer
+    ///         terminiert die Session auf dem nächsten Step (Stage=Failed, Outcome=EnrollmentFailed,
+    ///         <c>enrollment_failed</c>-Timeline-Event). Der Caller muss nur loggen.</item>
     ///   <item><see cref="Failures"/> → schreibt pro Fehler eine <c>effect_failure</c>-Transition ins Journal</item>
     ///   <item><see cref="ClassifierInvocations"/> / <see cref="ClassifierSkippedByAntiLoop"/> → Observability</item>
     /// </list>

@@ -487,6 +487,14 @@ namespace AutopilotMonitor.Functions.Services
                 if (evt.OriginalTimestamp.HasValue)
                     entity["OriginalTimestamp"] = EnsureUtc(evt.OriginalTimestamp.Value);
 
+                // Codex follow-up #3: forward-link columns. Null when absent on the agent
+                // payload (pre-#3 events, or events emitted outside the reducer pipeline);
+                // skip the entity setter in that case so the column stays unset.
+                if (evt.CausedByTransitionStepIndex.HasValue)
+                    entity["CausedByTransitionStepIndex"] = evt.CausedByTransitionStepIndex.Value;
+                if (evt.CausedBySignalOrdinal.HasValue)
+                    entity["CausedBySignalOrdinal"] = evt.CausedBySignalOrdinal.Value;
+
                 await tableClient.UpsertEntityAsync(entity);
                 _logger.LogDebug($"Stored event {evt.EventId}");
 
@@ -563,6 +571,12 @@ namespace AutopilotMonitor.Functions.Services
 
                             if (evt.OriginalTimestamp.HasValue)
                                 entity["OriginalTimestamp"] = EnsureUtc(evt.OriginalTimestamp.Value);
+
+                            // Codex follow-up #3: forward-link columns (see StoreEventAsync).
+                            if (evt.CausedByTransitionStepIndex.HasValue)
+                                entity["CausedByTransitionStepIndex"] = evt.CausedByTransitionStepIndex.Value;
+                            if (evt.CausedBySignalOrdinal.HasValue)
+                                entity["CausedBySignalOrdinal"] = evt.CausedBySignalOrdinal.Value;
 
                             return new TableTransactionAction(TableTransactionActionType.UpsertReplace, entity);
                         }).ToList();
@@ -1739,7 +1753,10 @@ namespace AutopilotMonitor.Functions.Services
                 RowKey = entity.RowKey,
                 ReceivedAt = entity.GetDateTimeOffset("ReceivedAt")?.UtcDateTime,
                 OriginalTimestamp = entity.GetDateTimeOffset("OriginalTimestamp")?.UtcDateTime,
-                TimestampClamped = entity.GetBoolean("TimestampClamped") ?? false
+                TimestampClamped = entity.GetBoolean("TimestampClamped") ?? false,
+                // Codex follow-up #3 — forward-link columns (nullable for legacy rows).
+                CausedByTransitionStepIndex = entity.GetInt64("CausedByTransitionStepIndex"),
+                CausedBySignalOrdinal = entity.GetInt64("CausedBySignalOrdinal"),
             };
         }
 

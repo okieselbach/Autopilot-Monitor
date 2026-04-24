@@ -38,6 +38,14 @@ namespace AutopilotMonitor.DecisionCore.Signals
         DeadlineFired,
         ClassifierVerdictIssued,
 
+        // Codex follow-up #2 — posted by EffectRunner when a critical effect
+        // (ScheduleDeadline / CancelDeadline) fails so the orchestrator's timer
+        // infrastructure cannot enforce a just-decided safety-net deadline.
+        // Carries payload { "reason": "<abortReason>", "failingEffect": "<EffectKind>" }.
+        // The reducer's HandleEffectInfrastructureFailureV1 transitions the session
+        // to Failed with SessionOutcome.EnrollmentFailed and emits enrollment_failed.
+        EffectInfrastructureFailure,
+
         // --- Lifecycle ---
         SessionStarted,
         SessionAborted,

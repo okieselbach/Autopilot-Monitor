@@ -494,5 +494,51 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
             var data = (JObject)parsed["Data"]!;
             Assert.Equal("v-123", (string?)data["verdictId"]);
         }
+
+        // ============================================================ Codex #3 forward-link
+
+        [Fact]
+        public void Emit_populates_CausedByTransitionStepIndex_from_currentState_StepIndex()
+        {
+            // Codex follow-up #3: every EmitEventTimelineEntry runs as part of a reducer
+            // step; the event carries the StepIndex forward so Inspector queries can locate
+            // all events emitted by a specific transition without needing the journal-side
+            // EmittedEventSequences (which stays empty because event Sequences are assigned
+            // after the journal record is on disk).
+            using var r = new Rig();
+            var state = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStepIndex(7)
+                .WithLastAppliedSignalOrdinal(12)
+                .Build();
+
+            r.Sut.Emit(
+                new Dictionary<string, string> { ["eventType"] = "enrollment_complete" },
+                state,
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal(7L, (long?)parsed["CausedByTransitionStepIndex"]);
+            Assert.Equal(12L, (long?)parsed["CausedBySignalOrdinal"]);
+        }
+
+        [Fact]
+        public void Emit_CausedBySignalOrdinal_is_null_when_state_has_no_applied_signal_yet()
+        {
+            // Fresh CreateInitial state has LastAppliedSignalOrdinal=-1 (sentinel for "no
+            // signal applied yet"). The forward-link is then written as null rather than -1
+            // so the nullable column stays absent instead of carrying a meaningless value.
+            using var r = new Rig();
+            var state = DecisionState.CreateInitial("S1", "T1"); // LastAppliedSignalOrdinal == -1
+
+            r.Sut.Emit(
+                new Dictionary<string, string> { ["eventType"] = "agent_started" },
+                state,
+                At);
+
+            var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
+            Assert.Equal(0L, (long?)parsed["CausedByTransitionStepIndex"]); // initial state's StepIndex is 0, still captured
+            Assert.Null((long?)parsed["CausedBySignalOrdinal"]);
+        }
     }
 }

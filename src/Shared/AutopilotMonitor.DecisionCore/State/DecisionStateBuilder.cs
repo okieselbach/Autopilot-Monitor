@@ -49,6 +49,7 @@ namespace AutopilotMonitor.DecisionCore.State
             Deadlines = new List<ActiveDeadline>(source.Deadlines);
             LastAppliedSignalOrdinal = source.LastAppliedSignalOrdinal;
             StepIndex = source.StepIndex;
+            AppInstallFacts = source.AppInstallFacts;
             SchemaVersion = source.SchemaVersion;
         }
 
@@ -82,6 +83,7 @@ namespace AutopilotMonitor.DecisionCore.State
         public List<ActiveDeadline> Deadlines { get; set; }
         public long LastAppliedSignalOrdinal { get; set; }
         public int StepIndex { get; set; }
+        public AppInstallFacts AppInstallFacts { get; set; } = AppInstallFacts.Empty;
         public string SchemaVersion { get; set; }
 
         // ---------- fluent helpers for the most common reducer operations ----------
@@ -125,6 +127,12 @@ namespace AutopilotMonitor.DecisionCore.State
 
         public DecisionStateBuilder ClearDeadlines() { Deadlines.Clear(); return this; }
 
+        public DecisionStateBuilder WithAppInstallFacts(AppInstallFacts facts)
+        {
+            AppInstallFacts = facts ?? throw new ArgumentNullException(nameof(facts));
+            return this;
+        }
+
         public DecisionState Build() =>
             new DecisionState(
                 sessionId: SessionId,
@@ -157,6 +165,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 deadlines: Deadlines.ToArray(),
                 lastAppliedSignalOrdinal: LastAppliedSignalOrdinal,
                 stepIndex: StepIndex,
+                appInstallFacts: AppInstallFacts,
                 schemaVersion: SchemaVersion);
     }
 }

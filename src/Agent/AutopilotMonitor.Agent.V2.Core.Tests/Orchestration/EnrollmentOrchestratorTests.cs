@@ -335,6 +335,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var field = typeof(EnrollmentOrchestrator).GetField(
                 "_scheduler",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            // Field is now typed IDeadlineScheduler (post-#50 #E testability hook); this
+            // helper still only runs in the tests that drive the real scheduler (past-due
+            // fire etc.), so the cast back to the concrete type is safe.
             return (DeadlineScheduler)field!.GetValue(sut)!;
         }
     }

@@ -196,8 +196,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         // ========================================================================= EffectRunner behavior
 
         [Fact]
-        public void ApplyStep_effect_runner_SessionMustAbort_is_logged_but_step_committed()
+        public void ApplyStep_effect_runner_SessionMustAbort_skips_snapshot_and_returns_result()
         {
+            // Codex follow-up (post-#50 #B): when the effects signal SessionMustAbort,
+            // the processor MUST NOT snapshot the phantom state — a crash-and-recovery from
+            // that snapshot would re-arm the same failed deadline and hang the session.
+            // The caller (SignalIngress) sees the abort flag on the returned result and
+            // durably synthesises a terminal EffectInfrastructureFailure signal inline.
             using var rig = new Rig();
             var abortResult = new EffectRunResult(
                 sessionMustAbort: true,
@@ -210,11 +215,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var sut = rig.Build();
             var (step, signal) = rig.ReduceSessionStarted();
 
-            sut.ApplyStep(step, signal);   // state still advances
+            var result = sut.ApplyStep(step, signal);
 
             Assert.Single(rig.Journal.Appended);
-            Assert.Same(step.NewState, sut.CurrentState);
-            Assert.Empty(rig.Quarantine.Reasons);   // effect-failures do NOT quarantine
+            Assert.Same(step.NewState, sut.CurrentState);   // state forwards so the synthetic signal reduces from here
+            Assert.Equal(0, rig.Snapshot.SaveCallCount);     // phantom snapshot suppressed
+            Assert.True(result.SessionMustAbort);
+            Assert.Equal(abortResult.AbortReason, result.AbortReason);
+            Assert.Empty(rig.Quarantine.Reasons);
         }
 
         [Fact]

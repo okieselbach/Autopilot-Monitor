@@ -41,5 +41,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
         /// verwendet.
         /// </summary>
         long LastTraceOrdinal { get; }
+
+        /// <summary>
+        /// Drop all transitions with <c>StepIndex &gt; <paramref name="lastValidStepIndex"/></c>.
+        /// Codex follow-up #1 / plan §5.1 — required after <c>ReducerReplay.Replay</c> when the
+        /// journal tail is ahead of the replayed state (snapshot stale + partial-write
+        /// scenarios leave phantom transitions on disk that would otherwise trigger monotonicity
+        /// violations on the next live append).
+        /// <para>
+        /// Behaviour:
+        /// <list type="bullet">
+        ///   <item>No-op when the journal is empty or already &lt;= the boundary.</item>
+        ///   <item>Dropped suffix lines are moved to <c>.quarantine/&lt;ts&gt;/journal-phantom-tail.jsonl</c>
+        ///         as a forensic trail.</item>
+        ///   <item>Throws when <paramref name="lastValidStepIndex"/> is &gt; <see cref="LastStepIndex"/>
+        ///         (can only truncate backwards) or &lt; -1.</item>
+        ///   <item>After return, <see cref="LastStepIndex"/> and <see cref="LastTraceOrdinal"/>
+        ///         reflect the truncated file.</item>
+        /// </list>
+        /// </para>
+        /// </summary>
+        void TruncateAfter(int lastValidStepIndex);
     }
 }
