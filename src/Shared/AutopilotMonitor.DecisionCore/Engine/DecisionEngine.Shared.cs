@@ -160,6 +160,73 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         /// <summary>
+        /// Handle <see cref="DecisionSignalKind.AppInstallCompleted"/>. Codex follow-up #4 —
+        /// observation-only: advance bookkeeping, roll the terminal outcome into
+        /// <see cref="DecisionState.AppInstallFacts"/>, record a taken transition. Does NOT
+        /// affect <see cref="SessionStage"/> or <see cref="SessionOutcome"/>; downstream
+        /// consumers (Inspector UI, future classifiers) read the aggregate directly.
+        /// <para>
+        /// Payload contract (from <c>ImeLogTrackerAdapter</c>): <c>appId</c>, <c>newState</c>
+        /// ∈ {<c>Installed</c>, <c>Skipped</c>, <c>Postponed</c>}. Unknown <c>newState</c>
+        /// values still count toward <see cref="AppInstallFacts.CompletedCount"/> but do not
+        /// update any breakdown counter.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleAppInstallCompletedV1(DecisionState state, DecisionSignal signal)
+        {
+            var newStatePayload = signal.Payload != null && signal.Payload.TryGetValue("newState", out var v)
+                ? v
+                : null;
+            var updatedFacts = state.AppInstallFacts.WithCompleted(newStatePayload);
+
+            var nextStep = state.StepIndex + 1;
+            var newState = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .WithAppInstallFacts(updatedFacts)
+                .Build();
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.AppInstallCompleted));
+
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
+
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.AppInstallFailed"/>. Codex follow-up #4 —
+        /// observation-only: advance bookkeeping, roll the failure into
+        /// <see cref="AppInstallFacts"/> (increments counter, appends <c>appId</c> up to
+        /// <see cref="AppInstallFacts.MaxFailedAppIds"/>), record a taken transition.
+        /// </summary>
+        private DecisionStep HandleAppInstallFailedV1(DecisionState state, DecisionSignal signal)
+        {
+            var appId = signal.Payload != null && signal.Payload.TryGetValue("appId", out var v)
+                ? v
+                : null;
+            var updatedFacts = state.AppInstallFacts.WithFailed(appId);
+
+            var nextStep = state.StepIndex + 1;
+            var newState = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .WithAppInstallFacts(updatedFacts)
+                .Build();
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.AppInstallFailed));
+
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
+
+        /// <summary>
         /// Handle <see cref="DecisionSignalKind.SessionAborted"/>.
         /// <para>
         /// Emitted by the orchestrator, never by a collector. Stage transitions to

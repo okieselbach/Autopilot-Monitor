@@ -51,6 +51,7 @@ namespace AutopilotMonitor.DecisionCore.State
             IReadOnlyList<ActiveDeadline> deadlines,
             long lastAppliedSignalOrdinal,
             int stepIndex,
+            AppInstallFacts? appInstallFacts = null,
             string? schemaVersion = null)
         {
             if (string.IsNullOrEmpty(sessionId))
@@ -93,6 +94,7 @@ namespace AutopilotMonitor.DecisionCore.State
             Deadlines = deadlines ?? throw new ArgumentNullException(nameof(deadlines));
             LastAppliedSignalOrdinal = lastAppliedSignalOrdinal;
             StepIndex = stepIndex;
+            AppInstallFacts = appInstallFacts ?? AppInstallFacts.Empty;
             SchemaVersion = schemaVersion ?? CurrentSchemaVersion;
         }
 
@@ -164,6 +166,13 @@ namespace AutopilotMonitor.DecisionCore.State
 
         public int StepIndex { get; }
 
+        /// <summary>
+        /// Rolled-up terminal outcomes from <see cref="Signals.DecisionSignalKind.AppInstallCompleted"/>
+        /// and <see cref="Signals.DecisionSignalKind.AppInstallFailed"/> signals — Codex
+        /// follow-up #4. Never null; defaults to <see cref="State.AppInstallFacts.Empty"/>.
+        /// </summary>
+        public AppInstallFacts AppInstallFacts { get; }
+
         public string SchemaVersion { get; }
 
         /// <summary>
@@ -208,6 +217,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 skipDeviceEsp: null,
                 deadlines: Array.Empty<ActiveDeadline>(),
                 lastAppliedSignalOrdinal: -1,
-                stepIndex: 0);
+                stepIndex: 0,
+                appInstallFacts: AppInstallFacts.Empty);
     }
 }

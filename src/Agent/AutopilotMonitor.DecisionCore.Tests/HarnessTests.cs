@@ -84,20 +84,22 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
-        public void Replay_unknownSignalKind_recordsDeadEnd_stateUnchanged()
+        public void Replay_unknownSchemaVersion_recordsDeadEnd_stateUnchanged()
         {
-            // An unhandled signal advances bookkeeping but leaves stage/outcome alone
-            // and records a DeadEndReason — plan §2.5 fail-safe shape for non-handlers.
-            // AppInstallCompleted is scheduled for v11.1; still unhandled in M3.3.
+            // Codex follow-up #4 wired AppInstallCompleted / AppInstallFailed, so every
+            // DecisionSignalKind now has at least one handler. The dead-end path remains
+            // reachable through an unknown schema version — the forward-compat surface the
+            // reducer guards per plan §2.5. A v2 SessionStarted arriving at a v1-aware
+            // backend is treated as an unhandled kind dispatch.
             var harness = new ReplayHarness(new DecisionEngine());
             var signal = new DecisionSignal(
                 sessionSignalOrdinal: 0,
                 sessionTraceOrdinal: 0,
-                kind: DecisionSignalKind.AppInstallCompleted,
-                kindSchemaVersion: 1,
+                kind: DecisionSignalKind.SessionStarted,
+                kindSchemaVersion: 99,
                 occurredAtUtc: DateTime.UtcNow,
                 sourceOrigin: "harness",
-                evidence: new Evidence(EvidenceKind.Raw, "App:test", "test"));
+                evidence: new Evidence(EvidenceKind.Raw, "session:future", "test"));
 
             var result = harness.Replay("s", "t", new List<DecisionSignal> { signal });
 

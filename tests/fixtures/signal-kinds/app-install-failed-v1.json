@@ -1,0 +1,5 @@
+# AppInstallFailed v1 — Codex follow-up #4.
+# Posted by ImeLogTrackerAdapter once per app on terminal Error state.
+# Reducer: HandleAppInstallFailedV1 → bookkeeping advance + AppInstallFacts.FailedCount++
+# + FailedAppIds.Add(appId) (dedup, capped at MaxFailedAppIds). No Stage/Outcome change.
+{"SessionSignalOrdinal":2,"SessionTraceOrdinal":2,"Kind":"AppInstallFailed","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-24T10:01:00.0000000Z","SourceOrigin":"IME","Evidence":{"Kind":"Derived","Identifier":"ime-log-tracker-v1","Summary":"App app-guid-002 → Error","DerivationInputs":{"appId":"app-guid-002","appName":"Broken Tool","previousState":"Installing","newState":"Error"}},"Payload":{"appId":"app-guid-002","newState":"Error"}}

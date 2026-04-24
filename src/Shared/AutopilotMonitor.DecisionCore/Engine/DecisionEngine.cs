@@ -98,7 +98,11 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 // ----- Informational pass-through (DecisionEngine.Shared.cs) — single-rail §1.3 -----
                 (DecisionSignalKind.InformationalEvent, 1)                 => HandleInformationalEventV1(state, signal),
 
-                // ----- Still unwired (AppInstall — v11.1+) -----
+                // ----- App-install observations (DecisionEngine.Shared.cs) — Codex follow-up #4 -----
+                (DecisionSignalKind.AppInstallCompleted, 1)                => HandleAppInstallCompletedV1(state, signal),
+                (DecisionSignalKind.AppInstallFailed, 1)                   => HandleAppInstallFailedV1(state, signal),
+
+                // ----- Fall-through: unknown (kind, schemaVersion) pair → dead-end journal entry -----
                 _ => HandleUnhandledSignal(state, signal),
             };
         }

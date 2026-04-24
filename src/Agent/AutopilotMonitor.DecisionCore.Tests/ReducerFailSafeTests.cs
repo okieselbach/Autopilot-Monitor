@@ -55,18 +55,20 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
-        public void Reduce_unhandledKind_producesDeadEnd_withVersionedReason()
+        public void Reduce_unhandledSchemaVersion_producesDeadEnd_withVersionedReason()
         {
-            // Pick a kind that no sub-milestone has wired yet. AppInstallCompleted is
-            // scheduled for v11.1 app-install observability; update this test when wired.
+            // After Codex follow-up #4 every DecisionSignalKind has at least one handler,
+            // so the dead-end path is now only reachable through an unknown schema version
+            // on a known kind. This is the realistic forward-compat failure mode: the
+            // backend sees a v2 signal it doesn't know how to interpret yet.
             var engine = new DecisionEngine();
             var state = DecisionState.CreateInitial("s", "t");
-            var signal = MakeSignal(DecisionSignalKind.AppInstallCompleted, schemaVersion: 1);
+            var signal = MakeSignal(DecisionSignalKind.SessionStarted, schemaVersion: 99);
 
             var step = engine.Reduce(state, signal);
 
             Assert.False(step.Transition.Taken);
-            Assert.Equal("unhandled_signal_kind:AppInstallCompleted:v1", step.Transition.DeadEndReason);
+            Assert.Equal("unhandled_signal_kind:SessionStarted:v99", step.Transition.DeadEndReason);
             Assert.Equal(SessionStage.SessionStarted, step.NewState.Stage);
             Assert.Equal(1, step.NewState.StepIndex);
         }

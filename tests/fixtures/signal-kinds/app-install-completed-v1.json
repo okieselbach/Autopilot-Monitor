@@ -1,0 +1,6 @@
+# AppInstallCompleted v1 — Codex follow-up #4.
+# Posted by ImeLogTrackerAdapter once per app on terminal Installed/Skipped/Postponed.
+# Reducer: HandleAppInstallCompletedV1 → bookkeeping advance + AppInstallFacts update
+# (CompletedCount++, and Installed/Skipped/Postponed breakdown when newState matches).
+# No Stage/Outcome change.
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"AppInstallCompleted","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-24T10:00:00.0000000Z","SourceOrigin":"IME","Evidence":{"Kind":"Derived","Identifier":"ime-log-tracker-v1","Summary":"App app-guid-001 → Installed","DerivationInputs":{"appId":"app-guid-001","appName":"Company Portal","previousState":"Installing","newState":"Installed"}},"Payload":{"appId":"app-guid-001","newState":"Installed"}}
