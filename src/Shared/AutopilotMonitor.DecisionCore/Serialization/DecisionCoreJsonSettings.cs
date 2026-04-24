@@ -51,6 +51,15 @@ namespace AutopilotMonitor.DecisionCore.Serialization
             settings.Converters.Add(new UnknownFallbackEnumConverter<DecisionEffectKind>(DecisionEffectKind.PersistSnapshot));
             settings.Converters.Add(new UnknownFallbackEnumConverter<EnrollmentPhase>(EnrollmentPhase.Unknown));
 
+            // Codex follow-up #5 (post-#51) — EnrollmentScenarioProfile dimensions. Without
+            // these registrations the new enums would round-trip as numeric JSON with no
+            // unknown-value fallback, breaking drift-tolerated cross-version reads.
+            settings.Converters.Add(new UnknownFallbackEnumConverter<EnrollmentMode>(EnrollmentMode.Unknown));
+            settings.Converters.Add(new UnknownFallbackEnumConverter<EnrollmentJoinMode>(EnrollmentJoinMode.Unknown));
+            settings.Converters.Add(new UnknownFallbackEnumConverter<EspConfig>(EspConfig.Unknown));
+            settings.Converters.Add(new UnknownFallbackEnumConverter<PreProvisioningSide>(PreProvisioningSide.None));
+            settings.Converters.Add(new UnknownFallbackEnumConverter<ProfileConfidence>(ProfileConfidence.Low));
+
             return settings;
         }
     }

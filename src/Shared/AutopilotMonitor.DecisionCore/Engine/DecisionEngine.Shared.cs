@@ -591,10 +591,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// on Classic V1 paths. Returns <c>true</c> only when the promotion is legitimate:
         /// <list type="bullet">
         ///   <item>AccountSetup has already been entered (the post-Account-ESP final exit case), or</item>
-        ///   <item>The profile's <see cref="EnrollmentScenarioProfile.EspConfig"/> resolves to
-        ///         a shape where Account-ESP never runs (<see cref="EspConfig.DeviceEspOnly"/>
-        ///         = skipUser=true, or <see cref="EspConfig.NoEsp"/> = skipUser=true AND
-        ///         skipDevice=true). In those shapes the first esp_exiting IS the final exit.</item>
+        ///   <item><see cref="EnrollmentScenarioObservations.SkipUserEsp"/> is observed as
+        ///         <c>true</c> (Account-ESP phase is skipped; first esp_exiting IS the final
+        ///         exit on device-only / full-skip flows).</item>
         /// </list>
         /// Otherwise returns <c>false</c> — a FinalizingSetup / EspExiting signal arriving
         /// before AccountSetup on a non-SkipUser enrollment is either a collector bug or the
@@ -602,18 +601,19 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// Keeping this helper in the reducer means even a regression in Fix 7 cannot drive a
         /// premature <c>AwaitingHello</c> + HelloSafety arm.
         /// <para>
-        /// Codex follow-up #5: the legacy <c>SkipUserEsp?.Value == true</c> check now reads
-        /// <see cref="DecisionState.ScenarioProfile"/> (derived enum) instead of the
-        /// half-fact. Semantically equivalent: DeviceEspOnly ≡ skipUser=true && skipDevice=false,
-        /// NoEsp ≡ skipUser=true && skipDevice=true. An <see cref="EspConfig.Unknown"/> profile
-        /// (EspConfigDetected not yet seen, or only one half parsed) blocks the promotion.
+        /// Codex follow-up #5 + post-#51 fix: the legacy <c>state.SkipUserEsp?.Value == true</c>
+        /// check now reads <see cref="DecisionState.ScenarioObservations"/>.<see cref="EnrollmentScenarioObservations.SkipUserEsp"/>
+        /// directly — NOT the derived <see cref="EnrollmentScenarioProfile.EspConfig"/> enum.
+        /// The derived enum requires BOTH halves (skipUser + skipDevice) to be observed before
+        /// it leaves <see cref="EspConfig.Unknown"/>, so a partial bootstrap payload carrying
+        /// only <c>skipUser=true</c> would block the promotion indefinitely under the previous
+        /// pass. The raw half-fact mirrors the old <c>SkipUserEsp?.Value</c> behaviour exactly.
         /// </para>
         /// </summary>
         private static bool ShouldTransitionToAwaitingHello(DecisionState state)
         {
             if (state.AccountSetupEnteredUtc != null) return true;
-            var esp = state.ScenarioProfile.EspConfig;
-            if (esp == EspConfig.DeviceEspOnly || esp == EspConfig.NoEsp) return true;
+            if (state.ScenarioObservations.SkipUserEsp?.Value == true) return true;
             return false;
         }
 

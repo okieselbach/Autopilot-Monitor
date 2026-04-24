@@ -199,6 +199,83 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
+        public void EspConfigDetectedSkipUserTrue_onlyHalfPayload_stillUnblocksAwaitingHello()
+        {
+            // Codex second-pass Hoch (post-#51) — partial-payload regression guard.
+            // EspConfigDetected arrives with ONLY skipUser=true (skipDevice missing, e.g.
+            // registry key not yet present). Under the original legacy code this was sufficient
+            // to unlock AwaitingHello because the guard read SkipUserEsp?.Value directly. The
+            // derived Profile.EspConfig enum would stay Unknown (it needs BOTH halves), so the
+            // guard must NOT be gated on EspConfig. This test pins the behaviour: one half +
+            // FinalizingSetup → AwaitingHello.
+            var engine = new DecisionEngine();
+            var seed = DecisionState.CreateInitial("s", "t")
+                .ToBuilder()
+                .WithStage(SessionStage.EspDeviceSetup)
+                .WithStepIndex(1)
+                .WithLastAppliedSignalOrdinal(0)
+                .Build();
+
+            var partial = new DecisionSignal(
+                sessionSignalOrdinal: 1,
+                sessionTraceOrdinal: 1,
+                kind: DecisionSignalKind.EspConfigDetected,
+                kindSchemaVersion: 1,
+                occurredAtUtc: Fixed,
+                sourceOrigin: "EnrollmentOrchestrator",
+                evidence: new Evidence(EvidenceKind.Raw, "esp_config_detected_bootstrap_partial", "SkipUser=true only"),
+                payload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.SkipUserEsp] = "true",
+                    // NOTE: skipDevice key intentionally missing.
+                });
+            var afterConfig = engine.Reduce(seed, partial).NewState;
+
+            // Only the raw half-fact is set; derived EspConfig enum stays Unknown.
+            Assert.True(afterConfig.ScenarioObservations.SkipUserEsp!.Value);
+            Assert.Null(afterConfig.ScenarioObservations.SkipDeviceEsp);
+            Assert.Equal(EspConfig.Unknown, afterConfig.ScenarioProfile.EspConfig);
+
+            // The guard MUST still unlock AwaitingHello — the semantic "Account-ESP is skipped"
+            // is fully known from SkipUser alone, regardless of skipDevice.
+            var finalizing = MakePhaseSignal(EnrollmentPhase.FinalizingSetup, ordinal: 2);
+            var afterFinalizing = engine.Reduce(afterConfig, finalizing);
+            Assert.Equal(SessionStage.AwaitingHello, afterFinalizing.NewState.Stage);
+        }
+
+        [Fact]
+        public void EspExiting_partialSkipUserTrue_armsHelloSafety()
+        {
+            // Symmetric with EspExiting (the path that actually arms HelloSafety) — partial
+            // bootstrap payload must not block this path either.
+            var engine = new DecisionEngine();
+            var seed = DecisionState.CreateInitial("s", "t")
+                .ToBuilder()
+                .WithStage(SessionStage.EspDeviceSetup)
+                .WithStepIndex(1)
+                .WithLastAppliedSignalOrdinal(0)
+                .Build();
+
+            var partial = new DecisionSignal(
+                sessionSignalOrdinal: 1,
+                sessionTraceOrdinal: 1,
+                kind: DecisionSignalKind.EspConfigDetected,
+                kindSchemaVersion: 1,
+                occurredAtUtc: Fixed,
+                sourceOrigin: "EnrollmentOrchestrator",
+                evidence: new Evidence(EvidenceKind.Raw, "esp_config_detected_bootstrap_partial", "SkipUser=true only"),
+                payload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.SkipUserEsp] = "true",
+                });
+            var afterConfig = engine.Reduce(seed, partial).NewState;
+            var afterExit = engine.Reduce(afterConfig, MakeExitingSignal(ordinal: 2));
+
+            Assert.Equal(SessionStage.AwaitingHello, afterExit.NewState.Stage);
+            Assert.Contains(afterExit.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
+        }
+
+        [Fact]
         public void Finalizing_beforeEspConfigDetected_staysInStage_evenIfRegistryWouldSaySkipUser()
         {
             // Regression guard for the OPPOSITE ordering: this MUST keep blocking, because the
