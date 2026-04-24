@@ -504,16 +504,14 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     _ = _slaBreachService.EvaluateSessionCompletionAsync(request.TenantId, updatedSession);
                 }
 
-                // Check if an admin has externally marked the session as terminal.
-                // Only signal the agent when this batch did NOT contain the terminal event itself
-                // (i.e., the agent didn't just report completion — the admin did it out-of-band).
-                string? adminAction = null;
-                if (updatedSession != null &&
-                    classification.CompletionEvent == null && classification.FailureEvent == null &&
-                    (updatedSession.Status == SessionStatus.Succeeded || updatedSession.Status == SessionStatus.Failed))
+                // AdminAction is the authoritative portal-button signal. Read
+                // SessionSummary.AdminMarkedAction (set exclusively by MarkSessionSucceededFunction
+                // / MarkSessionFailedFunction). The previous "status final + no completion marker
+                // in this batch" heuristic fired falsely on post-completion agent events.
+                string? adminAction = updatedSession?.AdminMarkedAction;
+                if (!string.IsNullOrEmpty(adminAction))
                 {
-                    adminAction = updatedSession.Status.ToString();
-                    _logger.LogInformation("{SessionPrefix} Admin override detected — signaling agent: AdminAction={AdminAction}",
+                    _logger.LogInformation("{SessionPrefix} Admin override detected (AdminMarkedAction) — signaling agent: AdminAction={AdminAction}",
                         sessionPrefix, adminAction);
                 }
 

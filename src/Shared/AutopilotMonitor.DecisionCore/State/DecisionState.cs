@@ -46,6 +46,8 @@ namespace AutopilotMonitor.DecisionCore.State
             SignalFact<DateTime>? helloResolvedPart2Utc,
             SignalFact<DateTime>? desktopArrivedPart2Utc,
             SignalFact<DateTime>? accountSetupCompletedPart2Utc,
+            SignalFact<bool>? skipUserEsp,
+            SignalFact<bool>? skipDeviceEsp,
             IReadOnlyList<ActiveDeadline> deadlines,
             long lastAppliedSignalOrdinal,
             int stepIndex,
@@ -86,6 +88,8 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloResolvedPart2Utc = helloResolvedPart2Utc;
             DesktopArrivedPart2Utc = desktopArrivedPart2Utc;
             AccountSetupCompletedPart2Utc = accountSetupCompletedPart2Utc;
+            SkipUserEsp = skipUserEsp;
+            SkipDeviceEsp = skipDeviceEsp;
             Deadlines = deadlines ?? throw new ArgumentNullException(nameof(deadlines));
             LastAppliedSignalOrdinal = lastAppliedSignalOrdinal;
             StepIndex = stepIndex;
@@ -147,6 +151,13 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<DateTime>? DesktopArrivedPart2Utc { get; }
         public SignalFact<DateTime>? AccountSetupCompletedPart2Utc { get; }
 
+        // --- ESP skip-flag facts from EspConfigDetected (plan §6 Fix 9). SkipUser=true means the
+        // Account-ESP phase never runs on this enrollment, so AwaitingHello is reachable directly
+        // after Device-ESP. When null the configuration has not been observed yet — guards that
+        // rely on an explicit bool must treat null as "unknown" rather than "false".
+        public SignalFact<bool>? SkipUserEsp { get; }
+        public SignalFact<bool>? SkipDeviceEsp { get; }
+
         public IReadOnlyList<ActiveDeadline> Deadlines { get; }
 
         public long LastAppliedSignalOrdinal { get; }
@@ -193,6 +204,8 @@ namespace AutopilotMonitor.DecisionCore.State
                 helloResolvedPart2Utc: null,
                 desktopArrivedPart2Utc: null,
                 accountSetupCompletedPart2Utc: null,
+                skipUserEsp: null,
+                skipDeviceEsp: null,
                 deadlines: Array.Empty<ActiveDeadline>(),
                 lastAppliedSignalOrdinal: -1,
                 stepIndex: 0);

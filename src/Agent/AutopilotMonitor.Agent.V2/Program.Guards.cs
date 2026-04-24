@@ -184,47 +184,27 @@ namespace AutopilotMonitor.Agent.V2
         // ----------------------------------------------------------------- Marker checks
 
         /// <summary>
-        /// <c>true</c> when an <c>enrollment-complete.marker</c> or the <c>Deployed</c> registry
-        /// marker indicates that this device already completed enrollment. Legacy parity —
-        /// triggers a self-destruct retry and the agent exits cleanly.
+        /// <c>true</c> when the file-based <c>enrollment-complete.marker</c> signals that a
+        /// previous session already completed enrollment — written by
+        /// <see cref="CheckSessionAgeEmergencyBreak"/> right before it fires the cleanup retry,
+        /// so that a next-boot observing the marker exits cleanly even if the cleanup retry
+        /// failed to remove the Scheduled Task. Triggers another self-destruct attempt when
+        /// <paramref name="selfDestructOnComplete"/> is set.
+        /// <para>
+        /// The <c>HKLM\SOFTWARE\AutopilotMonitor\Deployed</c> registry value is NOT consulted
+        /// here: it is a bootstrap-script reentry lock (read by Install-AutopilotMonitor-v2.ps1
+        /// Guard 1), set by <c>--install</c> and intentionally preserved across cleanup. It
+        /// therefore cannot distinguish a fresh install from a ghost restart and is unsuitable
+        /// as an agent-side ghost-restart signal.
+        /// </para>
         /// </summary>
         internal static bool CheckEnrollmentCompleteMarker(
-            string dataDirectory,
             string stateDirectory,
             bool selfDestructOnComplete,
             Func<CleanupService> cleanupServiceFactory,
             AgentLogger logger,
             bool consoleMode)
         {
-            // Registry guard: "Deployed" key set by --install but no active session → ghost restart.
-            try
-            {
-                using (var regKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(DeploymentRegistryKey))
-                {
-                    var deployed = regKey?.GetValue(DeploymentRegistryValue) as string;
-                    if (!string.IsNullOrEmpty(deployed))
-                    {
-                        var persistence = new SessionIdPersistence(dataDirectory);
-                        if (!persistence.SessionExists())
-                        {
-                            logger.Info($"Ghost restart detected (Deployed={deployed}, no active session).");
-                            if (selfDestructOnComplete)
-                            {
-                                TryRetryCleanup(cleanupServiceFactory, logger, "ghost_restart");
-                            }
-                            if (consoleMode)
-                                Console.Out.WriteLine("Agent was previously deployed but no active session. Exiting.");
-                            return true;
-                        }
-                        logger.Info($"Deployment marker present ({deployed}) with active session — continuing normally.");
-                    }
-                }
-            }
-            catch (Exception regEx)
-            {
-                logger.Warning($"Registry deployment marker check failed: {regEx.Message}");
-            }
-
             // File-based enrollment-complete marker.
             var markerPath = Path.Combine(stateDirectory, EnrollmentCompleteMarkerFileName);
             if (!File.Exists(markerPath)) return false;

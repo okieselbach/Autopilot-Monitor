@@ -8,7 +8,10 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Security;
+using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 
@@ -503,76 +506,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
         }
 
         /// <summary>
-        /// Reads ESP skip configuration from the enrollment FirstSync registry key.
-        /// CSP SkipUserStatusPage/SkipDeviceStatusPage are written as DWORD:
-        /// 0xFFFFFFFF = skip (ESP page not shown), 0 = show, key missing = unknown.
-        /// We use defensive interpretation: non-null AND non-zero = skip.
+        /// Reads ESP skip configuration from the enrollment FirstSync registry key via the
+        /// shared <see cref="EspSkipConfigurationProbe"/> (also used by
+        /// <see cref="Monitoring.Enrollment.SystemSignals.EspAndHelloTracker"/> so the tracker's
+        /// SkipUser guard and the reducer's <c>SkipUserEsp</c> fact stay in lockstep, plan §6 Fix 7/9).
         /// </summary>
         private (bool? skipUserStatusPage, bool? skipDeviceStatusPage) CollectEspConfiguration()
         {
             bool? skipUser = null;
             bool? skipDevice = null;
-            string enrollmentGuid = null;
 
             try
             {
-                const string enrollmentsKeyPath = @"SOFTWARE\Microsoft\Enrollments";
-
-                using (var enrollmentsKey = Registry.LocalMachine.OpenSubKey(enrollmentsKeyPath))
-                {
-                    if (enrollmentsKey == null)
-                    {
-                        _logger.Debug("EnrollmentTracker: Enrollments registry key not found — ESP config unknown");
-                        return (null, null);
-                    }
-
-                    // Find the MDM enrollment entry (EnrollmentType == 6)
-                    foreach (var guid in enrollmentsKey.GetSubKeyNames())
-                    {
-                        using (var enrollmentKey = enrollmentsKey.OpenSubKey(guid))
-                        {
-                            if (enrollmentKey == null) continue;
-
-                            var enrollmentType = enrollmentKey.GetValue("EnrollmentType");
-                            if (enrollmentType == null || Convert.ToInt32(enrollmentType) != 6)
-                                continue;
-
-                            enrollmentGuid = guid;
-
-                            // Read FirstSync subkey
-                            using (var firstSyncKey = enrollmentKey.OpenSubKey("FirstSync"))
-                            {
-                                if (firstSyncKey == null)
-                                {
-                                    _logger.Debug($"EnrollmentTracker: FirstSync subkey not found for enrollment {guid}");
-                                    break;
-                                }
-
-                                var rawSkipUser = firstSyncKey.GetValue("SkipUserStatusPage");
-                                if (rawSkipUser != null)
-                                    skipUser = Convert.ToInt32(rawSkipUser) != 0;
-
-                                var rawSkipDevice = firstSyncKey.GetValue("SkipDeviceStatusPage");
-                                if (rawSkipDevice != null)
-                                    skipDevice = Convert.ToInt32(rawSkipDevice) != 0;
-                            }
-
-                            break; // Found the MDM enrollment entry
-                        }
-                    }
-                }
+                (skipUser, skipDevice) = EspSkipConfigurationProbe.Read(_logger);
 
                 var data = new Dictionary<string, object>
                 {
                     { "source", "registry_firstsync" }
                 };
-                if (enrollmentGuid != null) data["enrollmentGuid"] = enrollmentGuid;
                 if (skipUser.HasValue) data["skipUserStatusPage"] = skipUser.Value;
                 if (skipDevice.HasValue) data["skipDeviceStatusPage"] = skipDevice.Value;
 
                 var summary = $"SkipUser={skipUser?.ToString() ?? "unknown"}, SkipDevice={skipDevice?.ToString() ?? "unknown"}";
                 _logger.Info($"EnrollmentTracker: ESP configuration detected — {summary}");
                 EmitDeviceInfoEvent("esp_config_detected", $"ESP configuration: {summary}", data);
+                PostEspConfigDetectedSignal(skipUser, skipDevice);
             }
             catch (Exception ex)
             {
@@ -762,6 +720,49 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
                 Message = message,
                 Data = data
             });
+        }
+
+        /// <summary>
+        /// Plan §6 Fix 9 — post an <see cref="DecisionSignalKind.EspConfigDetected"/> decision
+        /// signal alongside the user-facing <c>esp_config_detected</c> event so the reducer's
+        /// <see cref="AutopilotMonitor.DecisionCore.State.DecisionState.SkipUserEsp"/> /
+        /// <see cref="AutopilotMonitor.DecisionCore.State.DecisionState.SkipDeviceEsp"/> facts get
+        /// populated. Fix 8's reducer guards then block premature <c>AwaitingHello</c> transitions
+        /// on Classic (SkipUser=false) enrollments.
+        /// <para>
+        /// Deduplication lives in the reducer: <c>HandleEspConfigDetectedV1</c> uses per-fact
+        /// set-once semantics, so repeat posts (e.g. <see cref="CollectAtEnrollmentStart"/> once
+        /// wired, or a retry after FirstSync populates late) are safe and can fill in any fact
+        /// that was still <c>null</c>. The collector deliberately does not carry its own
+        /// fire-once flag — that would defeat the reducer's late-fill path.
+        /// </para>
+        /// </summary>
+        private void PostEspConfigDetectedSignal(bool? skipUser, bool? skipDevice)
+        {
+            if (_signalIngress == null || _clock == null) return;
+            if (skipUser == null && skipDevice == null) return;
+
+            var payload = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (skipUser.HasValue)
+                payload[SignalPayloadKeys.SkipUserEsp] = skipUser.Value ? "true" : "false";
+            if (skipDevice.HasValue)
+                payload[SignalPayloadKeys.SkipDeviceEsp] = skipDevice.Value ? "true" : "false";
+
+            var derivationInputs = new Dictionary<string, string>(payload, StringComparer.Ordinal)
+            {
+                ["source"] = "registry_firstsync",
+            };
+
+            _signalIngress.Post(
+                kind: DecisionSignalKind.EspConfigDetected,
+                occurredAtUtc: _clock.UtcNow,
+                sourceOrigin: "DeviceInfoCollector",
+                evidence: new Evidence(
+                    kind: EvidenceKind.Raw,
+                    identifier: "esp_config_detected",
+                    summary: $"SkipUser={skipUser?.ToString() ?? "unknown"}, SkipDevice={skipDevice?.ToString() ?? "unknown"}",
+                    derivationInputs: derivationInputs),
+                payload: payload);
         }
 
         private static string TryFormatJson(string input)

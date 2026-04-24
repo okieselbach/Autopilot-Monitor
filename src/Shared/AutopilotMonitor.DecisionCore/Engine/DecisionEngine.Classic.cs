@@ -12,6 +12,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
         // Post-ESP Hello-safety grace period per plan §2.7.
         private static readonly TimeSpan s_helloSafetyWindow = TimeSpan.FromSeconds(300);
 
+        // Grace window between both-prerequisites-resolved and Completed. Plan §5 Fix 6.
+        // Short enough that the user doesn't notice; long enough for the reducer's
+        // phase_transition(FinalizingSetup) + enrollment_complete effects to reach the
+        // backend before IsTerminal() fires and EnrollmentTerminationHandler drains the spool.
+        private static readonly TimeSpan s_finalizingGraceWindow = TimeSpan.FromSeconds(5);
+
         /// <summary>
         /// Handle <see cref="DecisionSignalKind.EspPhaseChanged"/>. Drives the
         /// <see cref="SessionStage.EspDeviceSetup"/> → <see cref="SessionStage.EspAccountSetup"/>
@@ -29,7 +35,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
             {
                 EnrollmentPhase.DeviceSetup => SessionStage.EspDeviceSetup,
                 EnrollmentPhase.AccountSetup => SessionStage.EspAccountSetup,
-                EnrollmentPhase.FinalizingSetup => SessionStage.AwaitingHello,
+                // Plan §6 Fix 8 — Finalizing is a synthetic phase derived from the Shell-Core
+                // esp_exiting event; on Classic V1 enrollments the first exit is the Device-ESP
+                // handoff, not the true final. Only promote to AwaitingHello when reaching it is
+                // legitimate (AccountSetup already observed, OR SkipUser flow). Otherwise keep
+                // the current stage — the signal is still recorded as a taken transition with
+                // the FinalizingEnteredUtc fact + CurrentEnrollmentPhase updated below, but the
+                // HelloSafety deadline is NOT armed.
+                EnrollmentPhase.FinalizingSetup => ShouldTransitionToAwaitingHello(state)
+                    ? SessionStage.AwaitingHello
+                    : state.Stage,
                 _ => state.Stage,
             };
 
@@ -84,6 +99,19 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 effectsList.Add(new DecisionEffect(
                     DecisionEffectKind.CancelDeadline,
                     cancelDeadlineName: DeadlineNames.DeviceOnlyEspDetection));
+
+                // Plan §6 Fix 10 — defensive belt-and-suspenders for the premature-AwaitingHello
+                // bounce-back case. If Fix 7's tracker guard or Fix 8's reducer guards ever fail
+                // and the stage reached AwaitingHello before AccountSetup (i.e. an early Finalizing
+                // synthesis armed HelloSafety from the wrong baseline), cancel the deadline here
+                // so it cannot fire from the wrong window after we resume EspAccountSetup.
+                if (state.Stage == SessionStage.AwaitingHello)
+                {
+                    builder.CancelDeadline(DeadlineNames.HelloSafety);
+                    effectsList.Add(new DecisionEffect(
+                        DecisionEffectKind.CancelDeadline,
+                        cancelDeadlineName: DeadlineNames.HelloSafety));
+                }
             }
 
             var newState = builder.Build();
@@ -100,15 +128,36 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>
         /// Handle <see cref="DecisionSignalKind.EspExiting"/>. Records
-        /// <see cref="DecisionState.EspFinalExitUtc"/>, transitions to
-        /// <see cref="SessionStage.AwaitingHello"/>, and schedules the Hello-safety deadline
-        /// so a hang on Hello doesn't strand the session.
+        /// <see cref="DecisionState.EspFinalExitUtc"/> for observability; transitions to
+        /// <see cref="SessionStage.AwaitingHello"/> and arms the Hello-safety deadline only
+        /// when <see cref="ShouldTransitionToAwaitingHello"/> holds (plan §6 Fix 8). On an
+        /// early / intermediate exit (e.g. the Device-ESP handoff on a Classic V1 enrollment)
+        /// the fact is still recorded but the stage is unchanged and no deadline is armed.
         /// </summary>
         private DecisionStep HandleEspExitingV1(DecisionState state, DecisionSignal signal)
         {
             var nextStep = state.StepIndex + 1;
-            var dueAtUtc = signal.OccurredAtUtc.Add(s_helloSafetyWindow);
+            var shouldTransition = ShouldTransitionToAwaitingHello(state);
 
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+            builder.EspFinalExitUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+
+            if (!shouldTransition)
+            {
+                // Early / intermediate esp_exiting: keep stage, no HelloSafety arm. Observability
+                // still records EspFinalExitUtc so downstream classifiers see the full picture.
+                var noopTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.EspExiting));
+                return new DecisionStep(builder.Build(), noopTransition, Array.Empty<DecisionEffect>());
+            }
+
+            var dueAtUtc = signal.OccurredAtUtc.Add(s_helloSafetyWindow);
             var helloSafety = new ActiveDeadline(
                 name: DeadlineNames.HelloSafety,
                 dueAtUtc: dueAtUtc,
@@ -118,14 +167,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     [SignalPayloadKeys.Deadline] = DeadlineNames.HelloSafety,
                 });
 
-            var builder = state.ToBuilder()
+            builder = builder
                 .WithStage(SessionStage.AwaitingHello)
-                .WithStepIndex(nextStep)
-                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .AddDeadline(helloSafety);
-            builder.EspFinalExitUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
-
-            var newState = builder.Build();
 
             var transition = BuildTakenTransition(
                 before: state,
@@ -139,7 +183,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: helloSafety),
             };
 
-            return new DecisionStep(newState, transition, effects);
+            return new DecisionStep(builder.Build(), transition, effects);
         }
 
         /// <summary>
@@ -162,29 +206,32 @@ namespace AutopilotMonitor.DecisionCore.Engine
             builder.HelloOutcome = new SignalFact<string>(outcome, signal.SessionSignalOrdinal);
 
             var desktopAlreadyArrived = state.DesktopArrivedUtc != null;
-            var toStage = desktopAlreadyArrived ? SessionStage.Completed : SessionStage.AwaitingDesktop;
-            builder.WithStage(toStage);
 
+            // Plan §5 Fix 6: when both prerequisites have resolved, go through the
+            // non-terminal Finalizing stage with a short grace period before Completed.
+            // This lets the backend see phase_transition(FinalizingSetup) + enrollment_complete
+            // before IsTerminal() fires and EnrollmentTerminationHandler tears down the spool.
             if (desktopAlreadyArrived)
             {
-                builder.WithOutcome(SessionOutcome.EnrollmentComplete);
-                builder.ClearDeadlines();
+                return TransitionToFinalizing(
+                    state: state,
+                    signal: signal,
+                    preparedBuilder: builder,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.HelloResolved));
             }
 
+            builder.WithStage(SessionStage.AwaitingDesktop);
             var newState = builder.Build();
 
             var transition = BuildTakenTransition(
                 before: state,
                 signal: signal,
-                toStage: toStage,
+                toStage: SessionStage.AwaitingDesktop,
                 nextStepIndex: nextStep,
                 trigger: nameof(DecisionSignalKind.HelloResolved));
 
-            var effects = desktopAlreadyArrived
-                ? new[] { BuildEnrollmentCompleteEffect() }
-                : Array.Empty<DecisionEffect>();
-
-            return new DecisionStep(newState, transition, effects);
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }
 
         /// <summary>
@@ -201,29 +248,32 @@ namespace AutopilotMonitor.DecisionCore.Engine
             builder.DesktopArrivedUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
 
             var helloAlreadyResolved = state.HelloResolvedUtc != null;
-            var toStage = helloAlreadyResolved ? SessionStage.Completed : state.Stage;
-            builder.WithStage(toStage);
 
+            // Plan §5 Fix 6: mirror of HandleHelloResolvedV1. When both prerequisites are in,
+            // go through Finalizing (non-terminal) instead of jumping straight to Completed.
             if (helloAlreadyResolved)
             {
-                builder.WithOutcome(SessionOutcome.EnrollmentComplete);
-                builder.ClearDeadlines();
+                return TransitionToFinalizing(
+                    state: state,
+                    signal: signal,
+                    preparedBuilder: builder,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.DesktopArrived));
             }
 
+            // Desktop came first: keep current stage (AwaitingHello or EspAccountSetup) until
+            // HelloResolved arrives.
+            builder.WithStage(state.Stage);
             var newState = builder.Build();
 
             var transition = BuildTakenTransition(
                 before: state,
                 signal: signal,
-                toStage: toStage,
+                toStage: state.Stage,
                 nextStepIndex: nextStep,
                 trigger: nameof(DecisionSignalKind.DesktopArrived));
 
-            var effects = helloAlreadyResolved
-                ? new[] { BuildEnrollmentCompleteEffect() }
-                : Array.Empty<DecisionEffect>();
-
-            return new DecisionStep(newState, transition, effects);
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }
 
         /// <summary>
@@ -312,6 +362,114 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         // ============================================================== internal helpers
+
+        /// <summary>
+        /// Plan §5 Fix 6 helper: transition to <see cref="SessionStage.Finalizing"/>, arm the
+        /// <see cref="DeadlineNames.FinalizingGrace"/> deadline (~5 s), emit a
+        /// <c>phase_transition(FinalizingSetup)</c> declaration so the UI sees Phase 6, and
+        /// return a <see cref="DecisionStep"/>. The deadline fire eventually drives the actual
+        /// Finalizing → Completed transition with the terminal <c>enrollment_complete</c> effect
+        /// (see <c>HandleFinalizingGraceDeadlineFired</c> below).
+        /// <para>
+        /// The caller has already populated <paramref name="preparedBuilder"/> with its
+        /// signal-specific state mutations (e.g. <c>HelloResolvedUtc</c> /
+        /// <c>DesktopArrivedUtc</c> / Hello-safety cancel); this helper only adds the stage +
+        /// deadline bookkeeping.
+        /// </para>
+        /// </summary>
+        private DecisionStep TransitionToFinalizing(
+            DecisionState state,
+            DecisionSignal signal,
+            DecisionStateBuilder preparedBuilder,
+            int nextStepIndex,
+            string trigger)
+        {
+            var dueAtUtc = signal.OccurredAtUtc.Add(s_finalizingGraceWindow);
+            var deadline = new ActiveDeadline(
+                name: DeadlineNames.FinalizingGrace,
+                dueAtUtc: dueAtUtc,
+                firesSignalKind: DecisionSignalKind.DeadlineFired,
+                firesPayload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.Deadline] = DeadlineNames.FinalizingGrace,
+                });
+
+            var builder = preparedBuilder
+                .WithStage(SessionStage.Finalizing)
+                .AddDeadline(deadline);
+
+            var newState = builder.Build();
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: SessionStage.Finalizing,
+                nextStepIndex: nextStepIndex,
+                trigger: trigger);
+
+            var effects = new[]
+            {
+                new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: deadline),
+                BuildPhaseTransitionEffect(EnrollmentPhase.FinalizingSetup),
+            };
+
+            return new DecisionStep(newState, transition, effects);
+        }
+
+        /// <summary>
+        /// Plan §5 Fix 6: FinalizingGrace deadline fired → transition Finalizing → Completed,
+        /// set <see cref="SessionOutcome.EnrollmentComplete"/>, emit the terminal
+        /// <c>enrollment_complete</c> event. <see cref="State.SessionStageExtensions.IsTerminal"/>
+        /// returns true for <see cref="SessionStage.Completed"/>, so
+        /// <c>DecisionStepProcessor.OnDecisionTerminalStage</c> now fires and
+        /// <c>EnrollmentTerminationHandler</c> takes over — 5 s later than before, with the
+        /// prior <c>phase_transition(FinalizingSetup)</c> already on the wire.
+        /// </summary>
+        private DecisionStep HandleFinalizingGraceDeadlineFired(DecisionState state, DecisionSignal signal)
+        {
+            var nextStep = state.StepIndex + 1;
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .WithStage(SessionStage.Completed)
+                .WithOutcome(SessionOutcome.EnrollmentComplete)
+                .ClearDeadlines();
+
+            var newState = builder.Build();
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: SessionStage.Completed,
+                nextStepIndex: nextStep,
+                trigger: $"DeadlineFired:{DeadlineNames.FinalizingGrace}");
+
+            var effects = new[] { BuildEnrollmentCompleteEffect() };
+
+            return new DecisionStep(newState, transition, effects);
+        }
+
+        /// <summary>
+        /// Phase-declaration effect used by <see cref="TransitionToFinalizing"/>. Emits a
+        /// <c>phase_transition</c> <see cref="EnrollmentEvent"/> with the requested
+        /// <see cref="EnrollmentPhase"/> so the Web UI's PhaseTimeline renders the phase bar.
+        /// <para>
+        /// Per <c>feedback_phase_strategy</c>: <c>phase_transition</c> is one of the small set
+        /// of event types allowed to carry <see cref="EnrollmentPhase"/> != Unknown. Flushes
+        /// immediately (<c>enrollment_complete</c> reducer-default) so the UI sees the phase
+        /// change within seconds, not at the next batch boundary.
+        /// </para>
+        /// </summary>
+        private static DecisionEffect BuildPhaseTransitionEffect(EnrollmentPhase phase) =>
+            new DecisionEffect(
+                kind: DecisionEffectKind.EmitEventTimelineEntry,
+                parameters: new Dictionary<string, string>
+                {
+                    ["eventType"] = "phase_transition",
+                    ["phase"] = phase.ToString(),
+                    ["source"] = "DecisionEngine",
+                    ["message"] = $"Phase: {phase}",
+                });
 
         private static DecisionEffect BuildEnrollmentCompleteEffect() =>
             new DecisionEffect(

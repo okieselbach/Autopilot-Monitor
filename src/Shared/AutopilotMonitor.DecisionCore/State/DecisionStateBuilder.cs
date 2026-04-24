@@ -44,6 +44,8 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloResolvedPart2Utc = source.HelloResolvedPart2Utc;
             DesktopArrivedPart2Utc = source.DesktopArrivedPart2Utc;
             AccountSetupCompletedPart2Utc = source.AccountSetupCompletedPart2Utc;
+            SkipUserEsp = source.SkipUserEsp;
+            SkipDeviceEsp = source.SkipDeviceEsp;
             Deadlines = new List<ActiveDeadline>(source.Deadlines);
             LastAppliedSignalOrdinal = source.LastAppliedSignalOrdinal;
             StepIndex = source.StepIndex;
@@ -75,6 +77,8 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<DateTime>? HelloResolvedPart2Utc { get; set; }
         public SignalFact<DateTime>? DesktopArrivedPart2Utc { get; set; }
         public SignalFact<DateTime>? AccountSetupCompletedPart2Utc { get; set; }
+        public SignalFact<bool>? SkipUserEsp { get; set; }
+        public SignalFact<bool>? SkipDeviceEsp { get; set; }
         public List<ActiveDeadline> Deadlines { get; set; }
         public long LastAppliedSignalOrdinal { get; set; }
         public int StepIndex { get; set; }
@@ -148,6 +152,8 @@ namespace AutopilotMonitor.DecisionCore.State
                 helloResolvedPart2Utc: HelloResolvedPart2Utc,
                 desktopArrivedPart2Utc: DesktopArrivedPart2Utc,
                 accountSetupCompletedPart2Utc: AccountSetupCompletedPart2Utc,
+                skipUserEsp: SkipUserEsp,
+                skipDeviceEsp: SkipDeviceEsp,
                 deadlines: Deadlines.ToArray(),
                 lastAppliedSignalOrdinal: LastAppliedSignalOrdinal,
                 stepIndex: StepIndex,

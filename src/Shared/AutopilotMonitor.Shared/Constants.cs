@@ -217,6 +217,7 @@ namespace AutopilotMonitor.Shared
             public const string ImeUserSessionCompleted   = "ime_user_session_completed";
             public const string DoTelemetry               = "do_telemetry";
             public const string AllAppsCompleted          = "all_apps_completed";
+            public const string AppTrackingSummary        = "app_tracking_summary";  // Plan §5 Fix 4b — terminal per-session app summary
 
             // Stall detection (Ebene 2 — StallProbeCollector)
             public const string StallProbeCheck           = "stall_probe_check";   // Trace heartbeat from Probe 2 (15 min) when no anomaly found

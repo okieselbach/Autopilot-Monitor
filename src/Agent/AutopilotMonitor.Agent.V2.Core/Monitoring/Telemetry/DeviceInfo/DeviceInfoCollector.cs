@@ -8,6 +8,8 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Win32;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment;
@@ -28,6 +30,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
         private readonly string _tenantId;
         private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
+        private readonly ISignalIngressSink _signalIngress;
+        private readonly IClock _clock;
 
         private const string RegKeyWindowsCurrentVersion = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 
@@ -35,12 +39,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
             string sessionId,
             string tenantId,
             InformationalEventPost post,
-            AgentLogger logger)
+            AgentLogger logger,
+            ISignalIngressSink signalIngress = null,
+            IClock clock = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId  = tenantId  ?? throw new ArgumentNullException(nameof(tenantId));
             _post      = post      ?? throw new ArgumentNullException(nameof(post));
             _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
+            _signalIngress = signalIngress;
+            _clock = clock;
         }
 
         /// <summary>

@@ -407,9 +407,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             var session = await _sessionRepo.GetSessionAsync(tenantId, sessionId);
             if (session == null) return (null, null);
 
-            string? adminAction = null;
-            if (session.Status == SessionStatus.Succeeded) adminAction = "Succeeded";
-            else if (session.Status == SessionStatus.Failed) adminAction = "Failed";
+            // AdminAction carries the portal-button signal only. The old logic (Status ==
+            // Succeeded/Failed → AdminAction) also fired for agent-reported completion and made
+            // every follow-up signal/transition upload look like an out-of-band admin override.
+            string? adminAction = session.AdminMarkedAction;
 
             List<ServerAction>? pendingActions = null;
             if (!string.IsNullOrEmpty(session.PendingActionsJson))

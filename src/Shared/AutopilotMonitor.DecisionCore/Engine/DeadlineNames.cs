@@ -32,6 +32,15 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>24 h watchdog after White-Glove Part 1 → reboot → awaiting user sign-in. Plan §2.3.</summary>
         public const string WhiteGlovePart2Safety = "whiteglove_part2_safety";
+
+        /// <summary>
+        /// Brief grace window (~5 s) between both-prerequisites-resolved and Completed.
+        /// Gives the reducer-emitted <c>phase_transition(FinalizingSetup)</c> and the terminal
+        /// <c>enrollment_complete</c> effect time to reach the backend before
+        /// <see cref="State.SessionStageExtensions.IsTerminal"/> fires and
+        /// <c>EnrollmentTerminationHandler</c> drains the spool. Plan §5 Fix 6.
+        /// </summary>
+        public const string FinalizingGrace = "finalizing_grace";
     }
 
     /// <summary>
@@ -53,6 +62,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>On <c>ImeUserSessionCompleted</c>: matched pattern id.</summary>
         public const string ImePatternId = "patternId";
+
+        /// <summary>On <c>EspConfigDetected</c>: "true" / "false"; missing → fact is not set.</summary>
+        public const string SkipUserEsp = "skipUserEsp";
+
+        /// <summary>On <c>EspConfigDetected</c>: "true" / "false"; missing → fact is not set.</summary>
+        public const string SkipDeviceEsp = "skipDeviceEsp";
 
         // --- InformationalEvent payload (plan §1.3, single-rail refactor) ------------
         // Mirrors the EnrollmentEvent fields the reducer must reconstruct for the

@@ -28,12 +28,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         private readonly string _spoolPath;
         private readonly UploadCursorPersistence _cursor;
         private readonly IClock _clock;
+        private readonly Logging.AgentLogger? _logger;
         private readonly object _lock = new object();
 
         private long _lastAssignedItemId = -1;
         private long _lastUploadedItemId = -1;
 
-        public TelemetrySpool(string directoryPath, IClock clock)
+        public TelemetrySpool(string directoryPath, IClock clock, Logging.AgentLogger? logger = null)
         {
             if (string.IsNullOrEmpty(directoryPath))
             {
@@ -41,6 +42,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             }
 
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+            _logger = logger;
 
             if (!Directory.Exists(directoryPath))
             {
@@ -99,6 +101,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 }
 
                 _lastAssignedItemId = itemId;
+                // Plan §5 Fix 5 — spool-cadence logging (DEBUG to avoid noise under heavy
+                // event flows; users can enable at troubleshoot-time).
+                _logger?.Debug(
+                    $"TelemetrySpool: enqueued itemId={itemId} kind={item.Kind} immediate={item.RequiresImmediateFlush} pending={itemId - _lastUploadedItemId}.");
                 return item;
             }
         }

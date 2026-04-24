@@ -243,6 +243,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     return HandleClassifierTickDeadlineFired(state, signal);
                 case DeadlineNames.WhiteGlovePart2Safety:
                     return HandleWhiteGlovePart2SafetyDeadlineFired(state, signal);
+                case DeadlineNames.FinalizingGrace:
+                    return HandleFinalizingGraceDeadlineFired(state, signal);
                 default:
                     // Deadline name not recognized in this sub-milestone. Cancel it from state
                     // and record a neutral taken transition — M3.3+ adds handlers for
@@ -287,29 +289,33 @@ namespace AutopilotMonitor.DecisionCore.Engine
             }
 
             var desktopAlreadyArrived = state.DesktopArrivedUtc != null;
-            var toStage = desktopAlreadyArrived ? SessionStage.Completed : SessionStage.AwaitingDesktop;
-            builder.WithStage(toStage);
 
+            // Plan §5 Fix 6: route the both-prerequisites case through Finalizing so the
+            // synthetic-timeout terminal event shares the same grace window + phase-declaration
+            // pathway as the happy-path handlers. AwaitingDesktop path is unchanged.
             if (desktopAlreadyArrived)
             {
-                builder.WithOutcome(SessionOutcome.EnrollmentComplete);
-                builder.ClearDeadlines();
+                return TransitionToFinalizing(
+                    state: state,
+                    signal: signal,
+                    preparedBuilder: builder,
+                    nextStepIndex: nextStep,
+                    trigger: $"DeadlineFired:{DeadlineNames.HelloSafety}");
             }
 
+            builder.WithStage(SessionStage.AwaitingDesktop);
             var newState = builder.Build();
 
             var transition = BuildTakenTransition(
                 before: state,
                 signal: signal,
-                toStage: toStage,
+                toStage: SessionStage.AwaitingDesktop,
                 nextStepIndex: nextStep,
                 trigger: $"DeadlineFired:{DeadlineNames.HelloSafety}");
 
-            DecisionEffect[] effects = desktopAlreadyArrived
-                ? new[] { BuildEnrollmentCompleteEffect() }
-                : Array.Empty<DecisionEffect>();
-
-            return new DecisionStep(newState, transition, effects);
+            // AwaitingDesktop path: terminal effect is deferred to the later DesktopArrived
+            // handler (which will itself route through Finalizing per Fix 6).
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }
 
         // ============================================================== diagnostic signals
@@ -332,6 +338,53 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// </summary>
         private DecisionStep HandleAutopilotProfileReadV1(DecisionState state, DecisionSignal signal) =>
             RecordDiagnosticObservation(state, signal, nameof(DecisionSignalKind.AutopilotProfileRead));
+
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.EspConfigDetected"/>. Plan §6 Fix 9.
+        /// <para>
+        /// Populates <see cref="DecisionState.SkipUserEsp"/> / <see cref="DecisionState.SkipDeviceEsp"/>
+        /// from the payload (<see cref="SignalPayloadKeys.SkipUserEsp"/> /
+        /// <see cref="SignalPayloadKeys.SkipDeviceEsp"/>). Set-once semantics — later signals with
+        /// identical payload are no-ops, and keys missing from the payload never clear a fact that
+        /// was already set (a re-read that failed to pick up one half must not invalidate the
+        /// other). Stage is unchanged; this is a fact-only signal that Fix 8's reducer guards
+        /// read.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleEspConfigDetectedV1(DecisionState state, DecisionSignal signal)
+        {
+            var nextStep = state.StepIndex + 1;
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+
+            if (signal.Payload != null)
+            {
+                if (state.SkipUserEsp == null
+                    && signal.Payload.TryGetValue(SignalPayloadKeys.SkipUserEsp, out var rawSkipUser)
+                    && bool.TryParse(rawSkipUser, out var skipUser))
+                {
+                    builder.SkipUserEsp = new SignalFact<bool>(skipUser, signal.SessionSignalOrdinal);
+                }
+
+                if (state.SkipDeviceEsp == null
+                    && signal.Payload.TryGetValue(SignalPayloadKeys.SkipDeviceEsp, out var rawSkipDevice)
+                    && bool.TryParse(rawSkipDevice, out var skipDevice))
+                {
+                    builder.SkipDeviceEsp = new SignalFact<bool>(skipDevice, signal.SessionSignalOrdinal);
+                }
+            }
+
+            var newState = builder.Build();
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.EspConfigDetected));
+
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
 
         private DecisionStep RecordDiagnosticObservation(DecisionState state, DecisionSignal signal, string trigger)
         {
@@ -417,6 +470,27 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 trigger: nameof(DecisionSignalKind.InformationalEvent),
                 deadEndReason: $"informational_event_missing_{missingKey}");
             return new DecisionStep(bookkept, transition, Array.Empty<DecisionEffect>());
+        }
+
+        /// <summary>
+        /// Plan §6 Fix 8 — gate for promoting to <see cref="SessionStage.AwaitingHello"/>
+        /// on Classic V1 paths. Returns <c>true</c> only when the promotion is legitimate:
+        /// <list type="bullet">
+        ///   <item>AccountSetup has already been entered (the post-Account-ESP final exit case), or</item>
+        ///   <item>SkipUser is explicitly <c>true</c> (the Account-ESP phase is skipped; first
+        ///         esp_exiting IS the final exit on device-only / full-skip flows).</item>
+        /// </list>
+        /// Otherwise returns <c>false</c> — a FinalizingSetup / EspExiting signal arriving
+        /// before AccountSetup on a non-SkipUser enrollment is either a collector bug or the
+        /// Device-ESP intermediate exit that Fix 7 otherwise swallows at the tracker layer.
+        /// Keeping this helper in the reducer means even a regression in Fix 7 cannot drive a
+        /// premature <c>AwaitingHello</c> + HelloSafety arm.
+        /// </summary>
+        private static bool ShouldTransitionToAwaitingHello(DecisionState state)
+        {
+            if (state.AccountSetupEnteredUtc != null) return true;
+            if (state.SkipUserEsp?.Value == true) return true;
+            return false;
         }
 
         /// <summary>

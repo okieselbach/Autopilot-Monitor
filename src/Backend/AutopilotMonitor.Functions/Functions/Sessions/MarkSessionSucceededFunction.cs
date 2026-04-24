@@ -40,13 +40,17 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
                 _logger.LogInformation($"Marking session {sessionId} as succeeded for tenant {tenantId} by user {userIdentifier}");
 
-                // Update session status to Succeeded with manual reason
+                // Update session status to Succeeded with manual reason. AdminMarkedAction is the
+                // authoritative trigger for the AdminAction response-field sent to agents — it
+                // replaces the old fragile heuristic (status final + current event not a completion
+                // marker) that also fired falsely on post-completion agent events.
                 var success = await _sessionRepo.UpdateSessionStatusAsync(
                     tenantId,
                     sessionId,
                     SessionStatus.Succeeded,
-                    null, // Keep current phase
-                    "Manually marked as succeeded by administrator"
+                    currentPhase: null, // Keep current phase
+                    failureReason: "Manually marked as succeeded by administrator",
+                    adminMarkedAction: "Succeeded"
                 );
 
                 if (success)

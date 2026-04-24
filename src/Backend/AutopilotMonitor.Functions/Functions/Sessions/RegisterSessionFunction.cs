@@ -124,13 +124,16 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             // Retrieve the stored session to include full data in SignalR message
             var session = await _sessionRepo.GetSessionAsync(registration.TenantId, registration.SessionId);
 
-            // Check if admin has already marked this session as terminal (e.g., agent restarted after admin override)
-            string? adminAction = null;
-            if (session != null && (session.Status == SessionStatus.Succeeded || session.Status == SessionStatus.Failed))
+            // AdminAction on re-register is only the portal button signal. SessionSummary.AdminMarkedAction
+            // is set exclusively by MarkSessionSucceededFunction / MarkSessionFailedFunction. An
+            // agent that restarts after its own completion must NOT receive a phantom AdminAction —
+            // previously inferred from "status is terminal", which applied to every agent-driven
+            // Succeeded/Failed session too.
+            string? adminAction = session?.AdminMarkedAction;
+            if (!string.IsNullOrEmpty(adminAction))
             {
-                adminAction = session.Status.ToString();
-                _logger.LogInformation("Session {SessionId} already in terminal state {Status} — signaling agent: AdminAction={AdminAction}",
-                    registration.SessionId, session.Status, adminAction);
+                _logger.LogInformation("Session {SessionId} was admin-marked as {AdminAction} — signaling agent on re-register: AdminAction={AdminAction}",
+                    registration.SessionId, adminAction, adminAction);
             }
 
             var response = req.CreateResponse(HttpStatusCode.OK);

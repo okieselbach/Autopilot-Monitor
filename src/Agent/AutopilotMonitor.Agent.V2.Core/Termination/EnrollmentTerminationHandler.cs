@@ -57,6 +57,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly DateTime _agentStartTimeUtc;
         private readonly Func<DecisionState> _currentStateAccessor;
         private readonly Func<AppPackageStateList> _packageStatesAccessor;
+        private readonly Func<IReadOnlyDictionary<string, AppInstallTiming>> _appTimingsAccessor;
         private readonly Func<CleanupService> _cleanupServiceFactory;
         private readonly Func<bool, string, Task<DiagnosticsUploadResult>> _uploadDiagnosticsAsync;
         private readonly Action _signalShutdown;
@@ -86,7 +87,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             SessionIdPersistence sessionPersistence = null,
             Action<int> triggerReboot = null,
             TimeSpan? lateEventGracePeriod = null,
-            TimeSpan? spoolDrainPeriod = null)
+            TimeSpan? spoolDrainPeriod = null,
+            Func<IReadOnlyDictionary<string, AppInstallTiming>> appTimingsAccessor = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -94,6 +96,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _agentStartTimeUtc = agentStartTimeUtc;
             _currentStateAccessor = currentStateAccessor ?? throw new ArgumentNullException(nameof(currentStateAccessor));
             _packageStatesAccessor = packageStatesAccessor ?? throw new ArgumentNullException(nameof(packageStatesAccessor));
+            // Plan §5 Fix 4 — optional timing accessor (older call sites / tests without IME
+            // plumbing pass null → empty timings, which is handled below).
+            _appTimingsAccessor = appTimingsAccessor ?? (() => new Dictionary<string, AppInstallTiming>());
             _cleanupServiceFactory = cleanupServiceFactory ?? throw new ArgumentNullException(nameof(cleanupServiceFactory));
             _uploadDiagnosticsAsync = uploadDiagnosticsAsync ?? throw new ArgumentNullException(nameof(uploadDiagnosticsAsync));
             _signalShutdown = signalShutdown ?? throw new ArgumentNullException(nameof(signalShutdown));
@@ -134,6 +139,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 else
                 {
                     RunBuildAndLaunchDialog(state, args);
+                }
+
+                // Plan §5 Fix 4b — emit app_tracking_summary terminal event before the
+                // late-event grace + diagnostics upload, so the backend has the final per-app
+                // summary even if the diagnostics upload fails. Skipped on WhiteGlove Part 1
+                // (apps haven't installed yet — Part 2 is where user apps land).
+                if (!isWhiteGlovePart1)
+                {
+                    EmitAppTrackingSummary();
                 }
 
                 // WhiteGlove Part-1 exit: keep the session alive, but announce the handoff so
@@ -198,6 +212,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             }
         }
 
+        private IReadOnlyDictionary<string, AppInstallTiming> TryGetAppTimings()
+        {
+            try { return _appTimingsAccessor() ?? new Dictionary<string, AppInstallTiming>(); }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: app timings accessor threw: {ex.Message}");
+                return new Dictionary<string, AppInstallTiming>();
+            }
+        }
+
         private void RunShutdownAnalyzers(EnrollmentTerminatedEventArgs args)
         {
             if (_analyzerManager == null) return;
@@ -220,7 +244,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             try
             {
                 var packages = TryGetPackageStates();
-                var status = FinalStatusBuilder.Build(state, args, packages, _agentStartTimeUtc);
+                var timings = TryGetAppTimings();
+                var status = FinalStatusBuilder.Build(state, args, packages, _agentStartTimeUtc, timings);
                 SummaryDialogLauncher.WriteAndLaunch(status, _configuration, _stateDirectory, _logger, _dialogExePathOverride);
 
                 if (_configuration.ShowEnrollmentSummary)
@@ -248,6 +273,112 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             catch (Exception ex)
             {
                 _logger.Warning($"EnrollmentTerminationHandler: FinalStatus/SummaryDialog step failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Plan §5 Fix 4b — emit a single <c>app_tracking_summary</c> event at termination time
+        /// with aggregate counts, per-phase breakdown, and per-app install-lifecycle timing.
+        /// Consumed by the Web UI's <c>useSessionDerivedData</c> hook to build authoritative
+        /// per-app durations (matching V1's <c>EnrollmentTracker.Diagnostics.cs:164</c> behaviour).
+        /// Best-effort: if any accessor throws, we log a warning and skip — the dialog has
+        /// already written <c>final-status.json</c> at this point, so the summary event is
+        /// supplementary observability, not load-bearing.
+        /// </summary>
+        private void EmitAppTrackingSummary()
+        {
+            if (_post == null)
+            {
+                // No informational event post (constructed in tests without wiring) — skip.
+                return;
+            }
+
+            try
+            {
+                var packages = TryGetPackageStates();
+                var timings = TryGetAppTimings();
+
+                var totalApps = 0;
+                var installedApps = 0;
+                var skippedApps = 0;
+                var postponedApps = 0;
+                var failedApps = 0;
+                var byPhase = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
+                var perApp = new List<Dictionary<string, object>>();
+
+                if (packages != null)
+                {
+                    foreach (var pkg in packages)
+                    {
+                        totalApps++;
+                        switch (pkg.InstallationState)
+                        {
+                            case AppInstallationState.Installed: installedApps++; break;
+                            case AppInstallationState.Skipped: skippedApps++; break;
+                            case AppInstallationState.Postponed: postponedApps++; break;
+                            case AppInstallationState.Error: failedApps++; break;
+                        }
+
+                        var phaseKey = pkg.Targeted.ToString();
+                        if (!byPhase.TryGetValue(phaseKey, out var bucket))
+                        {
+                            bucket = new Dictionary<string, int>(StringComparer.Ordinal)
+                            {
+                                ["total"] = 0, ["installed"] = 0, ["skipped"] = 0, ["postponed"] = 0, ["failed"] = 0,
+                            };
+                            byPhase[phaseKey] = bucket;
+                        }
+                        bucket["total"]++;
+                        if (pkg.InstallationState == AppInstallationState.Installed) bucket["installed"]++;
+                        else if (pkg.InstallationState == AppInstallationState.Skipped) bucket["skipped"]++;
+                        else if (pkg.InstallationState == AppInstallationState.Postponed) bucket["postponed"]++;
+                        else if (pkg.InstallationState == AppInstallationState.Error) bucket["failed"]++;
+
+                        timings.TryGetValue(pkg.Id, out var timing);
+                        var appEntry = new Dictionary<string, object>(StringComparer.Ordinal)
+                        {
+                            ["appId"] = pkg.Id,
+                            ["appName"] = pkg.Name ?? string.Empty,
+                            ["phase"] = phaseKey,
+                            ["finalState"] = pkg.InstallationState.ToString(),
+                        };
+                        if (timing?.StartedAtUtc != null) appEntry["startedAt"] = timing.StartedAtUtc.Value.ToString("o");
+                        if (timing?.CompletedAtUtc != null) appEntry["completedAt"] = timing.CompletedAtUtc.Value.ToString("o");
+                        if (timing?.DurationSeconds != null) appEntry["durationSeconds"] = timing.DurationSeconds.Value;
+                        perApp.Add(appEntry);
+                    }
+                }
+
+                var completedApps = installedApps + skippedApps + postponedApps + failedApps;
+
+                var data = new Dictionary<string, object>(StringComparer.Ordinal)
+                {
+                    ["totalApps"] = totalApps,
+                    ["completedApps"] = completedApps,
+                    ["installedApps"] = installedApps,
+                    ["skippedApps"] = skippedApps,
+                    ["postponedApps"] = postponedApps,
+                    ["failedApps"] = failedApps,
+                    ["byPhase"] = byPhase,
+                    ["perApp"] = perApp,
+                };
+
+                _post.Emit(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = Constants.EventTypes.AppTrackingSummary,
+                    Severity = EventSeverity.Info,
+                    Source = "EnrollmentTerminationHandler",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"App summary: {completedApps}/{totalApps} completed, {failedApps} failed.",
+                    Data = data,
+                    ImmediateUpload = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: app_tracking_summary emit failed: {ex.Message}");
             }
         }
 
