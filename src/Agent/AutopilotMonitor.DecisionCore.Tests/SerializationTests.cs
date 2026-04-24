@@ -245,5 +245,128 @@ namespace AutopilotMonitor.DecisionCore.Tests
 
             Assert.Equal(HypothesisLevel.Unknown, result);
         }
+
+        // ================================================================ Codex follow-up #5 (post-#51)
+        // EnrollmentScenarioProfile enums — the five dimensions of the new profile aggregate
+        // must be registered in DecisionCoreJsonSettings just like every other DecisionCore
+        // enum, otherwise snapshots round-trip as numeric JSON and unknown cross-version
+        // values crash instead of landing on the Unknown-fallback. These tests pin the
+        // registration contract.
+
+        [Fact]
+        public void UnknownFallbackEnumConverter_EnrollmentMode_roundtripsByName_andFallsBackOnUnknown()
+        {
+            var settings = DecisionCoreJsonSettings.Create();
+
+            var json = JsonConvert.SerializeObject(EnrollmentMode.WhiteGlove, settings);
+            Assert.Contains("WhiteGlove", json);
+            Assert.Equal(EnrollmentMode.WhiteGlove, JsonConvert.DeserializeObject<EnrollmentMode>(json, settings));
+
+            Assert.Equal(EnrollmentMode.Unknown,
+                JsonConvert.DeserializeObject<EnrollmentMode>("\"FutureMode\"", settings));
+        }
+
+        [Fact]
+        public void UnknownFallbackEnumConverter_EnrollmentJoinMode_roundtripsByName_andFallsBackOnUnknown()
+        {
+            var settings = DecisionCoreJsonSettings.Create();
+
+            var json = JsonConvert.SerializeObject(EnrollmentJoinMode.HybridAzureAdJoin, settings);
+            Assert.Contains("HybridAzureAdJoin", json);
+            Assert.Equal(EnrollmentJoinMode.HybridAzureAdJoin,
+                JsonConvert.DeserializeObject<EnrollmentJoinMode>(json, settings));
+
+            Assert.Equal(EnrollmentJoinMode.Unknown,
+                JsonConvert.DeserializeObject<EnrollmentJoinMode>("\"FutureJoinMode\"", settings));
+        }
+
+        [Fact]
+        public void UnknownFallbackEnumConverter_EspConfig_roundtripsByName_andFallsBackOnUnknown()
+        {
+            var settings = DecisionCoreJsonSettings.Create();
+
+            var json = JsonConvert.SerializeObject(EspConfig.DeviceEspOnly, settings);
+            Assert.Contains("DeviceEspOnly", json);
+            Assert.Equal(EspConfig.DeviceEspOnly, JsonConvert.DeserializeObject<EspConfig>(json, settings));
+
+            Assert.Equal(EspConfig.Unknown,
+                JsonConvert.DeserializeObject<EspConfig>("\"NewEspShape\"", settings));
+        }
+
+        [Fact]
+        public void UnknownFallbackEnumConverter_PreProvisioningSide_roundtripsByName_andFallsBackToNone()
+        {
+            var settings = DecisionCoreJsonSettings.Create();
+
+            var json = JsonConvert.SerializeObject(PreProvisioningSide.Technician, settings);
+            Assert.Contains("Technician", json);
+            Assert.Equal(PreProvisioningSide.Technician,
+                JsonConvert.DeserializeObject<PreProvisioningSide>(json, settings));
+
+            // The fallback for PreProvisioningSide is None (there is no Unknown member).
+            Assert.Equal(PreProvisioningSide.None,
+                JsonConvert.DeserializeObject<PreProvisioningSide>("\"FutureSide\"", settings));
+        }
+
+        [Fact]
+        public void UnknownFallbackEnumConverter_ProfileConfidence_roundtripsByName_andFallsBackToLow()
+        {
+            var settings = DecisionCoreJsonSettings.Create();
+
+            var json = JsonConvert.SerializeObject(ProfileConfidence.High, settings);
+            Assert.Contains("High", json);
+            Assert.Equal(ProfileConfidence.High,
+                JsonConvert.DeserializeObject<ProfileConfidence>(json, settings));
+
+            Assert.Equal(ProfileConfidence.Low,
+                JsonConvert.DeserializeObject<ProfileConfidence>("\"Unverified\"", settings));
+        }
+
+        [Fact]
+        public void ScenarioProfile_stateRoundtripsThroughStateSerializer_enumsAsStrings()
+        {
+            // End-to-end regression: the full DecisionState must serialize the new Profile
+            // dimensions as string literals (not integers) so cross-version reads stay robust.
+            var initial = DecisionState.CreateInitial("s", "t");
+            var state = initial
+                .ToBuilder()
+                .Apply(b => b.ScenarioProfile = b.ScenarioProfile.With(
+                    mode: EnrollmentMode.WhiteGlove,
+                    joinMode: EnrollmentJoinMode.HybridAzureAdJoin,
+                    espConfig: EspConfig.DeviceEspOnly,
+                    preProvisioningSide: PreProvisioningSide.Technician,
+                    confidence: ProfileConfidence.High,
+                    evidenceOrdinal: 7,
+                    reason: "test_round_trip"))
+                .Build();
+
+            var json = StateSerializer.Serialize(state);
+
+            // Enums persist as their string names, not their underlying integer values.
+            Assert.Contains("\"Mode\":\"WhiteGlove\"", json);
+            Assert.Contains("\"JoinMode\":\"HybridAzureAdJoin\"", json);
+            Assert.Contains("\"EspConfig\":\"DeviceEspOnly\"", json);
+            Assert.Contains("\"PreProvisioningSide\":\"Technician\"", json);
+            Assert.Contains("\"Confidence\":\"High\"", json);
+
+            var roundtripped = StateSerializer.Deserialize(json);
+            var p = roundtripped.ScenarioProfile;
+            Assert.Equal(EnrollmentMode.WhiteGlove, p.Mode);
+            Assert.Equal(EnrollmentJoinMode.HybridAzureAdJoin, p.JoinMode);
+            Assert.Equal(EspConfig.DeviceEspOnly, p.EspConfig);
+            Assert.Equal(PreProvisioningSide.Technician, p.PreProvisioningSide);
+            Assert.Equal(ProfileConfidence.High, p.Confidence);
+            Assert.Equal(7, p.EvidenceOrdinal);
+            Assert.Equal("test_round_trip", p.Reason);
+        }
+    }
+
+    internal static class DecisionStateBuilderTestExtensions
+    {
+        public static DecisionStateBuilder Apply(this DecisionStateBuilder b, Action<DecisionStateBuilder> mutate)
+        {
+            mutate(b);
+            return b;
+        }
     }
 }

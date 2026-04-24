@@ -53,13 +53,19 @@ namespace AutopilotMonitor.DecisionCore.Engine
             // periodically from the very start of the session — Plan §4.x M4.4.4.
             var classifierTick = BuildClassifierTickDeadline(signal.OccurredAtUtc);
 
-            // Stage stays SessionStarted; this transition is the "we saw the start" anchor.
-            var newState = state.ToBuilder()
+            // Codex follow-up #5 — seed the scenario profile from the registry-detector payload
+            // (enrollmentType + isHybridJoin). Stage stays SessionStarted; this transition is the
+            // "we saw the start" anchor.
+            var builder = state.ToBuilder()
                 .WithStage(SessionStage.SessionStarted)
                 .WithStepIndex(state.StepIndex + 1)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
-                .AddDeadline(classifierTick)
-                .Build();
+                .AddDeadline(classifierTick);
+
+            builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplySessionStarted(
+                builder.ScenarioProfile, signal);
+
+            var newState = builder.Build();
 
             var transition = BuildTakenTransition(
                 before: state,
@@ -458,15 +464,17 @@ namespace AutopilotMonitor.DecisionCore.Engine
             RecordDiagnosticObservation(state, signal, nameof(DecisionSignalKind.AutopilotProfileRead));
 
         /// <summary>
-        /// Handle <see cref="DecisionSignalKind.EspConfigDetected"/>. Plan §6 Fix 9.
+        /// Handle <see cref="DecisionSignalKind.EspConfigDetected"/>. Plan §6 Fix 9 +
+        /// Codex follow-up #5.
         /// <para>
-        /// Populates <see cref="DecisionState.SkipUserEsp"/> / <see cref="DecisionState.SkipDeviceEsp"/>
-        /// from the payload (<see cref="SignalPayloadKeys.SkipUserEsp"/> /
-        /// <see cref="SignalPayloadKeys.SkipDeviceEsp"/>). Set-once semantics — later signals with
-        /// identical payload are no-ops, and keys missing from the payload never clear a fact that
-        /// was already set (a re-read that failed to pick up one half must not invalidate the
-        /// other). Stage is unchanged; this is a fact-only signal that Fix 8's reducer guards
-        /// read.
+        /// Populates <see cref="EnrollmentScenarioObservations.SkipUserEsp"/> /
+        /// <see cref="EnrollmentScenarioObservations.SkipDeviceEsp"/> observations and, when
+        /// both halves are known, derives <see cref="EnrollmentScenarioProfile.EspConfig"/>.
+        /// Set-once semantics — later signals with identical payload are no-ops, and keys
+        /// missing from the payload never clear a fact that was already set (a re-read that
+        /// failed to pick up one half must not invalidate the other). Stage is unchanged;
+        /// this is a fact-only signal that Fix 8's reducer guards read via
+        /// <see cref="EnrollmentScenarioProfile.EspConfig"/>.
         /// </para>
         /// </summary>
         private DecisionStep HandleEspConfigDetectedV1(DecisionState state, DecisionSignal signal)
@@ -476,22 +484,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
 
-            if (signal.Payload != null)
-            {
-                if (state.SkipUserEsp == null
-                    && signal.Payload.TryGetValue(SignalPayloadKeys.SkipUserEsp, out var rawSkipUser)
-                    && bool.TryParse(rawSkipUser, out var skipUser))
-                {
-                    builder.SkipUserEsp = new SignalFact<bool>(skipUser, signal.SessionSignalOrdinal);
-                }
-
-                if (state.SkipDeviceEsp == null
-                    && signal.Payload.TryGetValue(SignalPayloadKeys.SkipDeviceEsp, out var rawSkipDevice)
-                    && bool.TryParse(rawSkipDevice, out var skipDevice))
-                {
-                    builder.SkipDeviceEsp = new SignalFact<bool>(skipDevice, signal.SessionSignalOrdinal);
-                }
-            }
+            var (newProfile, newObservations) = EnrollmentScenarioProfileUpdater.ApplyEspConfigDetected(
+                builder.ScenarioProfile, builder.ScenarioObservations, signal);
+            builder.ScenarioProfile = newProfile;
+            builder.ScenarioObservations = newObservations;
 
             var newState = builder.Build();
             var transition = BuildTakenTransition(
@@ -595,19 +591,29 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// on Classic V1 paths. Returns <c>true</c> only when the promotion is legitimate:
         /// <list type="bullet">
         ///   <item>AccountSetup has already been entered (the post-Account-ESP final exit case), or</item>
-        ///   <item>SkipUser is explicitly <c>true</c> (the Account-ESP phase is skipped; first
-        ///         esp_exiting IS the final exit on device-only / full-skip flows).</item>
+        ///   <item><see cref="EnrollmentScenarioObservations.SkipUserEsp"/> is observed as
+        ///         <c>true</c> (Account-ESP phase is skipped; first esp_exiting IS the final
+        ///         exit on device-only / full-skip flows).</item>
         /// </list>
         /// Otherwise returns <c>false</c> — a FinalizingSetup / EspExiting signal arriving
         /// before AccountSetup on a non-SkipUser enrollment is either a collector bug or the
         /// Device-ESP intermediate exit that Fix 7 otherwise swallows at the tracker layer.
         /// Keeping this helper in the reducer means even a regression in Fix 7 cannot drive a
         /// premature <c>AwaitingHello</c> + HelloSafety arm.
+        /// <para>
+        /// Codex follow-up #5 + post-#51 fix: the legacy <c>state.SkipUserEsp?.Value == true</c>
+        /// check now reads <see cref="DecisionState.ScenarioObservations"/>.<see cref="EnrollmentScenarioObservations.SkipUserEsp"/>
+        /// directly — NOT the derived <see cref="EnrollmentScenarioProfile.EspConfig"/> enum.
+        /// The derived enum requires BOTH halves (skipUser + skipDevice) to be observed before
+        /// it leaves <see cref="EspConfig.Unknown"/>, so a partial bootstrap payload carrying
+        /// only <c>skipUser=true</c> would block the promotion indefinitely under the previous
+        /// pass. The raw half-fact mirrors the old <c>SkipUserEsp?.Value</c> behaviour exactly.
+        /// </para>
         /// </summary>
         private static bool ShouldTransitionToAwaitingHello(DecisionState state)
         {
             if (state.AccountSetupEnteredUtc != null) return true;
-            if (state.SkipUserEsp?.Value == true) return true;
+            if (state.ScenarioObservations.SkipUserEsp?.Value == true) return true;
             return false;
         }
 

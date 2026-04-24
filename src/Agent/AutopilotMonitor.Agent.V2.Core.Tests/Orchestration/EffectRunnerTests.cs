@@ -301,12 +301,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 
             var state = InitialState()
                 .ToBuilder()
-                .Apply(b => b.WhiteGloveSealing = new Hypothesis(
+                .Apply(b => b.ClassifierOutcomes = b.ClassifierOutcomes.WithWhiteGloveSealing(new Hypothesis(
                     level: HypothesisLevel.Strong,
                     reason: "seed",
                     score: 80,
                     lastUpdatedUtc: At,
-                    lastClassifierVerdictId: Hash))
+                    lastClassifierVerdictId: Hash)))
                 .Build();
 
             var rig = new Rig();

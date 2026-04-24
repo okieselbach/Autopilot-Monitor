@@ -12,6 +12,18 @@ namespace AutopilotMonitor.DecisionCore.State
     /// Reducer contract: <c>(newState, transition, effects) = engine.Reduce(oldState, signal)</c>.
     /// </para>
     /// <para>
+    /// Codex follow-up #5 — the legacy 9-field hypothesis/fact mosaic
+    /// (<c>EnrollmentType</c>, <c>WhiteGloveSealing</c>, <c>WhiteGlovePart2Completion</c>,
+    /// <c>DeviceOnlyDeployment</c>, <c>SkipUserEsp</c>, <c>SkipDeviceEsp</c>,
+    /// <c>AadJoinedWithUser</c>, <c>ShellCoreWhiteGloveSuccessSeen</c>,
+    /// <c>WhiteGloveSealingPatternSeen</c>) has been replaced by three structured aggregates:
+    /// <list type="bullet">
+    ///   <item><see cref="ScenarioProfile"/> — the derived semantic classification.</item>
+    ///   <item><see cref="ScenarioObservations"/> — raw per-signal observations feeding the classifier.</item>
+    ///   <item><see cref="ClassifierOutcomes"/> — classifier verdicts + anti-loop state.</item>
+    /// </list>
+    /// </para>
+    /// <para>
     /// Agent-process lifecycle flags (crash, admin actions, boot-time, heartbeat) live
     /// in <c>agent-lifecycle.json</c>, not here (L.11 separation).
     /// </para>
@@ -25,10 +37,6 @@ namespace AutopilotMonitor.DecisionCore.State
             string tenantId,
             SessionStage stage,
             SessionOutcome? outcome,
-            Hypothesis enrollmentType,
-            Hypothesis whiteGloveSealing,
-            Hypothesis whiteGlovePart2Completion,
-            Hypothesis deviceOnlyDeployment,
             SignalFact<EnrollmentPhase>? currentEnrollmentPhase,
             SignalFact<DateTime>? deviceSetupEnteredUtc,
             SignalFact<DateTime>? accountSetupEnteredUtc,
@@ -38,20 +46,18 @@ namespace AutopilotMonitor.DecisionCore.State
             SignalFact<DateTime>? helloResolvedUtc,
             SignalFact<DateTime>? systemRebootUtc,
             SignalFact<string>? helloOutcome,
-            SignalFact<bool>? aadJoinedWithUser,
             SignalFact<string>? imeMatchedPatternId,
-            SignalFact<bool>? shellCoreWhiteGloveSuccessSeen,
-            SignalFact<bool>? whiteGloveSealingPatternSeen,
             SignalFact<DateTime>? userAadSignInCompleteUtc,
             SignalFact<DateTime>? helloResolvedPart2Utc,
             SignalFact<DateTime>? desktopArrivedPart2Utc,
             SignalFact<DateTime>? accountSetupCompletedPart2Utc,
-            SignalFact<bool>? skipUserEsp,
-            SignalFact<bool>? skipDeviceEsp,
             IReadOnlyList<ActiveDeadline> deadlines,
             long lastAppliedSignalOrdinal,
             int stepIndex,
             AppInstallFacts? appInstallFacts = null,
+            EnrollmentScenarioProfile? scenarioProfile = null,
+            EnrollmentScenarioObservations? scenarioObservations = null,
+            ClassifierOutcomes? classifierOutcomes = null,
             string? schemaVersion = null)
         {
             if (string.IsNullOrEmpty(sessionId))
@@ -68,10 +74,6 @@ namespace AutopilotMonitor.DecisionCore.State
             TenantId = tenantId;
             Stage = stage;
             Outcome = outcome;
-            EnrollmentType = enrollmentType ?? throw new ArgumentNullException(nameof(enrollmentType));
-            WhiteGloveSealing = whiteGloveSealing ?? throw new ArgumentNullException(nameof(whiteGloveSealing));
-            WhiteGlovePart2Completion = whiteGlovePart2Completion ?? throw new ArgumentNullException(nameof(whiteGlovePart2Completion));
-            DeviceOnlyDeployment = deviceOnlyDeployment ?? throw new ArgumentNullException(nameof(deviceOnlyDeployment));
             CurrentEnrollmentPhase = currentEnrollmentPhase;
             DeviceSetupEnteredUtc = deviceSetupEnteredUtc;
             AccountSetupEnteredUtc = accountSetupEnteredUtc;
@@ -81,20 +83,18 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloResolvedUtc = helloResolvedUtc;
             SystemRebootUtc = systemRebootUtc;
             HelloOutcome = helloOutcome;
-            AadJoinedWithUser = aadJoinedWithUser;
             ImeMatchedPatternId = imeMatchedPatternId;
-            ShellCoreWhiteGloveSuccessSeen = shellCoreWhiteGloveSuccessSeen;
-            WhiteGloveSealingPatternSeen = whiteGloveSealingPatternSeen;
             UserAadSignInCompleteUtc = userAadSignInCompleteUtc;
             HelloResolvedPart2Utc = helloResolvedPart2Utc;
             DesktopArrivedPart2Utc = desktopArrivedPart2Utc;
             AccountSetupCompletedPart2Utc = accountSetupCompletedPart2Utc;
-            SkipUserEsp = skipUserEsp;
-            SkipDeviceEsp = skipDeviceEsp;
             Deadlines = deadlines ?? throw new ArgumentNullException(nameof(deadlines));
             LastAppliedSignalOrdinal = lastAppliedSignalOrdinal;
             StepIndex = stepIndex;
             AppInstallFacts = appInstallFacts ?? AppInstallFacts.Empty;
+            ScenarioProfile = scenarioProfile ?? EnrollmentScenarioProfile.Empty;
+            ScenarioObservations = scenarioObservations ?? EnrollmentScenarioObservations.Empty;
+            ClassifierOutcomes = classifierOutcomes ?? ClassifierOutcomes.Empty;
             SchemaVersion = schemaVersion ?? CurrentSchemaVersion;
         }
 
@@ -107,15 +107,6 @@ namespace AutopilotMonitor.DecisionCore.State
 
         /// <summary>Null when the session is non-terminal.</summary>
         public SessionOutcome? Outcome { get; }
-
-        // --- Hypothesen ---
-        public Hypothesis EnrollmentType { get; }
-
-        public Hypothesis WhiteGloveSealing { get; }
-
-        public Hypothesis WhiteGlovePart2Completion { get; }
-
-        public Hypothesis DeviceOnlyDeployment { get; }
 
         // --- Enrollment-Phase (end-user reality, separate from Stage) ---
         public SignalFact<EnrollmentPhase>? CurrentEnrollmentPhase { get; }
@@ -137,28 +128,13 @@ namespace AutopilotMonitor.DecisionCore.State
 
         public SignalFact<string>? HelloOutcome { get; }
 
-        public SignalFact<bool>? AadJoinedWithUser { get; }
-
         public SignalFact<string>? ImeMatchedPatternId { get; }
-
-        /// <summary>True once <see cref="Signals.DecisionSignalKind.WhiteGloveShellCoreSuccess"/> has fired. WG Part-1 indicator.</summary>
-        public SignalFact<bool>? ShellCoreWhiteGloveSuccessSeen { get; }
-
-        /// <summary>True once <see cref="Signals.DecisionSignalKind.WhiteGloveSealingPatternDetected"/> has fired. Signal-correlated WG path.</summary>
-        public SignalFact<bool>? WhiteGloveSealingPatternSeen { get; }
 
         // --- WhiteGlove Part 2 (post-reboot user sign-in) facts ---
         public SignalFact<DateTime>? UserAadSignInCompleteUtc { get; }
         public SignalFact<DateTime>? HelloResolvedPart2Utc { get; }
         public SignalFact<DateTime>? DesktopArrivedPart2Utc { get; }
         public SignalFact<DateTime>? AccountSetupCompletedPart2Utc { get; }
-
-        // --- ESP skip-flag facts from EspConfigDetected (plan §6 Fix 9). SkipUser=true means the
-        // Account-ESP phase never runs on this enrollment, so AwaitingHello is reachable directly
-        // after Device-ESP. When null the configuration has not been observed yet — guards that
-        // rely on an explicit bool must treat null as "unknown" rather than "false".
-        public SignalFact<bool>? SkipUserEsp { get; }
-        public SignalFact<bool>? SkipDeviceEsp { get; }
 
         public IReadOnlyList<ActiveDeadline> Deadlines { get; }
 
@@ -172,6 +148,27 @@ namespace AutopilotMonitor.DecisionCore.State
         /// follow-up #4. Never null; defaults to <see cref="State.AppInstallFacts.Empty"/>.
         /// </summary>
         public AppInstallFacts AppInstallFacts { get; }
+
+        /// <summary>
+        /// Typed enrollment-scenario classification (Mode / JoinMode / EspConfig /
+        /// PreProvisioningSide / Confidence). Codex follow-up #5. Never null; defaults to
+        /// <see cref="EnrollmentScenarioProfile.Empty"/>.
+        /// </summary>
+        public EnrollmentScenarioProfile ScenarioProfile { get; }
+
+        /// <summary>
+        /// Raw per-signal observations feeding the WhiteGlove sealing classifier and downstream
+        /// guards. Codex follow-up #5. Never null; defaults to
+        /// <see cref="EnrollmentScenarioObservations.Empty"/>.
+        /// </summary>
+        public EnrollmentScenarioObservations ScenarioObservations { get; }
+
+        /// <summary>
+        /// Classifier verdict storage + anti-loop state (WhiteGlove sealing, WhiteGlove Part 2,
+        /// device-only deployment). Codex follow-up #5. Never null; defaults to
+        /// <see cref="ClassifierOutcomes.Empty"/>.
+        /// </summary>
+        public ClassifierOutcomes ClassifierOutcomes { get; }
 
         public string SchemaVersion { get; }
 
@@ -192,10 +189,6 @@ namespace AutopilotMonitor.DecisionCore.State
                 tenantId: tenantId,
                 stage: SessionStage.SessionStarted,
                 outcome: null,
-                enrollmentType: Hypothesis.UnknownInstance,
-                whiteGloveSealing: Hypothesis.UnknownInstance,
-                whiteGlovePart2Completion: Hypothesis.UnknownInstance,
-                deviceOnlyDeployment: Hypothesis.UnknownInstance,
                 currentEnrollmentPhase: null,
                 deviceSetupEnteredUtc: null,
                 accountSetupEnteredUtc: null,
@@ -205,19 +198,17 @@ namespace AutopilotMonitor.DecisionCore.State
                 helloResolvedUtc: null,
                 systemRebootUtc: null,
                 helloOutcome: null,
-                aadJoinedWithUser: null,
                 imeMatchedPatternId: null,
-                shellCoreWhiteGloveSuccessSeen: null,
-                whiteGloveSealingPatternSeen: null,
                 userAadSignInCompleteUtc: null,
                 helloResolvedPart2Utc: null,
                 desktopArrivedPart2Utc: null,
                 accountSetupCompletedPart2Utc: null,
-                skipUserEsp: null,
-                skipDeviceEsp: null,
                 deadlines: Array.Empty<ActiveDeadline>(),
                 lastAppliedSignalOrdinal: -1,
                 stepIndex: 0,
-                appInstallFacts: AppInstallFacts.Empty);
+                appInstallFacts: AppInstallFacts.Empty,
+                scenarioProfile: EnrollmentScenarioProfile.Empty,
+                scenarioObservations: EnrollmentScenarioObservations.Empty,
+                classifierOutcomes: ClassifierOutcomes.Empty);
     }
 }

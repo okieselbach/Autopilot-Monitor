@@ -26,7 +26,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
             var builder = state.ToBuilder()
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
-            builder.ShellCoreWhiteGloveSuccessSeen = new SignalFact<bool>(true, signal.SessionSignalOrdinal);
+            builder.ScenarioObservations = builder.ScenarioObservations.WithShellCoreWhiteGloveSuccessSeen(signal.SessionSignalOrdinal);
 
             var (newState, effects) = AttachWhiteGloveClassifierEffects(builder.Build(), signal);
 
@@ -51,7 +51,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
             var builder = state.ToBuilder()
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
-            builder.WhiteGloveSealingPatternSeen = new SignalFact<bool>(true, signal.SessionSignalOrdinal);
+            builder.ScenarioObservations = builder.ScenarioObservations.WithWhiteGloveSealingPatternSeen(signal.SessionSignalOrdinal);
 
             var (newState, effects) = AttachWhiteGloveClassifierEffects(builder.Build(), signal);
 
@@ -105,15 +105,20 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
             if (classifier == WhiteGloveSealingClassifier.ClassifierId)
             {
-                builder.WhiteGloveSealing = state.WhiteGloveSealing.With(
+                var updatedSealing = state.ClassifierOutcomes.WhiteGloveSealing.With(
                     level: level,
                     reason: reason,
                     score: score,
                     lastUpdatedUtc: signal.OccurredAtUtc,
                     lastClassifierVerdictId: inputHash);
+                builder.ClassifierOutcomes = state.ClassifierOutcomes.WithWhiteGloveSealing(updatedSealing);
 
                 if (level == HypothesisLevel.Confirmed)
                 {
+                    // Mirror the WG decision in the profile: Mode=WhiteGlove @ High confidence.
+                    builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyWhiteGloveSealingConfirmed(
+                        builder.ScenarioProfile, signal);
+
                     builder
                         .WithStage(SessionStage.WhiteGloveSealed)
                         .WithOutcome(SessionOutcome.WhiteGlovePart1Sealed)
@@ -242,18 +247,26 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// Build a <see cref="WhiteGloveSealingSnapshot"/> from the current <see cref="DecisionState"/>.
         /// Exposed to the effect runner so the verdict snapshot carried with the
         /// <see cref="DecisionEffectKind.RunClassifier"/> effect is deterministic from state.
+        /// <para>
+        /// Codex follow-up #5 — the snapshot fields are unchanged, only their sources moved:
+        /// the three Boolean signal-observation inputs come from
+        /// <see cref="DecisionState.ScenarioObservations"/>, the device-only input from
+        /// <see cref="DecisionState.ClassifierOutcomes"/>. The input-hash canonicalization in
+        /// <see cref="WhiteGloveSealingSnapshot.ComputeInputHash"/> is therefore byte-stable
+        /// across the refactor, which preserves the anti-loop semantics.
+        /// </para>
         /// </summary>
         internal static WhiteGloveSealingSnapshot BuildWhiteGloveSealingSnapshot(DecisionState state) =>
             new WhiteGloveSealingSnapshot(
-                shellCoreWhiteGloveSuccessSeen: state.ShellCoreWhiteGloveSuccessSeen?.Value == true,
-                whiteGloveSealingPatternSeen: state.WhiteGloveSealingPatternSeen?.Value == true,
-                aadJoinedWithUser: state.AadJoinedWithUser?.Value == true,
+                shellCoreWhiteGloveSuccessSeen: state.ScenarioObservations.ShellCoreWhiteGloveSuccessSeen?.Value == true,
+                whiteGloveSealingPatternSeen: state.ScenarioObservations.WhiteGloveSealingPatternSeen?.Value == true,
+                aadJoinedWithUser: state.ScenarioObservations.AadUserJoinWithUserObserved?.Value == true,
                 desktopArrived: state.DesktopArrivedUtc != null,
                 helloResolved: state.HelloResolvedUtc != null,
                 hasAccountSetupActivity: state.AccountSetupEnteredUtc != null,
                 isDeviceOnlyDeploymentHypothesis:
-                    state.DeviceOnlyDeployment.Level >= HypothesisLevel.Strong &&
-                    state.DeviceOnlyDeployment.Reason == DeviceOnlyReasons.DeviceOnly,
+                    state.ClassifierOutcomes.DeviceOnlyDeployment.Level >= HypothesisLevel.Strong &&
+                    state.ClassifierOutcomes.DeviceOnlyDeployment.Reason == DeviceOnlyReasons.DeviceOnly,
                 systemRebootUtc: state.SystemRebootUtc?.Value,
                 currentEnrollmentPhase: state.CurrentEnrollmentPhase?.Value);
 

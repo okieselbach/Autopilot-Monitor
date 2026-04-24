@@ -23,10 +23,12 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Equal("tenant-1", state.TenantId);
             Assert.Equal(SessionStage.SessionStarted, state.Stage);
             Assert.Null(state.Outcome);
-            Assert.Equal(HypothesisLevel.Unknown, state.EnrollmentType.Level);
-            Assert.Equal(HypothesisLevel.Unknown, state.WhiteGloveSealing.Level);
-            Assert.Equal(HypothesisLevel.Unknown, state.WhiteGlovePart2Completion.Level);
-            Assert.Equal(HypothesisLevel.Unknown, state.DeviceOnlyDeployment.Level);
+            // Codex follow-up #5 — the legacy hypothesis fields are now aggregated into
+            // ScenarioProfile (derived classification) and ClassifierOutcomes (verdict storage).
+            Assert.Equal(EnrollmentMode.Unknown, state.ScenarioProfile.Mode);
+            Assert.Equal(HypothesisLevel.Unknown, state.ClassifierOutcomes.WhiteGloveSealing.Level);
+            Assert.Equal(HypothesisLevel.Unknown, state.ClassifierOutcomes.WhiteGlovePart2Completion.Level);
+            Assert.Equal(HypothesisLevel.Unknown, state.ClassifierOutcomes.DeviceOnlyDeployment.Level);
             Assert.Empty(state.Deadlines);
             Assert.Equal(-1, state.LastAppliedSignalOrdinal);
             Assert.Equal(0, state.StepIndex);

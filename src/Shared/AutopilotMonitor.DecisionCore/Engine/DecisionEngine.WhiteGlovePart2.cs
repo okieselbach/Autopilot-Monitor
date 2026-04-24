@@ -116,11 +116,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .ClearDeadlines();
 
-            builder.WhiteGlovePart2Completion = state.WhiteGlovePart2Completion.With(
+            var rejectedPart2 = state.ClassifierOutcomes.WhiteGlovePart2Completion.With(
                 level: HypothesisLevel.Rejected,
                 reason: "part2_user_absent",
                 score: 0,
                 lastUpdatedUtc: signal.OccurredAtUtc);
+            builder.ClassifierOutcomes = state.ClassifierOutcomes.WithWhiteGlovePart2Completion(rejectedPart2);
 
             var newState = builder.Build();
 
@@ -219,12 +220,13 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
 
-            builder.WhiteGlovePart2Completion = state.WhiteGlovePart2Completion.With(
+            var updatedPart2 = state.ClassifierOutcomes.WhiteGlovePart2Completion.With(
                 level: level,
                 reason: reason,
                 score: score,
                 lastUpdatedUtc: signal.OccurredAtUtc,
                 lastClassifierVerdictId: inputHash);
+            builder.ClassifierOutcomes = state.ClassifierOutcomes.WithWhiteGlovePart2Completion(updatedPart2);
 
             if (level == HypothesisLevel.Confirmed)
             {

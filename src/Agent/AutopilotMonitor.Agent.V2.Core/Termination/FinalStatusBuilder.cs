@@ -43,7 +43,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 Outcome = MapOutcome(terminated.Outcome, state.Stage),
                 CompletionSource = terminated.Reason.ToString(),
                 HelloOutcome = state.HelloOutcome?.Value ?? "unknown",
-                EnrollmentType = state.EnrollmentType?.Reason ?? state.EnrollmentType?.Level.ToString() ?? "unknown",
+                EnrollmentType = DescribeEnrollmentType(state.ScenarioProfile),
                 AgentUptimeSeconds = uptimeSeconds,
                 SignalsSeen = BuildSignalsSeen(state),
                 AppSummary = BuildAppSummary(packageStates),
@@ -73,10 +73,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             if (state.HelloResolvedUtc != null) signals.Add("hello_resolved");
             if (state.DesktopArrivedUtc != null) signals.Add("desktop_arrived");
             if (state.SystemRebootUtc != null) signals.Add("system_reboot");
-            if (state.AadJoinedWithUser != null && state.AadJoinedWithUser.Value) signals.Add("aad_user_joined");
-            if (state.ShellCoreWhiteGloveSuccessSeen != null && state.ShellCoreWhiteGloveSuccessSeen.Value)
+            var obs = state.ScenarioObservations;
+            if (obs.AadUserJoinWithUserObserved != null && obs.AadUserJoinWithUserObserved.Value) signals.Add("aad_user_joined");
+            if (obs.ShellCoreWhiteGloveSuccessSeen != null && obs.ShellCoreWhiteGloveSuccessSeen.Value)
                 signals.Add("whiteglove_shellcore_success");
-            if (state.WhiteGloveSealingPatternSeen != null && state.WhiteGloveSealingPatternSeen.Value)
+            if (obs.WhiteGloveSealingPatternSeen != null && obs.WhiteGloveSealingPatternSeen.Value)
                 signals.Add("whiteglove_sealing_pattern");
             if (state.ImeMatchedPatternId != null) signals.Add($"ime_pattern:{state.ImeMatchedPatternId.Value}");
             if (state.UserAadSignInCompleteUtc != null) signals.Add("part2_user_aad_signin");
@@ -149,5 +150,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             || s == AppInstallationState.Skipped
             || s == AppInstallationState.Postponed
             || s == AppInstallationState.Error;
+
+        /// <summary>
+        /// Codex follow-up #5 — the final-status summary exposed the legacy
+        /// <c>Hypothesis.Reason ?? Level</c> string. The equivalent derivable from
+        /// <see cref="EnrollmentScenarioProfile"/> is the <c>Mode</c> name when known,
+        /// falling back to the current <see cref="EnrollmentScenarioProfile.Reason"/>
+        /// token, and finally to <c>"unknown"</c>.
+        /// </summary>
+        private static string DescribeEnrollmentType(EnrollmentScenarioProfile profile)
+        {
+            if (profile.Mode != EnrollmentMode.Unknown) return profile.Mode.ToString();
+            if (!string.IsNullOrEmpty(profile.Reason)) return profile.Reason!;
+            return "unknown";
+        }
     }
 }

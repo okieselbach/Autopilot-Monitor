@@ -35,10 +35,10 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
 
             Assert.Equal(SessionStage.WhiteGloveSealed, result.FinalState.Stage);
             Assert.Equal(SessionOutcome.WhiteGlovePart1Sealed, result.FinalState.Outcome);
-            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.WhiteGloveSealing.Level);
-            Assert.Equal(80, result.FinalState.WhiteGloveSealing.Score);
-            Assert.NotNull(result.FinalState.ShellCoreWhiteGloveSuccessSeen);
-            Assert.True(result.FinalState.ShellCoreWhiteGloveSuccessSeen!.Value);
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
+            Assert.Equal(80, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Score);
+            Assert.NotNull(result.FinalState.ScenarioObservations.ShellCoreWhiteGloveSuccessSeen);
+            Assert.True(result.FinalState.ScenarioObservations.ShellCoreWhiteGloveSuccessSeen!.Value);
             Assert.Empty(result.FinalState.Deadlines);
         }
 
@@ -51,8 +51,8 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
 
             Assert.Equal(SessionStage.WhiteGloveSealed, result.FinalState.Stage);
             Assert.Equal(SessionOutcome.WhiteGlovePart1Sealed, result.FinalState.Outcome);
-            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.WhiteGloveSealing.Level);
-            Assert.True(result.FinalState.WhiteGloveSealing.Score >= WhiteGloveSealingClassifier.HighThreshold);
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
+            Assert.True(result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Score >= WhiteGloveSealingClassifier.HighThreshold);
 
             // The tick fired between the two WG signals — snapshot unchanged at that point,
             // so it was anti-loop-skipped. The SealingPattern run and the ShellCore run both
@@ -74,12 +74,12 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(SessionOutcome.EnrollmentComplete, result.FinalState.Outcome);
 
             // WhiteGlove verdict should be Rejected (hard-excluded by AadJoinedWithUser).
-            Assert.Equal(HypothesisLevel.Rejected, result.FinalState.WhiteGloveSealing.Level);
-            Assert.Equal(0, result.FinalState.WhiteGloveSealing.Score);
+            Assert.Equal(HypothesisLevel.Rejected, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
+            Assert.Equal(0, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Score);
 
             // The late-AADJ fact + Hello + Desktop are all recorded.
-            Assert.NotNull(result.FinalState.AadJoinedWithUser);
-            Assert.True(result.FinalState.AadJoinedWithUser!.Value);
+            Assert.NotNull(result.FinalState.ScenarioObservations.AadUserJoinWithUserObserved);
+            Assert.True(result.FinalState.ScenarioObservations.AadUserJoinWithUserObserved!.Value);
             Assert.NotNull(result.FinalState.HelloResolvedUtc);
             Assert.NotNull(result.FinalState.DesktopArrivedUtc);
             Assert.Equal("Success", result.FinalState.HelloOutcome!.Value);
@@ -94,8 +94,8 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
 
             // SealingPattern was seen but insufficient alone for Confirmed.
             Assert.NotEqual(SessionStage.WhiteGloveSealed, result.FinalState.Stage);
-            Assert.Equal(HypothesisLevel.Weak, result.FinalState.WhiteGloveSealing.Level);
-            Assert.Equal(40, result.FinalState.WhiteGloveSealing.Score);
+            Assert.Equal(HypothesisLevel.Weak, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
+            Assert.Equal(40, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Score);
 
             var runs = harness.ClassifierRunStats.TryGetValue("whiteglove-sealing:run", out var r) ? r : 0;
             var skipped = harness.ClassifierRunStats.TryGetValue("whiteglove-sealing:skipped_by_antiloop", out var s) ? s : 0;
