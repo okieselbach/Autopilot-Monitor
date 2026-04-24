@@ -52,7 +52,21 @@ namespace AutopilotMonitor.DecisionCore.Signals
         /// <summary>Monotonic per SignalLog; RowKey for Azure Signals table.</summary>
         public long SessionSignalOrdinal { get; }
 
-        /// <summary>Session-wide monotonic across all telemetry types (Event + Signal + Transition). Inspector correlation only.</summary>
+        /// <summary>
+        /// Session-wide monotonic reducer-step correlation counter — a signal and the
+        /// transition it produces share the same value. Assigned by
+        /// <c>SessionTraceOrdinalProvider.Next()</c> in <c>SignalIngress.ProcessItem</c>
+        /// and copied by the reducer into <c>DecisionTransition.SessionTraceOrdinal</c>.
+        /// <para>
+        /// Codex follow-up #3: this is <b>not</b> the same counter as
+        /// <c>Transport.Telemetry.TelemetryItem.SessionTraceOrdinal</c>, which is the
+        /// transport-cursor (== <c>TelemetryItemId</c>). They are both monotonic per
+        /// session and can coincide numerically on fresh sessions, but their sources are
+        /// independent. The backend's <c>TelemetryPayloadParser</c> resolves the
+        /// ambiguity by preferring the inner (payload) value on ingest, so the
+        /// reducer-correlation semantics are authoritative end-to-end.
+        /// </para>
+        /// </summary>
         public long SessionTraceOrdinal { get; }
 
         public DecisionSignalKind Kind { get; }

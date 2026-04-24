@@ -99,7 +99,15 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         public IReadOnlyList<GuardReport> Guards { get; }
 
-        /// <summary>Plan §2.2 cross-reference — Event.Sequence values this transition emitted as effects.</summary>
+        /// <summary>
+        /// Plan §2.2 cross-reference — Event.Sequence values this transition emitted as
+        /// effects. <b>Currently always empty</b> (Codex follow-up #3): the journal record
+        /// is appended before effects run, so the Event.Sequence values are not yet known
+        /// at construction time. The forward link is instead carried by
+        /// <c>EnrollmentEvent.CausedByTransitionStepIndex</c> — query the Events table by
+        /// StepIndex for the "events this step emitted" lookup. The property stays on the
+        /// type for journal backwards-compatibility and for a potential future sidecar fill.
+        /// </summary>
         public IReadOnlyList<long> EmittedEventSequences { get; }
 
         public ClassifierVerdict? ClassifierVerdict { get; }

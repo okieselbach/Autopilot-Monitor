@@ -113,6 +113,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
                 Timestamp = DateTime.SpecifyKind(occurredAtUtc, DateTimeKind.Utc),
                 ImmediateUpload = ParseImmediateUpload(parameters),
                 Data = ResolveData(parameters, typedPayload),
+
+                // Codex follow-up #3 forward-link: every EmitEventTimelineEntry effect runs
+                // as part of a reducer step, so currentState.StepIndex == the emitting
+                // transition's StepIndex and currentState.LastAppliedSignalOrdinal == the
+                // signal that drove the reduce. Persisting both on the event lets the
+                // Inspector jump "event → transition → signal" without joining tables.
+                CausedByTransitionStepIndex = currentState.StepIndex,
+                CausedBySignalOrdinal = currentState.LastAppliedSignalOrdinal >= 0
+                    ? currentState.LastAppliedSignalOrdinal
+                    : (long?)null,
             };
 
             _emitter.Emit(evt);

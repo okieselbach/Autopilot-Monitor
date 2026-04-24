@@ -77,7 +77,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         /// <summary>Transport-Cursor — monoton pro Session über ALLE Item-Typen.</summary>
         public long TelemetryItemId { get; }
 
-        /// <summary>Plan §2.2 — equals <see cref="TelemetryItemId"/> wenn session-zugehörig, null bei Agent-globalen Items.</summary>
+        /// <summary>
+        /// Transport-envelope view of <see cref="TelemetryItemId"/> — present when the
+        /// item belongs to a session, null for agent-global items.
+        /// <para>
+        /// Codex follow-up #3 semantic clarification: this is the <b>transport-cursor</b>
+        /// counter (spool-item ordering), <b>not</b> the reducer-step correlation counter
+        /// that lives on <c>DecisionSignal.SessionTraceOrdinal</c> /
+        /// <c>DecisionTransition.SessionTraceOrdinal</c>. Both counters are monotonic per
+        /// session but come from independent sources (spool vs.
+        /// <c>SessionTraceOrdinalProvider</c>). They share a name historically; the
+        /// backend's <c>TelemetryPayloadParser</c> prefers the inner payload value on
+        /// ingest for Signals and Transitions, so the reducer-correlation value wins
+        /// in downstream storage. This envelope value is only used for transport-cursor
+        /// bookkeeping.
+        /// </para>
+        /// </summary>
         public long? SessionTraceOrdinal { get; }
 
         /// <summary>Bereits fertig serialisiertes JSON der Payload (Event / DecisionSignal / DecisionTransition).</summary>
