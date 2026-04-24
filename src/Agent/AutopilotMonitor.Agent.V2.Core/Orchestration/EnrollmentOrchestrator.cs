@@ -468,6 +468,38 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // 13) Ingress-Worker starten (vor Collectors — sonst race-prone).
             _ingress.Start();
 
+            // 13.5) Codex follow-up #1 / plan §3 Phase 3 — re-arm persisted deadlines.
+            //       Without this any deadline armed pre-crash (HelloSafety, Part2Safety,
+            //       FinalizingGrace, ClassifierTick, …) would silently disappear on restart
+            //       and the session could hang forever. Must run AFTER _scheduler.Fired
+            //       subscription (step 12) AND AFTER _ingress.Start (step 13) because
+            //       past-due deadlines fire immediately via ThreadPool and the bridge
+            //       handler posts synthetic DeadlineFired signals through _ingress. Running
+            //       it before either one would either lose the fire (no subscriber) or drop
+            //       the signal (OnDeadlineFired returns early when _ingress is null).
+            //       Sits before the WG Part-2 bridge and before collectors start so
+            //       rehydrated past-due fires precede any fresh adapter-generated signals.
+            if (initialState.Deadlines.Count > 0)
+            {
+                _logger.Info(
+                    $"EnrollmentOrchestrator: re-arming {initialState.Deadlines.Count} " +
+                    $"persisted deadline(s) post-recovery.");
+                try
+                {
+                    _scheduler.RehydrateFromSnapshot(initialState.Deadlines);
+                }
+                catch (Exception ex)
+                {
+                    // Codex follow-up #2 will convert this into a synthetic
+                    // EffectInfrastructureFailure → enrollment_failed transition. For now
+                    // we log at error so operators see the symptom — the max-lifetime
+                    // watchdog remains the last-resort termination path.
+                    _logger.Error(
+                        "EnrollmentOrchestrator: deadline rehydration failed; session running without some deadlines.",
+                        ex);
+                }
+            }
+
             // 13a) Recovery Sonderfall 1: WG Part-1 → Part-2 bridge zünden. Das Signal muss
             //      nach _ingress.Start laufen, aber VOR Collectors/Adapters — so sieht der
             //      Reducer-Worker zuerst die Bridge-Transition (WhiteGloveSealed → AwaitingUserSignIn)

@@ -362,6 +362,94 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             sut.Stop();
         }
 
+        // ============================================================ Codex #1 Phase 3 — deadline re-arm
+
+        [Fact]
+        public void Snapshot_with_past_due_deadline_fires_DeadlineFired_signal_on_start()
+        {
+            // Past-due re-arm: a deadline whose DueAtUtc lies before clock.UtcNow must fire
+            // immediately on rehydrate. The scheduler's past-due path queues to ThreadPool,
+            // the Fired bridge synthesises a DeadlineFired signal, and it lands on the log.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var pastDue = new ActiveDeadline(
+                name: "hello_safety",
+                dueAtUtc: At.AddMinutes(-5),
+                firesSignalKind: DecisionSignalKind.DeadlineFired,
+                firesPayload: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["deadlineName"] = "hello_safety",
+                });
+            var seed = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.AwaitingHello)
+                .WithStepIndex(3)
+                .WithLastAppliedSignalOrdinal(2)
+                .AddDeadline(pastDue)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(seed);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            var signalLog = GetSignalLog(sut);
+            Assert.True(
+                SpinWait.SpinUntil(
+                    () => signalLog.ReadAll().Any(s =>
+                        s.Kind == DecisionSignalKind.DeadlineFired &&
+                        s.Payload != null &&
+                        s.Payload.TryGetValue("deadlineName", out var n) &&
+                        n == "hello_safety"),
+                    3000),
+                "Expected DeadlineFired signal for re-armed past-due deadline.");
+
+            sut.Stop();
+        }
+
+        [Fact]
+        public void Snapshot_with_future_deadline_is_scheduled_but_not_yet_fired()
+        {
+            // Future re-arm: the rehydrated deadline is live on the scheduler (IsScheduled=true)
+            // but no DeadlineFired signal has been emitted because its wall-clock due time
+            // has not arrived.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var future = new ActiveDeadline(
+                name: "part2_safety",
+                dueAtUtc: DateTime.UtcNow.AddHours(2), // real wall-clock future (scheduler uses wall clock)
+                firesSignalKind: DecisionSignalKind.DeadlineFired);
+            var seed = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.WhiteGloveSealed)
+                .WithStepIndex(5)
+                .WithLastAppliedSignalOrdinal(4)
+                .AddDeadline(future)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(seed);
+
+            var sut = rig.Build();
+            sut.Start();
+
+            // Scheduler must know about the re-armed deadline.
+            var scheduler = GetScheduler(sut);
+            Assert.True(scheduler.IsScheduled("part2_safety"),
+                "Future-due persisted deadline was not re-armed on the scheduler.");
+
+            // Give the ThreadPool a moment to prove we don't fire it prematurely.
+            Thread.Sleep(100);
+            var signalLog = GetSignalLog(sut);
+            Assert.DoesNotContain(signalLog.ReadAll(),
+                s => s.Kind == DecisionSignalKind.DeadlineFired);
+
+            sut.Stop();
+        }
+
         // ================================================================= Sonderfall 3: Transport-Resume
 
         [Fact]
@@ -411,6 +499,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 "_signalLog",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
             return (ISignalLogWriter)field!.GetValue(sut)!;
+        }
+
+        private static IDeadlineScheduler GetScheduler(EnrollmentOrchestrator sut)
+        {
+            var field = typeof(EnrollmentOrchestrator).GetField(
+                "_scheduler",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            return (IDeadlineScheduler)field!.GetValue(sut)!;
         }
 
         private static DrainResult InvokeDrain(EnrollmentOrchestrator sut)
