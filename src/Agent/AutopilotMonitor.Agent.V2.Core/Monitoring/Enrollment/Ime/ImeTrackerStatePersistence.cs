@@ -106,6 +106,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         public string CurrentPackageId { get; set; }
         public List<PackageStateData> Packages { get; set; }
         public Dictionary<string, FilePositionData> FilePositions { get; set; }
+
+        // Codex follow-up (882fef64 PR3-PR5 review): per-phase package snapshots that the
+        // tracker captures just before _packageStates.Clear() on the next-phase transition.
+        // Without persistence, an agent restart between phases (common on hybrid-join +
+        // multi-reboot enrollments) loses the earlier-phase apps from the union returned by
+        // GetAllKnownPackageStates, which in turn drops them from FinalStatus + the
+        // app_tracking_summary terminal event. Null on agents from before this field was
+        // added — LoadState handles that as "no snapshots" and the in-memory dict stays empty
+        // (degrades gracefully back to the live _packageStates view).
+        public Dictionary<string, List<PackageStateData>> PhasePackageSnapshots { get; set; }
     }
 
     public class PackageStateData

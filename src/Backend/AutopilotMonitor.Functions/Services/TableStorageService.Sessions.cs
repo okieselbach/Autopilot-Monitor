@@ -1222,6 +1222,18 @@ namespace AutopilotMonitor.Functions.Services
                             if (currentPhase.HasValue)
                                 forceUpdate["CurrentPhase"] = (int)currentPhase.Value;
 
+                            // Codex follow-up (882fef64 PR3-PR5 review): mirror the
+                            // terminal-phase override from the normal path (line ~1019). V2
+                            // emits enrollment_complete with Phase=Unknown (per
+                            // feedback_phase_strategy), so currentPhase.HasValue is false
+                            // here. Without this override the force-update path leaves
+                            // CurrentPhase at its prior (in-flight or -1) value forever
+                            // when ETag retries are exhausted exactly at completion.
+                            if (status == SessionStatus.Succeeded)
+                            {
+                                forceUpdate["CurrentPhase"] = (int)EnrollmentPhase.Complete;
+                            }
+
                             var freshStartedAt = freshSession.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
                             if (earliestEventTimestamp.HasValue && earliestEventTimestamp.Value < freshStartedAt)
                                 forceUpdate["StartedAt"] = EnsureUtc(earliestEventTimestamp.Value);

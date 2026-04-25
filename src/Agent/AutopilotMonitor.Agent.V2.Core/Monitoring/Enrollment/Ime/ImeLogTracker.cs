@@ -382,23 +382,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 _packageStates.Clear();
                 foreach (var p in state.Packages)
                 {
-                    var pkg = AppPackageState.Restore(
-                        p.Id, p.ListPos, p.Name,
-                        (AppRunAs)p.RunAs, (AppIntent)p.Intent, (AppTargeted)p.Targeted,
-                        p.DependsOn != null ? new HashSet<string>(p.DependsOn) : new HashSet<string>(),
-                        (AppInstallationState)p.InstallationState, p.DownloadingOrInstallingSeen,
-                        p.ProgressPercent, p.BytesDownloaded, p.BytesTotal,
-                        errorPatternId: p.ErrorPatternId, errorDetail: p.ErrorDetail, errorCode: p.ErrorCode,
-                        exitCode: p.ExitCode, hresultFromWin32: p.HResultFromWin32,
-                        doFileSize: p.DoFileSize, doTotalBytesDownloaded: p.DoTotalBytesDownloaded,
-                        doBytesFromPeers: p.DoBytesFromPeers, doPercentPeerCaching: p.DoPercentPeerCaching,
-                        doBytesFromLanPeers: p.DoBytesFromLanPeers, doBytesFromGroupPeers: p.DoBytesFromGroupPeers,
-                        doBytesFromInternetPeers: p.DoBytesFromInternetPeers, doDownloadMode: p.DoDownloadMode,
-                        doDownloadDuration: p.DoDownloadDuration, doBytesFromHttp: p.DoBytesFromHttp,
-                        hasDoTelemetry: p.HasDoTelemetry,
-                        appVersion: p.AppVersion, appType: p.AppType,
-                        attemptNumber: p.AttemptNumber, detectionResult: p.DetectionResult);
-                    _packageStates.Add(pkg);
+                    _packageStates.Add(FromPackageStateData(p));
+                }
+            }
+
+            // Codex follow-up (882fef64 PR3-PR5 review): restore per-phase snapshots so
+            // GetAllKnownPackageStates() still sees DeviceSetup apps after a mid-AccountSetup
+            // restart. Old state files that pre-date the field have null here — leave the
+            // dict empty in that case (degrades to live-only view, no crash).
+            _phasePackageSnapshots.Clear();
+            if (state.PhasePackageSnapshots != null)
+            {
+                foreach (var kv in state.PhasePackageSnapshots)
+                {
+                    if (string.IsNullOrEmpty(kv.Key) || kv.Value == null) continue;
+                    var restored = new List<AppPackageState>(kv.Value.Count);
+                    foreach (var p in kv.Value)
+                    {
+                        try { restored.Add(FromPackageStateData(p)); }
+                        catch (Exception ex)
+                        {
+                            _logger.Warning($"ImeLogTracker: failed to restore phase-snapshot package '{p?.Id ?? "(null)"}' for phase '{kv.Key}': {ex.Message}");
+                        }
+                    }
+                    _phasePackageSnapshots[kv.Key] = restored;
                 }
             }
 
@@ -438,42 +445,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 SeenAppIds = _seenAppIds.ToList(),
                 IgnoreList = _packageStates.IgnoreList.ToList(),
                 CurrentPackageId = _packageStates.CurrentPackageId,
-                Packages = _packageStates.Select(p => new PackageStateData
-                {
-                    Id = p.Id,
-                    ListPos = p.ListPos,
-                    Name = p.Name,
-                    RunAs = (int)p.RunAs,
-                    Intent = (int)p.Intent,
-                    Targeted = (int)p.Targeted,
-                    DependsOn = p.DependsOn?.ToList() ?? new List<string>(),
-                    InstallationState = (int)p.InstallationState,
-                    DownloadingOrInstallingSeen = p.DownloadingOrInstallingSeen,
-                    ProgressPercent = p.ProgressPercent,
-                    BytesDownloaded = p.BytesDownloaded,
-                    BytesTotal = p.BytesTotal,
-                    ErrorPatternId = p.ErrorPatternId,
-                    ErrorDetail = p.ErrorDetail,
-                    ErrorCode = p.ErrorCode,
-                    ExitCode = p.ExitCode,
-                    HResultFromWin32 = p.HResultFromWin32,
-                    DoFileSize = p.DoFileSize,
-                    DoTotalBytesDownloaded = p.DoTotalBytesDownloaded,
-                    DoBytesFromPeers = p.DoBytesFromPeers,
-                    DoPercentPeerCaching = p.DoPercentPeerCaching,
-                    DoBytesFromLanPeers = p.DoBytesFromLanPeers,
-                    DoBytesFromGroupPeers = p.DoBytesFromGroupPeers,
-                    DoBytesFromInternetPeers = p.DoBytesFromInternetPeers,
-                    DoDownloadMode = p.DoDownloadMode,
-                    DoDownloadDuration = p.DoDownloadDuration,
-                    DoBytesFromHttp = p.DoBytesFromHttp,
-                    HasDoTelemetry = p.HasDoTelemetry,
-                    AppVersion = p.AppVersion,
-                    AppType = p.AppType,
-                    AttemptNumber = p.AttemptNumber,
-                    DetectionResult = p.DetectionResult
-                }).ToList(),
-                FilePositions = new Dictionary<string, FilePositionData>()
+                Packages = _packageStates.Select(ToPackageStateData).ToList(),
+                FilePositions = new Dictionary<string, FilePositionData>(),
+
+                // Codex follow-up (882fef64 PR3-PR5 review): persist per-phase snapshots so
+                // hybrid-join / multi-reboot enrollments don't lose DeviceSetup apps from
+                // FinalStatus + app_tracking_summary across an agent restart. The dict key is
+                // the ESP phase name (e.g. "DeviceSetup"); the value is the dehydrated snapshot
+                // captured on _packageStates.Clear() during the next-phase transition.
+                PhasePackageSnapshots = _phasePackageSnapshots.ToDictionary(
+                    kv => kv.Key,
+                    kv => kv.Value.Select(ToPackageStateData).ToList(),
+                    StringComparer.Ordinal),
             };
 
             // Store file positions by filename only (log folder is known)
@@ -490,6 +473,64 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             _statePersistence.Save(state);
         }
 
+        // Codex follow-up (882fef64 PR3-PR5 review): single source of truth for AppPackageState
+        // <-> PackageStateData mapping. Used both for the live _packageStates list and for the
+        // _phasePackageSnapshots restore path so the field set never drifts between the two.
+        private static PackageStateData ToPackageStateData(AppPackageState p) =>
+            new PackageStateData
+            {
+                Id = p.Id,
+                ListPos = p.ListPos,
+                Name = p.Name,
+                RunAs = (int)p.RunAs,
+                Intent = (int)p.Intent,
+                Targeted = (int)p.Targeted,
+                DependsOn = p.DependsOn?.ToList() ?? new List<string>(),
+                InstallationState = (int)p.InstallationState,
+                DownloadingOrInstallingSeen = p.DownloadingOrInstallingSeen,
+                ProgressPercent = p.ProgressPercent,
+                BytesDownloaded = p.BytesDownloaded,
+                BytesTotal = p.BytesTotal,
+                ErrorPatternId = p.ErrorPatternId,
+                ErrorDetail = p.ErrorDetail,
+                ErrorCode = p.ErrorCode,
+                ExitCode = p.ExitCode,
+                HResultFromWin32 = p.HResultFromWin32,
+                DoFileSize = p.DoFileSize,
+                DoTotalBytesDownloaded = p.DoTotalBytesDownloaded,
+                DoBytesFromPeers = p.DoBytesFromPeers,
+                DoPercentPeerCaching = p.DoPercentPeerCaching,
+                DoBytesFromLanPeers = p.DoBytesFromLanPeers,
+                DoBytesFromGroupPeers = p.DoBytesFromGroupPeers,
+                DoBytesFromInternetPeers = p.DoBytesFromInternetPeers,
+                DoDownloadMode = p.DoDownloadMode,
+                DoDownloadDuration = p.DoDownloadDuration,
+                DoBytesFromHttp = p.DoBytesFromHttp,
+                HasDoTelemetry = p.HasDoTelemetry,
+                AppVersion = p.AppVersion,
+                AppType = p.AppType,
+                AttemptNumber = p.AttemptNumber,
+                DetectionResult = p.DetectionResult,
+            };
+
+        private static AppPackageState FromPackageStateData(PackageStateData p) =>
+            AppPackageState.Restore(
+                p.Id, p.ListPos, p.Name,
+                (AppRunAs)p.RunAs, (AppIntent)p.Intent, (AppTargeted)p.Targeted,
+                p.DependsOn != null ? new HashSet<string>(p.DependsOn) : new HashSet<string>(),
+                (AppInstallationState)p.InstallationState, p.DownloadingOrInstallingSeen,
+                p.ProgressPercent, p.BytesDownloaded, p.BytesTotal,
+                errorPatternId: p.ErrorPatternId, errorDetail: p.ErrorDetail, errorCode: p.ErrorCode,
+                exitCode: p.ExitCode, hresultFromWin32: p.HResultFromWin32,
+                doFileSize: p.DoFileSize, doTotalBytesDownloaded: p.DoTotalBytesDownloaded,
+                doBytesFromPeers: p.DoBytesFromPeers, doPercentPeerCaching: p.DoPercentPeerCaching,
+                doBytesFromLanPeers: p.DoBytesFromLanPeers, doBytesFromGroupPeers: p.DoBytesFromGroupPeers,
+                doBytesFromInternetPeers: p.DoBytesFromInternetPeers, doDownloadMode: p.DoDownloadMode,
+                doDownloadDuration: p.DoDownloadDuration, doBytesFromHttp: p.DoBytesFromHttp,
+                hasDoTelemetry: p.HasDoTelemetry,
+                appVersion: p.AppVersion, appType: p.AppType,
+                attemptNumber: p.AttemptNumber, detectionResult: p.DetectionResult);
+
         /// <summary>
         /// Deletes persisted state file. Called on enrollment complete to ensure
         /// a fresh state on the next enrollment cycle.
@@ -498,6 +539,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         {
             _statePersistence?.Delete();
         }
+
+        // Test-only seams: exercise the persistence round-trip without driving Start() (which
+        // also spins up file watchers). Codex follow-up (882fef64 PR3-PR5 review) needs these
+        // to verify PhasePackageSnapshots survive a simulated agent restart.
+        internal void SaveStateForTest() => SaveState();
+        internal void LoadStateForTest() => LoadState();
 
         #endregion
 

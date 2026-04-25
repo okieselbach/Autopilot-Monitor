@@ -109,6 +109,84 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Ime
         }
 
         [Fact]
+        public void PhasePackageSnapshots_survive_save_and_load_roundtrip()
+        {
+            // Codex follow-up (882fef64 PR3-PR5 review): on hybrid-join + multi-reboot
+            // enrollments the agent commonly restarts mid-AccountSetup. Before this fix the
+            // snapshot dict was lost on restart and DeviceSetup apps disappeared from
+            // FinalStatus + app_tracking_summary. Round-trip the persistence path on the
+            // same state directory to prove the dict survives.
+            using var tmp = new TempDirectory();
+            var stateDir = System.IO.Path.Combine(tmp.Path, "State");
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+
+            using (var trackerA = new ImeLogTracker(
+                logFolder: tmp.Path,
+                patterns: new List<ImeLogPattern>(),
+                logger: logger,
+                stateDirectory: stateDir))
+            {
+                trackerA.SeedPhaseSnapshotForTesting("DeviceSetup", new[]
+                {
+                    NewPkg("device-1", AppTargeted.Device, AppInstallationState.Installed),
+                    NewPkg("device-2", AppTargeted.Device, AppInstallationState.Installed),
+                });
+                trackerA.PackageStates.Add(NewPkg("user-1", AppTargeted.User, AppInstallationState.Installed));
+
+                trackerA.SaveStateForTest();
+            }
+
+            // Fresh tracker on the same state dir — simulates an agent restart picking up the
+            // persisted state. LoadStateForTest replaces the synchronous Start() path so file
+            // watchers stay out of the test.
+            using (var trackerB = new ImeLogTracker(
+                logFolder: tmp.Path,
+                patterns: new List<ImeLogPattern>(),
+                logger: logger,
+                stateDirectory: stateDir))
+            {
+                trackerB.LoadStateForTest();
+
+                var all = trackerB.GetAllKnownPackageStates();
+                Assert.Equal(3, all.Count);
+                Assert.Equal(2, all.Count(p => p.Targeted == AppTargeted.Device));
+                Assert.Equal(1, all.Count(p => p.Targeted == AppTargeted.User));
+                Assert.Contains(all, p => p.Id == "device-1");
+                Assert.Contains(all, p => p.Id == "device-2");
+                Assert.Contains(all, p => p.Id == "user-1");
+            }
+        }
+
+        [Fact]
+        public void LoadState_tolerates_old_snapshot_files_without_PhasePackageSnapshots_field()
+        {
+            // Backwards-compat: agent rolled out before this field exists has snapshot files
+            // with no PhasePackageSnapshots entry. Loading must NOT throw and must leave the
+            // in-memory dict empty (degrades to live-only view).
+            using var tmp = new TempDirectory();
+            var stateDir = System.IO.Path.Combine(tmp.Path, "State");
+            System.IO.Directory.CreateDirectory(stateDir);
+
+            // Hand-craft an old-shape state file: contains only fields that pre-dated the
+            // PhasePackageSnapshots addition. JSON-deserialiser must default the new field
+            // to null without complaining.
+            var oldJson = "{\"CurrentPhaseOrder\":1,\"LastEspPhaseDetected\":\"DeviceSetup\",\"AllAppsCompletedFired\":false,\"LogPhaseIsCurrentPhase\":true,\"SeenAppIds\":[],\"IgnoreList\":[],\"CurrentPackageId\":null,\"Packages\":[],\"FilePositions\":{}}";
+            System.IO.File.WriteAllText(System.IO.Path.Combine(stateDir, "ime-tracker-state.json"), oldJson);
+
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            using var tracker = new ImeLogTracker(
+                logFolder: tmp.Path,
+                patterns: new List<ImeLogPattern>(),
+                logger: logger,
+                stateDirectory: stateDir);
+
+            // Must not throw.
+            tracker.LoadStateForTest();
+            // No snapshots restored, no live packages → empty consolidated view.
+            Assert.Empty(tracker.GetAllKnownPackageStates());
+        }
+
+        [Fact]
         public void GetAllKnownPackageStates_dedupes_by_id_with_live_winning()
         {
             // Defensive: ESP-phase moves all known IDs into IgnoreList so an app cannot
