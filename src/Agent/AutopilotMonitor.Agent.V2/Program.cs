@@ -397,9 +397,15 @@ namespace AutopilotMonitor.Agent.V2
             BackendTelemetryUploader uploader;
             try
             {
+                // Share BackendApiClient.NetworkMetrics so the mTLS pipeline records every
+                // outbound request — most importantly BackendTelemetryUploader's POST
+                // /api/agent/telemetry, which dominates per-session traffic. Without this the
+                // agent_metrics_snapshot net_total_requests undercounts ~25-30x (only the
+                // legacy BackendApiClient calls would show up).
                 mtlsHttpClient = MtlsHttpClientFactory.Create(
                     resolver: new DefaultCertificateResolver(),
-                    logger: logger);
+                    logger: logger,
+                    metrics: backendApiClient.NetworkMetrics);
             }
             catch (InvalidOperationException ex)
             {

@@ -3,6 +3,7 @@ using System;
 using System.Net;
 using System.Net.Http;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Security;
 
 namespace AutopilotMonitor.Agent.V2.Core.Orchestration
@@ -71,14 +72,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <summary>
         /// Baut einen fertig konfigurierten <see cref="HttpClient"/> — Handler via
         /// <see cref="CreateHandler"/>, Timeout via Parameter (default <see cref="DefaultTimeout"/>).
+        /// <para>
+        /// When <paramref name="metrics"/> is supplied, every outbound request through the returned
+        /// client is recorded on that shared <see cref="NetworkMetrics"/> instance via a
+        /// <see cref="NetworkMetricsRecordingHandler"/> in the pipeline. This is how the
+        /// V2 telemetry-upload path (<c>POST /api/agent/telemetry</c>) gets counted in
+        /// <c>net_total_requests</c> — without it the metric only reflects the legacy
+        /// <c>BackendApiClient</c> calls and undercounts by ~25-30x.
+        /// </para>
         /// </summary>
         public static HttpClient Create(
             ICertificateResolver resolver,
             AgentLogger logger,
-            TimeSpan? timeout = null)
+            TimeSpan? timeout = null,
+            NetworkMetrics? metrics = null)
         {
-            var handler = CreateHandler(resolver, logger);
-            return new HttpClient(handler)
+            var innerHandler = CreateHandler(resolver, logger);
+            HttpMessageHandler pipelineHead = innerHandler;
+            if (metrics != null)
+            {
+                pipelineHead = new NetworkMetricsRecordingHandler(metrics, innerHandler);
+            }
+            return new HttpClient(pipelineHead)
             {
                 Timeout = timeout ?? DefaultTimeout,
             };
