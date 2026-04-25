@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Linq;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Persistence;
@@ -103,6 +104,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (step == null) throw new ArgumentNullException(nameof(step));
             if (signal == null) throw new ArgumentNullException(nameof(signal));
 
+            // PR3-D1: capture pre-step stage so the post-step log line can show the transition.
+            var previousStage = _currentState.Stage;
+
             // 1) Journal-Append — einziger Fehler-Pfad der hart wirft + Quarantine eskaliert.
             try
             {
@@ -199,6 +203,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             //    follow-up synthetic signal reduces FROM the correct pre-terminal state.
             _currentState = step.NewState;
             _consecutiveJournalFailures = 0;
+
+            // PR3-D1: per-step observability. Stage transitions and effect-bearing steps fire
+            // at DEBUG (operator-relevant); pure no-op steps (Stage unchanged + no effects)
+            // fire at VERBOSE so a steady stream of e.g. ClassifierTick + InformationalEvent
+            // pass-throughs doesn't drown the log.
+            var newStage = step.NewState.Stage;
+            if (previousStage != newStage || step.Effects.Count > 0)
+            {
+                _logger.Debug(
+                    $"DecisionStep: ord={signal.SessionSignalOrdinal} kind={signal.Kind} " +
+                    $"stage={previousStage}->{newStage} effects=[{string.Join(",", step.Effects.Select(e => e.Kind))}] " +
+                    $"abort={effectResult.SessionMustAbort} failures={effectResult.Failures.Count}");
+            }
+            else
+            {
+                _logger.Verbose($"DecisionStep: ord={signal.SessionSignalOrdinal} kind={signal.Kind} stage={previousStage} (no-op)");
+            }
 
             // 5) Terminal-stage detection (M4.6.β). Fires exactly once per agent run when the
             //    DecisionEngine transitions the session into a terminal SessionStage — the

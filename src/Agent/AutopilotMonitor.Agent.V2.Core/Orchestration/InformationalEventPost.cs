@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
@@ -42,11 +44,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
         private readonly ISignalIngressSink _ingress;
         private readonly IClock _clock;
+        // PR3-D5: optional logger so every lifecycle event passing through the single rail
+        // shows up in the agent log with eventType + source + immediate-flag. Null in legacy
+        // unit tests; production wires the agent logger via the new ctor overload below.
+        private readonly AgentLogger? _logger;
 
         public InformationalEventPost(ISignalIngressSink ingress, IClock clock)
+            : this(ingress, clock, logger: null)
+        {
+        }
+
+        public InformationalEventPost(ISignalIngressSink ingress, IClock clock, AgentLogger? logger)
         {
             _ingress = ingress ?? throw new ArgumentNullException(nameof(ingress));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+            _logger = logger;
         }
 
         /// <summary>
@@ -129,6 +141,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 evidence: evidence,
                 payload: payload,
                 typedPayload: typedPayload);
+
+            // PR3-D5: lifecycle-event observability — DEBUG so it doesn't dominate at INFO,
+            // but every event that hits the timeline has a matching agent-log line. First
+            // 8 payload keys are usually enough to identify the event variant.
+            if (_logger != null)
+            {
+                var keys = string.Join(",", payload.Keys.Take(8));
+                _logger.Debug(
+                    $"InformationalEventPost: emit eventType={eventType} source={source} " +
+                    $"immediate={immediateUpload} severity={severity?.ToString() ?? "default"} " +
+                    $"dataKeys=[{keys}]");
+            }
         }
 
         /// <summary>

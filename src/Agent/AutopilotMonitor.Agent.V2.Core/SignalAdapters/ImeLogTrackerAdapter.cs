@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.DecisionCore.Engine;
@@ -57,6 +58,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private readonly InformationalEventPost _post;
         private readonly HashSet<string> _whiteGloveSealingPatternIds;
         private readonly object _lock = new object();
+        // PR3-D4: optional logger so the largest signal adapter (777 LOC, 0 logger calls
+        // before this PR) gets DEBUG-level visibility into emissions. Null in legacy tests.
+        private readonly AgentLogger? _logger;
 
         // Previous action-handlers — restored on Dispose so we don't leave a dead callback
         // hanging on the tracker.
@@ -100,12 +104,14 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             ImeLogTracker tracker,
             ISignalIngressSink ingress,
             IClock clock,
-            IReadOnlyCollection<string>? whiteGloveSealingPatternIds = null)
+            IReadOnlyCollection<string>? whiteGloveSealingPatternIds = null,
+            AgentLogger? logger = null)
         {
             _tracker = tracker ?? throw new ArgumentNullException(nameof(tracker));
             _ingress = ingress ?? throw new ArgumentNullException(nameof(ingress));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _post = new InformationalEventPost(ingress, clock);
+            _logger = logger;
 
             _whiteGloveSealingPatternIds = whiteGloveSealingPatternIds == null
                 ? new HashSet<string>(StringComparer.Ordinal)
@@ -267,6 +273,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 phase: mappedPhase == EnrollmentPhase.Unknown ? (EnrollmentPhase?)null : mappedPhase,
                 data: data,
                 occurredAtUtc: now);
+
+            // PR3-D4: phase emissions are decision-relevant — operators want to see them.
+            _logger?.Debug($"ImeAdapter: EspPhase '{phase}' posted (mappedTo={mappedPhase}, patternId={patternId ?? "(none)"})");
         }
 
         private void EmitUserSessionCompleted()
@@ -306,6 +315,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 message: "IME user session completed",
                 data: data,
                 occurredAtUtc: now);
+
+            // PR3-D4: terminal-ish lifecycle marker — INFO so it's visible at the default level.
+            _logger?.Info($"ImeAdapter: user session completed -> posting ImeUserSessionCompleted (patternId={patternId ?? "(none)"})");
         }
 
         private void EmitAppState(AppPackageState app, AppInstallationState oldState, AppInstallationState newState)
@@ -376,6 +388,13 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 immediateUpload: true,
                 data: BuildAppStatePayload(app, newState, timing),
                 occurredAtUtc: now);
+
+            // PR3-D4: app state transitions are the heaviest cardinality observability target —
+            // a forensic reader needs (oldState->newState, terminal flag, sub-phase emit) to
+            // reconstruct why the UI shows what it shows.
+            var shortId = (app.Id != null && app.Id.Length >= 8) ? app.Id.Substring(0, 8) : (app.Id ?? "?");
+            _logger?.Debug(
+                $"ImeAdapter: app '{app.Name ?? "?"}' ({shortId}) {oldState}->{newState} appType={app.AppType ?? "?"} bytesTotal={app.BytesTotal} terminal={(terminalKind != null)} eventType={eventType}");
         }
 
         /// <summary>
@@ -511,6 +530,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 {
                     [SignalPayloadKeys.ImePatternId] = patternId,
                 });
+
+            // PR3-D4: WG Part-1 boundary — INFO-level lifecycle marker, fires at most once.
+            _logger?.Info($"ImeAdapter: WG sealing pattern '{patternId}' detected -> posting WhiteGloveSealingPatternDetected (Part-1 boundary)");
         }
 
         private void EmitImeAgentVersion(string version)
@@ -531,6 +553,9 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 message: $"IME Agent version: {version}",
                 data: data,
                 occurredAtUtc: _clock.UtcNow);
+
+            // PR3-D4: fire-once and useful for compatibility-debugging — INFO level.
+            _logger?.Info($"ImeAdapter: IME agent version detected: {version}");
         }
 
         private void EmitDoTelemetry(AppPackageState app)
@@ -578,6 +603,10 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 immediateUpload: true,
                 data: data,
                 occurredAtUtc: _clock.UtcNow);
+
+            // PR3-D4: per-app DO summary at DEBUG with the headline metrics.
+            _logger?.Debug(
+                $"ImeAdapter: DO telemetry app='{app.Name ?? "?"}' total={app.DoFileSize} peers={app.DoBytesFromPeers} http={app.DoBytesFromHttp} mode={app.DoDownloadMode}");
         }
 
         private void EmitScriptCompleted(ScriptExecutionState script)
@@ -630,6 +659,11 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 severity: severity,
                 data: data,
                 occurredAtUtc: _clock.UtcNow);
+
+            // PR3-D4: per-script summary at DEBUG (failures already surface via Severity=Error
+            // in the event itself; the log line carries forensic context for both outcomes).
+            _logger?.Debug(
+                $"ImeAdapter: script completed policyId={shortId} type={script.ScriptType ?? "?"} result={script.Result ?? "?"} exit={(script.ExitCode.HasValue ? script.ExitCode.Value.ToString() : "n/a")}");
         }
 
         private static bool IsRemediation(string? scriptType) =>

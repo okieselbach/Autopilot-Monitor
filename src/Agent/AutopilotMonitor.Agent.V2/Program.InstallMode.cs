@@ -181,6 +181,10 @@ namespace AutopilotMonitor.Agent.V2
 
             logger.Info($"Executing: {fileName} {arguments}");
 
+            // PR3-A3: prior `Process exit code: 0` line had no context — here we add the
+            // process name + duration so log readers can correlate the line with the
+            // command issued without scrolling back.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             using (var process = Process.Start(psi))
             {
                 if (process == null)
@@ -189,11 +193,13 @@ namespace AutopilotMonitor.Agent.V2
                 var stdout = process.StandardOutput.ReadToEnd();
                 var stderr = process.StandardError.ReadToEnd();
                 process.WaitForExit();
+                sw.Stop();
 
                 if (!string.IsNullOrWhiteSpace(stdout)) logger.Info($"Process output: {stdout.Trim()}");
                 if (!string.IsNullOrWhiteSpace(stderr)) logger.Warning($"Process error output: {stderr.Trim()}");
 
-                logger.Info($"Process exit code: {process.ExitCode}");
+                var processName = System.IO.Path.GetFileName(fileName);
+                logger.Info($"Process completed: {processName} -> exit={process.ExitCode}, durationMs={sw.ElapsedMilliseconds}");
                 return process.ExitCode;
             }
         }

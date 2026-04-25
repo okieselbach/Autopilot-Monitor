@@ -583,7 +583,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     logger.Info($"ImeLogHost: SimulationMode ENABLED (speedFactor={simulationSpeedFactor}, path={logFolder})");
                 }
 
-                _adapter = new ImeLogTrackerAdapter(_tracker, ingress, clock, whiteGloveSealingPatternIds);
+                _adapter = new ImeLogTrackerAdapter(_tracker, ingress, clock, whiteGloveSealingPatternIds, logger);
 
                 var processWatcherPost = new InformationalEventPost(ingress, clock);
                 _processWatcher = new ImeProcessWatcher(sessionId, tenantId, processWatcherPost, logger);

@@ -482,7 +482,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 ingress: _sinkRelay,
                 emitter: _timelineEmitter,
                 snapshot: _snapshot,
-                clock: _clock);
+                clock: _clock,
+                logger: _logger);
 
             // 8) Processor — owns the initial state + journal + snapshot + quarantine hook +
             //    M4.6.β terminal-stage hook (fires Terminated event when the engine reaches a
@@ -522,7 +523,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 clock: _clock,
                 backPressureObserver: _backPressureObserver,
                 signalEmitter: _signalEmitter,
-                channelCapacity: _channelCapacity);
+                channelCapacity: _channelCapacity,
+                logger: _logger);
 
             // 11) Relay auf den echten Ingress umbiegen.
             _sinkRelay.Target = _ingress;
@@ -695,7 +697,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 _logger.Info($"EnrollmentOrchestrator: max-lifetime watchdog armed ({_agentMaxLifetime.Value.TotalMinutes:F0}min).");
             }
 
-            _logger.Info("EnrollmentOrchestrator: started.");
+            // PR3-A3: previous "started." line had zero context. Add the cardinality info that
+            // tells a forensic reader what the orchestrator is actually running (initial stage,
+            // collector-host count, short session id) and how long max-lifetime is set for.
+            var sessionShort = _sessionId != null && _sessionId.Length >= 8 ? _sessionId.Substring(0, 8) : (_sessionId ?? string.Empty);
+            var initialStage = CurrentState?.Stage.ToString() ?? "Unknown";
+            var hostCount = _collectorHosts?.Count ?? 0;
+            var maxLifetimeMin = _agentMaxLifetime.HasValue ? _agentMaxLifetime.Value.TotalMinutes.ToString("F0") + "min" : "off";
+            _logger.Info($"EnrollmentOrchestrator: started (sessionId={sessionShort}, initialStage={initialStage}, hosts={hostCount}, maxLifetime={maxLifetimeMin}).");
         }
 
         /// <summary>
@@ -840,7 +849,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (Volatile.Read(ref _started) == 0) return;
             if (Interlocked.Exchange(ref _stopRequested, 1) == 1) return;
 
-            _logger.Info("EnrollmentOrchestrator: stopping.");
+            // PR3-A3: include current stage + observed signal count so forensic readers can see
+            // what the orchestrator was working on at stop time.
+            var stopStage = CurrentState?.Stage.ToString() ?? "Unknown";
+            var stopSignalsApplied = CurrentState?.LastAppliedSignalOrdinal ?? -1;
+            _logger.Info($"EnrollmentOrchestrator: stopping (currentStage={stopStage}, signalsApplied={stopSignalsApplied + 1}).");
 
             // -1) Max-lifetime watchdog stoppen (M4.6.α). Idempotent — safe even if never armed.
             try { _maxLifetimeTimer?.Dispose(); _maxLifetimeTimer = null; }

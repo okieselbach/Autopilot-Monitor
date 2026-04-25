@@ -104,9 +104,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 }
 
                 _lastAssignedItemId = itemId;
-                // Plan §5 Fix 5 — spool-cadence logging (DEBUG to avoid noise under heavy
-                // event flows; users can enable at troubleshoot-time).
-                _logger?.Debug(
+                // Plan §5 Fix 5 — spool-cadence logging. PR3-A2: VERBOSE (was DEBUG)
+                // because per-item logging hits ~600 lines per session and floods the log
+                // at troubleshoot level. Activate only at micro-repro level.
+                _logger?.Verbose(
                     $"TelemetrySpool: enqueued itemId={itemId} kind={item.Kind} immediate={item.RequiresImmediateFlush} pending={itemId - _lastUploadedItemId}.");
             }
 

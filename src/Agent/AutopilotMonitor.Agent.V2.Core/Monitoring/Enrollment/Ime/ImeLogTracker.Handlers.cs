@@ -18,6 +18,40 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
     /// </summary>
     public partial class ImeLogTracker
     {
+        // PR3-A2: dedup state for `IME impersonation` lines. ~24 identical per session at
+        // DEBUG flooded the log; we now emit on user change + a 60s rollup with the count.
+        private string _lastImpersonationUser;
+        private int _impersonationRepeatCount;
+        private DateTime _impersonationLastRollupUtc = DateTime.MinValue;
+        private static readonly TimeSpan ImpersonationRollupInterval = TimeSpan.FromSeconds(60);
+
+        private void HandleImeImpersonation(string user)
+        {
+            var current = string.IsNullOrEmpty(user) ? "(unknown)" : user;
+
+            if (!string.Equals(current, _lastImpersonationUser, StringComparison.Ordinal))
+            {
+                if (_impersonationRepeatCount > 0)
+                {
+                    _logger.Debug($"IME impersonation: previous '{_lastImpersonationUser}' seen {_impersonationRepeatCount}x before change");
+                }
+                _logger.Debug($"IME impersonation: {current}");
+                _lastImpersonationUser = current;
+                _impersonationRepeatCount = 0;
+                _impersonationLastRollupUtc = DateTime.UtcNow;
+                return;
+            }
+
+            _impersonationRepeatCount++;
+            var now = DateTime.UtcNow;
+            if (now - _impersonationLastRollupUtc >= ImpersonationRollupInterval)
+            {
+                _logger.Debug($"IME impersonation: same as before (user='{current}', n={_impersonationRepeatCount} since last rollup)");
+                _impersonationLastRollupUtc = now;
+                _impersonationRepeatCount = 0;
+            }
+        }
+
         private void HandleDoTelemetry(string json)
         {
             try

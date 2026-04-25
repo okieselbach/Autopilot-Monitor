@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Persistence;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
@@ -35,6 +36,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly ISnapshotPersistence _snapshot;
         private readonly IClock _clock;
         private readonly IReadOnlyList<TimeSpan> _retryBackoffs;
+        // PR3-D3: optional logger so transient retries, exhausted retries, critical failures,
+        // anti-loop skips, and classifier exceptions are visible. Null in legacy unit tests.
+        private readonly AgentLogger? _logger;
 
         public EffectRunner(
             IDeadlineScheduler scheduler,
@@ -43,7 +47,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IEventTimelineEmitter emitter,
             ISnapshotPersistence snapshot,
             IClock clock,
-            IReadOnlyList<TimeSpan>? retryBackoffs = null)
+            IReadOnlyList<TimeSpan>? retryBackoffs = null,
+            AgentLogger? logger = null)
         {
             _scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
             _classifiers = classifiers ?? throw new ArgumentNullException(nameof(classifiers));
@@ -52,6 +57,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _retryBackoffs = retryBackoffs ?? DefaultRetryBackoffs;
+            _logger = logger;
         }
 
         public async Task<EffectRunResult> RunAsync(
@@ -155,6 +161,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
             catch (Exception ex)
             {
+                _logger?.Warning(
+                    $"EffectRunner: CRITICAL effect {effect.Kind} failed — session must abort: {ex.GetType().Name}: {ex.Message}");
                 return new EffectFailure(
                     effectKind: effect.Kind,
                     errorReason: $"{ex.GetType().Name}: {ex.Message}",
@@ -198,6 +206,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 !string.IsNullOrEmpty(lastVerdictId) &&
                 snapshotHash == lastVerdictId)
             {
+                _logger?.Debug(
+                    $"EffectRunner: classifier {effect.ClassifierId} skipped (snapshotHash unchanged: {ShortHash(snapshotHash)})");
                 return new ClassifierEffectOutcome(invoked: false, skippedByAntiLoop: true, failure: null);
             }
 
@@ -209,6 +219,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             catch (Exception ex)
             {
                 // Optional-class failure: emit an Inconclusive verdict instead of aborting.
+                _logger?.Warning(
+                    $"EffectRunner: classifier {effect.ClassifierId} threw -> emitting Inconclusive: {ex.GetType().Name}: {ex.Message}");
                 var inconclusive = new ClassifierVerdict(
                     classifierId: effect.ClassifierId!,
                     level: HypothesisLevel.Inconclusive,
@@ -272,10 +284,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     lastErr = $"{ex.GetType().Name}: {ex.Message}";
                     if (attempt < _retryBackoffs.Count)
                     {
-                        await _clock.Delay(_retryBackoffs[attempt], cancellationToken).ConfigureAwait(false);
+                        var backoff = _retryBackoffs[attempt];
+                        _logger?.Debug(
+                            $"EffectRunner: effect {effect.Kind} attempt {attempt + 1}/{_retryBackoffs.Count + 1} failed -> retry in {backoff.TotalMilliseconds:F0}ms: {lastErr}");
+                        await _clock.Delay(backoff, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
+
+            _logger?.Warning(
+                $"EffectRunner: TRANSIENT effect {effect.Kind} exhausted after {_retryBackoffs.Count + 1} attempts: {lastErr ?? "unknown transient error"}");
 
             failures.Add(new EffectFailure(
                 effect.Kind,
@@ -283,6 +301,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 isTransient: true,
                 exhaustedRetries: true));
         }
+
+        // PR3-D3: short hash for log readability — full SHA in the verdict already.
+        private static string ShortHash(string h) => string.IsNullOrEmpty(h) ? "(empty)" : (h.Length <= 8 ? h : h.Substring(0, 8));
 
         private readonly struct ClassifierEffectOutcome
         {

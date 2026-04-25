@@ -9,6 +9,12 @@ using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
 {
+    // PR3 (882fef64 debrief): BinaryIntegrityVerifier holds a process-global static
+    // `_runtimeSelfUpdateFired` flag. The single-shot guarantee inside
+    // `Check_mismatch_fires_runtime_self_update_trigger_exactly_once` races with parallel
+    // tests that may also call Check() with a mismatch and pre-set the flag. Pin to the
+    // existing serial collection so mismatch-tests don't interleave across classes.
+    [Collection("SerialThreading")]
     public sealed class BinaryIntegrityVerifierTests
     {
         private static AgentLogger NewLogger(TempDirectory tmp)

@@ -152,7 +152,9 @@ namespace AutopilotMonitor.Agent.V2
 
             var logger = new AgentLogger(logDirectory) { EnableConsoleOutput = consoleMode };
             logger.Info($"AutopilotMonitor.Agent.V2 starting (version {GetAgentVersion()}).");
-            logger.Info($"Command line: {FormatArgsForLog(args)}");
+            // PR3-A3: empty args looked broken (`Command line: `). Make the no-args case explicit.
+            var formattedArgs = FormatArgsForLog(args);
+            logger.Info($"Command line: {(string.IsNullOrEmpty(formattedArgs) ? "(no args)" : formattedArgs)}");
 
             try
             {
@@ -664,7 +666,7 @@ namespace AutopilotMonitor.Agent.V2
                         // (plan Parity Issue #1).
                         orchestrator.Start(ingress =>
                         {
-                            lifecyclePost = new InformationalEventPost(ingress, SystemClock.Instance);
+                            lifecyclePost = new InformationalEventPost(ingress, SystemClock.Instance, logger);
                             EmitAgentStartedEvent(lifecyclePost, agentConfig, previousExit, logger);
                             EmitVersionCheckEventIfAny(lifecyclePost, agentConfig, logger);
                             EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);

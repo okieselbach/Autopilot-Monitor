@@ -197,7 +197,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
 
                     case "imesessionchange":
                         var sessionChange = match.Groups["change"]?.Value;
-                        _logger.Debug($"IME session change: {sessionChange}");
+                        // PR3-A3: lift sessionId + user from match if the regex captures them, so the
+                        // line carries enough context to correlate without cross-referencing.
+                        var sessionChangeSid = match.Groups["sessionId"]?.Value;
+                        var sessionChangeUser = match.Groups["user"]?.Value;
+                        var sessionChangeContext = (!string.IsNullOrEmpty(sessionChangeSid) || !string.IsNullOrEmpty(sessionChangeUser))
+                            ? $" (sessionId={sessionChangeSid ?? "?"}, user={sessionChangeUser ?? "?"})"
+                            : string.Empty;
+                        _logger.Debug($"IME session change: {sessionChange}{sessionChangeContext}");
                         OnImeSessionChange?.Invoke(sessionChange);
                         break;
 
@@ -221,7 +228,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                         break;
 
                     case "imeimpersonation":
-                        _logger.Debug($"IME impersonation: {match.Groups["user"]?.Value}");
+                        // PR3-A2: dedup. The same user triggers ~24 identical lines per session;
+                        // log on first/changed user, otherwise count and emit a single rollup
+                        // every 60s ("same as before (n=…)") so the log stays readable but the
+                        // sequence stays reconstructible.
+                        HandleImeImpersonation(match.Groups["user"]?.Value);
                         break;
 
                     case "enrollmentcompleted":

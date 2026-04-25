@@ -491,6 +491,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             }
         }
 
+        // PR3-A3: when 358/360 are suppressed below, include eventTime + provider so log readers
+        // can still tell which exact occurrence was dropped without cross-referencing the eventlog.
+        private void LogSuppressedSnapshotEvent(int eventId, DateTime timestamp, string providerName, string label)
+        {
+            _logger.Debug($"Hello EventID {eventId} ({label}) observed — snapshot only, suppressed (eventTime={timestamp:O}, provider={providerName ?? "(unknown)"})");
+        }
+
         internal void ProcessHelloEvent(int eventId, DateTime timestamp, string providerName, bool isBackfill)
         {
             string eventType;
@@ -509,7 +516,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     // event only fueled UI-timeline noise. Keep the debug log line so the
                     // sequence is still reconstructible from agent-logs during diagnostics,
                     // but do not emit a backend event.
-                    _logger.Debug("Hello EventID 358 (willlaunch) observed — snapshot only, suppressed");
+                    LogSuppressedSnapshotEvent(eventId, timestamp, providerName, "willlaunch");
                     return;
 
                 case EventId_NgcKeyRegistered: // 300
@@ -531,7 +538,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 case EventId_ProvisioningWillNotLaunch: // 360
                     // Sibling of 358 — also a snapshot flag. DecisionEngine does not treat it
                     // as terminal either, so suppress for the same noise-reduction reason.
-                    _logger.Debug("Hello EventID 360 (willnotlaunch) observed — snapshot only, suppressed");
+                    LogSuppressedSnapshotEvent(eventId, timestamp, providerName, "willnotlaunch");
                     return;
 
                 case EventId_ProvisioningBlocked: // 362

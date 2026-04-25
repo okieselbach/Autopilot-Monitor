@@ -3,6 +3,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
+using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Persistence;
 using AutopilotMonitor.Agent.V2.Core.Telemetry.Signals;
 using AutopilotMonitor.DecisionCore.Engine;
@@ -48,6 +49,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly IClock _clock;
         private readonly TimeSpan _backPressureThrottle;
         private readonly int _channelCapacity;
+        // PR3-D2: optional logger so production wiring gets observability into the previously
+        // silent paths (SignalLog append failures, DecisionSignal ctor rejections, worker
+        // faults). Null in unit-test rigs that don't care.
+        private readonly AgentLogger? _logger;
+        private long _processedCount;
+        private long _stopRequestedAtTicks;
 
         private readonly BlockingCollection<IngressItem> _channel;
         private readonly Dictionary<string, DateTime> _lastBackPressureEmittedUtc =
@@ -69,7 +76,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IBackPressureObserver? backPressureObserver = null,
             TelemetrySignalEmitter? signalEmitter = null,
             int channelCapacity = DefaultChannelCapacity,
-            TimeSpan? backPressureThrottle = null)
+            TimeSpan? backPressureThrottle = null,
+            AgentLogger? logger = null)
         {
             if (channelCapacity <= 0)
             {
@@ -85,6 +93,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _signalEmitter = signalEmitter;
             _channelCapacity = channelCapacity;
             _backPressureThrottle = backPressureThrottle ?? DefaultBackPressureThrottle;
+            _logger = logger;
 
             _channel = new BlockingCollection<IngressItem>(boundedCapacity: channelCapacity);
             _nextSignalOrdinal = signalLog.LastOrdinal + 1;
@@ -143,6 +152,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 return;
             }
 
+            var stopStartUtc = _clock.UtcNow;
+            Interlocked.Exchange(ref _stopRequestedAtTicks, stopStartUtc.Ticks);
+            var pendingAtStop = _channel.Count;
+
             // CompleteAdding unblockt GetConsumingEnumerable sobald die Queue leer ist.
             _channel.CompleteAdding();
 
@@ -151,6 +164,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             {
                 worker.Join();
             }
+
+            // PR3-D2: lifecycle marker so forensic readers see how many items remained queued
+            // and how long the drain took. Worker fault is logged here (not just thrown) so a
+            // crash dump catches the message before the exception unwinds.
+            var drainMs = (long)(_clock.UtcNow - stopStartUtc).TotalMilliseconds;
+            var lastOrd = LastAssignedSignalOrdinal;
+            var processedTotal = Interlocked.Read(ref _processedCount);
+            _logger?.Info($"SignalIngress: stop requested — drained pending={pendingAtStop} items, processedTotal={processedTotal}, lastOrd={lastOrd}, durationMs={drainMs}.");
 
             if (_workerFault != null)
             {
@@ -279,9 +300,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
             catch (Exception ex)
             {
-                // Darf nicht passieren — ProcessItem fängt alles ab. Falls doch, für Stop()
-                // aufheben, damit die Regression sichtbar ist.
+                // PR3-D2: this branch should never fire — ProcessItem swallows everything. If it
+                // does, the worker is now stopped and no further signals will be processed.
+                // Surface that catastrophe explicitly so the agent log shows it before the next
+                // Post() throws "ingress has been stopped".
                 _workerFault = ex;
+                _logger?.Error("SignalIngress.Worker faulted unexpectedly — ingress STOPPED. No further signals will be processed.", ex);
             }
         }
 
@@ -305,10 +329,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     payload: item.Payload,
                     typedPayload: item.TypedPayload);
             }
-            catch
+            catch (Exception ex)
             {
                 // DecisionSignal-Ctor validiert Pflichtfelder. Invalid input → überspringen,
                 // Ordinal NICHT verbrauchen (sonst entsteht eine Lücke im SignalLog).
+                _logger?.Warning(
+                    $"SignalIngress: dropped invalid signal kind={item.Kind} origin={item.SourceOrigin} " +
+                    $"— DecisionSignal ctor threw, ordinal NOT consumed: {ex.Message}");
                 return;
             }
 
@@ -316,16 +343,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             {
                 _signalLog.Append(signal);
             }
-            catch
+            catch (Exception ex)
             {
                 // Append fehlgeschlagen (z.B. Disk-Full). Ohne on-disk-Persistenz darf der
                 // Reducer nicht laufen (L.1 Signal-Log-Determinismus). Ordinal bleibt „geplant",
                 // wird beim nächsten Versuch neu vergeben — monoton, da _nextSignalOrdinal
                 // noch nicht inkrementiert wurde.
+                _logger?.Error(
+                    $"SignalIngress: SignalLog.Append failed for ord={signalOrdinal} kind={item.Kind} " +
+                    $"— ordinal will be re-attempted on next post: {ex.Message}",
+                    ex);
                 return;
             }
 
             _nextSignalOrdinal = signalOrdinal + 1;
+            // PR3-D2: 1:1 correlation marker for D1 (DecisionStepProcessor logs the same ord +
+            // kind on the receive side). Verbose because the steady-state happy-path is the
+            // dominant cardinality.
+            _logger?.Verbose($"SignalIngress: processed ord={signalOrdinal} kind={item.Kind} origin={item.SourceOrigin}.");
+            Interlocked.Increment(ref _processedCount);
 
             // Project the signal onto the telemetry transport for backend upload. Local
             // SignalLog is authoritative (§2.7c / L.1); a transport enqueue failure must NOT
