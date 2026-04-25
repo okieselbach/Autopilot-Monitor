@@ -28,6 +28,13 @@ namespace AutopilotMonitor.DecisionCore.Signals
         AutopilotProfileRead,
         EspConfigDetected,
 
+        // PR4 (882fef64 debrief) — Hello/WHfB policy fact. Carries
+        // { "helloEnabled": "true|false", "policySource": "<csp|gpo|...>" }.
+        // Updates DecisionState.HelloPolicyEnabled so the wait-cadence + downstream
+        // observability (`hello_policy_detection_mismatch`) can read it. Does NOT
+        // gate enrollment_complete — completion stays orthogonal to Hello policy.
+        HelloPolicyDetected,
+
         // --- Raw — WhiteGlove Part 2 (Post-Reboot User-Sign-In) ---
         UserAadSignInComplete,
         HelloResolvedPart2,

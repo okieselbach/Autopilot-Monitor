@@ -58,6 +58,7 @@ namespace AutopilotMonitor.DecisionCore.State
             EnrollmentScenarioProfile? scenarioProfile = null,
             EnrollmentScenarioObservations? scenarioObservations = null,
             ClassifierOutcomes? classifierOutcomes = null,
+            SignalFact<bool>? helloPolicyEnabled = null,
             string? schemaVersion = null)
         {
             if (string.IsNullOrEmpty(sessionId))
@@ -95,6 +96,7 @@ namespace AutopilotMonitor.DecisionCore.State
             ScenarioProfile = scenarioProfile ?? EnrollmentScenarioProfile.Empty;
             ScenarioObservations = scenarioObservations ?? EnrollmentScenarioObservations.Empty;
             ClassifierOutcomes = classifierOutcomes ?? ClassifierOutcomes.Empty;
+            HelloPolicyEnabled = helloPolicyEnabled;
             SchemaVersion = schemaVersion ?? CurrentSchemaVersion;
         }
 
@@ -170,6 +172,18 @@ namespace AutopilotMonitor.DecisionCore.State
         /// </summary>
         public ClassifierOutcomes ClassifierOutcomes { get; }
 
+        /// <summary>
+        /// WHfB / Hello-for-Business policy fact, set once when the agent first observes the
+        /// CSP/GPO state. Null when the policy hasn't been detected yet — the engine treats
+        /// null as unknown and keeps the default wait cadence. PR4 (882fef64 debrief).
+        /// </summary>
+        /// <remarks>
+        /// This fact drives the post-ESP-exit Hello wait cadence (30s default vs 10s when
+        /// policy is explicitly disabled), NOT the enrollment-completion gate. Completion is
+        /// orthogonal to Hello — see <c>feedback_hello_policy_wait_not_completion</c>.
+        /// </remarks>
+        public SignalFact<bool>? HelloPolicyEnabled { get; }
+
         public string SchemaVersion { get; }
 
         /// <summary>
@@ -209,6 +223,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 appInstallFacts: AppInstallFacts.Empty,
                 scenarioProfile: EnrollmentScenarioProfile.Empty,
                 scenarioObservations: EnrollmentScenarioObservations.Empty,
-                classifierOutcomes: ClassifierOutcomes.Empty);
+                classifierOutcomes: ClassifierOutcomes.Empty,
+                helloPolicyEnabled: null);
     }
 }

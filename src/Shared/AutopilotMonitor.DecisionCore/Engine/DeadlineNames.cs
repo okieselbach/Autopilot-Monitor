@@ -69,6 +69,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// <summary>On <c>EspConfigDetected</c>: "true" / "false"; missing → fact is not set.</summary>
         public const string SkipDeviceEsp = "skipDeviceEsp";
 
+        /// <summary>On <c>HelloPolicyDetected</c>: "true" / "false". PR4 (882fef64 debrief).</summary>
+        public const string HelloEnabled = "helloEnabled";
+
+        /// <summary>On <c>HelloPolicyDetected</c>: source string (e.g. "csp", "gpo", "registry"). Optional.</summary>
+        public const string HelloPolicySource = "policySource";
+
         /// <summary>On <c>SessionStarted</c>: literal "v1" / "v2" from <c>EnrollmentRegistryDetector.DetectEnrollmentType()</c>.</summary>
         public const string EnrollmentType = "enrollmentType";
 

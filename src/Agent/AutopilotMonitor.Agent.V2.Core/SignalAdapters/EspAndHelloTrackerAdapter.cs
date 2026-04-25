@@ -50,6 +50,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private bool _whiteGloveSuccessPosted;
         private bool _espFailurePosted;
         private bool _deviceSetupCompletePosted;
+        private bool _helloPolicyPosted;
 
         /// <summary>Tracked HelloOutcome (read via event; coordinator exposes property).</summary>
         public EspAndHelloTrackerAdapter(
@@ -68,6 +69,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _coordinator.WhiteGloveCompleted += OnWhiteGloveCompleted;
             _coordinator.EspFailureDetected += OnEspFailure;
             _coordinator.DeviceSetupProvisioningComplete += OnDeviceSetupComplete;
+            _coordinator.HelloPolicyDetected += OnHelloPolicyDetected;
         }
 
         public void Dispose()
@@ -77,6 +79,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _coordinator.WhiteGloveCompleted -= OnWhiteGloveCompleted;
             _coordinator.EspFailureDetected -= OnEspFailure;
             _coordinator.DeviceSetupProvisioningComplete -= OnDeviceSetupComplete;
+            _coordinator.HelloPolicyDetected -= OnHelloPolicyDetected;
         }
 
         private void OnHelloCompleted(object sender, EventArgs e) => EmitHello(ReadHelloOutcome());
@@ -84,12 +87,14 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private void OnWhiteGloveCompleted(object sender, EventArgs e) => EmitWhiteGlove();
         private void OnEspFailure(object sender, string failureType) => EmitEspFailure(failureType);
         private void OnDeviceSetupComplete(object sender, EventArgs e) => EmitDeviceSetupComplete();
+        private void OnHelloPolicyDetected(bool helloEnabled, string source) => EmitHelloPolicy(helloEnabled, source);
 
         internal void TriggerHelloFromTest(string? helloOutcome) => EmitHello(helloOutcome);
         internal void TriggerFinalizingFromTest(string reason) => EmitFinalizing(reason);
         internal void TriggerWhiteGloveFromTest() => EmitWhiteGlove();
         internal void TriggerEspFailureFromTest(string failureType) => EmitEspFailure(failureType);
         internal void TriggerDeviceSetupCompleteFromTest() => EmitDeviceSetupComplete();
+        internal void TriggerHelloPolicyDetectedFromTest(bool helloEnabled, string source) => EmitHelloPolicy(helloEnabled, source);
 
         /// <summary>
         /// Reads <c>HelloOutcome</c> from the coordinator's forwarded property
@@ -197,6 +202,39 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 payload: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["failureType"] = safeType,
+                });
+        }
+
+        // PR4 (882fef64 debrief) — once per session: post HelloPolicyDetected so the engine
+        // can read the fact off DecisionState. Re-detection by the tracker (e.g. after a CSP
+        // re-poll) is filtered out by the once-flag here; the reducer is also set-once at the
+        // engine level, so duplicate posts would be no-ops anyway.
+        private void EmitHelloPolicy(bool helloEnabled, string source)
+        {
+            if (_helloPolicyPosted) return;
+            _helloPolicyPosted = true;
+
+            var helloEnabledStr = helloEnabled ? "true" : "false";
+            var safeSource = string.IsNullOrEmpty(source) ? "unknown" : source!;
+
+            _ingress.Post(
+                kind: DecisionSignalKind.HelloPolicyDetected,
+                occurredAtUtc: _clock.UtcNow,
+                sourceOrigin: SourceOrigin,
+                evidence: new Evidence(
+                    kind: EvidenceKind.Derived,
+                    identifier: DetectorId,
+                    summary: $"Hello policy detected (helloEnabled={helloEnabledStr}, source={safeSource})",
+                    derivationInputs: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["subSource"] = "HelloTracker",
+                        [SignalPayloadKeys.HelloEnabled] = helloEnabledStr,
+                        [SignalPayloadKeys.HelloPolicySource] = safeSource,
+                    }),
+                payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [SignalPayloadKeys.HelloEnabled] = helloEnabledStr,
+                    [SignalPayloadKeys.HelloPolicySource] = safeSource,
                 });
         }
 

@@ -160,5 +160,67 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Throws<ArgumentNullException>(() => new EspAndHelloTrackerAdapter(f.Coordinator, null!, f.Clock));
             Assert.Throws<ArgumentNullException>(() => new EspAndHelloTrackerAdapter(f.Coordinator, f.Ingress, null!));
         }
+
+        // PR4 (882fef64 debrief) — HelloPolicyDetected is forwarded from the inner HelloTracker
+        // through the coordinator and posted as a DecisionSignalKind.HelloPolicyDetected signal
+        // so the engine can read the fact off DecisionState.
+
+        [Fact]
+        public void HelloPolicyDetected_emits_HelloPolicyDetected_signal_with_payload()
+        {
+            using var f = new Fixture();
+            using var adapter = new EspAndHelloTrackerAdapter(f.Coordinator, f.Ingress, f.Clock);
+
+            adapter.TriggerHelloPolicyDetectedFromTest(helloEnabled: true, source: "CSP/Intune (user-scoped)");
+
+            var posted = Assert.Single(f.Ingress.Posted);
+            Assert.Equal(DecisionSignalKind.HelloPolicyDetected, posted.Kind);
+            Assert.Equal("EspAndHelloTracker", posted.SourceOrigin);
+            Assert.Equal("true", posted.Payload![SignalPayloadKeys.HelloEnabled]);
+            Assert.Equal("CSP/Intune (user-scoped)", posted.Payload[SignalPayloadKeys.HelloPolicySource]);
+        }
+
+        [Fact]
+        public void HelloPolicyDetected_disabled_emits_false_payload()
+        {
+            using var f = new Fixture();
+            using var adapter = new EspAndHelloTrackerAdapter(f.Coordinator, f.Ingress, f.Clock);
+
+            adapter.TriggerHelloPolicyDetectedFromTest(helloEnabled: false, source: "GPO");
+
+            var posted = Assert.Single(f.Ingress.Posted);
+            Assert.Equal(DecisionSignalKind.HelloPolicyDetected, posted.Kind);
+            Assert.Equal("false", posted.Payload![SignalPayloadKeys.HelloEnabled]);
+            Assert.Equal("GPO", posted.Payload[SignalPayloadKeys.HelloPolicySource]);
+        }
+
+        [Fact]
+        public void HelloPolicyDetected_repeated_invocations_are_deduplicated()
+        {
+            using var f = new Fixture();
+            using var adapter = new EspAndHelloTrackerAdapter(f.Coordinator, f.Ingress, f.Clock);
+
+            adapter.TriggerHelloPolicyDetectedFromTest(helloEnabled: true, source: "CSP/Intune");
+            adapter.TriggerHelloPolicyDetectedFromTest(helloEnabled: false, source: "GPO");
+            adapter.TriggerHelloPolicyDetectedFromTest(helloEnabled: true, source: "CSP/Intune");
+
+            // Once-flag at the adapter layer — only the first detection is posted. The reducer
+            // also dedupes at the engine level, so this is belt-and-suspenders.
+            var helloPolicySignals = f.Ingress.Posted.Where(p => p.Kind == DecisionSignalKind.HelloPolicyDetected).ToList();
+            Assert.Single(helloPolicySignals);
+            Assert.Equal("true", helloPolicySignals[0].Payload![SignalPayloadKeys.HelloEnabled]);
+        }
+
+        [Fact]
+        public void HelloPolicyDetected_empty_source_falls_back_to_unknown()
+        {
+            using var f = new Fixture();
+            using var adapter = new EspAndHelloTrackerAdapter(f.Coordinator, f.Ingress, f.Clock);
+
+            adapter.TriggerHelloPolicyDetectedFromTest(helloEnabled: true, source: "");
+
+            var posted = Assert.Single(f.Ingress.Posted);
+            Assert.Equal("unknown", posted.Payload![SignalPayloadKeys.HelloPolicySource]);
+        }
     }
 }

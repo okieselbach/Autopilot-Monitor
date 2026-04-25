@@ -500,6 +500,70 @@ namespace AutopilotMonitor.DecisionCore.Engine
             return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }
 
+        /// <summary>
+        /// PR4 (882fef64 debrief) — record the WHfB / Hello-for-Business policy fact on the
+        /// engine state. Stage is NOT changed; this is a fact-only signal that downstream
+        /// observers (HelloTracker wait cadence, mismatch detector) can read off
+        /// <see cref="DecisionState.HelloPolicyEnabled"/>. Set-once: a prior fact with the
+        /// same value is a no-op, a different value updates with the new ordinal so the
+        /// Inspector evidence trace points at the most recent re-detection.
+        /// </summary>
+        /// <remarks>
+        /// Completion-gating is intentionally not influenced here — the existing Hello+Desktop
+        /// AND-gate accepts any terminal Hello outcome (success/skip/not_configured). See
+        /// <c>feedback_hello_policy_wait_not_completion</c>. Missing or unparseable
+        /// <see cref="SignalPayloadKeys.HelloEnabled"/> → DeadEnd transition so the malformed
+        /// signal is visible in the transitions table.
+        /// </remarks>
+        private DecisionStep HandleHelloPolicyDetectedV1(DecisionState state, DecisionSignal signal)
+        {
+            var payload = signal.Payload;
+            if (payload == null
+                || !payload.TryGetValue(SignalPayloadKeys.HelloEnabled, out var rawEnabled)
+                || !bool.TryParse(rawEnabled, out var helloEnabled))
+            {
+                var deadEnd = BumpStepBookkeeping(state, signal);
+                var deadEndTransition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: deadEnd.StepIndex,
+                    trigger: nameof(DecisionSignalKind.HelloPolicyDetected),
+                    deadEndReason: "hello_policy_detected_missing_helloEnabled");
+                return new DecisionStep(deadEnd, deadEndTransition, Array.Empty<DecisionEffect>());
+            }
+
+            // Set-once: same value, same ordinal-or-later → no-op (skip the update). Different
+            // value → update so a fixed detector / corrected reading is reflected.
+            if (state.HelloPolicyEnabled != null
+                && state.HelloPolicyEnabled.Value == helloEnabled)
+            {
+                var unchanged = BumpStepBookkeeping(state, signal);
+                var noOpTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: unchanged.StepIndex,
+                    trigger: nameof(DecisionSignalKind.HelloPolicyDetected) + ":no-op");
+                return new DecisionStep(unchanged, noOpTransition, Array.Empty<DecisionEffect>());
+            }
+
+            var nextStep = state.StepIndex + 1;
+            var newState = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .WithHelloPolicyEnabled(helloEnabled, signal.SessionSignalOrdinal)
+                .Build();
+
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.HelloPolicyDetected));
+
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
+
         private DecisionStep RecordDiagnosticObservation(DecisionState state, DecisionSignal signal, string trigger)
         {
             var newState = BumpStepBookkeeping(state, signal);

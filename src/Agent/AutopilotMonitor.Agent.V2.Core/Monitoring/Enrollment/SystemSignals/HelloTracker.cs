@@ -62,6 +62,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         private static readonly Regex HResultPattern = new Regex(@"0x[0-9A-Fa-f]{8}", RegexOptions.Compiled);
 
+        // PR4 (882fef64 debrief) — when policy is explicitly DISABLED, only wait briefly
+        // for a Hello wizard. The grace exists solely as a sanity check against a buggy
+        // policy detector — if a Hello terminal arrives anyway, the mismatch event flags it.
+        internal const int HelloWaitTimeoutDisabledSeconds = 10;
+
         private readonly AgentLogger _logger;
         private readonly string _sessionId;
         private readonly string _tenantId;
@@ -82,6 +87,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly object _stateLock = new object();
 
         public event EventHandler HelloCompleted;
+
+        // PR4 (882fef64 debrief) — fires once when the Hello policy is first detected.
+        // Subscribers (EspAndHelloTrackerAdapter) post a DecisionSignalKind.HelloPolicyDetected
+        // signal so the engine state reflects the fact. Args: (helloEnabled, source).
+        public event Action<bool, string> HelloPolicyDetected;
 
         public string HelloOutcome { get; private set; }
 
@@ -235,11 +245,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     return;
                 }
 
-                _logger.Info($"Starting Hello wait timer ({_helloWaitTimeoutSeconds}s) - waiting for Hello wizard to start");
+                // PR4 (882fef64 debrief) — when policy is explicitly disabled, only wait
+                // briefly. The grace exists purely as a sanity check against a buggy
+                // detector — if a Hello terminal arrives anyway, the mismatch event flags it.
+                // Policy=enabled or unknown keeps the default wait (30s) so a slow wizard
+                // start still has its full window.
+                var waitSeconds = (_isPolicyConfigured && !_isHelloPolicyEnabled)
+                    ? HelloWaitTimeoutDisabledSeconds
+                    : _helloWaitTimeoutSeconds;
+
+                _logger.Info($"Starting Hello wait timer ({waitSeconds}s) - waiting for Hello wizard to start" +
+                             $" (policy={(_isPolicyConfigured ? (_isHelloPolicyEnabled ? "enabled" : "disabled") : "unknown")})");
                 _helloWaitTimer = new System.Threading.Timer(
                     OnHelloWaitTimeout,
                     null,
-                    TimeSpan.FromSeconds(_helloWaitTimeoutSeconds),
+                    TimeSpan.FromSeconds(waitSeconds),
                     TimeSpan.FromMilliseconds(-1));
             }
         }
@@ -289,6 +309,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             {
                 var (isEnabled, source) = DetectHelloPolicy();
 
+                bool justDetected = false;
+                bool detectedValue = false;
+                string detectedSource = null;
+
                 lock (_stateLock)
                 {
                     if (!_isPolicyConfigured && isEnabled.HasValue)
@@ -324,10 +348,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                             _policyCheckTimer = null;
                             _logger.Debug("Stopped periodic Hello policy check - policy has been detected");
                         }
+
+                        justDetected = true;
+                        detectedValue = isEnabled.Value;
+                        detectedSource = source;
                     }
                     else if (!_isPolicyConfigured && !isEnabled.HasValue)
                     {
                         _logger.Debug("Periodic Hello policy check: No WHfB policy found yet - will check again");
+                    }
+                }
+
+                // PR4 (882fef64 debrief) — invoke OUTSIDE the state lock so a subscriber that
+                // re-enters the tracker (or anything that already holds another lock) can't
+                // deadlock. Subscribers post a DecisionSignalKind.HelloPolicyDetected signal
+                // so DecisionState.HelloPolicyEnabled reflects the value across replays.
+                if (justDetected)
+                {
+                    var subscribers = HelloPolicyDetected;
+                    if (subscribers != null)
+                    {
+                        try { subscribers.Invoke(detectedValue, detectedSource); }
+                        catch (Exception ex)
+                        {
+                            _logger.Warning($"HelloPolicyDetected subscriber threw: {ex.Message}");
+                        }
                     }
                 }
             }
@@ -546,7 +591,53 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
             if (shouldTriggerHelloCompleted)
             {
+                EmitHelloPolicyDetectionMismatch(eventType, eventId, timestamp);
                 try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
+            }
+        }
+
+        // PR4 (882fef64 debrief) — emit a warning when a Hello-terminal event arrives while
+        // policy is explicitly disabled. This indicates a bug in the CSP/GPO detector — the
+        // device clearly DOES have Hello-for-Business in some form, despite our reader saying
+        // otherwise. Severity Warning + Phase Unknown so the event surfaces in dashboards but
+        // doesn't claim to be a lifecycle marker.
+        private void EmitHelloPolicyDetectionMismatch(string actualEventType, int? windowsEventId, DateTime timestamp)
+        {
+            string source;
+            lock (_stateLock)
+            {
+                if (!(_isPolicyConfigured && !_isHelloPolicyEnabled)) return;
+                source = "EspAndHelloTracker";
+            }
+
+            try
+            {
+                var data = new Dictionary<string, object>
+                {
+                    { "expected", "no_hello" },
+                    { "actual", actualEventType ?? string.Empty },
+                    { "policySource", "tracker_state" },
+                };
+                if (windowsEventId.HasValue) data["windowsEventId"] = windowsEventId.Value;
+
+                _post.Emit(new EnrollmentEvent
+                {
+                    SessionId = _sessionId,
+                    TenantId = _tenantId,
+                    Timestamp = timestamp,
+                    EventType = "hello_policy_detection_mismatch",
+                    Severity = EventSeverity.Warning,
+                    Source = source,
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Hello policy detected as DISABLED but Hello terminal event '{actualEventType}' arrived — detector bug suspected.",
+                    Data = data,
+                    ImmediateUpload = true,
+                });
+                _logger.Warning($"hello_policy_detection_mismatch: actual={actualEventType} (eventId={windowsEventId})");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Failed to emit hello_policy_detection_mismatch: {ex.Message}");
             }
         }
 
@@ -742,6 +833,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
             if (shouldTriggerHelloCompleted)
             {
+                EmitHelloPolicyDetectionMismatch(eventType, eventId, timestamp);
                 try { HelloCompleted?.Invoke(this, EventArgs.Empty); } catch { }
             }
         }
@@ -998,6 +1090,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     },
                     ImmediateUpload = true
                 });
+            }
+
+            // PR4 (882fef64 debrief) — fire the policy event outside the state lock so tests
+            // exercise the same notification path as production.
+            var subscribers = HelloPolicyDetected;
+            if (subscribers != null)
+            {
+                try { subscribers.Invoke(helloEnabled, source); }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"HelloPolicyDetected subscriber threw (test seam): {ex.Message}");
+                }
             }
         }
 

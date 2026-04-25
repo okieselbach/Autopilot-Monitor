@@ -44,6 +44,7 @@ namespace AutopilotMonitor.DecisionCore.State
             ScenarioProfile = source.ScenarioProfile;
             ScenarioObservations = source.ScenarioObservations;
             ClassifierOutcomes = source.ClassifierOutcomes;
+            HelloPolicyEnabled = source.HelloPolicyEnabled;
             SchemaVersion = source.SchemaVersion;
         }
 
@@ -72,6 +73,7 @@ namespace AutopilotMonitor.DecisionCore.State
         public EnrollmentScenarioProfile ScenarioProfile { get; set; } = EnrollmentScenarioProfile.Empty;
         public EnrollmentScenarioObservations ScenarioObservations { get; set; } = EnrollmentScenarioObservations.Empty;
         public ClassifierOutcomes ClassifierOutcomes { get; set; } = ClassifierOutcomes.Empty;
+        public SignalFact<bool>? HelloPolicyEnabled { get; set; }
         public string SchemaVersion { get; set; }
 
         // ---------- fluent helpers for the most common reducer operations ----------
@@ -139,6 +141,16 @@ namespace AutopilotMonitor.DecisionCore.State
             return this;
         }
 
+        // Set-once on first detection. Re-detection by the agent (e.g. after a re-poll of
+        // the CSP store) is allowed to update the value, but the source ordinal must
+        // monotonically advance — that's enforced by the caller passing the current
+        // signal ordinal. PR4 (882fef64 debrief).
+        public DecisionStateBuilder WithHelloPolicyEnabled(bool value, long sourceSignalOrdinal)
+        {
+            HelloPolicyEnabled = new SignalFact<bool>(value, sourceSignalOrdinal);
+            return this;
+        }
+
         public DecisionState Build() =>
             new DecisionState(
                 sessionId: SessionId,
@@ -166,6 +178,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 scenarioProfile: ScenarioProfile,
                 scenarioObservations: ScenarioObservations,
                 classifierOutcomes: ClassifierOutcomes,
+                helloPolicyEnabled: HelloPolicyEnabled,
                 schemaVersion: SchemaVersion);
     }
 }

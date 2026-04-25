@@ -80,6 +80,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         /// </summary>
         public event EventHandler DeviceSetupProvisioningComplete;
 
+        // PR4 (882fef64 debrief) — coordinator-forwarded copy of <see cref="HelloTracker.HelloPolicyDetected"/>.
+        // Args: (helloEnabled, source). Subscribed by EspAndHelloTrackerAdapter to post a
+        // DecisionSignalKind.HelloPolicyDetected signal.
+        public event Action<bool, string> HelloPolicyDetected;
+
         /// <summary>
         /// Outcome of Hello provisioning. Set when Hello resolves (via events, timeout, or not configured).
         /// Values: "completed", "skipped", "timeout", "not_configured", "wizard_not_started", null (not yet resolved).
@@ -203,6 +208,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 _logger,
                 _helloWaitTimeoutSeconds);
             _helloTracker.HelloCompleted += OnHelloCompleted;
+            _helloTracker.HelloPolicyDetected += OnHelloPolicyDetected;
             _helloTracker.Start();
 
             _shellCoreTracker = new ShellCoreTracker(
@@ -259,6 +265,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             try
             {
                 _helloTracker.HelloCompleted -= OnHelloCompleted;
+                _helloTracker.HelloPolicyDetected -= OnHelloPolicyDetected;
                 _helloTracker.Stop();
             }
             catch (Exception ex) { _logger.Error("Error stopping Hello tracker", ex); }
@@ -308,6 +315,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         {
             try { HelloCompleted?.Invoke(this, EventArgs.Empty); }
             catch (Exception ex) { _logger.Error("Error forwarding HelloCompleted", ex); }
+        }
+
+        private void OnHelloPolicyDetected(bool helloEnabled, string source)
+        {
+            try { HelloPolicyDetected?.Invoke(helloEnabled, source); }
+            catch (Exception ex) { _logger.Error("Error forwarding HelloPolicyDetected", ex); }
         }
 
         private void OnFinalizingSetupPhaseTriggered(object sender, string reason)
