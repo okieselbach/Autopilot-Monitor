@@ -447,13 +447,35 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             //     the spool for up to _drainInterval before the periodic loop uploads them,
             //     producing the ~30 s "session-register then silence" gap at session start.
             //
-            //     The signal TCS is installed BEFORE the subscription — and both BEFORE the drain
-            //     task starts at step 15 — so any Enqueue fired during the rest of Start() (e.g.
+            //     The signal TCS is installed BEFORE the subscription, and both BEFORE the drain
+            //     task starts at step 3b — so any Enqueue fired during the rest of Start() (e.g.
             //     the EspConfigDetected bootstrap at step 13c or the synchronous Classifier-Start
             //     at step 11.5) sets the current signal rather than hitting a null field.
             _immediateFlushSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _immediateFlushBridge = OnImmediateFlushRequested;
             _spool.ImmediateFlushRequested += _immediateFlushBridge;
+
+            // 3b) Periodic drain pump (fire-and-forget). Started here — directly after the spool
+            //     and the immediate-flush bridge are wired — instead of after collector startup,
+            //     because steps 4-14 do non-trivial synchronous work (gather-rule compile, Hello
+            //     event-log subscriptions, PowerShell runspace open in DeliveryOptimizationCollector,
+            //     ipinfo.io GeoLocation, analyzer scheduling, …). On a constrained VM that whole
+            //     stretch ran ~6.7 s in session 3808befb-…, during which 100 startup signals
+            //     accumulated in the spool. The first batch then hit the upload right when the
+            //     pump finally got a turn, surfacing in the Web UI as "session opens, silence,
+            //     then a wall of 100 events" rather than the V1 streaming feel.
+            //
+            //     With the pump live from step 3b onward, the very first immediate-flush wakeup
+            //     (e.g. agent_started in onIngressReady at step 13b) sets the TCS and the drain
+            //     loop's WhenAny returns within milliseconds, draining whatever the spool has
+            //     accumulated up to that moment via DrainAllAsync's peek-flush-peek loop.
+            //
+            //     Safety: the loop only references _spool and _transport (both built at step 3),
+            //     and the wakeup TCS (this step). No collector-state, classifier-state, or
+            //     ingress dependency. An empty Peek returns OK(0) without an HTTP round-trip,
+            //     so a pump tick that races ahead of any enqueue is a no-op.
+            _drainCts = new CancellationTokenSource();
+            _drainTask = Task.Run(() => DrainLoopAsync(_drainCts.Token));
 
             // 4) Event-Emitter-Kette. Single-rail (Plan §5.10): der TelemetryEventEmitter wird
             //    lokal gebaut und nur in die zwei erlaubten Caller (EventTimelineEmitter,
@@ -680,9 +702,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 }
             }
 
-            // 15) Periodischer Drain-Loop (Fire-and-forget).
-            _drainCts = new CancellationTokenSource();
-            _drainTask = Task.Run(() => DrainLoopAsync(_drainCts.Token));
+            // 15) (moved) Periodic drain loop is now started at step 3b — directly after the
+            //     spool / immediate-flush bridge are wired — so it does not have to wait for
+            //     collector startup to finish. See the rationale at step 3b.
 
             // 16) Max-lifetime watchdog (M4.6.α). Fires once after the configured duration when
             //     no real terminal stage has been reached. Timer is a best-effort System.Threading.Timer
