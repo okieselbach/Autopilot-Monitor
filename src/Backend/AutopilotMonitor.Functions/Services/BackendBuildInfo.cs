@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Linq;
 using System.Reflection;
 
 namespace AutopilotMonitor.Functions.Services
@@ -7,9 +9,19 @@ namespace AutopilotMonitor.Functions.Services
     /// via /api/health and /api/health/detailed. Values come from the assembly's
     /// InformationalVersion attribute which MSBuild populates from &lt;Version&gt; and
     /// -p:SourceRevisionId (the latter is set by the deploy workflow to github.sha).
+    /// <para>
+    /// <b>BuildUtc</b> reads the <c>BuildTimestampUtc</c> AssemblyMetadata attribute
+    /// baked in by the .csproj at build time. The previous implementation used
+    /// <c>File.GetLastWriteTimeUtc(asm.Location)</c>, which on Azure Functions reports
+    /// the zip-extract / cold-start time of the running container — not the build
+    /// moment. The metadata attribute travels inside the DLL and is therefore stable
+    /// across deploy / cold-start.
+    /// </para>
     /// </summary>
     public sealed class BackendBuildInfo
     {
+        internal const string BuildTimestampMetadataKey = "BuildTimestampUtc";
+
         public string Version { get; }
         public string CommitHash { get; }
         public DateTime BuildUtc { get; }
@@ -21,18 +33,29 @@ namespace AutopilotMonitor.Functions.Services
                 ?? "0.0.0";
 
             (Version, CommitHash) = ParseInformationalVersion(info);
+            BuildUtc = ResolveBuildUtc(asm);
+        }
 
-            try
+        /// <summary>
+        /// Reads the <c>BuildTimestampUtc</c> AssemblyMetadata attribute. Falls back to
+        /// <c>DateTime.UtcNow</c> only when the attribute is missing or unparseable —
+        /// the file mtime fallback is intentionally gone because it lies on Azure
+        /// Functions zip-deploys.
+        /// </summary>
+        private static DateTime ResolveBuildUtc(Assembly asm)
+        {
+            var raw = asm.GetCustomAttributes<AssemblyMetadataAttribute>()
+                .FirstOrDefault(a => string.Equals(a.Key, BuildTimestampMetadataKey, StringComparison.Ordinal))?.Value;
+
+            if (!string.IsNullOrEmpty(raw)
+                && DateTime.TryParse(raw, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var parsed))
             {
-                var path = asm.Location;
-                BuildUtc = !string.IsNullOrEmpty(path) && File.Exists(path)
-                    ? File.GetLastWriteTimeUtc(path)
-                    : DateTime.UtcNow;
+                return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
             }
-            catch
-            {
-                BuildUtc = DateTime.UtcNow;
-            }
+
+            return DateTime.UtcNow;
         }
 
         /// <summary>
