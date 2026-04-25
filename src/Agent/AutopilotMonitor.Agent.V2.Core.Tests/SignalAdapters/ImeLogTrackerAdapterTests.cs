@@ -621,5 +621,87 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Same(priorDo, f.Tracker.OnDoTelemetryReceived);
             Assert.Same(priorScript, f.Tracker.OnScriptCompleted);
         }
+
+        [Theory]
+        // V1 parity: terminal Installed/Error transitions must also emit a shadow
+        // `download_progress` event with status=completed/failed so the Web UI's
+        // DownloadProgress panel closes out apps that produced no byte progress
+        // (WinGet/Store apps emit no DO byte data — without the shadow they'd
+        // stay stuck on "started" forever).
+        [InlineData(AppInstallationState.Installed, SharedEventTypes.AppInstallComplete, "completed")]
+        [InlineData(AppInstallationState.Error, SharedEventTypes.AppInstallFailed, "failed")]
+        public void AppStateChange_terminal_state_emits_V1_parity_shadow_download_progress(
+            AppInstallationState terminalState,
+            string expectedPrimaryEventType,
+            string expectedShadowStatus)
+        {
+            using var f = new ImeLogTrackerAdapterFixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+            var app = AppPackageState.Restore(
+                id: "wg-app",
+                listPos: 0,
+                name: "Company Portal",
+                runAs: AppRunAs.System,
+                intent: AppIntent.Install,
+                targeted: AppTargeted.Device,
+                dependsOn: new HashSet<string>(),
+                installationState: terminalState,
+                downloadingOrInstallingSeen: true,
+                progressPercent: terminalState == AppInstallationState.Installed ? 100 : 0,
+                bytesDownloaded: terminalState == AppInstallationState.Installed ? 100 : 0,
+                bytesTotal: 100,
+                errorPatternId: null,
+                errorDetail: terminalState == AppInstallationState.Error ? "synthetic" : null,
+                errorCode: terminalState == AppInstallationState.Error ? "1" : null,
+                exitCode: null,
+                hresultFromWin32: null,
+                appType: "WinGet");
+
+            adapter.TriggerAppStateFromTest(app, AppInstallationState.Installing, terminalState);
+
+            // Primary terminal event still fires once (unchanged).
+            Assert.Single(f.InfoEvents(expectedPrimaryEventType));
+
+            // Shadow `download_progress` carries status + the same payload fields.
+            var shadow = Assert.Single(f.InfoEvents(SharedEventTypes.DownloadProgress));
+            Assert.Equal(expectedShadowStatus, shadow.Payload!["status"]);
+            Assert.Equal("wg-app", shadow.Payload["appId"]);
+            Assert.Equal("Company Portal", shadow.Payload["appName"]);
+            Assert.Equal(EventSeverity.Debug.ToString(), shadow.Payload[SignalPayloadKeys.Severity]);
+        }
+
+        [Fact]
+        public void AppStateChange_non_terminal_transitions_do_not_emit_shadow_download_progress()
+        {
+            using var f = new ImeLogTrackerAdapterFixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+            AppPackageState MakeApp(AppInstallationState state) => AppPackageState.Restore(
+                id: "app-1",
+                listPos: 0,
+                name: "App",
+                runAs: AppRunAs.System,
+                intent: AppIntent.Install,
+                targeted: AppTargeted.Device,
+                dependsOn: new HashSet<string>(),
+                installationState: state,
+                downloadingOrInstallingSeen: true,
+                progressPercent: 0,
+                bytesDownloaded: 0,
+                bytesTotal: 0,
+                errorPatternId: null,
+                errorDetail: null,
+                errorCode: null,
+                exitCode: null,
+                hresultFromWin32: null);
+
+            // Downloading → Installing must NOT add a shadow `download_progress` —
+            // and Skipped/Postponed terminal states must NOT either (V1 parity).
+            adapter.TriggerAppStateFromTest(MakeApp(AppInstallationState.Downloading), AppInstallationState.Unknown, AppInstallationState.Downloading);
+            adapter.TriggerAppStateFromTest(MakeApp(AppInstallationState.Installing), AppInstallationState.Downloading, AppInstallationState.Installing);
+            adapter.TriggerAppStateFromTest(MakeApp(AppInstallationState.Skipped), AppInstallationState.Installing, AppInstallationState.Skipped);
+            adapter.TriggerAppStateFromTest(MakeApp(AppInstallationState.Postponed), AppInstallationState.Installing, AppInstallationState.Postponed);
+
+            Assert.Empty(f.InfoEvents(SharedEventTypes.DownloadProgress));
+        }
     }
 }

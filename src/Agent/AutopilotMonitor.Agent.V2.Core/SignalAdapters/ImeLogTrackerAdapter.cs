@@ -376,6 +376,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             if (mapped == null) return;
 
             var (eventType, severity) = mapped.Value;
+            var payload = BuildAppStatePayload(app, newState, timing);
             // All app-state transitions flush immediately, including `download_progress`:
             // progress ticks run every 3s and only while a download is actively in flight
             // (bounded by download duration), so live UI responsiveness wins over the small
@@ -386,8 +387,30 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 message: BuildAppStateMessage(app, newState, eventType),
                 severity: severity,
                 immediateUpload: true,
-                data: BuildAppStatePayload(app, newState, timing),
+                data: payload,
                 occurredAtUtc: now);
+
+            // V1 parity: on terminal Installed/Error transitions, also emit a shadow
+            // `download_progress` event tagged with status=completed/failed. The Web UI's
+            // DownloadProgress panel relies on this to close out apps that never produced
+            // byte-level progress (WinGet/Store apps emit no `download_progress` ticks
+            // because they have no DO byte data). Without this, Company Portal & friends
+            // stay stuck on "started" forever.
+            if (newState == AppInstallationState.Installed || newState == AppInstallationState.Error)
+            {
+                var status = newState == AppInstallationState.Installed ? "completed" : "failed";
+                var shadowPayload = new Dictionary<string, string>(payload.Count + 1, StringComparer.Ordinal);
+                foreach (var kv in payload) shadowPayload[kv.Key] = kv.Value;
+                shadowPayload["status"] = status;
+                _post.Emit(
+                    eventType: SharedEventTypes.DownloadProgress,
+                    source: SourceLabel,
+                    message: $"{app.Name ?? app.Id}: {status}",
+                    severity: EventSeverity.Debug,
+                    immediateUpload: true,
+                    data: shadowPayload,
+                    occurredAtUtc: now);
+            }
 
             // PR3-D4: app state transitions are the heaviest cardinality observability target —
             // a forensic reader needs (oldState->newState, terminal flag, sub-phase emit) to
