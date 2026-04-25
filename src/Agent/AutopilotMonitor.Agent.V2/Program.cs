@@ -703,7 +703,8 @@ namespace AutopilotMonitor.Agent.V2
                                 sessionPersistence: sessionPersistence,
                                 // Plan §5 Fix 4 — per-app timing snapshot for FinalStatusBuilder +
                                 // app_tracking_summary emission. Null-safe via the handler's default.
-                                appTimingsAccessor: () => componentFactory.ImeAppTimings);
+                                appTimingsAccessor: () => componentFactory.ImeAppTimings,
+                                agentVersion: GetAgentVersion());
 
                             // Single-rail refactor (plan §5.3) — ServerActionDispatcher emits through
                             // the same InformationalEventPost. Constructed inside this hook so

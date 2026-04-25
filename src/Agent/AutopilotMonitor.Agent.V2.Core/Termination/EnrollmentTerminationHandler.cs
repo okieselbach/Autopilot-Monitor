@@ -72,6 +72,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly Action<int> _triggerReboot;
         private readonly TimeSpan _lateEventGracePeriod;
         private readonly TimeSpan _spoolDrainPeriod;
+        private readonly string _agentVersion;
 
         private int _handled;
 
@@ -92,7 +93,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             Action<int> triggerReboot = null,
             TimeSpan? lateEventGracePeriod = null,
             TimeSpan? spoolDrainPeriod = null,
-            Func<IReadOnlyDictionary<string, AppInstallTiming>> appTimingsAccessor = null)
+            Func<IReadOnlyDictionary<string, AppInstallTiming>> appTimingsAccessor = null,
+            string agentVersion = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -113,6 +115,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _triggerReboot = triggerReboot ?? DefaultTriggerReboot;
             _lateEventGracePeriod = lateEventGracePeriod ?? DefaultLateEventGrace;
             _spoolDrainPeriod = spoolDrainPeriod ?? DefaultSpoolDrain;
+            _agentVersion = agentVersion ?? string.Empty;
         }
 
         /// <summary>
@@ -135,6 +138,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 // their delta events make it into the final diagnostics ZIP. The
                 // AnalyzerManager is optional (null in tests where analyzers are out-of-scope).
                 RunShutdownAnalyzers(args);
+
+                // PR1-C / V1 parity — emit agent_shutting_down unconditionally so the timeline
+                // always sees the agent accept termination. Previously gated on
+                // SelfDestructOnComplete, which left dev/test VMs (where SelfDestruct=false)
+                // without the event entirely. Fires for WhiteGlove Part 1 too — that branch
+                // also ends the running agent process.
+                EmitAgentShuttingDown(args);
 
                 if (state == null)
                 {
@@ -553,28 +563,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 return;
             }
 
-            // Plan §6.2 terminate-hygiene — post an explicit agent_shutting_down acknowledgement BEFORE
-            // the CleanupService tears the agent down. This guarantees the backend sees the agent
-            // accept the termination (so it can stop re-queuing terminate_session) even when the
-            // cleanup script races ahead of the final telemetry flush.
-            EmitEventSafe(new EnrollmentEvent
-            {
-                SessionId = _configuration.SessionId,
-                TenantId = _configuration.TenantId,
-                EventType = Constants.EventTypes.AgentShuttingDown,
-                Severity = EventSeverity.Info,
-                Source = "EnrollmentTerminationHandler",
-                Phase = EnrollmentPhase.Unknown,
-                Message = "Agent accepted termination — running CleanupService.",
-                Data = new Dictionary<string, object>
-                {
-                    { "reason", args.Reason.ToString() },
-                    { "outcome", args.Outcome.ToString() },
-                    { "stage", args.StageName ?? string.Empty },
-                },
-                ImmediateUpload = true,
-            });
-
             try
             {
                 var service = _cleanupServiceFactory();
@@ -585,6 +573,34 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             {
                 _logger.Error("EnrollmentTerminationHandler: cleanup service invocation threw.", ex);
             }
+        }
+
+        // V1-parity acknowledgement that the agent has accepted termination. Carries enough
+        // context for the backend to correlate the shutdown with its trigger (reason/outcome/
+        // stage) and for diagnostics to show how long the agent ran. Always emitted, regardless
+        // of whether self-destruct cleanup actually runs afterwards.
+        private void EmitAgentShuttingDown(EnrollmentTerminatedEventArgs args)
+        {
+            var uptimeMinutes = Math.Round((DateTime.UtcNow - _agentStartTimeUtc).TotalMinutes, 1);
+            EmitEventSafe(new EnrollmentEvent
+            {
+                SessionId = _configuration.SessionId,
+                TenantId = _configuration.TenantId,
+                EventType = Constants.EventTypes.AgentShuttingDown,
+                Severity = EventSeverity.Info,
+                Source = "EnrollmentTerminationHandler",
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"Agent shutting down (reason={args.Reason}, outcome={args.Outcome}).",
+                Data = new Dictionary<string, object>
+                {
+                    { "reason", args.Reason.ToString() },
+                    { "outcome", args.Outcome.ToString() },
+                    { "stage", args.StageName ?? string.Empty },
+                    { "uptimeMinutes", uptimeMinutes },
+                    { "agentVersion", _agentVersion },
+                },
+                ImmediateUpload = true,
+            });
         }
 
         private void TrySaveWhiteGloveComplete()

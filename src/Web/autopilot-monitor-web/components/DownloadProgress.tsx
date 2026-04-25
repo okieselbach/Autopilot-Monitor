@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { shouldSkipLowBytesTotal, shouldSkipNoActivity } from "@/lib/downloadProgressFilters";
 
 interface DownloadEvent {
   timestamp: string;
@@ -138,24 +139,16 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
         || (bytesTotal > 0 && bytesDownloaded >= bytesTotal)
         || (progressPercent >= 100 && bytesDownloaded === 0 && bytesTotal === 0);
 
-      // Skip if bytesTotal is too small (< 1 KB) AND not explicitly completed/failed/skipped
-      if (bytesTotal > 0 && bytesTotal < 1024 && status !== "completed" && status !== "failed" && !isSkippedEvent) {
-        continue;
-      }
-
-      // Skip if no download activity yet (0 bytes downloaded, not completed/failed/skipped)
-      // This makes downloads appear dynamically as they start
-      if (
-        bytesDownloaded === 0 &&
-        bytesTotal === 0 &&
-        status !== "completed" &&
-        status !== "failed" &&
-        !isDownloadStartEvent &&
-        !isSkippedEvent &&
-        progressPercent < 100
-      ) {
-        continue;
-      }
+      const filterInput = {
+        bytesDownloaded: isNaN(bytesDownloaded) ? 0 : bytesDownloaded,
+        bytesTotal: isNaN(bytesTotal) ? 0 : bytesTotal,
+        status,
+        isDownloadStartEvent,
+        isSkippedEvent,
+        progressPercent: isNaN(progressPercent) ? 0 : progressPercent,
+      };
+      if (shouldSkipLowBytesTotal(filterInput)) continue;
+      if (shouldSkipNoActivity(filterInput)) continue;
 
       const existing = downloadMap.get(appName);
       // Max plausible rate: 250 MB/s (~2 Gbit/s, generous for any real client connection)

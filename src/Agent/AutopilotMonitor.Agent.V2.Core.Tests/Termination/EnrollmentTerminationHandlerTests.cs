@@ -128,7 +128,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             public IReadOnlyDictionary<string, AppInstallTiming>? AppTimingsOverride { get; set; }
 
-            public EnrollmentTerminationHandler Build(AgentConfiguration? config = null)
+            public EnrollmentTerminationHandler Build(AgentConfiguration? config = null) =>
+                BuildCore(config, agentVersion: null);
+
+            public EnrollmentTerminationHandler BuildWithVersion(string agentVersion) =>
+                BuildCore(config: null, agentVersion: agentVersion);
+
+            private EnrollmentTerminationHandler BuildCore(AgentConfiguration? config, string? agentVersion)
             {
                 config ??= BuildConfig();
                 return new EnrollmentTerminationHandler(
@@ -159,7 +165,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                     // the dedicated V1-parity tests below which opt back in via their own Rig.
                     lateEventGracePeriod: TimeSpan.Zero,
                     spoolDrainPeriod: TimeSpan.Zero,
-                    appTimingsAccessor: () => AppTimingsOverride ?? new Dictionary<string, AppInstallTiming>());
+                    appTimingsAccessor: () => AppTimingsOverride ?? new Dictionary<string, AppInstallTiming>(),
+                    agentVersion: agentVersion);
             }
 
             public void Dispose() => Tmp.Dispose();
@@ -410,8 +417,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
         }
 
         [Fact]
-        public void Handle_skips_agent_shutting_down_when_self_destruct_disabled()
+        public void Handle_emits_agent_shutting_down_when_self_destruct_disabled()
         {
+            // PR1-C / V1 parity: dev/test VMs run with SelfDestruct=false but the agent still
+            // ends after termination — the timeline must show that.
             using var rig = new Rig();
             rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
             var cfg = rig.BuildConfig(selfDestruct: false);
@@ -419,25 +428,64 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             rig.Build(cfg).Handle(sender: null!,
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
 
-            // agent_shutting_down is a CleanupService acknowledgement — if cleanup doesn't run,
-            // the event must not fire either (the agent isn't really shutting down via self-destruct).
             Assert.Equal(0, rig.CleanupService.Invocations);
-            Assert.DoesNotContain(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+            Assert.Contains(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+
+            var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
+            Assert.NotNull(data);
+            Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage.ToString(), (string)data!["reason"]);
         }
 
         [Fact]
-        public void Handle_skips_agent_shutting_down_on_whiteglove_part1_exit()
+        public void Handle_emits_agent_shutting_down_on_whiteglove_part1_exit()
         {
+            // PR1-C: the running agent process ends on Part 1 just like on a normal terminal —
+            // emit the lifecycle marker so the timeline reflects the handoff. Stage payload
+            // tells the backend this was the WG sealing branch.
             using var rig = new Rig();
             rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.WhiteGloveSealed }.Build();
 
             rig.Build().Handle(sender: null!,
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.WhiteGloveSealed));
 
-            // WhiteGlove Part-1 exit keeps the agent alive for Part 2 — no self-destruct, so no
-            // agent_shutting_down acknowledgement either.
+            // Cleanup still must NOT run on WG Part 1 (the session resumes on next boot).
             Assert.Equal(0, rig.CleanupService.Invocations);
-            Assert.DoesNotContain(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+            Assert.Contains(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+
+            var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
+            Assert.NotNull(data);
+            Assert.Equal(SessionStage.WhiteGloveSealed.ToString(), (string)data!["stage"]);
+        }
+
+        [Fact]
+        public void Handle_propagates_max_lifetime_reason_in_agent_shutting_down_data()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.AwaitingHello }.Build();
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.MaxLifetimeExceeded, EnrollmentTerminationOutcome.Failed, SessionStage.AwaitingHello));
+
+            var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
+            Assert.NotNull(data);
+            Assert.Equal(EnrollmentTerminationReason.MaxLifetimeExceeded.ToString(), (string)data!["reason"]);
+            Assert.Equal(EnrollmentTerminationOutcome.Failed.ToString(), (string)data["outcome"]);
+        }
+
+        [Fact]
+        public void Handle_includes_uptime_and_agent_version_in_agent_shutting_down()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+
+            rig.BuildWithVersion("9.9.9").Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
+            Assert.NotNull(data);
+            Assert.Equal("9.9.9", (string)data!["agentVersion"]);
+            Assert.True(data.ContainsKey("uptimeMinutes"));
+            Assert.IsType<double>(data["uptimeMinutes"]);
         }
 
         // ============================================================================

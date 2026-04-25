@@ -49,11 +49,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         private readonly BackendApiClient _apiClient;
         private readonly HttpClient _httpClient;
 
-        private static readonly string ImeLogFolder =
+        private readonly string _imeLogFolder;
+        private readonly string _agentLogFolder;
+        private readonly string _agentStateFolder;
+        private readonly string _agentSpoolFolder;
+        private readonly string _agentDataFolder;
+
+        private static readonly string DefaultImeLogFolder =
             Environment.ExpandEnvironmentVariables(@"%ProgramData%\Microsoft\IntuneManagementExtension\Logs");
 
-        private static readonly string AgentLogFolder =
+        private static readonly string DefaultAgentLogFolder =
             Environment.ExpandEnvironmentVariables(Constants.LogDirectory);
+
+        private static readonly string DefaultAgentStateFolder =
+            Environment.ExpandEnvironmentVariables(Constants.StateDirectory);
+
+        private static readonly string DefaultAgentSpoolFolder =
+            Environment.ExpandEnvironmentVariables(Constants.SpoolDirectory);
+
+        private static readonly string DefaultAgentDataFolder =
+            Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
 
         /// <summary>
         /// File extensions collected from built-in log folders (Agent + IME).
@@ -65,12 +80,60 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             "*.etl", "*.evtx", "*.xml", "*.csv", "*.cab"
         };
 
+        /// <summary>
+        /// Patterns collected from the agent state folder. Adds completion markers on top of
+        /// the standard log patterns so files like <c>enrollment-complete.marker</c> and
+        /// <c>whiteglove-backfill-state.json</c> reach the diagnostics archive.
+        /// </summary>
+        private static readonly string[] StateFilePatterns = new[]
+        {
+            "*.log", "*.txt", "*.json", "*.jsonl",
+            "*.etl", "*.evtx", "*.xml", "*.csv", "*.cab",
+            "*.complete", "*.marker"
+        };
+
+        /// <summary>
+        /// Marker patterns from the top-level data directory. Kept tight on purpose: only
+        /// completion/exit markers, no session.id / bootstrap.json (those are config, not
+        /// forensic state).
+        /// </summary>
+        private static readonly string[] RootMarkerPatterns = new[] { "*.complete", "*.marker" };
+
+        /// <summary>
+        /// Telemetry spool: only the JSON-shaped files. The spool folder may also contain
+        /// quarantine subfolders, so subfolders are excluded to keep the archive focused
+        /// on what is actually pending upload.
+        /// </summary>
+        private static readonly string[] SpoolFilePatterns = new[] { "*.jsonl", "*.json" };
+
         public DiagnosticsPackageService(AgentConfiguration configuration, AgentLogger logger, BackendApiClient apiClient)
+            : this(configuration, logger, apiClient, null, null, null, null, null)
+        {
+        }
+
+        // Test seam: allows xUnit fixtures to redirect log/state/spool/data folders to a
+        // temp dir without touching real %ProgramData% paths. Production callers always go
+        // through the public ctor.
+        internal DiagnosticsPackageService(
+            AgentConfiguration configuration,
+            AgentLogger logger,
+            BackendApiClient apiClient,
+            string agentLogFolderOverride,
+            string imeLogFolderOverride,
+            string agentStateFolderOverride,
+            string agentSpoolFolderOverride,
+            string agentDataFolderOverride)
         {
             _configuration = configuration;
             _logger = logger;
             _apiClient = apiClient;
             _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+
+            _agentLogFolder = agentLogFolderOverride ?? DefaultAgentLogFolder;
+            _imeLogFolder = imeLogFolderOverride ?? DefaultImeLogFolder;
+            _agentStateFolder = agentStateFolderOverride ?? DefaultAgentStateFolder;
+            _agentSpoolFolder = agentSpoolFolderOverride ?? DefaultAgentSpoolFolder;
+            _agentDataFolder = agentDataFolderOverride ?? DefaultAgentDataFolder;
         }
 
         /// <summary>
@@ -119,51 +182,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 var suffix = string.IsNullOrEmpty(fileNameSuffix) ? "" : $"-{fileNameSuffix}";
                 var zipFileName = $"AgentDiagnostics-{_configuration.SessionId}-{timestamp}{suffix}.zip";
 
-                byte[] zipBytes;
-                using (var ms = new MemoryStream())
-                {
-                    using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
-                    {
-                        // 1. sessioninfo.txt
-                        AddSessionInfo(archive, enrollmentSucceeded);
-
-                        // 2. Agent logs
-                        foreach (var pattern in LogFilePatterns)
-                            AddLogFiles(archive, AgentLogFolder, "AgentLogs", pattern);
-
-                        // 3. IME logs (all relevant files in the IME log folder)
-                        foreach (var pattern in LogFilePatterns)
-                            AddLogFiles(archive, ImeLogFolder, "ImeLogs", pattern);
-
-                        // 4. Configured additional log paths (global + tenant, validated by guards)
-                        foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())
-                        {
-                            // Resolve %LOGGED_ON_USER_PROFILE% token and get profile path for guard exception
-                            var userProfilePath = UserProfileResolver.ContainsUserProfileToken(entry.Path)
-                                ? UserProfileResolver.GetLoggedOnUserProfilePath() : null;
-
-                            if (!DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode, userProfilePath))
-                            {
-                                _logger.Warning($"Diagnostics path blocked by guard: {entry.Path}");
-                                continue;
-                            }
-                            var expandedPath = UserProfileResolver.ExpandCustomTokens(entry.Path);
-                            if (expandedPath == null)
-                            {
-                                _logger.Warning($"Diagnostics path skipped (no user session for token): {entry.Path}");
-                                continue;
-                            }
-                            var folder = Path.GetDirectoryName(expandedPath);
-                            var pattern = Path.GetFileName(expandedPath);
-                            if (string.IsNullOrEmpty(folder)) continue;
-                            if (string.IsNullOrEmpty(pattern) || !pattern.Contains(".")) pattern = "*";
-                            var zipFolder = $"AdditionalLogs/{Path.GetFileName(folder)}";
-                            AddLogFiles(archive, folder, zipFolder, pattern, entry.IncludeSubfolders);
-                        }
-                    }
-
-                    zipBytes = ms.ToArray();
-                }
+                var zipBytes = BuildArchiveBytes(enrollmentSucceeded);
 
                 _logger.Info($"Diagnostics package created: {zipFileName} ({zipBytes.Length / 1024} KB)");
 
@@ -220,6 +239,72 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             catch
             {
                 return "(url unavailable)";
+            }
+        }
+
+        // Builds the diagnostics ZIP body in-memory. Extracted from CreateAndUploadAsync so
+        // tests can assert archive contents without going through the upload path.
+        internal virtual byte[] BuildArchiveBytes(bool enrollmentSucceeded)
+        {
+            using (var ms = new MemoryStream())
+            {
+                using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+                {
+                    // 1. sessioninfo.txt
+                    AddSessionInfo(archive, enrollmentSucceeded);
+
+                    // 2. Agent logs
+                    foreach (var pattern in LogFilePatterns)
+                        AddLogFiles(archive, _agentLogFolder, "AgentLogs", pattern);
+
+                    // 3. IME logs (all relevant files in the IME log folder)
+                    foreach (var pattern in LogFilePatterns)
+                        AddLogFiles(archive, _imeLogFolder, "ImeLogs", pattern);
+
+                    // 4. Agent state: snapshot, journal, signal-log, ime-tracker-state,
+                    //    enrollment-complete.marker, final-status.json, whiteglove-backfill-state.json.
+                    //    Recursive to include `.quarantine` subfolders if present.
+                    foreach (var pattern in StateFilePatterns)
+                        AddLogFiles(archive, _agentStateFolder, "AgentState", pattern, includeSubfolders: true);
+
+                    // 5. Telemetry spool — pending uploads + upload cursor (forensic: what didn't ship?)
+                    foreach (var pattern in SpoolFilePatterns)
+                        AddLogFiles(archive, _agentSpoolFolder, "AgentSpool", pattern, includeSubfolders: false);
+
+                    // 6. Top-level markers (whiteglove.complete, clean-exit marker) — Part-1/Part-2
+                    //    bridge + ghost-restart guard. Top-directory only to avoid re-zipping
+                    //    State/Spool/Logs/Agent which already have their own sections.
+                    foreach (var pattern in RootMarkerPatterns)
+                        AddLogFiles(archive, _agentDataFolder, "AgentMarkers", pattern, includeSubfolders: false);
+
+                    // 7. Configured additional log paths (global + tenant, validated by guards)
+                    foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())
+                    {
+                        // Resolve %LOGGED_ON_USER_PROFILE% token and get profile path for guard exception
+                        var userProfilePath = UserProfileResolver.ContainsUserProfileToken(entry.Path)
+                            ? UserProfileResolver.GetLoggedOnUserProfilePath() : null;
+
+                        if (!DiagnosticsPathGuards.IsDiagnosticsPathAllowed(entry.Path, _configuration.UnrestrictedMode, userProfilePath))
+                        {
+                            _logger.Warning($"Diagnostics path blocked by guard: {entry.Path}");
+                            continue;
+                        }
+                        var expandedPath = UserProfileResolver.ExpandCustomTokens(entry.Path);
+                        if (expandedPath == null)
+                        {
+                            _logger.Warning($"Diagnostics path skipped (no user session for token): {entry.Path}");
+                            continue;
+                        }
+                        var folder = Path.GetDirectoryName(expandedPath);
+                        var pattern = Path.GetFileName(expandedPath);
+                        if (string.IsNullOrEmpty(folder)) continue;
+                        if (string.IsNullOrEmpty(pattern) || !pattern.Contains(".")) pattern = "*";
+                        var zipFolder = $"AdditionalLogs/{Path.GetFileName(folder)}";
+                        AddLogFiles(archive, folder, zipFolder, pattern, entry.IncludeSubfolders);
+                    }
+                }
+
+                return ms.ToArray();
             }
         }
 
