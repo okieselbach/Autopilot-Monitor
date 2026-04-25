@@ -437,7 +437,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStep,
                 trigger: $"DeadlineFired:{DeadlineNames.FinalizingGrace}");
 
-            var effects = new[] { BuildEnrollmentCompleteEffect() };
+            var effects = new[] { BuildEnrollmentCompleteEffect(newState, $"DeadlineFired:{DeadlineNames.FinalizingGrace}") };
 
             return new DecisionStep(newState, transition, effects);
         }
@@ -464,12 +464,98 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     ["message"] = $"Phase: {phase}",
                 });
 
-        private static DecisionEffect BuildEnrollmentCompleteEffect() =>
-            new DecisionEffect(
+        /// <summary>
+        /// Terminal <c>enrollment_complete</c> effect emitted by the Classic FinalizingGrace
+        /// deadline path and the SelfDeploying DeviceSetupProvisioningComplete path. Restores
+        /// V1 backend-side audit-trail parity (882fef64 debrief follow-up): Parameters carry
+        /// just <c>eventType</c> (legacy contract), and a structured <see cref="DecisionEffect.TypedPayload"/>
+        /// dictionary feeds <c>EnrollmentEvent.Data</c> with <c>signalsSeen</c>,
+        /// <c>signalTimestamps</c>, <c>completionSource</c>, <c>completionTrigger</c>, plus the
+        /// resolved Hello / scenario context. Lets backend consumers reconstruct "which signals
+        /// drove completion" without re-reading the agent's <c>final-status.json</c>.
+        /// </summary>
+        /// <param name="state">Post-transition state (Stage=Completed, Outcome=EnrollmentComplete).</param>
+        /// <param name="completionTrigger">
+        /// The trigger label that was passed to <see cref="DecisionEngine.BuildTakenTransition"/>
+        /// for this step (e.g. <c>"DeadlineFired:FinalizingGrace"</c> or
+        /// <c>"DeviceSetupProvisioningComplete"</c>) — keeps the audit trail self-describing
+        /// without requiring the consumer to re-derive it from the StepIndex.
+        /// </param>
+        internal static DecisionEffect BuildEnrollmentCompleteEffect(DecisionState state, string completionTrigger)
+        {
+            return new DecisionEffect(
                 kind: DecisionEffectKind.EmitEventTimelineEntry,
                 parameters: new Dictionary<string, string>
                 {
                     ["eventType"] = "enrollment_complete",
-                });
+                },
+                typedPayload: BuildEnrollmentCompleteAuditTrail(state, completionTrigger));
+        }
+
+        private static Dictionary<string, object> BuildEnrollmentCompleteAuditTrail(
+            DecisionState state,
+            string completionTrigger)
+        {
+            var signalsSeen = new List<string>(8);
+            var signalTimestamps = new Dictionary<string, object>(StringComparer.Ordinal);
+
+            if (state.HelloResolvedUtc != null)
+            {
+                signalsSeen.Add("hello_resolved");
+                signalTimestamps["helloResolved"] = FormatUtc(state.HelloResolvedUtc.Value);
+            }
+            if (state.DesktopArrivedUtc != null)
+            {
+                signalsSeen.Add("desktop_arrived");
+                signalTimestamps["desktopArrived"] = FormatUtc(state.DesktopArrivedUtc.Value);
+            }
+            if (state.EspFinalExitUtc != null)
+            {
+                signalsSeen.Add("esp_final_exit");
+                signalTimestamps["espFinalExit"] = FormatUtc(state.EspFinalExitUtc.Value);
+            }
+            if (state.ImeMatchedPatternId != null)
+            {
+                signalsSeen.Add("ime_pattern_matched");
+            }
+            if (state.UserAadSignInCompleteUtc != null)
+            {
+                signalsSeen.Add("user_aad_sign_in_complete");
+                signalTimestamps["userAadSignInComplete"] = FormatUtc(state.UserAadSignInCompleteUtc.Value);
+            }
+
+            var data = new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["completionSource"] = "DecisionEngine",
+                ["completionTrigger"] = completionTrigger,
+                ["signalsSeen"] = signalsSeen,
+                ["signalTimestamps"] = signalTimestamps,
+                ["sessionStage"] = state.Stage.ToString(),
+            };
+
+            if (state.HelloOutcome != null)
+            {
+                data["helloOutcome"] = state.HelloOutcome.Value;
+            }
+            if (state.HelloPolicyEnabled != null)
+            {
+                data["helloPolicyEnabled"] = state.HelloPolicyEnabled.Value;
+            }
+            if (state.ImeMatchedPatternId != null)
+            {
+                data["imePatternMatchedPatternId"] = state.ImeMatchedPatternId.Value;
+            }
+            if (state.ScenarioProfile != null)
+            {
+                data["enrollmentMode"] = state.ScenarioProfile.Mode.ToString();
+                data["enrollmentJoinMode"] = state.ScenarioProfile.JoinMode.ToString();
+            }
+
+            return data;
+        }
+
+        private static string FormatUtc(DateTime utc) =>
+            DateTime.SpecifyKind(utc, DateTimeKind.Utc)
+                .ToString("o", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

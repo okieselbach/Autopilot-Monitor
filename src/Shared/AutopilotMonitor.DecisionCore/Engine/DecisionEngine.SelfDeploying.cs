@@ -105,7 +105,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStep,
                 trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete));
 
-            var effects = new[] { BuildEnrollmentCompleteEffect() };
+            var effects = new[] { BuildEnrollmentCompleteEffect(newState, nameof(DecisionSignalKind.DeviceSetupProvisioningComplete)) };
 
             return new DecisionStep(newState, transition, effects);
         }

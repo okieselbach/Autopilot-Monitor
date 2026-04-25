@@ -130,6 +130,47 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
+        public void FinalizingGraceDeadline_enrollment_complete_carries_v1_audit_trail_in_typed_payload()
+        {
+            // 882fef64 debrief follow-up: V2 had regressed by emitting enrollment_complete with
+            // empty Data — V1's audit trail (signalsSeen, signalTimestamps, completionSource,
+            // helloOutcome) had only been written to the local final-status.json. The reducer
+            // now restores parity by attaching a structured TypedPayload that the
+            // EventTimelineEmitter passes verbatim to EnrollmentEvent.Data.
+            var engine = new DecisionEngine();
+            var state = InitialAwaitingDesktop(engine);
+            state = engine.Reduce(state, MakeSignal(5, DecisionSignalKind.DesktopArrived, T0.AddMinutes(5), null)).NewState;
+
+            var step = engine.Reduce(
+                state,
+                MakeSignal(6, DecisionSignalKind.DeadlineFired, T0.AddMinutes(5).AddSeconds(5),
+                    new Dictionary<string, string> { [SignalPayloadKeys.Deadline] = DeadlineNames.FinalizingGrace }));
+
+            var terminalEffect = Assert.Single(
+                step.Effects,
+                e => e.Kind == DecisionEffectKind.EmitEventTimelineEntry
+                     && e.Parameters != null
+                     && e.Parameters.TryGetValue("eventType", out var et) && et == "enrollment_complete");
+
+            var payload = Assert.IsType<Dictionary<string, object>>(terminalEffect.TypedPayload);
+            Assert.Equal("DecisionEngine", payload["completionSource"]);
+            Assert.Equal($"DeadlineFired:{DeadlineNames.FinalizingGrace}", payload["completionTrigger"]);
+            Assert.Equal(nameof(SessionStage.Completed), payload["sessionStage"]);
+
+            var signalsSeen = Assert.IsType<List<string>>(payload["signalsSeen"]);
+            Assert.Contains("hello_resolved", signalsSeen);
+            Assert.Contains("desktop_arrived", signalsSeen);
+
+            var timestamps = Assert.IsType<Dictionary<string, object>>(payload["signalTimestamps"]);
+            // Hello resolved at T0+4min, Desktop arrived at T0+5min — both ISO-8601 round-trip strings.
+            Assert.Equal(T0.AddMinutes(4).ToString("o", System.Globalization.CultureInfo.InvariantCulture), timestamps["helloResolved"]);
+            Assert.Equal(T0.AddMinutes(5).ToString("o", System.Globalization.CultureInfo.InvariantCulture), timestamps["desktopArrived"]);
+
+            // HelloOutcome payload was supplied as "Success" by the InitialAwaitingDesktop fixture.
+            Assert.Equal("Success", payload["helloOutcome"]);
+        }
+
+        [Fact]
         public void HelloResolved_when_Desktop_already_arrived_also_routes_through_Finalizing()
         {
             // Mirror scenario: Desktop arrives first (before Hello resolves), reducer stays in
