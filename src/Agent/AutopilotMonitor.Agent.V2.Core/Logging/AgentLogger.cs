@@ -23,9 +23,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Logging
     /// </summary>
     public class AgentLogger
     {
-        private readonly string _logFilePath;
+        // Rotation cap. With per-enrollment lifecycle (30 min – 4 h) and verbose mode the
+        // active log can grow into the hundreds of MB territory; 50 MB keeps individual
+        // files manageable for forensics tooling without hiding any data — rotated files
+        // are kept alongside the active one with a numeric suffix.
+        private const long DefaultMaxFileSizeBytes = 50L * 1024 * 1024;
+
         private AgentLogLevel _logLevel;
         private readonly object _lockObject = new object();
+
+        private readonly long _maxFileSizeBytes;
+        private readonly string _logDirectory;
+        private readonly string _logFileBaseName;   // "agent_20260425"
+        private string _logFilePath;                // mutable — rotates to "_002", "_003" ...
+        private int _rotationSuffix;                // 0 = base file, 2+ = "_002" etc.
 
         /// <summary>
         /// When true, log entries are also written to Console.Out (same format as the log file).
@@ -33,17 +44,61 @@ namespace AutopilotMonitor.Agent.V2.Core.Logging
         /// </summary>
         public bool EnableConsoleOutput { get; set; }
 
-        public AgentLogger(string logDirectory, AgentLogLevel logLevel = AgentLogLevel.Info)
+        public AgentLogger(string logDirectory, AgentLogLevel logLevel = AgentLogLevel.Info, long maxFileSizeBytes = DefaultMaxFileSizeBytes)
         {
             _logLevel = logLevel;
+            _maxFileSizeBytes = maxFileSizeBytes > 0 ? maxFileSizeBytes : DefaultMaxFileSizeBytes;
+            _logDirectory = logDirectory;
 
             if (!Directory.Exists(logDirectory))
             {
                 Directory.CreateDirectory(logDirectory);
             }
 
-            var logFileName = $"agent_{DateTime.Now:yyyyMMdd}.log";
-            _logFilePath = Path.Combine(logDirectory, logFileName);
+            _logFileBaseName = $"agent_{DateTime.Now:yyyyMMdd}";
+            _rotationSuffix = ProbeNextRotationSuffix(logDirectory, _logFileBaseName);
+            _logFilePath = BuildLogFilePath();
+        }
+
+        // Picks up the highest existing rotation suffix on the same day so a process restart
+        // doesn't overwrite previous segments. Returns 0 when no log file exists yet — the
+        // first segment uses the unsuffixed name `agent_YYYYMMDD.log`.
+        private static int ProbeNextRotationSuffix(string dir, string baseName)
+        {
+            if (!Directory.Exists(dir)) return 0;
+            string[] existing;
+            try { existing = Directory.GetFiles(dir, baseName + "*.log"); }
+            catch { return 0; }
+
+            int max = 0;
+            foreach (var path in existing)
+            {
+                var name = Path.GetFileNameWithoutExtension(path);
+                if (string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (max < 1) max = 1;
+                    continue;
+                }
+                if (name.Length > baseName.Length + 1 &&
+                    name.StartsWith(baseName + "_", StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(name.Substring(baseName.Length + 1), out var suffix) &&
+                    suffix > max)
+                {
+                    max = suffix;
+                }
+            }
+            // 0 means "no file yet" → use the unsuffixed base; otherwise continue at the
+            // highest existing suffix so the active writer appends to the most recent file
+            // (rotation kicks in once it crosses the cap).
+            return max;
+        }
+
+        private string BuildLogFilePath()
+        {
+            var name = _rotationSuffix < 2
+                ? $"{_logFileBaseName}.log"
+                : $"{_logFileBaseName}_{_rotationSuffix:D3}.log";
+            return Path.Combine(_logDirectory, name);
         }
 
         /// <summary>
@@ -99,6 +154,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Logging
                     var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff");
                     var logEntry = $"[{timestamp}] [{level}] {SanitizeLogMessage(message)}";
 
+                    RotateIfOverCap(timestamp);
+
                     File.AppendAllText(_logFilePath, logEntry + Environment.NewLine);
 
                     if (EnableConsoleOutput)
@@ -110,6 +167,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Logging
             catch
             {
                 // Swallow logging errors to prevent crashes
+            }
+        }
+
+        // Best-effort size check. FileInfo.Length is briefly cached, so under bursty writes
+        // the active file can drift slightly past the cap before rotation kicks in — that's
+        // acceptable. Rotation is non-fatal: any failure here is silently ignored so the
+        // logger never breaks the agent.
+        private void RotateIfOverCap(string timestamp)
+        {
+            try
+            {
+                var fi = new FileInfo(_logFilePath);
+                if (!fi.Exists || fi.Length < _maxFileSizeBytes) return;
+
+                _rotationSuffix = _rotationSuffix < 2 ? 2 : _rotationSuffix + 1;
+                _logFilePath = BuildLogFilePath();
+
+                var capMb = _maxFileSizeBytes / (1024 * 1024);
+                var rotateMsg = $"[{timestamp}] [INFO] AgentLogger: rotated from previous segment ({capMb}MB cap reached).";
+                File.AppendAllText(_logFilePath, rotateMsg + Environment.NewLine);
+            }
+            catch
+            {
+                // Best-effort: never break logging on a rotation glitch.
             }
         }
 
