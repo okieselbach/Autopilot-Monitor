@@ -376,10 +376,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                                  $"silenced {ignoredFromStates} packages + {ignoredFromSeen} additional seen IDs " +
                                  $"(total ignore list: {_packageStates.IgnoreList.Count})");
 
-                    // Snapshot package states from the completed phase before clearing
+                    // Snapshot package states from the completed phase before clearing.
+                    // We hold the actual AppPackageState references (cheap; List<T>.Clear() on
+                    // _packageStates does not destroy them) so the termination summary path
+                    // can iterate per-phase apps with their full typed state — see
+                    // GetAllKnownPackageStates() in the partial Core class.
                     if (_packageStates.CountAll > 0)
                     {
-                        _phasePackageSnapshots[_lastEspPhaseDetected] = _packageStates.ToFinalStatusList();
+                        _phasePackageSnapshots[_lastEspPhaseDetected] =
+                            new List<AppPackageState>(_packageStates);
                         _logger.Info($"ImeLogTracker: Snapshotted {_packageStates.CountAll} package states from {_lastEspPhaseDetected} phase");
                     }
 

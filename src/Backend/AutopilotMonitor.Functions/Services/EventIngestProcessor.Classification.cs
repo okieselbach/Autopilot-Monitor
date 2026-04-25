@@ -26,6 +26,13 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     case "phase_changed":
                     case "esp_phase_changed":
+                    // V2 DecisionEngine emits AppsDevice/AppsUser/FinalizingSetup as
+                    // `phase_transition` (one of the few event types allowed to carry
+                    // Phase != Unknown per feedback_phase_strategy). Without classifying
+                    // these as phase updates the session row's CurrentPhase stayed at -1
+                    // throughout the App phases and the Web UI's PhaseTimeline rendered
+                    // steps 4–7 grey on otherwise-successful V2 sessions.
+                    case "phase_transition":
                         classification.LastPhaseChangeEvent = evt;
                         break;
                     case "enrollment_complete":

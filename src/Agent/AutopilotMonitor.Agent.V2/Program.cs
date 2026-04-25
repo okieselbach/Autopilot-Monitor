@@ -690,7 +690,11 @@ namespace AutopilotMonitor.Agent.V2
                                 stateDirectory: stateSubdir,
                                 agentStartTimeUtc: agentStartTimeUtc,
                                 currentStateAccessor: () => orchestrator.CurrentState,
-                                packageStatesAccessor: () => componentFactory.ImePackageStates,
+                                // F5 (debrief 7dd4e593) — pass the deduped phase-snapshot+live
+                                // union so DeviceSetup apps cleared from _packageStates on the
+                                // AccountSetup transition still appear in the SummaryDialog and
+                                // app_tracking_summary event.
+                                packageStatesAccessor: () => componentFactory.AllKnownPackageStates,
                                 cleanupServiceFactory: () => new CleanupService(agentConfig, logger),
                                 uploadDiagnosticsAsync: uploadDiagnosticsAsync,
                                 signalShutdown: () => shutdown.Set(),

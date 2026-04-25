@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
@@ -12,15 +14,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
     /// Launches <c>AutopilotMonitor.SummaryDialog.exe</c> in the signed-in user's session
     /// with a freshly-written <c>final-status.json</c>. Plan §4.x M4.6.β.
     /// <para>
-    /// Sequence (Legacy parity):
+    /// Sequence (V1 parity, see legacy <c>EnrollmentCompletionHandler.LaunchEnrollmentSummaryDialog</c>):
     /// </para>
     /// <list type="number">
     ///   <item>Resolve the dialog exe next to the agent binary (<c>Assembly.Location</c>).</item>
     ///   <item>Write the final-status.json to the agent state directory.</item>
-    ///   <item>Copy exe + dependencies + final-status.json to a per-launch temp directory under
-    ///     <c>%ProgramData%\AutopilotMonitor-Summary\</c> (the dialog deletes itself via <c>--cleanup</c>).</item>
-    ///   <item>Grant the signed-in user delete permission on that temp directory so the dialog's
+    ///   <item>Wipe + recreate <c>%ProgramData%\AutopilotMonitor-Summary\</c> (single flat dir,
+    ///     V1 parity — no per-launch GUID subdirs that could leak across sessions).</item>
+    ///   <item>Grant the signed-in user delete permission on that dir so the dialog's
     ///     self-cleanup step works (runs as user).</item>
+    ///   <item>Copy exe + dependencies + final-status.json into the dir; the dialog deletes
+    ///     itself via <c>--cleanup</c> after the user closes it / the timeout fires.</item>
     ///   <item>Invoke <see cref="UserSessionProcessLauncher.LaunchInUserSession"/> with the right args.</item>
     /// </list>
     /// <para>
@@ -91,13 +95,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 return false;
             }
 
-            // 3) Copy to temp dir (dialog self-deletes via --cleanup).
+            // 3) Wipe + recreate %ProgramData%\AutopilotMonitor-Summary\ (V1 parity).
+            // The dialog runs in the signed-in user's session — Path.GetTempPath() resolves to
+            // C:\WINDOWS\SystemTemp\ when the agent runs as SYSTEM, where standard users have
+            // neither Read nor Execute access, causing the dialog to fail to start with the
+            // generic "This application could not be started" message. Single flat dir (no
+            // per-launch GUID subdirs) matches V1's behaviour: only one summary dialog per
+            // session, the previous run's leftovers (if --cleanup didn't fire) are wiped.
             string tempDir;
             string tempExe;
             try
             {
-                tempDir = Path.Combine(Path.GetTempPath(), SummaryTempRootEnvVar, Guid.NewGuid().ToString("N"));
+                tempDir = ResolveSummaryTempDir();
+                try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); }
+                catch (Exception ex) { logger.Debug($"SummaryDialogLauncher: pre-wipe of '{tempDir}' failed (continuing): {ex.Message}"); }
                 Directory.CreateDirectory(tempDir);
+
+                // Grant the signed-in user delete rights so the dialog's --cleanup self-removal
+                // succeeds (the dialog runs as user, the directory was created by SYSTEM).
+                GrantUserDeletePermission(tempDir, logger);
 
                 tempExe = Path.Combine(tempDir, DialogExeName);
                 File.Copy(dialogExe, tempExe, overwrite: true);
@@ -139,6 +155,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         {
             try { if (File.Exists(source)) File.Copy(source, destination, overwrite: true); }
             catch { /* best-effort — the dialog degrades gracefully on missing config/deps */ }
+        }
+
+        /// <summary>
+        /// Resolves the dialog temp directory: <c>%ProgramData%\AutopilotMonitor-Summary\</c>.
+        /// Standard users always have read+execute access under <c>%ProgramData%</c>, unlike
+        /// <c>C:\WINDOWS\SystemTemp\</c> which is the path <see cref="Path.GetTempPath"/> resolves
+        /// to when the agent runs as SYSTEM. V1-parity: single flat directory wiped on each
+        /// launch — at most one summary dialog runs per session.
+        /// </summary>
+        internal static string ResolveSummaryTempDir() =>
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                SummaryTempRootEnvVar);
+
+        /// <summary>
+        /// Grants the BUILTIN\Users group full control on the dialog temp directory so the
+        /// dialog (running in the user session) can delete itself via <c>--cleanup</c>. The
+        /// directory is created by SYSTEM with default ACLs that deny user-side delete.
+        /// Best-effort: failure logs at debug and continues — the dialog still launches; only
+        /// self-cleanup may not run.
+        /// </summary>
+        private static void GrantUserDeletePermission(string directoryPath, AgentLogger logger)
+        {
+            try
+            {
+                var dirInfo = new DirectoryInfo(directoryPath);
+                var security = dirInfo.GetAccessControl();
+                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                security.AddAccessRule(new FileSystemAccessRule(
+                    usersIdentity,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+                dirInfo.SetAccessControl(security);
+            }
+            catch (Exception ex)
+            {
+                logger.Debug($"SummaryDialogLauncher: could not set ACL on summary folder: {ex.Message}");
+            }
         }
     }
 }

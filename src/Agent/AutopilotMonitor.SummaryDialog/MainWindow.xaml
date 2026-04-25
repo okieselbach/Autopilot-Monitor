@@ -34,6 +34,11 @@
         <SolidColorBrush x:Key="CloseButtonHover" Color="#FEE2E2"/>
         <SolidColorBrush x:Key="PhaseHeaderText" Color="#374151"/>
         <SolidColorBrush x:Key="AppItemHover" Color="#F3F4F6"/>
+        <!-- Schema 2 — additional outcome states -->
+        <SolidColorBrush x:Key="InfoColor" Color="#2563EB"/>
+        <SolidColorBrush x:Key="InfoBackground" Color="#DBEAFE"/>
+        <SolidColorBrush x:Key="WarningColor" Color="#D97706"/>
+        <SolidColorBrush x:Key="WarningBackground" Color="#FEF3C7"/>
     </Window.Resources>
 
     <Grid Margin="16">
@@ -131,10 +136,17 @@
 
                     <TextBlock x:Name="OutcomeText" FontFamily="Segoe UI Semibold" FontSize="20"
                                Foreground="{DynamicResource PrimaryText}" HorizontalAlignment="Center"
-                               Text="Enrollment Completed"/>
+                               Text="Enrollment Completed" TextWrapping="Wrap" TextAlignment="Center"/>
                     <TextBlock x:Name="DurationText" FontFamily="Segoe UI" FontSize="13"
                                Foreground="{DynamicResource SecondaryText}" HorizontalAlignment="Center"
                                Margin="0,6,0,0" Text="Duration: --"/>
+                    <!-- Schema 2 — failure / status banner. Collapsed unless populated. -->
+                    <Border x:Name="StatusBanner" Visibility="Collapsed"
+                            CornerRadius="6" Padding="12,8" Margin="0,12,0,0"
+                            HorizontalAlignment="Stretch">
+                        <TextBlock x:Name="StatusBannerText" FontFamily="Segoe UI" FontSize="12"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                    </Border>
                 </StackPanel>
             </Border>
 

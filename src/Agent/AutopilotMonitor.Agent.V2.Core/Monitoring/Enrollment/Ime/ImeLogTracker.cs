@@ -58,9 +58,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         };
         private int _currentPhaseOrder = 0;
 
-        // Snapshots of package states from completed ESP phases (e.g. DeviceSetup apps before AccountSetup starts)
-        private readonly Dictionary<string, List<Dictionary<string, object>>> _phasePackageSnapshots =
-            new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.OrdinalIgnoreCase);
+        // Snapshots of AppPackageState lists from completed ESP phases (e.g. DeviceSetup apps
+        // before AccountSetup starts). Keyed by phase name ("DeviceSetup", "AccountSetup").
+        // Captured as live AppPackageState references just before _packageStates.Clear() on
+        // phase transition — those references survive the clear (List<T>.Clear only removes
+        // them from the source list) and remain readable for the termination summary path.
+        private readonly Dictionary<string, List<AppPackageState>> _phasePackageSnapshots =
+            new Dictionary<string, List<AppPackageState>>(StringComparer.OrdinalIgnoreCase);
 
         // Simulation mode
         public bool SimulationMode { get; set; }
@@ -135,10 +139,61 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         public AppPackageStateList PackageStates => _packageStates;
 
         /// <summary>
-        /// Snapshots of package states from completed ESP phases (keyed by phase name, e.g. "DeviceSetup").
-        /// Captured before package states are cleared on phase transition.
+        /// Snapshots of <see cref="AppPackageState"/> lists from completed ESP phases (keyed
+        /// by phase name, e.g. <c>"DeviceSetup"</c>). Captured immediately before package
+        /// states are cleared on phase transition.
         /// </summary>
-        public Dictionary<string, List<Dictionary<string, object>>> PhasePackageSnapshots => _phasePackageSnapshots;
+        public IReadOnlyDictionary<string, IReadOnlyList<AppPackageState>> PhasePackageSnapshots
+        {
+            get
+            {
+                var copy = new Dictionary<string, IReadOnlyList<AppPackageState>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in _phasePackageSnapshots)
+                    copy[kv.Key] = kv.Value;
+                return copy;
+            }
+        }
+
+        /// <summary>
+        /// Test-only seam: lets unit tests populate <c>_phasePackageSnapshots</c> without
+        /// driving a full ESP phase-transition via the regex patterns. Production code never
+        /// calls this — phase snapshots are captured from <see cref="HandleEspPhaseChanged"/>
+        /// at the real transition boundary.
+        /// </summary>
+        internal void SeedPhaseSnapshotForTesting(string phaseName, IReadOnlyCollection<AppPackageState> apps)
+        {
+            if (string.IsNullOrEmpty(phaseName)) throw new ArgumentNullException(nameof(phaseName));
+            if (apps == null) throw new ArgumentNullException(nameof(apps));
+            _phasePackageSnapshots[phaseName] = new List<AppPackageState>(apps);
+        }
+
+        /// <summary>
+        /// Returns a deduped union of phase-snapshotted apps plus the live
+        /// <see cref="PackageStates"/> (current phase). Live entries win on Id collision.
+        /// Used by the termination summary path so that DeviceSetup apps cleared from
+        /// <c>_packageStates</c> on the AccountSetup transition still appear in the
+        /// final-status JSON and the <c>app_tracking_summary</c> event (V1-parity for
+        /// per-phase app counts).
+        /// </summary>
+        public IReadOnlyList<AppPackageState> GetAllKnownPackageStates()
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<AppPackageState>();
+            foreach (var pkg in _packageStates)
+            {
+                if (pkg != null && pkg.Id != null && seen.Add(pkg.Id))
+                    result.Add(pkg);
+            }
+            foreach (var snapshot in _phasePackageSnapshots.Values)
+            {
+                foreach (var pkg in snapshot)
+                {
+                    if (pkg != null && pkg.Id != null && seen.Add(pkg.Id))
+                        result.Add(pkg);
+                }
+            }
+            return result;
+        }
 
         public ImeLogTracker(string logFolder, List<ImeLogPattern> patterns, AgentLogger logger, int pollingIntervalMs = 100, string matchLogPath = null, string stateDirectory = null)
         {

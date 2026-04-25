@@ -251,6 +251,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             var json = JsonConvert.SerializeObject(status);
 
             // Dialog-wire contract: all fields lower-camelCase (matches SummaryDialog's FinalStatus model).
+            Assert.Contains("\"schemaVersion\":2", json);
             Assert.Contains("\"timestamp\":", json);
             Assert.Contains("\"outcome\":", json);
             Assert.Contains("\"completionSource\":", json);
@@ -260,6 +261,159 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             Assert.Contains("\"signalsSeen\":", json);
             Assert.Contains("\"appSummary\":", json);
             Assert.Contains("\"packageStatesByPhase\":", json);
+        }
+
+        // ============================================================ Schema 2 fields
+
+        [Fact]
+        public void Build_emits_schema_version_two()
+        {
+            // Sentinel that lets the dialog branch into the V2 renderer. Locked at 2 until
+            // a deliberate schema bump.
+            var status = FinalStatusBuilder.Build(StateWith(SessionStage.Completed),
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+            Assert.Equal(2, status.SchemaVersion);
+        }
+
+        [Theory]
+        [InlineData(SessionStage.Completed, EnrollmentTerminationOutcome.Succeeded, "succeeded")]
+        [InlineData(SessionStage.Failed, EnrollmentTerminationOutcome.Failed, "failed")]
+        [InlineData(SessionStage.WhiteGloveSealed, EnrollmentTerminationOutcome.Succeeded, "whiteglove_part1")]
+        [InlineData(SessionStage.WhiteGloveCompletedPart2, EnrollmentTerminationOutcome.Succeeded, "whiteglove_part2")]
+        public void Build_outcome_carries_v2_granularity(SessionStage stage, EnrollmentTerminationOutcome outcome, string expected)
+        {
+            // Schema 2 keeps the V2-enum granularity in the wire format. The dialog reads
+            // schemaVersion to know it can interpret these new strings.
+            var status = FinalStatusBuilder.Build(StateWith(stage),
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, outcome, stage),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+            Assert.Equal(expected, status.Outcome);
+        }
+
+        [Fact]
+        public void Build_failure_reason_uses_terminated_details_first()
+        {
+            // When the orchestrator supplies a specific Details message we use it verbatim —
+            // it's the most actionable string available to the user.
+            var args = new EnrollmentTerminatedEventArgs(
+                EnrollmentTerminationReason.DecisionTerminalStage,
+                EnrollmentTerminationOutcome.Failed,
+                SessionStage.Failed.ToString(),
+                EndUtc,
+                details: "ESP failed: 0x800705B4 (provisioning timeout).");
+
+            var status = FinalStatusBuilder.Build(StateWith(SessionStage.Failed), args,
+                packageStates: null, agentStartTimeUtc: StartUtc);
+
+            Assert.Equal("ESP failed: 0x800705B4 (provisioning timeout).", status.FailureReason);
+        }
+
+        [Fact]
+        public void Build_failure_reason_for_max_lifetime_timeout()
+        {
+            var args = Args(EnrollmentTerminationReason.MaxLifetimeExceeded,
+                            EnrollmentTerminationOutcome.TimedOut, SessionStage.EspDeviceSetup);
+
+            var status = FinalStatusBuilder.Build(StateWith(SessionStage.EspDeviceSetup), args,
+                packageStates: null, agentStartTimeUtc: StartUtc);
+
+            Assert.NotNull(status.FailureReason);
+            Assert.Contains("maximum", status.FailureReason!, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Build_failure_reason_picks_up_hello_timeout_when_no_details()
+        {
+            // When Details are absent and the only failure indicator we can derive is the
+            // Hello outcome, surface that — most user-actionable hint we have.
+            var state = StateWith(SessionStage.Failed, helloOutcome: "timeout");
+            var status = FinalStatusBuilder.Build(state,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+
+            Assert.NotNull(status.FailureReason);
+            Assert.Contains("Hello", status.FailureReason!, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Build_failure_reason_null_for_success()
+        {
+            // Healthy outcome → no banner, no failureReason in JSON (NullValueHandling.Ignore).
+            var status = FinalStatusBuilder.Build(StateWith(SessionStage.Completed),
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+            Assert.Null(status.FailureReason);
+        }
+
+        [Fact]
+        public void Build_per_app_error_fields_only_set_on_failed_apps()
+        {
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            var list = new AppPackageStateList(logger);
+
+            var failed = new AppPackageState("acme-vpn", 0);
+            failed.UpdateState(AppInstallationState.Installing);
+            failed.SetErrorContext("IME-MSI-1603", "MSI exited with 1603 — install path locked.", "1603");
+            failed.UpdateState(AppInstallationState.Error);
+            TestHelpers.SetTargeted(failed, AppTargeted.Device);
+            list.Add(failed);
+
+            var ok = new AppPackageState("happy-app", 1);
+            ok.UpdateState(AppInstallationState.Installing);
+            ok.UpdateState(AppInstallationState.Installed);
+            TestHelpers.SetTargeted(ok, AppTargeted.Device);
+            list.Add(ok);
+
+            var status = FinalStatusBuilder.Build(StateWith(SessionStage.Failed),
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed),
+                packageStates: list, agentStartTimeUtc: StartUtc);
+
+            var failedInfo = status.PackageStatesByPhase["Device"].Single(p => p.AppName == "acme-vpn");
+            Assert.Equal("IME-MSI-1603", failedInfo.ErrorPatternId);
+            Assert.Equal("MSI exited with 1603 — install path locked.", failedInfo.ErrorDetail);
+            Assert.Equal("1603", failedInfo.ErrorCode);
+
+            var okInfo = status.PackageStatesByPhase["Device"].Single(p => p.AppName == "happy-app");
+            Assert.Null(okInfo.ErrorPatternId);
+            Assert.Null(okInfo.ErrorDetail);
+            Assert.Null(okInfo.ErrorCode);
+        }
+
+        [Fact]
+        public void Build_signal_timestamps_carry_iso8601_when_observed()
+        {
+            // V1 wrote signalTimestamps; V2 lost it; schema 2 reinstates it for diagnostics.
+            // Field engineers reading final-status.json post-mortem rely on these timestamps
+            // to reconstruct the session timeline.
+            var initial = DecisionState.CreateInitial("S1", "T1");
+            var stamped = new DecisionStateBuilder(initial)
+            {
+                Stage = SessionStage.Completed,
+                EspFinalExitUtc = new SignalFact<DateTime>(StartUtc.AddMinutes(5), sourceSignalOrdinal: 1),
+                DesktopArrivedUtc = new SignalFact<DateTime>(StartUtc.AddMinutes(7), sourceSignalOrdinal: 2),
+            }.Build();
+
+            var status = FinalStatusBuilder.Build(stamped,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+
+            Assert.NotNull(status.SignalTimestamps);
+            Assert.Equal(StartUtc.AddMinutes(5).ToString("o"), status.SignalTimestamps!["espFinalExit"]);
+            Assert.Equal(StartUtc.AddMinutes(7).ToString("o"), status.SignalTimestamps["desktopArrived"]);
+        }
+
+        [Fact]
+        public void Build_signal_timestamps_null_when_no_signal_observed()
+        {
+            // No observed signals → null map → JSON omits the field entirely
+            // (NullValueHandling.Ignore on the property).
+            var status = FinalStatusBuilder.Build(StateWith(SessionStage.Failed),
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+
+            Assert.Null(status.SignalTimestamps);
         }
     }
 

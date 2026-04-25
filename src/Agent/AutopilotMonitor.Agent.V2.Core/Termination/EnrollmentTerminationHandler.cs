@@ -56,7 +56,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly string _stateDirectory;
         private readonly DateTime _agentStartTimeUtc;
         private readonly Func<DecisionState> _currentStateAccessor;
-        private readonly Func<AppPackageStateList> _packageStatesAccessor;
+        // F5 (debrief 7dd4e593) — accept any IReadOnlyList<AppPackageState> so the
+        // termination summary can iterate the union of phase-snapshotted apps + live
+        // _packageStates (V2's clear-on-phase-transition would otherwise drop the
+        // DeviceSetup apps from app_tracking_summary and the SummaryDialog).
+        private readonly Func<IReadOnlyList<AppPackageState>> _packageStatesAccessor;
         private readonly Func<IReadOnlyDictionary<string, AppInstallTiming>> _appTimingsAccessor;
         private readonly Func<CleanupService> _cleanupServiceFactory;
         private readonly Func<bool, string, Task<DiagnosticsUploadResult>> _uploadDiagnosticsAsync;
@@ -77,7 +81,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             string stateDirectory,
             DateTime agentStartTimeUtc,
             Func<DecisionState> currentStateAccessor,
-            Func<AppPackageStateList> packageStatesAccessor,
+            Func<IReadOnlyList<AppPackageState>> packageStatesAccessor,
             Func<CleanupService> cleanupServiceFactory,
             Func<bool, string, Task<DiagnosticsUploadResult>> uploadDiagnosticsAsync,
             Action signalShutdown,
@@ -202,7 +206,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             }
         }
 
-        private AppPackageStateList TryGetPackageStates()
+        private IReadOnlyList<AppPackageState> TryGetPackageStates()
         {
             try { return _packageStatesAccessor(); }
             catch (Exception ex)

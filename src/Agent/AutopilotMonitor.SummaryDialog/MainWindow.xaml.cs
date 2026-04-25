@@ -49,12 +49,25 @@ namespace AutopilotMonitor.SummaryDialog
 
                 LoadStatusData();
 
-                var isSuccess = _status == null ||
-                    string.Equals(_status.Outcome, "completed", StringComparison.OrdinalIgnoreCase);
-                ApplyTaskbarIcon(isSuccess);
+                // Schema-version dispatch: V2 renderer is enabled when the agent emitted
+                // schemaVersion >= 2. V1 agents (no schemaVersion field) deserialise to 0
+                // and we keep the legacy rendering for backward compat. When V1 is
+                // retired, the V1 branch can be deleted in one cut.
+                var outcomeKind = OutcomeMapper.Map(_status);
+                ApplyTaskbarIcon(outcomeKind == OutcomeKind.Success
+                                 || outcomeKind == OutcomeKind.PreProvisioningComplete);
 
-                RenderOutcome();
-                RenderAppList();
+                if (OutcomeMapper.IsV2Schema(_status))
+                {
+                    RenderOutcomeV2(outcomeKind);
+                    RenderAppListV2();
+                }
+                else
+                {
+                    RenderOutcome();
+                    RenderAppList();
+                }
+
                 StartCountdown();
 
                 // Load branding image (async, best-effort)
@@ -130,6 +143,110 @@ namespace AutopilotMonitor.SummaryDialog
                 DurationText.Text = $"Duration: {duration.Seconds} sec";
         }
 
+        /// <summary>
+        /// Schema 2 — six-state outcome rendering plus failure banner. Reuses the existing
+        /// SuccessIcon / FailureIcon canvases and recolours them at runtime so we don't
+        /// have to declare four separate XAML icon shapes.
+        /// </summary>
+        private void RenderOutcomeV2(OutcomeKind kind)
+        {
+            if (_status == null)
+            {
+                OutcomeText.Text = "Enrollment Status Unknown";
+                DurationText.Text = "Details unavailable";
+                FailureIcon.Visibility = Visibility.Visible;
+                return;
+            }
+
+            OutcomeText.Text = OutcomeMapper.HeaderText(kind);
+
+            // Pick icon shape (check vs X), then recolour for the specific kind.
+            switch (kind)
+            {
+                case OutcomeKind.Success:
+                    SuccessIcon.Visibility = Visibility.Visible;
+                    FailureIcon.Visibility = Visibility.Collapsed;
+                    break;
+                case OutcomeKind.PreProvisioningComplete:
+                    SuccessIcon.Visibility = Visibility.Visible;
+                    FailureIcon.Visibility = Visibility.Collapsed;
+                    RecolourIcon(SuccessIcon, (Brush)FindResource("InfoBackground"), (Brush)FindResource("InfoColor"));
+                    OutcomeText.Foreground = (Brush)FindResource("InfoColor");
+                    break;
+                case OutcomeKind.TimedOut:
+                case OutcomeKind.Unknown:
+                    SuccessIcon.Visibility = Visibility.Collapsed;
+                    FailureIcon.Visibility = Visibility.Visible;
+                    RecolourIcon(FailureIcon, (Brush)FindResource("WarningBackground"), (Brush)FindResource("WarningColor"));
+                    OutcomeText.Foreground = (Brush)FindResource("WarningColor");
+                    break;
+                case OutcomeKind.Failure:
+                default:
+                    SuccessIcon.Visibility = Visibility.Collapsed;
+                    FailureIcon.Visibility = Visibility.Visible;
+                    OutcomeText.Foreground = (Brush)FindResource("ErrorColor");
+                    break;
+            }
+
+            // Failure / info banner — the agent-supplied reason wins, otherwise fall back
+            // to a generic per-state message. Skip entirely for clean Success.
+            var bannerText = !string.IsNullOrWhiteSpace(_status.FailureReason)
+                ? _status.FailureReason
+                : OutcomeMapper.DefaultBannerText(kind);
+            if (!string.IsNullOrEmpty(bannerText))
+            {
+                StatusBannerText.Text = bannerText;
+                StatusBanner.Visibility = Visibility.Visible;
+                switch (kind)
+                {
+                    case OutcomeKind.PreProvisioningComplete:
+                        StatusBanner.Background = (Brush)FindResource("InfoBackground");
+                        StatusBannerText.Foreground = (Brush)FindResource("InfoColor");
+                        break;
+                    case OutcomeKind.TimedOut:
+                    case OutcomeKind.Unknown:
+                        StatusBanner.Background = (Brush)FindResource("WarningBackground");
+                        StatusBannerText.Foreground = (Brush)FindResource("WarningColor");
+                        break;
+                    case OutcomeKind.Failure:
+                    default:
+                        StatusBanner.Background = (Brush)FindResource("ErrorBackground");
+                        StatusBannerText.Foreground = (Brush)FindResource("ErrorColor");
+                        break;
+                }
+            }
+
+            // Format duration (same for all V2 outcome kinds).
+            var duration = TimeSpan.FromSeconds(_status.AgentUptimeSeconds);
+            if (duration.TotalHours >= 1)
+                DurationText.Text = $"Duration: {(int)duration.TotalHours}h {duration.Minutes}m {duration.Seconds}s";
+            else if (duration.TotalMinutes >= 1)
+                DurationText.Text = $"Duration: {(int)duration.TotalMinutes} min {duration.Seconds} sec";
+            else
+                DurationText.Text = $"Duration: {duration.Seconds} sec";
+        }
+
+        /// <summary>
+        /// Walks the SuccessIcon / FailureIcon canvas and replaces its two-tone fill +
+        /// stroke with the given pair, so a single XAML icon shape can carry four
+        /// outcome variants without duplicating the Path geometry.
+        /// </summary>
+        private static void RecolourIcon(Canvas icon, Brush background, Brush foreground)
+        {
+            foreach (var child in icon.Children)
+            {
+                if (child is System.Windows.Shapes.Ellipse el)
+                {
+                    if (el.Fill != null) el.Fill = background;
+                    if (el.Stroke != null) el.Stroke = foreground;
+                }
+                else if (child is System.Windows.Shapes.Path p)
+                {
+                    p.Stroke = foreground;
+                }
+            }
+        }
+
         private void RenderAppList()
         {
             if (_status?.AppSummary == null || _status.AppSummary.TotalApps == 0)
@@ -192,6 +309,213 @@ namespace AutopilotMonitor.SummaryDialog
                     AddPhaseSection(phase.Key, phase.Value);
                 }
             }
+        }
+
+        /// <summary>
+        /// Schema 2 — same overall layout as <see cref="RenderAppList"/> but pushes failed
+        /// apps to the top of each phase (so the user sees what's broken first) and uses
+        /// <see cref="CreateAppItemV2"/> which shows per-app duration and error detail.
+        /// </summary>
+        private void RenderAppListV2()
+        {
+            if (_status?.AppSummary == null || _status.AppSummary.TotalApps == 0)
+            {
+                NoAppsText.Visibility = Visibility.Visible;
+                AppSummaryText.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            var summary = _status.AppSummary;
+
+            var skippedCount = _status.PackageStatesByPhase != null
+                ? _status.PackageStatesByPhase.Values.SelectMany(p => p)
+                    .Count(a => string.Equals(a.State, "Skipped", StringComparison.OrdinalIgnoreCase))
+                : 0;
+
+            var visibleTotal = summary.TotalApps - skippedCount;
+            var visibleCompleted = summary.CompletedApps - skippedCount;
+            if (visibleTotal < 0) visibleTotal = 0;
+            if (visibleCompleted < 0) visibleCompleted = 0;
+
+            if (visibleTotal == 0)
+            {
+                NoAppsText.Visibility = Visibility.Visible;
+                AppSummaryText.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                var parentGrid = (Grid)ProgressBarSuccess.Parent;
+                var totalWidth = parentGrid.ActualWidth;
+                if (totalWidth > 0 && visibleTotal > 0)
+                {
+                    ProgressBarSuccess.Width = (double)visibleCompleted / visibleTotal * totalWidth;
+                    if (summary.ErrorCount > 0)
+                        ProgressBarSuccess.Background = (Brush)FindResource("ProgressError");
+                }
+            }));
+
+            if (summary.ErrorCount > 0)
+            {
+                AppSummaryText.Text = $"{visibleCompleted} of {visibleTotal} apps installed, {summary.ErrorCount} failed";
+                AppSummaryText.Foreground = (Brush)FindResource("ErrorColor");
+            }
+            else
+            {
+                AppSummaryText.Text = $"{visibleCompleted} of {visibleTotal} apps installed";
+            }
+
+            if (_status.PackageStatesByPhase != null)
+            {
+                foreach (var phase in _status.PackageStatesByPhase)
+                {
+                    AddPhaseSectionV2(phase.Key, phase.Value);
+                }
+            }
+        }
+
+        private void AddPhaseSectionV2(string phaseName, List<PackageInfo> apps)
+        {
+            if (apps == null || apps.Count == 0) return;
+
+            // Errors first, then completed, then anything else — gives the user actionable
+            // information at a glance instead of buried inside a long list.
+            var visibleApps = apps
+                .Where(a => !string.Equals(a.State, "Skipped", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(a => a.IsError)
+                .ThenBy(a => a.AppName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (visibleApps.Count == 0) return;
+
+            var header = new TextBlock
+            {
+                Text = $"{FormatPhaseName(phaseName)} ({visibleApps.Count})",
+                FontFamily = new FontFamily("Segoe UI Semibold"),
+                FontSize = 12,
+                Foreground = (Brush)FindResource("PhaseHeaderText"),
+                Margin = new Thickness(0, 8, 0, 6),
+                TextWrapping = TextWrapping.Wrap
+            };
+            AppListPanel.Children.Add(header);
+
+            foreach (var app in visibleApps)
+            {
+                AppListPanel.Children.Add(CreateAppItemV2(app));
+            }
+        }
+
+        /// <summary>
+        /// Schema 2 — app row layout:
+        /// <para>
+        /// <c>[icon] [name + optional error detail]              [duration / "Error"]</c>
+        /// </para>
+        /// Failed apps additionally render the agent-supplied <see cref="PackageInfo.ErrorDetail"/>
+        /// (or <see cref="PackageInfo.ErrorCode"/> as fallback) on a second line under the
+        /// app name, so the user sees the "why" without opening logs.
+        /// </summary>
+        private Border CreateAppItemV2(PackageInfo app)
+        {
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var iconText = new TextBlock
+            {
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontSize = 14,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            if (app.IsError)
+            {
+                iconText.Text = "";
+                iconText.Foreground = (Brush)FindResource("ErrorColor");
+            }
+            else if (app.IsCompleted)
+            {
+                iconText.Text = "";
+                iconText.Foreground = (Brush)FindResource("SuccessColor");
+            }
+            else
+            {
+                iconText.Text = "";
+                iconText.Foreground = (Brush)FindResource("SecondaryText");
+            }
+            Grid.SetColumn(iconText, 0);
+            grid.Children.Add(iconText);
+
+            // Name + (when present) per-app error detail under it.
+            var nameStack = new StackPanel { Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            nameStack.Children.Add(new TextBlock
+            {
+                Text = app.AppName ?? "Unknown App",
+                FontFamily = new FontFamily("Segoe UI"),
+                FontSize = 13,
+                Foreground = (Brush)FindResource("PrimaryText"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            if (app.IsError)
+            {
+                var detail = !string.IsNullOrWhiteSpace(app.ErrorDetail)
+                    ? app.ErrorDetail
+                    : (!string.IsNullOrWhiteSpace(app.ErrorCode) ? $"Error code: {app.ErrorCode}" : null);
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    nameStack.Children.Add(new TextBlock
+                    {
+                        Text = detail,
+                        FontFamily = new FontFamily("Segoe UI"),
+                        FontSize = 11,
+                        Foreground = (Brush)FindResource("SecondaryText"),
+                        TextWrapping = TextWrapping.Wrap,
+                        Margin = new Thickness(0, 2, 0, 0),
+                    });
+                }
+            }
+            Grid.SetColumn(nameStack, 1);
+            grid.Children.Add(nameStack);
+
+            // Right column: "Error" label OR duration. Error wins for failed apps so the
+            // user sees the most actionable label; duration is shown otherwise.
+            string rightText = null;
+            Brush rightBrush = (Brush)FindResource("SecondaryText");
+            if (app.IsError)
+            {
+                rightText = "Error";
+                rightBrush = (Brush)FindResource("ErrorColor");
+            }
+            else if (app.DurationSeconds.HasValue && app.DurationSeconds.Value > 0)
+            {
+                rightText = OutcomeMapper.FormatDuration(app.DurationSeconds.Value);
+            }
+
+            if (!string.IsNullOrEmpty(rightText))
+            {
+                var rightLabel = new TextBlock
+                {
+                    Text = rightText,
+                    FontFamily = new FontFamily("Segoe UI"),
+                    FontSize = 12,
+                    Foreground = rightBrush,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(rightLabel, 2);
+                grid.Children.Add(rightLabel);
+            }
+
+            var border = new Border
+            {
+                Child = grid,
+                Padding = new Thickness(6, 6, 8, 6),
+                CornerRadius = new CornerRadius(4),
+                Margin = new Thickness(0, 1, 0, 1),
+                Background = Brushes.Transparent
+            };
+            border.MouseEnter += (s, e) => border.Background = (Brush)FindResource("AppItemHover");
+            border.MouseLeave += (s, e) => border.Background = Brushes.Transparent;
+            return border;
         }
 
         private void AddPhaseSection(string phaseName, List<PackageInfo> apps)

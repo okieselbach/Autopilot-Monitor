@@ -1003,10 +1003,22 @@ namespace AutopilotMonitor.Functions.Services
 
                     update["Status"] = status.ToString();
 
-                    // Update current phase if provided
+                    // Update current phase if provided.
                     if (currentPhase.HasValue)
                     {
                         update["CurrentPhase"] = (int)currentPhase.Value;
+                    }
+
+                    // Materialize the terminal phase regardless of the phase carried by the
+                    // triggering event. The V2 DecisionEngine emits enrollment_complete with
+                    // Phase=Unknown (feedback_phase_strategy forbids non-phase events from
+                    // declaring a phase), which would otherwise leave CurrentPhase at -1
+                    // (or its previous in-flight value) on succeeded sessions and break the
+                    // Web UI PhaseTimeline. Backend is the right place to materialize the
+                    // "terminal => Complete" invariant.
+                    if (status == SessionStatus.Succeeded)
+                    {
+                        update["CurrentPhase"] = (int)EnrollmentPhase.Complete;
                     }
 
                     // Align StartedAt with the earliest event timestamp provided by the caller

@@ -74,6 +74,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         public Monitoring.Enrollment.Ime.AppPackageStateList? ImePackageStates => _imeLogHost?.PackageStates;
 
         /// <summary>
+        /// F5 (debrief 7dd4e593) — deduped union of phase-snapshotted apps + the live
+        /// <see cref="ImePackageStates"/>. Use this from the termination summary path so
+        /// DeviceSetup apps cleared from <c>_packageStates</c> on the AccountSetup transition
+        /// still reach the SummaryDialog and <c>app_tracking_summary</c> event. Returns
+        /// <c>null</c> before <see cref="CreateCollectorHosts"/> has been called.
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyList<Monitoring.Enrollment.Ime.AppPackageState>? AllKnownPackageStates =>
+            _imeLogHost?.AllKnownPackageStates;
+
+        /// <summary>
         /// Plan §5 Fix 4c — per-app install-lifecycle timings (StartedAt / CompletedAt /
         /// DurationSeconds) captured by <c>ImeLogTrackerAdapter</c>. Returns <c>null</c> before
         /// <see cref="CreateCollectorHosts"/> has been called (Orchestrator start order).
@@ -508,6 +518,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             /// (M4.6.β <c>FinalStatusBuilder</c>, M4.6.γ <c>DeliveryOptimizationHost</c>).
             /// </summary>
             public Monitoring.Enrollment.Ime.AppPackageStateList PackageStates => _tracker.PackageStates;
+
+            /// <summary>
+            /// F5 (debrief 7dd4e593) — deduped union of phase-snapshotted apps (e.g. the
+            /// DeviceSetup apps captured before <c>_packageStates.Clear()</c> at the
+            /// AccountSetup transition) plus the live <see cref="PackageStates"/>.
+            /// </summary>
+            public System.Collections.Generic.IReadOnlyList<Monitoring.Enrollment.Ime.AppPackageState> AllKnownPackageStates =>
+                _tracker.GetAllKnownPackageStates();
 
             /// <summary>
             /// Plan §5 Fix 4c — per-app install-lifecycle timings captured by the adapter,

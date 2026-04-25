@@ -27,7 +27,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         public static FinalStatus Build(
             DecisionState state,
             EnrollmentTerminatedEventArgs terminated,
-            AppPackageStateList? packageStates,
+            IReadOnlyList<AppPackageState>? packageStates,
             DateTime agentStartTimeUtc,
             IReadOnlyDictionary<string, AppInstallTiming>? appTimings = null)
         {
@@ -39,6 +39,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
             var status = new FinalStatus
             {
+                SchemaVersion = 2,
                 Timestamp = terminated.TerminatedAtUtc.ToString("O"),
                 Outcome = MapOutcome(terminated.Outcome, state.Stage),
                 CompletionSource = terminated.Reason.ToString(),
@@ -46,11 +47,76 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 EnrollmentType = DescribeEnrollmentType(state.ScenarioProfile),
                 AgentUptimeSeconds = uptimeSeconds,
                 SignalsSeen = BuildSignalsSeen(state),
+                FailureReason = BuildFailureReason(terminated, state),
+                SignalTimestamps = BuildSignalTimestamps(state),
                 AppSummary = BuildAppSummary(packageStates),
                 PackageStatesByPhase = BuildPackageStatesByPhase(packageStates, timings),
             };
 
             return status;
+        }
+
+        /// <summary>
+        /// Schema 2 — derives a human-readable explanation rendered as the dialog's failure
+        /// banner. Returns <c>null</c> for successful terminal outcomes (succeeded /
+        /// whiteglove_part1 / whiteglove_part2) so the dialog skips the banner.
+        /// <para>
+        /// Source priority:
+        /// </para>
+        /// <list type="number">
+        ///   <item><see cref="EnrollmentTerminatedEventArgs.Details"/> — if the orchestrator
+        ///     supplied a specific message (e.g. ESP failure code from the failure event).</item>
+        ///   <item><see cref="EnrollmentTerminationReason.MaxLifetimeExceeded"/> — generic timeout.</item>
+        ///   <item>Hello outcome (<c>"timeout"</c> / <c>"failed"</c>) — the most user-facing of
+        ///     the terminal failure modes when ESP itself didn't pre-empt with a code.</item>
+        ///   <item>Generic fallback for terminal failures — preserves the dialog's failure
+        ///     rendering even when no specific cause is identifiable.</item>
+        /// </list>
+        /// </summary>
+        private static string? BuildFailureReason(EnrollmentTerminatedEventArgs terminated, DecisionState state)
+        {
+            // Successful outcomes — no banner.
+            if (terminated.Outcome == EnrollmentTerminationOutcome.Succeeded) return null;
+
+            if (!string.IsNullOrEmpty(terminated.Details)) return terminated.Details;
+
+            if (terminated.Reason == EnrollmentTerminationReason.MaxLifetimeExceeded)
+            {
+                return "Enrollment exceeded the maximum allowed runtime and was stopped before reaching a terminal stage.";
+            }
+
+            var hello = state.HelloOutcome?.Value;
+            if (string.Equals(hello, "timeout", StringComparison.OrdinalIgnoreCase))
+                return "Windows Hello provisioning timed out.";
+            if (string.Equals(hello, "failed", StringComparison.OrdinalIgnoreCase))
+                return "Windows Hello provisioning failed.";
+
+            return "Enrollment did not complete successfully. Check the diagnostics bundle for details.";
+        }
+
+        /// <summary>
+        /// Schema 2 — milestone signal timestamps (ISO-8601). Mirrors what the V1 agent wrote
+        /// to <c>signalTimestamps</c>; V2 lost this in the rewrite. The dialog does not render
+        /// it, but field engineers reading <c>final-status.json</c> post-mortem rely on it.
+        /// </summary>
+        private static Dictionary<string, string>? BuildSignalTimestamps(DecisionState state)
+        {
+            var ts = new Dictionary<string, string>(StringComparer.Ordinal);
+            void Add(string key, SignalFact<DateTime>? fact)
+            {
+                if (fact != null) ts[key] = fact.Value.ToString("o");
+            }
+
+            Add("espFinalExit", state.EspFinalExitUtc);
+            Add("helloResolved", state.HelloResolvedUtc);
+            Add("desktopArrived", state.DesktopArrivedUtc);
+            Add("systemReboot", state.SystemRebootUtc);
+            Add("part2UserAadSignIn", state.UserAadSignInCompleteUtc);
+            Add("part2HelloResolved", state.HelloResolvedPart2Utc);
+            Add("part2DesktopArrived", state.DesktopArrivedPart2Utc);
+            Add("part2AccountSetupCompleted", state.AccountSetupCompletedPart2Utc);
+
+            return ts.Count == 0 ? null : ts;
         }
 
         private static string MapOutcome(EnrollmentTerminationOutcome outcome, SessionStage stage)
@@ -87,7 +153,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             return signals;
         }
 
-        private static FinalStatusAppSummary BuildAppSummary(AppPackageStateList? packageStates)
+        private static FinalStatusAppSummary BuildAppSummary(IReadOnlyList<AppPackageState>? packageStates)
         {
             var summary = new FinalStatusAppSummary();
             if (packageStates == null || packageStates.Count == 0) return summary;
@@ -112,7 +178,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         }
 
         private static Dictionary<string, List<FinalStatusPackageInfo>> BuildPackageStatesByPhase(
-            AppPackageStateList? packageStates,
+            IReadOnlyList<AppPackageState>? packageStates,
             IReadOnlyDictionary<string, AppInstallTiming> timings)
         {
             var result = new Dictionary<string, List<FinalStatusPackageInfo>>();
@@ -129,16 +195,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
                 timings.TryGetValue(pkg.Id, out var timing);
 
+                var isError = pkg.InstallationState == AppInstallationState.Error;
                 bucket.Add(new FinalStatusPackageInfo
                 {
                     AppName = string.IsNullOrEmpty(pkg.Name) ? pkg.Id : pkg.Name,
                     State = pkg.InstallationState.ToString(),
-                    IsError = pkg.InstallationState == AppInstallationState.Error,
+                    IsError = isError,
                     IsCompleted = IsCompleted(pkg.InstallationState),
                     Targeted = pkg.Targeted.ToString(),
                     StartedAt = timing?.StartedAtUtc?.ToString("o"),
                     CompletedAt = timing?.CompletedAtUtc?.ToString("o"),
                     DurationSeconds = timing?.DurationSeconds,
+                    // Schema 2 — surface per-app error detail only when the app actually
+                    // failed; healthy entries stay clean (NullValueHandling.Ignore).
+                    ErrorPatternId = isError ? NullIfEmpty(pkg.ErrorPatternId) : null,
+                    ErrorDetail = isError ? NullIfEmpty(pkg.ErrorDetail) : null,
+                    ErrorCode = isError ? NullIfEmpty(pkg.ErrorCode) : null,
                 });
             }
 
@@ -150,6 +222,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             || s == AppInstallationState.Skipped
             || s == AppInstallationState.Postponed
             || s == AppInstallationState.Error;
+
+        private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
 
         /// <summary>
         /// Codex follow-up #5 — the final-status summary exposed the legacy

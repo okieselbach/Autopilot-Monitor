@@ -14,6 +14,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
     /// </summary>
     public sealed class FinalStatus
     {
+        /// <summary>
+        /// V2 wire-format version. The dialog branches on this: a missing or <c>1</c> value
+        /// triggers the V1 backward-compat render path (legacy "completed"/"failed" outcome
+        /// strings, no failure banner, no per-app duration / error detail). V2 emits
+        /// <c>2</c> and the dialog uses the richer renderer.
+        /// </summary>
+        [JsonProperty("schemaVersion")]
+        public int SchemaVersion { get; set; } = 2;
+
         [JsonProperty("timestamp")]
         public string Timestamp { get; set; }
 
@@ -34,6 +43,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
         [JsonProperty("signalsSeen")]
         public List<string> SignalsSeen { get; set; } = new List<string>();
+
+        /// <summary>
+        /// V2 schema 2 — human-readable explanation rendered as a banner under the outcome
+        /// header. Set only for non-success outcomes (failed / timed_out). Examples:
+        /// "ESP failed: 0x800705B4 (provisioning timeout)", "Enrollment exceeded the 6-hour
+        /// time limit", "Windows Hello provisioning timed out".
+        /// </summary>
+        [JsonProperty("failureReason", NullValueHandling = NullValueHandling.Ignore)]
+        public string FailureReason { get; set; }
+
+        /// <summary>
+        /// V2 schema 2 — when each milestone signal was observed (ISO-8601). V1 wrote this
+        /// too; V2 reinstates it for parity. Used by field engineers reading the JSON
+        /// post-mortem; the dialog itself does not render it.
+        /// </summary>
+        [JsonProperty("signalTimestamps", NullValueHandling = NullValueHandling.Ignore)]
+        public Dictionary<string, string> SignalTimestamps { get; set; }
 
         [JsonProperty("appSummary")]
         public FinalStatusAppSummary AppSummary { get; set; } = new FinalStatusAppSummary();
@@ -92,5 +118,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
         [JsonProperty("durationSeconds", NullValueHandling = NullValueHandling.Ignore)]
         public double? DurationSeconds { get; set; }
+
+        // Schema 2 — per-app failure detail. Populated only for apps with
+        // InstallationState=Error so the V2 dialog can render the "why" beneath the app row.
+        [JsonProperty("errorPatternId", NullValueHandling = NullValueHandling.Ignore)]
+        public string ErrorPatternId { get; set; }
+
+        [JsonProperty("errorDetail", NullValueHandling = NullValueHandling.Ignore)]
+        public string ErrorDetail { get; set; }
+
+        [JsonProperty("errorCode", NullValueHandling = NullValueHandling.Ignore)]
+        public string ErrorCode { get; set; }
     }
 }
