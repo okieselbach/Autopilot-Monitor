@@ -85,6 +85,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         public AppInstallationState InstallationState { get; private set; } = AppInstallationState.Unknown;
         public long InstallationStateLastChangedTicks { get; private set; } = 0;
         public bool DownloadingOrInstallingSeen { get; private set; } = false;
+        // PR5: surface the inverse-detection auto-downgrade (Installed -> Skipped without prior
+        // download/install seen) so the adapter / UI can explain WHY an app appears as Skipped.
+        // Set once when the auto-downgrade fires. Read-only outside of UpdateState.
+        public bool WasAutoDowngradedToSkipped { get; private set; }
         public int? ProgressPercent { get; private set; } = null;
         public long BytesDownloaded { get; private set; } = 0;
         public long BytesTotal { get; private set; } = 0;
@@ -378,9 +382,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
 
             // If "Installed" without ever seeing download/install -> auto-downgrade to Skipped
             // This handles apps with "inverse" detection rules (e.g., uninstall packages marked as
-            // installed when old software is NOT detected)
+            // installed when old software is NOT detected). PR5: also flag the auto-downgrade so
+            // the caller can log "App X reclassified Installed -> Skipped (inverse detection)".
             if (newState == AppInstallationState.Installed && !DownloadingOrInstallingSeen)
+            {
                 newState = AppInstallationState.Skipped;
+                WasAutoDowngradedToSkipped = true;
+            }
 
             // Compute the effective progress percent that will be applied
             var effectiveProgressPercent = (newState == AppInstallationState.Installed && newProgressPercent == null) ? 100 : newProgressPercent;

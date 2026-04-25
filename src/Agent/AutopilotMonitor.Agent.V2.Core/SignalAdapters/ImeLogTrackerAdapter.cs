@@ -393,8 +393,11 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             // a forensic reader needs (oldState->newState, terminal flag, sub-phase emit) to
             // reconstruct why the UI shows what it shows.
             var shortId = (app.Id != null && app.Id.Length >= 8) ? app.Id.Substring(0, 8) : (app.Id ?? "?");
+            // PR5: surface WasAutoDowngradedToSkipped on the same line as the state-transition
+            // log — this is the "why is App X marked Skipped without a download" answer.
+            var autoDowngradeNote = app.WasAutoDowngradedToSkipped ? " auto-downgraded=true (inverse-detection)" : string.Empty;
             _logger?.Debug(
-                $"ImeAdapter: app '{app.Name ?? "?"}' ({shortId}) {oldState}->{newState} appType={app.AppType ?? "?"} bytesTotal={app.BytesTotal} terminal={(terminalKind != null)} eventType={eventType}");
+                $"ImeAdapter: app '{app.Name ?? "?"}' ({shortId}) {oldState}->{newState} appType={app.AppType ?? "?"} bytesTotal={app.BytesTotal} terminal={(terminalKind != null)} eventType={eventType}{autoDowngradeNote}");
         }
 
         /// <summary>

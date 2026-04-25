@@ -134,6 +134,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             long zipSizeBytes = 0;
             string latestVersion = null;
 
+            // PR5: entry-marker line so forensics can grep for "Self-update started" and see
+            // both the trigger and the version baseline. The previous first-output line was
+            // either a downgrade-decision or a "no update needed" — for the happy path nothing
+            // logged at all until the cmp result.
+            log($"Self-update: started (current={currentVersion}, trigger={triggerReason}, force={forceUpdate}, allowDowngrade={allowDowngrade})");
+
             try
             {
                 // Step 1: Fetch version-v2.json (2.5s timeout)
@@ -212,6 +218,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                     return;
                 }
                 try { zipSizeBytes = new FileInfo(zipPath).Length; } catch { /* best-effort */ }
+                // PR5: download success line — inner helper logs failure paths but stays silent on success.
+                log($"Self-update: ZIP downloaded ({zipSizeBytes / 1024} KB in {downloadMs}ms)");
 
                 // Step 3b: Verify SHA-256 integrity (backend hash has priority over version-v2.json hash)
                 string expectedSha256;
@@ -242,6 +250,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                         WriteSkipMarker("integrity_mismatch", currentVersion, latestVersion, "SHA-256 mismatch on downloaded ZIP", log);
                     return;
                 }
+                // PR5: integrity verified — silent before, opaque whether the verify step actually ran.
+                log($"Self-update: ZIP integrity verified ({verifyMs}ms)");
 
                 // Step 4: Extract to staging directory
                 var stagingDir = Environment.ExpandEnvironmentVariables(Constants.AgentUpdateStagingDir);
@@ -255,6 +265,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                         WriteSkipMarker("extract_failed", currentVersion, latestVersion, "ZIP extraction failed", log);
                     return;
                 }
+                // PR5: extract success log line so forensics can see the full pipeline progressing.
+                log($"Self-update: extract succeeded ({extractMs}ms, target={stagingDir})");
 
                 // Step 5: Validate staging
                 var stagedExe = Path.Combine(stagingDir, "AutopilotMonitor.Agent.exe");

@@ -45,6 +45,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
 
             var result = new RemoteConfigMergeResult();
 
+            // PR5: snapshot the operator-relevant flags BEFORE overwrite so we can log what
+            // actually flipped. Log spam is bounded — Merge runs at most once per remote
+            // config fetch (every ~5 min by default).
+            var prevSelfDestruct = agentConfig.SelfDestructOnComplete;
+            var prevKeepLog = agentConfig.KeepLogFile;
+            var prevReboot = agentConfig.RebootOnComplete;
+            var prevDiagMode = agentConfig.DiagnosticsUploadMode;
+            var prevDiagEnabled = agentConfig.DiagnosticsUploadEnabled;
+            var prevShowSummary = agentConfig.ShowEnrollmentSummary;
+            var prevMaxLifetime = agentConfig.AgentMaxLifetimeMinutes;
+
             // ---------------- Simple scalar flags — remote wins.
             agentConfig.SelfDestructOnComplete = remoteConfig.SelfDestructOnComplete;
             agentConfig.KeepLogFile = remoteConfig.KeepLogFile;
@@ -152,6 +163,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
                 if (collectors.HelloWaitTimeoutSeconds > 0)
                     agentConfig.HelloWaitTimeoutSeconds = collectors.HelloWaitTimeoutSeconds;
             }
+
+            // PR5: per-flip Info lines for operator-relevant knobs that were silent before.
+            // LogLevel + UnrestrictedMode already log via existing branches above.
+            if (prevSelfDestruct != agentConfig.SelfDestructOnComplete)
+                logger?.Info($"Remote config: SelfDestructOnComplete {prevSelfDestruct} -> {agentConfig.SelfDestructOnComplete}");
+            if (prevKeepLog != agentConfig.KeepLogFile)
+                logger?.Info($"Remote config: KeepLogFile {prevKeepLog} -> {agentConfig.KeepLogFile}");
+            if (prevReboot != agentConfig.RebootOnComplete)
+                logger?.Info($"Remote config: RebootOnComplete {prevReboot} -> {agentConfig.RebootOnComplete}");
+            if (!string.Equals(prevDiagMode, agentConfig.DiagnosticsUploadMode, StringComparison.Ordinal))
+                logger?.Info($"Remote config: DiagnosticsUploadMode '{prevDiagMode ?? "(null)"}' -> '{agentConfig.DiagnosticsUploadMode ?? "(null)"}'");
+            if (prevDiagEnabled != agentConfig.DiagnosticsUploadEnabled)
+                logger?.Info($"Remote config: DiagnosticsUploadEnabled {prevDiagEnabled} -> {agentConfig.DiagnosticsUploadEnabled}");
+            if (prevShowSummary != agentConfig.ShowEnrollmentSummary)
+                logger?.Info($"Remote config: ShowEnrollmentSummary {prevShowSummary} -> {agentConfig.ShowEnrollmentSummary}");
+            if (prevMaxLifetime != agentConfig.AgentMaxLifetimeMinutes)
+                logger?.Info($"Remote config: AgentMaxLifetimeMinutes {prevMaxLifetime} -> {agentConfig.AgentMaxLifetimeMinutes}");
 
             return result;
         }
