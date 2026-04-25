@@ -227,7 +227,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var evt = new EnrollmentEvent
             {
                 EventType = "agent_started",
-                Source = "AutopilotMonitor.Agent.V2",
+                Source = "Agent",
                 Severity = EventSeverity.Info,
                 Phase = EnrollmentPhase.Unknown,
                 Message = "Agent started",
@@ -241,7 +241,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var posted = Assert.Single(sink.Posted);
             var payload = posted.Payload!;
             Assert.Equal("agent_started", payload[SignalPayloadKeys.EventType]);
-            Assert.Equal("AutopilotMonitor.Agent.V2", payload[SignalPayloadKeys.Source]);
+            Assert.Equal("Agent", payload[SignalPayloadKeys.Source]);
             Assert.Equal("Agent started", payload[SignalPayloadKeys.Message]);
             Assert.Equal("Info", payload[SignalPayloadKeys.Severity]);
             // Finding 3: ImmediateUpload is written both-ways, not omitted when false.
@@ -286,7 +286,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var evt = new EnrollmentEvent
             {
                 EventType = "agent_started",
-                Source = "AutopilotMonitor.Agent.V2",
+                Source = "Agent",
                 Timestamp = explicitTime,
                 Data = new Dictionary<string, object>(),
             };
@@ -304,7 +304,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var evt = new EnrollmentEvent
             {
                 EventType = "agent_started",
-                Source = "AutopilotMonitor.Agent.V2",
+                Source = "Agent",
                 Message = string.Empty,
                 Data = new Dictionary<string, object>(),
             };
@@ -326,7 +326,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var evt = new EnrollmentEvent
             {
                 EventType = "agent_started",
-                Source = "AutopilotMonitor.Agent.V2",
+                Source = "Agent",
                 Data = new Dictionary<string, object>
                 {
                     ["previousBootUtc"] = bootTime,
@@ -405,7 +405,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var evt = new EnrollmentEvent
             {
                 EventType = "agent_started",
-                Source = "AutopilotMonitor.Agent.V2",
+                Source = "Agent",
                 Data = null!,
             };
 

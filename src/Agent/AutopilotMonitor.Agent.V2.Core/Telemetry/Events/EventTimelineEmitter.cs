@@ -28,7 +28,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
     internal sealed class EventTimelineEmitter : IEventTimelineEmitter
     {
         /// <summary>Default <see cref="EnrollmentEvent.Source"/> when no <see cref="SourceParamKey"/> override is provided.</summary>
-        internal const string SourceId = "decision_engine";
+        internal const string SourceId = "DecisionEngine";
 
         internal const string EventTypeParamKey = "eventType";
 
@@ -41,9 +41,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
 
         /// <summary>
         /// Parameter key for the optional <see cref="EnrollmentEvent.Source"/> override. Any
-        /// non-empty string is accepted; default is <see cref="SourceId"/> so existing reducer
-        /// cases keep emitting as <c>"decision_engine"</c>. Single-rail migration uses this to
-        /// preserve the original collector's source label (e.g. <c>"Network"</c>,
+        /// non-empty string is accepted; default is <see cref="SourceId"/> so reducer-emitted
+        /// events surface as <c>"DecisionEngine"</c>. Single-rail migration uses this to
+        /// preserve the original collector's source label (e.g. <c>"ImeLogTracker"</c>,
         /// <c>"ServerActionDispatcher"</c>) on the wire — otherwise the UI would lose that
         /// fidelity when everything flows through the engine.
         /// </summary>

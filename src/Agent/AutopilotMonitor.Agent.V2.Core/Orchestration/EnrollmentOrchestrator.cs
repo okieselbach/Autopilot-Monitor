@@ -126,6 +126,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private int _started;
         private int _stopRequested;
         private int _disposed;
+        private int _collectorHostsStopped;
 
         // Quarantine flag — set mid-run, read on next start.
         private bool _quarantineRequested;
@@ -864,6 +865,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         }
 
         /// <summary>
+        /// Stop and dispose the collector hosts ahead of full <see cref="Stop"/>. Idempotent —
+        /// callable from <see cref="EnrollmentTerminationHandler"/> right before the
+        /// diagnostics ZIP is built so periodic collectors (PerformanceCollector,
+        /// AgentSelfMetricsCollector, …) don't keep emitting <c>performance_snapshot</c> /
+        /// <c>agent_metrics_snapshot</c> events while the package is being assembled.
+        /// </summary>
+        public void StopCollectorHosts()
+        {
+            if (Interlocked.Exchange(ref _collectorHostsStopped, 1) == 1) return;
+            if (_collectorHosts == null) return;
+
+            foreach (var host in _collectorHosts)
+            {
+                try { host.Stop(); }
+                catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: host '{host.Name}' stop failed: {ex.Message}"); }
+            }
+        }
+
+        /// <summary>
         /// Stop the pipeline. Idempotent; calls <see cref="Stop"/> from <see cref="Dispose"/> as well.
         /// </summary>
         public void Stop()
@@ -882,14 +902,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: max-lifetime timer dispose failed: {ex.Message}"); }
 
             // 0) Collector-Hosts stoppen — keine neuen Events / DecisionSignals aus dem Feld.
-            if (_collectorHosts != null)
-            {
-                foreach (var host in _collectorHosts)
-                {
-                    try { host.Stop(); }
-                    catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: host '{host.Name}' stop failed: {ex.Message}"); }
-                }
-            }
+            //    No-op when EnrollmentTerminationHandler already drained them via
+            //    StopCollectorHosts() before the diagnostics ZIP was built.
+            StopCollectorHosts();
 
             // 1) Scheduler.Fired-Handler abmelden — keine neuen DeadlineFired-Signals mehr.
             try

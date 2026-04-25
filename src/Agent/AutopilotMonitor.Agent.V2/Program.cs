@@ -706,7 +706,13 @@ namespace AutopilotMonitor.Agent.V2
                                 // Plan §5 Fix 4 — per-app timing snapshot for FinalStatusBuilder +
                                 // app_tracking_summary emission. Null-safe via the handler's default.
                                 appTimingsAccessor: () => componentFactory.ImeAppTimings,
-                                agentVersion: GetAgentVersion());
+                                agentVersion: GetAgentVersion(),
+                                // Stop periodic collectors (PerformanceCollector,
+                                // AgentSelfMetricsCollector, …) before the diagnostics ZIP is
+                                // built, so no late `performance_snapshot` slips in after
+                                // `diagnostics_collecting`. Idempotent on the orchestrator side
+                                // — the full Stop() call later is a no-op for hosts.
+                                stopPeripheralCollectors: () => orchestrator.StopCollectorHosts());
 
                             // Single-rail refactor (plan §5.3) — ServerActionDispatcher emits through
                             // the same InformationalEventPost. Constructed inside this hook so
@@ -1262,7 +1268,7 @@ namespace AutopilotMonitor.Agent.V2
                     TenantId = agentConfig.TenantId,
                     EventType = "agent_started",
                     Severity = EventSeverity.Info,
-                    Source = "AutopilotMonitor.Agent.V2",
+                    Source = "Agent",
                     Phase = EnrollmentPhase.Unknown,
                     Message = $"Agent v{GetAgentVersion()} started (previousExit={previousExit?.ExitType ?? "unknown"}).",
                     Data = data,

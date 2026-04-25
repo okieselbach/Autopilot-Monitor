@@ -486,7 +486,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         }
 
         [Fact]
-        public void ScriptCompleted_platform_success_emits_script_completed_info_source_IME()
+        public void ScriptCompleted_platform_success_emits_script_completed_info_source_ImeLogTracker()
         {
             using var f = new ImeLogTrackerAdapterFixture();
             using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
@@ -504,8 +504,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             adapter.TriggerScriptCompletedFromTest(script);
 
             var info = Assert.Single(f.InfoEvents(SharedEventTypes.ScriptCompleted));
-            // V1 contract: Source="IME" (not "ImeLogTracker") for script_completed.
-            Assert.Equal("IME", info.Payload![SignalPayloadKeys.Source]);
+            // Source uniformly reports the producing adapter; consistent with sibling
+            // events (app_install_started, download_progress, do_telemetry, …).
+            Assert.Equal("ImeLogTracker", info.Payload![SignalPayloadKeys.Source]);
             Assert.Equal(script.PolicyId, info.Payload["policyId"]);
             Assert.Equal("platform", info.Payload["scriptType"]);
             Assert.Equal("0", info.Payload["exitCode"]);

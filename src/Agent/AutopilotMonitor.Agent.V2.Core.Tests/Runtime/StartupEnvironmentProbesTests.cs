@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
 
             Assert.Equal("device_location", evt.EventType);
             Assert.Equal(EventSeverity.Info, evt.Severity);
-            Assert.Equal("Network", evt.Source);
+            Assert.Equal("StartupEnvironmentProbes", evt.Source);
             Assert.Equal("S1", evt.SessionId);
             Assert.Equal("T1", evt.TenantId);
             Assert.True(evt.ImmediateUpload);

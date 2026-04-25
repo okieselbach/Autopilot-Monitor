@@ -56,7 +56,9 @@ namespace AutopilotMonitor.Shared.Models
         public string SeverityString => Severity.ToString();
 
         /// <summary>
-        /// Source of the event (e.g., "IME", "EventLog", "Agent")
+        /// Source of the event — typically the producing class name (e.g.
+        /// "ImeLogTracker", "EnrollmentTracker", "DecisionEngine") or a
+        /// stable lifecycle label ("Agent").
         /// </summary>
         public string Source { get; set; } = default!;
 

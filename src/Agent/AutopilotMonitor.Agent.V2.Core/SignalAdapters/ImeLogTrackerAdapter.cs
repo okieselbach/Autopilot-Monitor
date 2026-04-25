@@ -639,7 +639,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         {
             if (script == null || string.IsNullOrEmpty(script.PolicyId)) return;
 
-            // V1 contract: Source="IME" (not "ImeLogTracker"), severity derived from result.
+            // Severity derived from script result; failure = exit code != 0 OR Result=Failed.
             var isFailure = string.Equals(script.Result, "Failed", StringComparison.OrdinalIgnoreCase)
                             || (script.ExitCode.HasValue && script.ExitCode.Value != 0);
             var severity = isFailure ? EventSeverity.Error : EventSeverity.Info;
@@ -680,7 +680,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
 
             _post.Emit(
                 eventType: SharedEventTypes.ScriptCompleted,
-                source: "IME",
+                source: SourceLabel,
                 message: msg,
                 severity: severity,
                 data: data,

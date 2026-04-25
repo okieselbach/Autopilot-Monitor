@@ -250,7 +250,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
         }
 
         [Fact]
-        public void Source_is_decision_engine()
+        public void Source_is_DecisionEngine()
         {
             using var r = new Rig();
             r.Sut.Emit(
@@ -259,7 +259,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
                 At);
 
             var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
-            Assert.Equal("decision_engine", (string?)parsed["Source"]);
+            Assert.Equal("DecisionEngine", (string?)parsed["Source"]);
         }
 
         [Fact]
@@ -294,7 +294,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry.Events
                 At);
 
             var parsed = JObject.Parse(r.Transport.Enqueued[0].PayloadJson);
-            Assert.Equal("decision_engine", (string?)parsed["Source"]);
+            Assert.Equal("DecisionEngine", (string?)parsed["Source"]);
         }
 
         [Fact]

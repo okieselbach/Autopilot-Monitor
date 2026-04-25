@@ -65,6 +65,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly Func<CleanupService> _cleanupServiceFactory;
         private readonly Func<bool, string, Task<DiagnosticsUploadResult>> _uploadDiagnosticsAsync;
         private readonly Action _signalShutdown;
+        private readonly Action _stopPeripheralCollectors;
         private readonly string _dialogExePathOverride;
         private readonly AgentAnalyzerManager _analyzerManager;
         private readonly InformationalEventPost _post;
@@ -94,7 +95,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             TimeSpan? lateEventGracePeriod = null,
             TimeSpan? spoolDrainPeriod = null,
             Func<IReadOnlyDictionary<string, AppInstallTiming>> appTimingsAccessor = null,
-            string agentVersion = null)
+            string agentVersion = null,
+            Action stopPeripheralCollectors = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -108,6 +110,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _cleanupServiceFactory = cleanupServiceFactory ?? throw new ArgumentNullException(nameof(cleanupServiceFactory));
             _uploadDiagnosticsAsync = uploadDiagnosticsAsync ?? throw new ArgumentNullException(nameof(uploadDiagnosticsAsync));
             _signalShutdown = signalShutdown ?? throw new ArgumentNullException(nameof(signalShutdown));
+            _stopPeripheralCollectors = stopPeripheralCollectors;
             _dialogExePathOverride = dialogExePathOverride;
             _analyzerManager = analyzerManager;
             _post = post;
@@ -189,6 +192,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 }
 
                 DelayLateEventGrace();
+
+                // Stop peripheral collectors (PerformanceCollector, AgentSelfMetricsCollector,
+                // DeliveryOptimizationCollector, …) before the diagnostics ZIP is built so
+                // late `performance_snapshot` / `agent_metrics_snapshot` events don't slip in
+                // after `diagnostics_collecting` and the snapshot captured in the package
+                // matches the timeline. Best-effort — never blocks termination.
+                StopPeripheralCollectorsBestEffort();
 
                 RunUploadDiagnosticsWithEvents(args);
                 WriteEnrollmentCompleteMarker(args);
@@ -620,6 +630,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             if (_lateEventGracePeriod <= TimeSpan.Zero) return;
             try { Task.Delay(_lateEventGracePeriod).Wait(); }
             catch { /* best-effort */ }
+        }
+
+        private void StopPeripheralCollectorsBestEffort()
+        {
+            if (_stopPeripheralCollectors == null) return;
+            try
+            {
+                _stopPeripheralCollectors();
+                _logger.Info("EnrollmentTerminationHandler: peripheral collectors stopped before diagnostics package.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: stopPeripheralCollectors threw: {ex.Message}");
+            }
         }
 
         private void DrainSpool()
