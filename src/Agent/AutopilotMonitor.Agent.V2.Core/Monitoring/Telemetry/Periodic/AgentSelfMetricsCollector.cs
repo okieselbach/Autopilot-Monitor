@@ -1,3 +1,4 @@
+#nullable enable annotations
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -5,6 +6,7 @@ using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
@@ -19,13 +21,27 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
     /// </summary>
     public class AgentSelfMetricsCollector : CollectorBase
     {
+        // Pressure thresholds — once either is crossed within a session, a one-shot
+        // `spool_pressure_detected` event is emitted with RequiresImmediateFlush=true
+        // so the backend can surface the condition without waiting for the next snapshot
+        // to be queried out of Storage. Sized so a healthy 6h provisioning session never
+        // trips them; tripping is a strong "upload backlog is growing or downstream stalled"
+        // signal worth investigating in the field.
+        internal const int PressurePendingItemThreshold = 2000;
+        internal const long PressureFileSizeBytesThreshold = 5L * 1024 * 1024; // 5 MB
+
         private readonly string _agentVersion;
         private readonly NetworkMetrics _networkMetrics;
+        private readonly ITelemetrySpool? _telemetrySpool;
 
         // Previous sample for delta calculations
         private TimeSpan _prevCpuTime;
         private DateTime _prevWallTime;
         private NetworkMetricsSnapshot _prevNetSnapshot;
+
+        // Fire-once flag for the spool-pressure event. Interlocked so concurrent Collect
+        // ticks (shouldn't happen in CollectorBase, but cheap insurance) cannot double-emit.
+        private int _pressureEmitted;
 
         public AgentSelfMetricsCollector(
             string sessionId,
@@ -34,11 +50,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             NetworkMetrics networkMetrics,
             AgentLogger logger,
             string agentVersion = "unknown",
-            int intervalSeconds = 60)
+            int intervalSeconds = 60,
+            ITelemetrySpool? telemetrySpool = null)
             : base(sessionId, tenantId, post, logger, intervalSeconds)
         {
             _networkMetrics = networkMetrics ?? throw new ArgumentNullException(nameof(networkMetrics));
             _agentVersion = string.IsNullOrWhiteSpace(agentVersion) ? "unknown" : agentVersion;
+            _telemetrySpool = telemetrySpool;
         }
 
         protected override void OnBeforeStart()
@@ -101,11 +119,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                 Logger.Debug($"Process metrics read failed: {ex.Message}");
             }
 
-            // --- Spool queue depth ---
-            // M4.5.a: removed legacy EventSpool-based queue-depth metric. V2 equivalent
-            // (TelemetrySpool.LastAssignedItemId - LastUploadedItemId) would require Transport
-            // wiring that is out of scope for this collector; deferred to M4.5.b when
-            // DefaultComponentFactory introduces the new telemetry wiring.
+            // --- Spool stats (P2 telemetry) ---
+            // _telemetrySpool is the live transport-layer spool, plumbed through
+            // DefaultComponentFactory.SetTelemetrySpool from EnrollmentOrchestrator.Start
+            // step 3. Null only on test fakes that don't construct a real spool.
+            int pendingItemCount = 0;
+            long spoolFileSizeBytes = 0L;
+            if (_telemetrySpool != null)
+            {
+                try
+                {
+                    pendingItemCount = _telemetrySpool.PendingItemCount;
+                    spoolFileSizeBytes = _telemetrySpool.SpoolFileSizeBytes;
+                    var peakPending = _telemetrySpool.PeakPendingItemCount;
+                    var totalEnqueued = _telemetrySpool.LastAssignedItemId + 1; // -1 sentinel → 0
+
+                    data["spool_pending_item_count"] = pendingItemCount;
+                    data["spool_peak_pending_item_count"] = peakPending;
+                    data["spool_file_size_bytes"] = spoolFileSizeBytes;
+                    data["spool_total_enqueued_count"] = totalEnqueued;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Spool metrics read failed: {ex.Message}");
+                }
+            }
 
             // --- Network delta ---
             try
@@ -148,6 +186,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                               $"\u2193{(data.ContainsKey("net_bytes_down") ? data["net_bytes_down"] : "?")} B",
                     Data = data
                 });
+            }
+
+            // One-shot pressure event \u2014 fires once per session when the spool grows past
+            // either threshold. ImmediateUpload=true so it shows up promptly on the
+            // backend without waiting for the next batch drain.
+            if (_telemetrySpool != null
+                && (pendingItemCount > PressurePendingItemThreshold
+                    || spoolFileSizeBytes > PressureFileSizeBytesThreshold)
+                && Interlocked.CompareExchange(ref _pressureEmitted, 1, 0) == 0)
+            {
+                var pressureData = new Dictionary<string, object>
+                {
+                    { "pendingItemCount", pendingItemCount },
+                    { "fileSizeBytes", spoolFileSizeBytes },
+                    { "pendingThreshold", PressurePendingItemThreshold },
+                    { "fileSizeThresholdBytes", PressureFileSizeBytesThreshold },
+                    { "totalEnqueuedCount", _telemetrySpool.LastAssignedItemId + 1 },
+                    { "lastUploadedItemId", _telemetrySpool.LastUploadedItemId },
+                    { "ImmediateUpload", true }
+                };
+
+                Post.Emit(new EnrollmentEvent
+                {
+                    SessionId = SessionId,
+                    TenantId = TenantId,
+                    Timestamp = now,
+                    EventType = "spool_pressure_detected",
+                    Severity = EventSeverity.Warning,
+                    Source = "AgentSelfMetricsCollector",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Telemetry spool pressure detected: pending={pendingItemCount}, " +
+                              $"fileBytes={spoolFileSizeBytes} \u2014 upload may be stalled or session " +
+                              $"is unusually long.",
+                    Data = pressureData
+                });
+
+                Logger.Warning(
+                    $"AgentSelfMetricsCollector: spool pressure detected " +
+                    $"(pending={pendingItemCount}, fileBytes={spoolFileSizeBytes}). " +
+                    $"Emitted spool_pressure_detected (one-shot per session).");
             }
         }
     }

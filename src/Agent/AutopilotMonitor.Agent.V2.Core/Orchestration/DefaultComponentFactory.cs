@@ -65,6 +65,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly string _stateDirectory;
 
         private ImeLogHost? _imeLogHost;
+        private Transport.Telemetry.ITelemetrySpool? _telemetrySpool;
 
         /// <summary>
         /// Exposes the IME tracker's package-state list to peripheral consumers such as the
@@ -102,6 +103,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _networkMetrics = networkMetrics;
             _agentVersion = string.IsNullOrEmpty(agentVersion) ? "unknown" : agentVersion;
             _stateDirectory = stateDirectory ?? throw new ArgumentNullException(nameof(stateDirectory));
+        }
+
+        /// <summary>
+        /// Late-binding setter called by <see cref="EnrollmentOrchestrator"/> right after
+        /// the <see cref="Transport.Telemetry.TelemetrySpool"/> is constructed (Start step 3).
+        /// The spool reference flows from here into the
+        /// <c>PeriodicCollectorLifecycleHost</c> in <see cref="CreateCollectorHosts"/> and
+        /// from there into <see cref="Monitoring.Telemetry.Periodic.AgentSelfMetricsCollector"/>,
+        /// which surfaces <c>spool.pendingItemCount</c> / <c>spool.fileSizeBytes</c> on
+        /// every <c>agent_metrics_snapshot</c>.
+        /// </summary>
+        public void SetTelemetrySpool(Transport.Telemetry.ITelemetrySpool spool)
+        {
+            _telemetrySpool = spool;
         }
 
         public IReadOnlyList<ICollectorHost> CreateCollectorHosts(
@@ -211,7 +226,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     selfMetricsIntervalSeconds: collectors.AgentSelfMetricsIntervalSeconds,
                     idleTimeoutMinutes: collectors.CollectorIdleTimeoutMinutes,
                     networkMetrics: _networkMetrics,
-                    agentVersion: _agentVersion));
+                    agentVersion: _agentVersion,
+                    telemetrySpool: _telemetrySpool));
             }
 
             // V1 parity (CollectorCoordinator.StartOptionalCollectors:375-382) — wire the
@@ -831,6 +847,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             private readonly int _idleTimeoutMinutes;
             private readonly NetworkMetrics? _networkMetrics;
             private readonly string _agentVersion;
+            private readonly Transport.Telemetry.ITelemetrySpool? _telemetrySpool;
 
             // Codex Finding 4 — reference to the concrete SignalIngress (when available) so we
             // can subscribe to its SignalPosted event. This lets us observe activity from
@@ -862,7 +879,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 int selfMetricsIntervalSeconds,
                 int idleTimeoutMinutes,
                 NetworkMetrics? networkMetrics,
-                string agentVersion)
+                string agentVersion,
+                Transport.Telemetry.ITelemetrySpool? telemetrySpool = null)
             {
                 if (ingress == null) throw new ArgumentNullException(nameof(ingress));
                 if (clock == null) throw new ArgumentNullException(nameof(clock));
@@ -876,6 +894,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 _idleTimeoutMinutes = idleTimeoutMinutes;
                 _networkMetrics = networkMetrics;
                 _agentVersion = agentVersion;
+                _telemetrySpool = telemetrySpool;
                 _lastRealEventTimeUtc = DateTime.UtcNow;
 
                 // Post goes to the raw ingress — no per-host wrapping. Activity observation
@@ -974,7 +993,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 if (_selfMetricsEnabled && _selfMetricsCollector == null && _networkMetrics != null)
                 {
                     _selfMetricsCollector = new AgentSelfMetricsCollector(
-                        _sessionId, _tenantId, _post, _networkMetrics, _logger, _agentVersion, _selfMetricsIntervalSeconds);
+                        _sessionId, _tenantId, _post, _networkMetrics, _logger, _agentVersion, _selfMetricsIntervalSeconds, _telemetrySpool);
                     _selfMetricsCollector.Start();
                 }
                 _idleStopped = false;

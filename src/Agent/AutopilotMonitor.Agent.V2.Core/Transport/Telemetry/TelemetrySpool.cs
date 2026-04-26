@@ -20,7 +20,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
     /// <para>
     /// <b>Recovery</b>: beim Konstruktor werden beide Files gescannt. <c>LastAssignedItemId</c> = max
     /// <c>TelemetryItemId</c> in spool.jsonl (ab der letzten parsbaren Zeile); <c>LastUploadedItemId</c>
-    /// = Wert aus cursor-File (oder -1 bei Fehler).
+    /// = Wert aus cursor-File (oder -1 bei Fehler). Items mit <c>Id &gt; LastUploadedItemId</c> werden
+    /// in den in-memory Tail-Cache <c>_pending</c> rehydriert.
+    /// </para>
+    /// <para>
+    /// <b>Performance — in-memory tail cache</b>: <see cref="Peek"/> liest aus dem in-memory
+    /// <see cref="LinkedList{T}"/> <c>_pending</c>, nicht aus der Datei. Disk wird nur beim
+    /// <see cref="Enqueue"/> (append) und einmal im ctor (rehydrate) berührt. Die JSONL bleibt
+    /// die Source-of-Truth für Crash-Recovery + Diagnostics-ZIP-Forensik; der RAM-Cache
+    /// existiert ausschliesslich um O(N)-File-Reads pro Drain zu vermeiden.
+    /// </para>
+    /// <para>
+    /// <b>Performance — conditional fsync</b>: nur Items mit
+    /// <see cref="TelemetryItemDraft.RequiresImmediateFlush"/> = <c>true</c> erzwingen einen
+    /// <c>FileOptions.WriteThrough</c> + <c>Flush(true)</c>. Nicht-immediate Items (typisch:
+    /// periodische Snapshots, Hello-Snapshot-Flag-Updates) gehen ohne fsync in den OS-Cache;
+    /// das spart auf langsamen Provisioning-VMs ~5-20 ms pro Item. Trade-off: bei einem
+    /// Crash zwischen Append und OS-Flush gehen genau die nicht-immediate Items verloren,
+    /// die noch nicht hochgeladen wurden — Backend dedupt eh via (PartitionKey, RowKey),
+    /// ein paar verlorene Snapshots sind akzeptabel.
     /// </para>
     /// </summary>
     public sealed class TelemetrySpool : ITelemetrySpool
@@ -33,6 +51,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
         private long _lastAssignedItemId = -1;
         private long _lastUploadedItemId = -1;
+
+        // In-memory tail cache: holds every item with TelemetryItemId > _lastUploadedItemId.
+        // Populated from disk in the ctor and kept in sync by Enqueue / MarkUploaded. Peek
+        // reads from here so the periodic drain loop is O(batchSize) instead of O(N) per
+        // call. Disk JSONL stays the source of truth — the cache is rebuilt on every
+        // process start.
+        private readonly LinkedList<TelemetryItem> _pending = new LinkedList<TelemetryItem>();
+        private int _peakPendingCount;
 
         public TelemetrySpool(string directoryPath, IClock clock, Logging.AgentLogger? logger = null)
         {
@@ -52,8 +78,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             _spoolPath = Path.Combine(directoryPath, "spool.jsonl");
             _cursor = new UploadCursorPersistence(Path.Combine(directoryPath, "upload-cursor.json"));
 
-            _lastAssignedItemId = ScanLastAssignedItemId();
+            // Cursor must be loaded BEFORE we scan the file so we know which items still
+            // count as "pending" and need to be rehydrated into _pending.
             _lastUploadedItemId = _cursor.Load();
+            _lastAssignedItemId = ScanSpoolAndRehydratePending();
+            _peakPendingCount = _pending.Count;
         }
 
         public long LastAssignedItemId
@@ -64,6 +93,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         public long LastUploadedItemId
         {
             get { lock (_lock) return _lastUploadedItemId; }
+        }
+
+        public int PendingItemCount
+        {
+            get { lock (_lock) return _pending.Count; }
+        }
+
+        public int PeakPendingItemCount
+        {
+            get { lock (_lock) return _peakPendingCount; }
+        }
+
+        public long SpoolFileSizeBytes
+        {
+            get
+            {
+                try
+                {
+                    var info = new FileInfo(_spoolPath);
+                    return info.Exists ? info.Length : 0L;
+                }
+                catch
+                {
+                    return 0L;
+                }
+            }
         }
 
         public event EventHandler? ImmediateFlushRequested;
@@ -91,24 +146,40 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 var line = TelemetryItemSerializer.Serialize(item);
                 var bytes = Encoding.UTF8.GetBytes(line + "\n");
 
+                // Conditional fsync (P2 Step 1): immediate-flush items get the strong
+                // crash-durability guarantee; periodic / batched items go to OS cache only.
+                // FileStream.Dispose at the end of the using-block always Flushes the user
+                // buffer to the OS, so the data is visible to in-process readers immediately;
+                // only the fsync-to-disk barrier differs.
+                var options = draft.RequiresImmediateFlush
+                    ? FileOptions.WriteThrough
+                    : FileOptions.None;
+
                 using (var fs = new FileStream(
                     _spoolPath,
                     FileMode.Append,
                     FileAccess.Write,
                     FileShare.Read,
                     bufferSize: 4096,
-                    options: FileOptions.WriteThrough))
+                    options: options))
                 {
                     fs.Write(bytes, 0, bytes.Length);
-                    fs.Flush(flushToDisk: true);
+                    if (draft.RequiresImmediateFlush)
+                    {
+                        fs.Flush(flushToDisk: true);
+                    }
                 }
 
                 _lastAssignedItemId = itemId;
+                _pending.AddLast(item);
+                if (_pending.Count > _peakPendingCount)
+                    _peakPendingCount = _pending.Count;
+
                 // Plan §5 Fix 5 — spool-cadence logging. PR3-A2: VERBOSE (was DEBUG)
                 // because per-item logging hits ~600 lines per session and floods the log
                 // at troubleshoot level. Activate only at micro-repro level.
                 _logger?.Verbose(
-                    $"TelemetrySpool: enqueued itemId={itemId} kind={item.Kind} immediate={item.RequiresImmediateFlush} pending={itemId - _lastUploadedItemId}.");
+                    $"TelemetrySpool: enqueued itemId={itemId} kind={item.Kind} immediate={item.RequiresImmediateFlush} pending={_pending.Count}.");
             }
 
             // Fire outside the lock — subscribers must not be able to re-enter Enqueue or
@@ -132,33 +203,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
             lock (_lock)
             {
-                if (!File.Exists(_spoolPath)) return Array.Empty<TelemetryItem>();
+                if (_pending.Count == 0) return Array.Empty<TelemetryItem>();
 
-                var pending = new List<TelemetryItem>();
-                foreach (var line in File.ReadAllLines(_spoolPath, Encoding.UTF8))
+                var batch = new List<TelemetryItem>(Math.Min(max, _pending.Count));
+                var node = _pending.First;
+                while (node != null && batch.Count < max)
                 {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-
-                    TelemetryItem parsed;
-                    try
-                    {
-                        parsed = TelemetryItemSerializer.Deserialize(line);
-                    }
-                    catch
-                    {
-                        // Corrupt tail (crash mid-append) — stop reading, the items before
-                        // are still valid. Orchestrator will drain them; the unparsable
-                        // tail stays in the file but is never Peek-returned.
-                        break;
-                    }
-
-                    if (parsed.TelemetryItemId <= _lastUploadedItemId) continue;
-
-                    pending.Add(parsed);
-                    if (pending.Count >= max) break;
+                    batch.Add(node.Value);
+                    node = node.Next;
                 }
-
-                return pending;
+                return batch;
             }
         }
 
@@ -175,10 +229,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
                 _cursor.Save(upToItemIdInclusive);
                 _lastUploadedItemId = upToItemIdInclusive;
+
+                // Trim the in-memory tail. The list is in TelemetryItemId-monotonic order
+                // (Enqueue only appends), so we can drop from the front until the first
+                // remaining item is past the cursor.
+                while (_pending.First != null && _pending.First.Value.TelemetryItemId <= upToItemIdInclusive)
+                {
+                    _pending.RemoveFirst();
+                }
             }
         }
 
-        private long ScanLastAssignedItemId()
+        /// <summary>
+        /// Single-pass scan of <c>spool.jsonl</c>: returns the highest <c>TelemetryItemId</c>
+        /// found AND populates <see cref="_pending"/> with every item past
+        /// <see cref="_lastUploadedItemId"/>. Called once from the ctor — replaces the
+        /// previous per-Peek <c>File.ReadAllLines</c> hot path.
+        /// </summary>
+        private long ScanSpoolAndRehydratePending()
         {
             if (!File.Exists(_spoolPath)) return -1;
 
@@ -186,14 +254,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             foreach (var line in File.ReadAllLines(_spoolPath, Encoding.UTF8))
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
+                TelemetryItem item;
                 try
                 {
-                    var item = TelemetryItemSerializer.Deserialize(line);
-                    if (item.TelemetryItemId > highest) highest = item.TelemetryItemId;
+                    item = TelemetryItemSerializer.Deserialize(line);
                 }
                 catch
                 {
+                    // Corrupt tail (crash mid-append) — stop reading, the items before are
+                    // still valid. Keeps current behaviour: orchestrator drains the parsable
+                    // prefix; the unparsable tail stays in the file but is never returned.
                     break;
+                }
+
+                if (item.TelemetryItemId > highest) highest = item.TelemetryItemId;
+                if (item.TelemetryItemId > _lastUploadedItemId)
+                {
+                    _pending.AddLast(item);
                 }
             }
             return highest;

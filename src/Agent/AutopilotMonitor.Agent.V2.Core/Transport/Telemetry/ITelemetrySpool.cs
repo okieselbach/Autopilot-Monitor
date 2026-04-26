@@ -45,6 +45,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         long LastUploadedItemId { get; }
 
         /// <summary>
+        /// Number of items currently in the spool that have not yet been marked as uploaded.
+        /// Reflects the in-memory tail cache; equals
+        /// <c>LastAssignedItemId - LastUploadedItemId</c> in steady state.
+        /// </summary>
+        int PendingItemCount { get; }
+
+        /// <summary>
+        /// Highest <see cref="PendingItemCount"/> ever observed during this process lifetime
+        /// (sticky high-water — never decreases). Useful as an early indicator of upload
+        /// stalls on long sessions, where a steadily growing pending queue surfaces before
+        /// an absolute size threshold trips.
+        /// </summary>
+        int PeakPendingItemCount { get; }
+
+        /// <summary>
+        /// Current size of the on-disk <c>spool.jsonl</c> file in bytes. Returns 0 when the
+        /// file does not yet exist. Cheap (single <c>FileInfo.Length</c> call) and safe to
+        /// poll from periodic collectors.
+        /// </summary>
+        long SpoolFileSizeBytes { get; }
+
+        /// <summary>
         /// Raised after <see cref="Enqueue"/> persists an item whose <see cref="TelemetryItemDraft.RequiresImmediateFlush"/>
         /// was <c>true</c>. The orchestrator uses this to wake the drain loop early — without a
         /// wakeup, <c>ImmediateUpload=true</c> items wait for the full periodic drain interval

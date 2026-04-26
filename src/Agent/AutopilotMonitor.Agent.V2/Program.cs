@@ -481,6 +481,23 @@ namespace AutopilotMonitor.Agent.V2
                 ? (TimeSpan?)TimeSpan.FromMinutes(agentConfig.AgentMaxLifetimeMinutes)
                 : null;
 
+            // P1 fix: tenant-controlled telemetry cadence knobs (UploadIntervalSeconds /
+            // MaxBatchSize) were merged into agentConfig by RemoteConfigMerger but never
+            // reached the orchestrator. Read them here, clamp to safe bounds, and pass via
+            // the orchestrator constructor so a tenant change actually takes effect on the
+            // next agent run. Bounds are deliberately wide — they exist only to guard
+            // against typos / zero values, not to enforce policy. Initial-apply only;
+            // there is no V2 hot-reload path for these knobs because there is no periodic
+            // remote-config refresh outside the rotate_config ServerAction (which itself
+            // does not re-merge into agentConfig today).
+            var drainInterval = TimeSpan.FromSeconds(ClampUploadIntervalSeconds(agentConfig.UploadIntervalSeconds));
+            var uploadBatchSize = ClampUploadBatchSize(agentConfig.MaxBatchSize);
+            logger.Info(
+                $"Telemetry cadence: drainInterval={drainInterval.TotalSeconds:F0}s, " +
+                $"uploadBatchSize={uploadBatchSize} " +
+                $"(remote raw values: UploadIntervalSeconds={agentConfig.UploadIntervalSeconds}, " +
+                $"MaxBatchSize={agentConfig.MaxBatchSize}).");
+
             // Diagnostics upload delegate — wraps the production DiagnosticsPackageService.
             // Instantiated lazily + per-invocation (cheap) so we always pick up current config.
             var diagnosticsService = new DiagnosticsPackageService(agentConfig, logger, backendApiClient);
@@ -500,7 +517,9 @@ namespace AutopilotMonitor.Agent.V2
                 classifiers: classifiers,
                 componentFactory: componentFactory,
                 whiteGloveSealingPatternIds: whiteGloveSealingPatternIds,
-                agentMaxLifetime: agentMaxLifetime))
+                drainInterval: drainInterval,
+                agentMaxLifetime: agentMaxLifetime,
+                uploadBatchSize: uploadBatchSize))
             {
                 using (var shutdown = new ManualResetEventSlim(false))
                 using (var shutdownComplete = new ManualResetEventSlim(false))
@@ -1103,6 +1122,33 @@ namespace AutopilotMonitor.Agent.V2
             {
                 logger.Error("onAdminFailed (AdminAction=Failed) threw.", ex);
             }
+        }
+
+        // Clamp bounds for the tenant-controlled telemetry cadence knobs. The orchestrator
+        // throws on non-positive values; the upper bounds are sanity guards so a typo in
+        // tenant config can't push the drain to an absurd cadence (e.g. 1 sec hammer-poll
+        // or hour-long gaps that hide live UI from operators).
+        private const int MinUploadIntervalSeconds = 5;
+        private const int MaxUploadIntervalSeconds = 300;
+        private const int DefaultUploadIntervalSeconds = 30;
+        private const int MinUploadBatchSize = 1;
+        private const int MaxUploadBatchSize = 500;
+        private const int DefaultUploadBatchSize = 100;
+
+        private static int ClampUploadIntervalSeconds(int requested)
+        {
+            if (requested <= 0) return DefaultUploadIntervalSeconds;
+            if (requested < MinUploadIntervalSeconds) return MinUploadIntervalSeconds;
+            if (requested > MaxUploadIntervalSeconds) return MaxUploadIntervalSeconds;
+            return requested;
+        }
+
+        private static int ClampUploadBatchSize(int requested)
+        {
+            if (requested <= 0) return DefaultUploadBatchSize;
+            if (requested < MinUploadBatchSize) return MinUploadBatchSize;
+            if (requested > MaxUploadBatchSize) return MaxUploadBatchSize;
+            return requested;
         }
 
         /// <summary>

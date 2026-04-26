@@ -79,6 +79,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly TimeSpan _drainInterval;
         private readonly TimeSpan _terminalDrainTimeout;
         private readonly TimeSpan? _agentMaxLifetime;
+        private readonly int _uploadBatchSize;
 
         // Test-only override so tests can drive rehydrate-failure via FakeDeadlineScheduler.
         // Production always passes null → Start() creates the real DeadlineScheduler.
@@ -152,6 +153,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             TimeSpan? drainInterval = null,
             TimeSpan? terminalDrainTimeout = null,
             TimeSpan? agentMaxLifetime = null,
+            int uploadBatchSize = 100,
             IDeadlineScheduler? schedulerOverride = null)
         {
             if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("SessionId is mandatory.", nameof(sessionId));
@@ -186,6 +188,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (agentMaxLifetime.HasValue && agentMaxLifetime.Value <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException(nameof(agentMaxLifetime), "AgentMaxLifetime must be positive when set.");
             _agentMaxLifetime = agentMaxLifetime;
+
+            if (uploadBatchSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(uploadBatchSize), "UploadBatchSize must be positive.");
+            _uploadBatchSize = uploadBatchSize;
+
             _schedulerOverride = schedulerOverride;
         }
 
@@ -438,9 +445,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     "will be posted after ingress start; self-destruct handling is caller-owned.");
             }
 
-            // 3) Telemetry-Transport.
+            // 3) Telemetry-Transport. Batch size flows from AgentConfiguration.MaxBatchSize
+            //    via Program.cs (P1 fix: previously the remote-config knob was merged but
+            //    never applied, so tenants saw drainInterval/MaxBatchSize have no effect).
             _spool = new TelemetrySpool(_transportDirectory, _clock, _logger);
-            _transport = new TelemetryUploadOrchestrator(_spool, _uploader, _clock);
+            _transport = new TelemetryUploadOrchestrator(_spool, _uploader, _clock, batchSize: _uploadBatchSize);
+
+            // Late-bind the spool reference into the component factory so peripheral
+            // collectors (AgentSelfMetricsCollector via PeriodicCollectorLifecycleHost) can
+            // read PendingItemCount / SpoolFileSizeBytes for the agent_metrics_snapshot
+            // payload. Done as a setter call rather than a CreateCollectorHosts parameter
+            // because IComponentFactory is a public seam with test fakes — adding a
+            // parameter would force every fake to be touched, and the spool stats are an
+            // optional capability that test fakes don't need to surface.
+            if (_componentFactory is DefaultComponentFactory defaultFactory)
+            {
+                defaultFactory.SetTelemetrySpool(_spool);
+            }
 
             // 3a) Immediate-flush wakeup — lifecycle-critical items (agent_started, hello wizard,
             //     auth-failure shutdown, version-check, enrollment_failed on max-lifetime, …)
