@@ -197,53 +197,13 @@ namespace AutopilotMonitor.Agent.V2
             var isWhiteGloveResume = bootstrap.IsWhiteGloveResume;
             var cleanupServiceFactory = bootstrap.CleanupServiceFactory;
 
-            var backendApiClient = new BackendApiClient(
-                baseUrl: agentConfig.ApiBaseUrl,
-                configuration: agentConfig,
-                logger: logger,
-                agentVersion: GetAgentVersion());
-
-            // M4.6.γ — Emergency + Distress reporters. Plumbed into RemoteConfigService so
-            // Config-fetch failures (auth vs network) flow to the correct channel. Also fires
-            // an initial AuthCertificateMissing distress when the MDM cert was expected but
-            // not found (Legacy parity — surfaces pre-MDM-enrollment dead-ends to the backend
-            // via the cert-less distress channel).
-            var hardwareForReporters = HardwareInfo.GetHardwareInfo(logger);
-            var distressReporter = new DistressReporter(
-                baseUrl: agentConfig.ApiBaseUrl,
-                tenantId: agentConfig.TenantId,
-                manufacturer: hardwareForReporters.Manufacturer,
-                model: hardwareForReporters.Model,
-                serialNumber: hardwareForReporters.SerialNumber,
-                agentVersion: GetAgentVersion(),
-                logger: logger);
-
-            var emergencyReporter = new EmergencyReporter(
-                apiClient: backendApiClient,
-                sessionId: agentConfig.SessionId,
-                tenantId: agentConfig.TenantId,
-                agentVersion: GetAgentVersion(),
-                logger: logger);
-
-            if (agentConfig.UseClientCertAuth && backendApiClient.ClientCertificate == null)
-            {
-                _ = distressReporter.TrySendAsync(
-                    DistressErrorType.AuthCertificateMissing,
-                    "MDM certificate not found in LocalMachine or CurrentUser store");
-            }
-
-            // Central observer for consecutive 401/403 responses. Initialised with the CLI/bootstrap
-            // defaults on AgentConfiguration; UpdateLimits is called after RemoteConfigMerger.Merge
-            // so tenant-policy overrides take effect. ThresholdExceeded is wired below, once the
-            // shutdown signal is available, to trigger a clean agent exit when the limit is hit.
-            // V1 parity — the distress reporter is plumbed in at construction so the tracker is
-            // the single dispatch point for auth-failure distress (first failure only).
-            var authFailureTracker = new AuthFailureTracker(
-                maxFailures: agentConfig.MaxAuthFailures,
-                timeoutMinutes: agentConfig.AuthFailureTimeoutMinutes,
-                clock: SystemClock.Instance,
-                logger: logger,
-                distressReporter: distressReporter);
+            // Phase 3 (BackendApiClient + reporters + auth-failure tracker) is encapsulated
+            // in BackendClientFactory; see Runtime/BackendClientFactory.cs.
+            var auth = Runtime.BackendClientFactory.BuildAuthClients(agentConfig, GetAgentVersion(), logger);
+            var backendApiClient = auth.BackendApiClient;
+            var distressReporter = auth.DistressReporter;
+            var emergencyReporter = auth.EmergencyReporter;
+            var authFailureTracker = auth.AuthFailureTracker;
 
             var remoteConfigService = new RemoteConfigService(
                 backendApiClient, agentConfig.TenantId, logger, emergencyReporter, distressReporter, authFailureTracker);
@@ -315,45 +275,16 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Debug($"BootstrapConfigCleanup outer exception: {ex.Message}");
             }
 
-            HttpClient mtlsHttpClient;
-            BackendTelemetryUploader uploader;
-            try
+            // Phase 5 (mTLS HttpClient + BackendTelemetryUploader) is encapsulated in
+            // BackendClientFactory. Construction failures map to V1-parity exit codes
+            // (4 = mTLS, 5 = uploader). See Runtime/BackendClientFactory.cs.
+            var telemetry = Runtime.BackendClientFactory.BuildTelemetryClients(agentConfig, auth, GetAgentVersion(), logger);
+            if (telemetry.ShouldExit)
             {
-                // Share BackendApiClient.NetworkMetrics so the mTLS pipeline records every
-                // outbound request — most importantly BackendTelemetryUploader's POST
-                // /api/agent/telemetry, which dominates per-session traffic. Without this the
-                // agent_metrics_snapshot net_total_requests undercounts ~25-30x (only the
-                // legacy BackendApiClient calls would show up).
-                mtlsHttpClient = MtlsHttpClientFactory.Create(
-                    resolver: new DefaultCertificateResolver(),
-                    logger: logger,
-                    metrics: backendApiClient.NetworkMetrics);
+                return telemetry.ExitCode;
             }
-            catch (InvalidOperationException ex)
-            {
-                logger.Error("mTLS HttpClient creation failed — cannot upload telemetry.", ex);
-                return 4;
-            }
-
-            try
-            {
-                uploader = new BackendTelemetryUploader(
-                    httpClient: mtlsHttpClient,
-                    baseUrl: agentConfig.ApiBaseUrl,
-                    tenantId: agentConfig.TenantId,
-                    manufacturer: hardwareForReporters.Manufacturer,
-                    model: hardwareForReporters.Model,
-                    serialNumber: hardwareForReporters.SerialNumber,
-                    bootstrapToken: agentConfig.UseBootstrapTokenAuth ? agentConfig.BootstrapToken : null,
-                    agentVersion: GetAgentVersion(),
-                    authFailureTracker: authFailureTracker,
-                    logger: logger);     // Plan §5 Fix 5 — upload-cadence logging
-            }
-            catch (Exception ex)
-            {
-                logger.Error("BackendTelemetryUploader construction failed.", ex);
-                return 5;
-            }
+            var mtlsHttpClient = telemetry.MtlsHttpClient;
+            var uploader = telemetry.Uploader;
 
             // V1 parity (MonitoringService.Start, MonitoringService.RegisterSessionAsync) —
             // POST /api/agent/register-session with 5-retry exponential backoff (2s/4s/8s/16s)
