@@ -205,75 +205,13 @@ namespace AutopilotMonitor.Agent.V2
             var emergencyReporter = auth.EmergencyReporter;
             var authFailureTracker = auth.AuthFailureTracker;
 
-            var remoteConfigService = new RemoteConfigService(
-                backendApiClient, agentConfig.TenantId, logger, emergencyReporter, distressReporter, authFailureTracker);
-            var remoteConfig = remoteConfigService.FetchConfigAsync().GetAwaiter().GetResult();
-
-            // Project remote tenant-controlled knobs onto the runtime AgentConfiguration so that
-            // downstream consumers (CleanupService, SummaryDialogLauncher, StartupEnvironmentProbes,
-            // DiagnosticsPackageService, EnrollmentTerminationHandler, the logger, the watchdog)
-            // actually respect the tenant admin settings. V1 parity — remote wins
-            // unconditionally for every knob that has a 1:1 mapping. CLI flags seed the initial
-            // AgentConfiguration in BuildAgentConfiguration and then yield to tenant policy.
-            var configMergeResult = RemoteConfigMerger.Merge(agentConfig, remoteConfig, logger);
-
-            // Refresh tracker ceilings with the tenant-specific values we just merged in.
-            authFailureTracker.UpdateLimits(agentConfig.MaxAuthFailures, agentConfig.AuthFailureTimeoutMinutes);
-
-            logger.SetLogLevel(agentConfig.LogLevel);
-
-            // Propagate the backend-expected SHA so the runtime hash-mismatch trigger (M4.6.α
-            // continues this wire; actual runtime trigger will be wired via ServerActionDispatcher
-            // in M4.6.β) has the up-to-date integrity hash. Also refresh AllowAgentDowngrade.
-            if (!string.IsNullOrEmpty(remoteConfig.LatestAgentSha256))
-                SelfUpdater.BackendExpectedSha256 = remoteConfig.LatestAgentSha256;
-
-            // Post-config binary-integrity check: verify the running EXE's SHA-256 against the
-            // value advertised by the backend. V1 parity — on mismatch we (a) emit an
-            // IntegrityCheckFailed emergency report and (b) fire the runtime self-update trigger
-            // so the agent auto-heals (SelfUpdater.CheckAndApplyUpdateAsync force-update path).
-            // The trigger is single-shot per process (Interlocked guard inside the verifier).
-            var agentDirForTrigger = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty;
-            Func<string, bool, Task> runtimeSelfUpdateTrigger = (zipHash, downgrade) =>
-            {
-                if (!string.IsNullOrEmpty(zipHash))
-                    SelfUpdater.BackendExpectedSha256 = zipHash;
-
-                return SelfUpdater.CheckAndApplyUpdateAsync(
-                    currentVersion: GetAgentVersion(),
-                    agentDir: agentDirForTrigger,
-                    consoleMode: consoleMode,
-                    forceUpdate: true,
-                    triggerReason: "runtime_hash_mismatch",
-                    downloadTimeoutMsOverride: 60000,
-                    allowDowngrade: downgrade);
-            };
-
-            var integrityResult = BinaryIntegrityVerifier.Check(
-                expectedSha256: remoteConfig.LatestAgentExeSha256,
-                logger: logger,
-                runtimeSelfUpdateTrigger: runtimeSelfUpdateTrigger,
-                zipHash: remoteConfig.LatestAgentSha256,
-                allowDowngrade: remoteConfig.AllowAgentDowngrade);
-            if (integrityResult.IsMismatch)
-            {
-                _ = emergencyReporter.TrySendAsync(
-                    AgentErrorType.IntegrityCheckFailed,
-                    $"Running exe SHA-256 differs from backend-advertised hash. actual={integrityResult.ActualSha256}, expected={integrityResult.ExpectedSha256}");
-            }
-
-            // H-2 mitigation: delete the persisted bootstrap-config.json once the MDM cert
-            // proves it can authenticate. Non-blocking — any failure leaves the file for retry.
-            try
-            {
-                BootstrapConfigCleanup
-                    .TryDeleteIfCertReadyAsync(agentConfig, logger, GetAgentVersion())
-                    .GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                logger.Debug($"BootstrapConfigCleanup outer exception: {ex.Message}");
-            }
+            // Phase 4 (RemoteConfig fetch + Merge + tracker/logger refresh + binary-integrity
+            // verification + bootstrap-config cleanup) is encapsulated in AgentRuntimeConfig.
+            // See Runtime/AgentRuntimeConfig.cs.
+            var runtimeConfig = Runtime.AgentRuntimeConfig.Resolve(agentConfig, auth, GetAgentVersion(), consoleMode, logger);
+            var remoteConfigService = runtimeConfig.RemoteConfigService;
+            var remoteConfig = runtimeConfig.RemoteConfig;
+            var configMergeResult = runtimeConfig.MergeResult;
 
             // Phase 5 (mTLS HttpClient + BackendTelemetryUploader) is encapsulated in
             // BackendClientFactory. Construction failures map to V1-parity exit codes
