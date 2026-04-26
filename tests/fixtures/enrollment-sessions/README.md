@@ -36,9 +36,14 @@ A fixture may only land here when **all** of the following hold:
 
 ## Fixtures
 
-| Filename | Category | Terminal Stage | EnrollmentType | WhiteGlove | Notes |
-|---|---|---|---|---|---|
-| _(empty — populated during M3 bring-up)_ | | | | | |
+Authoritative terminal-state expectations live in the paired scenario tests, not in this
+table — see [`AutopilotMonitor.Agent.V2.Core.Tests/Integration/ScenarioTests.cs`](../../../src/Agent/AutopilotMonitor.Agent.V2.Core.Tests/Integration/ScenarioTests.cs)
+and [`AutopilotMonitor.DecisionCore.Tests/Scenarios/`](../../../src/Agent/AutopilotMonitor.DecisionCore.Tests/Scenarios/).
+Add a row below for any new fixture so reviewers can spot coverage gaps at a glance.
+
+| Filename | Category | Terminal Stage | EnrollmentType | Notes |
+|---|---|---|---|---|
+| `userdriven-hello-skipped-v2.jsonl` | userdriven-happy (variant) | Completed | v1 | Real-world anon replay of session df7abbc2. HelloOutcome=skipped (not Success); ScenarioProfile.Mode=Classic via ImeUserSessionCompleted. 23 decision signals. |
 
 ## Ordering
 

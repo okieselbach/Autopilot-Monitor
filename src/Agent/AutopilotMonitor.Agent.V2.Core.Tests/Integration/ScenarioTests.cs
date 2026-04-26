@@ -253,6 +253,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
             f.Stop();
         }
 
+        // ================================================================ 14) UserDriven-v1 Hello-Skipped (real-world replay)
+
+        [Fact]
+        public void Scenario14_UserDriven_HelloSkipped_completes_with_skipped_outcome()
+        {
+            // Anonymized replay of session df7abbc2 — UserDriven v1 happy variant where the
+            // Hello-for-Business policy was enabled but the per-user enrollment ultimately
+            // resolved as "skipped" (not "Success"). Verifies that the AND-gate (Desktop +
+            // Hello) accepts any terminal Hello outcome and still routes through Finalizing
+            // → Completed (project memory: feedback_hello_policy_wait_not_completion).
+            using var f = new EnrollmentOrchestratorFixture();
+            f.Start();
+            f.PostFixture("userdriven-hello-skipped-v2.jsonl");
+
+            Assert.True(f.WaitForStage(DefaultTerminalTimeoutMs, SessionStage.Completed));
+            Assert.Equal(SessionOutcome.EnrollmentComplete, f.Orchestrator.CurrentState.Outcome);
+            Assert.Equal("skipped", f.Orchestrator.CurrentState.HelloOutcome?.Value);
+            // ImeUserSessionCompleted at signal 21 promotes ScenarioProfile.Mode to Classic.
+            Assert.Equal(EnrollmentMode.Classic, f.Orchestrator.CurrentState.ScenarioProfile.Mode);
+
+            f.Stop();
+        }
+
         // ================================================================ Pipeline smoke (Telemetry)
 
         [Fact]
