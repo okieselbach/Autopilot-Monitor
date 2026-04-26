@@ -13,7 +13,7 @@ using Xunit;
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
 {
     /// <summary>
-    /// Verifies that <see cref="AutopilotMonitor.Agent.V2.Program.PostSessionStartedSignal"/>
+    /// Verifies that <see cref="AutopilotMonitor.Agent.V2.Runtime.LifecycleEmitters.PostSessionStarted"/>
     /// emits the SessionStarted decision signal with the registration metadata payload the
     /// reducer anchor needs. Plan §M4-V2-parity PR-C.
     /// </summary>
@@ -62,7 +62,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             var logger = NewLogger(tmp.Path);
             var result = BuildSucceeded(ValidatorType.AutopilotV1);
 
-            AutopilotMonitor.Agent.V2.Program.PostSessionStartedSignal(sink, result, BuildConfig(bootstrap: false), logger);
+            AutopilotMonitor.Agent.V2.Runtime.LifecycleEmitters.PostSessionStarted(sink, result, BuildConfig(bootstrap: false), agentVersion: "1.2.3.4", logger);
 
             Assert.Single(sink.Posted);
             var posted = sink.Posted[0];
@@ -81,7 +81,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             var logger = NewLogger(tmp.Path);
             var result = BuildSucceeded(ValidatorType.CorporateIdentifier);
 
-            AutopilotMonitor.Agent.V2.Program.PostSessionStartedSignal(sink, result, BuildConfig(bootstrap: true), logger);
+            AutopilotMonitor.Agent.V2.Runtime.LifecycleEmitters.PostSessionStarted(sink, result, BuildConfig(bootstrap: true), agentVersion: "1.2.3.4", logger);
 
             var payload = sink.Posted[0].Payload;
             Assert.NotNull(payload);
@@ -103,7 +103,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             var result = BuildSucceeded(ValidatorType.Bootstrap);
 
             var ex = Record.Exception(() =>
-                AutopilotMonitor.Agent.V2.Program.PostSessionStartedSignal(sink, result, BuildConfig(bootstrap: false), logger));
+                AutopilotMonitor.Agent.V2.Runtime.LifecycleEmitters.PostSessionStarted(sink, result, BuildConfig(bootstrap: false), agentVersion: "1.2.3.4", logger));
 
             Assert.Null(ex);
         }

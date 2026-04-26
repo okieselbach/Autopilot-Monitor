@@ -65,7 +65,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         {
             using var rig = new Rig();
 
-            global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+            global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                 adminAction: "Succeeded",
                 stageNameAccessor: () => "Completed",
                 post: rig.Post,
@@ -91,7 +91,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         {
             using var rig = new Rig();
 
-            global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+            global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                 adminAction: "Failed",
                 stageNameAccessor: () => "DeviceSetup",
                 post: rig.Post,
@@ -117,7 +117,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         {
             using var rig = new Rig();
 
-            global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+            global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                 adminAction: "succeeded",
                 stageNameAccessor: () => null,
                 post: rig.Post,
@@ -135,7 +135,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             // soft-shutdown path is the safer default.
             using var rig = new Rig();
 
-            global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+            global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                 adminAction: "Quarantined",
                 stageNameAccessor: () => null,
                 post: rig.Post,
@@ -154,7 +154,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             using var rig = new Rig();
 
             var ex = Record.Exception(() =>
-                global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+                global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                     adminAction: "Failed",
                     stageNameAccessor: () => null,
                     post: rig.Post,
@@ -174,7 +174,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             // is a nice-to-have for telemetry, not a correctness dependency.
             using var rig = new Rig();
 
-            global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+            global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                 adminAction: "Failed",
                 stageNameAccessor: () => throw new InvalidOperationException("not started"),
                 post: rig.Post,
@@ -200,7 +200,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
                 new VirtualClock(new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc)));
 
             var ex = Record.Exception(() =>
-                global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+                global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                     adminAction: "Succeeded",
                     stageNameAccessor: () => null,
                     post: stoppedPost,
@@ -223,7 +223,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
                 new ThrowingSink(),
                 new VirtualClock(new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc)));
 
-            global::AutopilotMonitor.Agent.V2.Program.HandleAdminAction(
+            global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.HandleAdminAction(
                 adminAction: "Failed",
                 stageNameAccessor: () => "DeviceSetup",
                 post: stoppedPost,

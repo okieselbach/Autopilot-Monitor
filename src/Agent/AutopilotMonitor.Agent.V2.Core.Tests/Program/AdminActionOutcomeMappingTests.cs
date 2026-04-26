@@ -16,7 +16,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         [Fact]
         public void adminOutcome_Succeeded_maps_to_Succeeded()
         {
-            var result = global::AutopilotMonitor.Agent.V2.Program.MapAdminOutcome(
+            var result = global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.MapAdminOutcome(
                 new Dictionary<string, string> { ["adminOutcome"] = "Succeeded" });
             Assert.Equal(EnrollmentTerminationOutcome.Succeeded, result);
         }
@@ -27,7 +27,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         [InlineData("SuCcEeDeD")]
         public void adminOutcome_Succeeded_is_case_insensitive(string value)
         {
-            var result = global::AutopilotMonitor.Agent.V2.Program.MapAdminOutcome(
+            var result = global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.MapAdminOutcome(
                 new Dictionary<string, string> { ["adminOutcome"] = value });
             Assert.Equal(EnrollmentTerminationOutcome.Succeeded, result);
         }
@@ -35,7 +35,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         [Fact]
         public void adminOutcome_Failed_maps_to_Failed()
         {
-            var result = global::AutopilotMonitor.Agent.V2.Program.MapAdminOutcome(
+            var result = global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.MapAdminOutcome(
                 new Dictionary<string, string> { ["adminOutcome"] = "Failed" });
             Assert.Equal(EnrollmentTerminationOutcome.Failed, result);
         }
@@ -49,7 +49,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             // Failure-safe default: any value that isn't an explicit "Succeeded" (case-insensitive)
             // maps to Failed. This means a future outcome value the agent doesn't know yet won't
             // accidentally be treated as success.
-            var result = global::AutopilotMonitor.Agent.V2.Program.MapAdminOutcome(
+            var result = global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.MapAdminOutcome(
                 new Dictionary<string, string> { ["adminOutcome"] = value });
             Assert.Equal(EnrollmentTerminationOutcome.Failed, result);
         }
@@ -59,7 +59,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         {
             // A kill-signal-driven terminate_session sets origin=kill_signal but no adminOutcome —
             // that's an expected Failed path (hard termination).
-            var result = global::AutopilotMonitor.Agent.V2.Program.MapAdminOutcome(
+            var result = global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.MapAdminOutcome(
                 new Dictionary<string, string> { ["origin"] = "kill_signal" });
             Assert.Equal(EnrollmentTerminationOutcome.Failed, result);
         }
@@ -67,7 +67,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         [Fact]
         public void Null_params_dictionary_maps_to_Failed()
         {
-            var result = global::AutopilotMonitor.Agent.V2.Program.MapAdminOutcome(null);
+            var result = global::AutopilotMonitor.Agent.V2.Runtime.ServerControlPlane.MapAdminOutcome(null);
             Assert.Equal(EnrollmentTerminationOutcome.Failed, result);
         }
     }

@@ -346,49 +346,12 @@ namespace AutopilotMonitor.Agent.V2
 
                     // V1 parity — on the max-lifetime watchdog firing, emit an explicit
                     // `enrollment_failed` event with failureType=agent_timeout BEFORE the
-                    // regular termination path runs. Dashboards + KQL queries key on the
-                    // event type + data dictionary to distinguish a genuine enrollment failure
-                    // from a timeout-triggered shutdown.
-                    EventHandler<EnrollmentTerminatedEventArgs> maxLifetimeEmitter = (s, e) =>
-                    {
-                        if (e.Reason != EnrollmentTerminationReason.MaxLifetimeExceeded) return;
-                        if (lifecyclePost == null)
-                        {
-                            logger.Warning("enrollment_failed (max_lifetime) suppressed — ingress not ready.");
-                            return;
-                        }
-                        try
-                        {
-                            var uptimeMin = (DateTime.UtcNow - agentStartTimeUtc).TotalMinutes;
-                            // Phase stays Unknown per plan §1.4 phase-invariant — the UI timeline
-                            // buckets chronologically into the last-declared phase. This fixes the
-                            // legacy violation where enrollment_failed (max_lifetime) carried
-                            // Phase=Complete and caused a phantom phase in the UI.
-                            lifecyclePost.Emit(new EnrollmentEvent
-                            {
-                                SessionId = agentConfig.SessionId,
-                                TenantId = agentConfig.TenantId,
-                                EventType = "enrollment_failed",
-                                Severity = EventSeverity.Error,
-                                Source = "EnrollmentOrchestrator",
-                                Phase = EnrollmentPhase.Unknown,
-                                Message = $"Agent max lifetime expired ({uptimeMin:F0} min) — enrollment did not complete in time",
-                                Data = new System.Collections.Generic.Dictionary<string, object>
-                                {
-                                    { "failureType", "agent_timeout" },
-                                    { "failureSource", "max_lifetime_timer" },
-                                    { "agentUptimeMinutes", Math.Round(uptimeMin, 1) },
-                                    { "agentMaxLifetimeMinutes", agentConfig.AgentMaxLifetimeMinutes },
-                                    { "stageAtTimeout", e.StageName ?? string.Empty },
-                                },
-                                ImmediateUpload = true,
-                            });
-                        }
-                        catch (Exception emitEx)
-                        {
-                            logger.Warning($"enrollment_failed (max_lifetime) emission failed: {emitEx.Message}");
-                        }
-                    };
+                    // regular termination path runs. See Runtime/LifecycleEmitters.cs.
+                    var maxLifetimeEmitter = Runtime.LifecycleEmitters.CreateMaxLifetimeEmitter(
+                        getLifecyclePost: () => lifecyclePost,
+                        agentConfig: agentConfig,
+                        agentStartTimeUtc: agentStartTimeUtc,
+                        logger: logger);
                     orchestrator.Terminated += maxLifetimeEmitter;
                     // terminationHandler is constructed inside orchestrator.Start's onIngressReady
                     // hook below, so this wrapper null-checks the captured variable. Terminated
@@ -408,52 +371,12 @@ namespace AutopilotMonitor.Agent.V2
 
                     // Auth-failure watchdog: when MaxAuthFailures / AuthFailureTimeoutMinutes
                     // is exceeded the agent must shut down cleanly instead of hammering a
-                    // backend that has definitely said no. Event fires at most once.
-                    // V1 parity — emit a structured `agent_shutdown` event with reason=auth_failure
-                    // and the full telemetry payload before tripping the shutdown signal so the
-                    // backend sees WHY the agent terminated in the session timeline.
-                    EventHandler<AuthFailureThresholdEventArgs> authThresholdHandler = (s, e) =>
-                    {
-                        logger.Error($"Auth-failure threshold exceeded ({e.Reason}) — initiating shutdown.");
-                        if (lifecyclePost != null)
-                        {
-                            try
-                            {
-                                lifecyclePost.Emit(new EnrollmentEvent
-                                {
-                                    SessionId = agentConfig.SessionId,
-                                    TenantId = agentConfig.TenantId,
-                                    EventType = "agent_shutdown",
-                                    Severity = EventSeverity.Error,
-                                    Source = "AuthFailureTracker",
-                                    Phase = EnrollmentPhase.Unknown,
-                                    Message = $"Agent shut down after {e.ConsecutiveFailures} consecutive auth failures",
-                                    Data = new System.Collections.Generic.Dictionary<string, object>
-                                    {
-                                        { "reason", "auth_failure" },
-                                        { "consecutiveFailures", e.ConsecutiveFailures },
-                                        { "firstFailureTime", e.FirstFailureUtc.ToString("o") },
-                                        { "maxFailures", agentConfig.MaxAuthFailures },
-                                        { "timeoutMinutes", agentConfig.AuthFailureTimeoutMinutes },
-                                        { "lastOperation", e.LastOperation ?? string.Empty },
-                                        { "lastStatusCode", e.LastStatusCode },
-                                        { "thresholdReason", e.Reason ?? string.Empty },
-                                    },
-                                    ImmediateUpload = true,
-                                });
-                            }
-                            catch (Exception emitEx)
-                            {
-                                logger.Warning($"agent_shutdown emission failed: {emitEx.Message}");
-                            }
-                        }
-                        else
-                        {
-                            logger.Warning("agent_shutdown (auth_failure) suppressed — ingress not ready.");
-                        }
-
-                        shutdown.Set();
-                    };
+                    // backend that has definitely said no. See Runtime/LifecycleEmitters.cs.
+                    var authThresholdHandler = Runtime.LifecycleEmitters.CreateAuthThresholdHandler(
+                        getLifecyclePost: () => lifecyclePost,
+                        agentConfig: agentConfig,
+                        signalShutdown: () => shutdown.Set(),
+                        logger: logger);
                     authFailureTracker.ThresholdExceeded += authThresholdHandler;
 
                     try
@@ -466,9 +389,9 @@ namespace AutopilotMonitor.Agent.V2
                         orchestrator.Start(ingress =>
                         {
                             lifecyclePost = new InformationalEventPost(ingress, SystemClock.Instance, logger);
-                            EmitAgentStartedEvent(lifecyclePost, agentConfig, previousExit, logger);
-                            EmitVersionCheckEventIfAny(lifecyclePost, agentConfig, logger);
-                            EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
+                            Runtime.LifecycleEmitters.EmitAgentStarted(lifecyclePost, agentConfig, previousExit, GetAgentVersion(), logger);
+                            Runtime.LifecycleEmitters.EmitVersionCheckIfAny(lifecyclePost, agentConfig, logger);
+                            Runtime.LifecycleEmitters.EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
 
                             // Single-rail refactor (plan §5.7) — AgentAnalyzerManager emits through
                             // the same InformationalEventPost. Constructed inside this hook so
@@ -513,101 +436,29 @@ namespace AutopilotMonitor.Agent.V2
                                 // — the full Stop() call later is a no-op for hosts.
                                 stopPeripheralCollectors: () => orchestrator.StopCollectorHosts());
 
-                            // Single-rail refactor (plan §5.3) — ServerActionDispatcher emits through
-                            // the same InformationalEventPost. Constructed inside this hook so
-                            // lifecyclePost is guaranteed non-null; the dispatcher is only wired into
-                            // the telemetry response-path below (WireTelemetryServerResponse), which
-                            // runs strictly after Start returns.
-                            serverActionDispatcher = new ServerActionDispatcher(
-                                configuration: agentConfig,
-                                logger: logger,
-                                rotateConfigAsync: async () =>
-                                {
-                                    try { var _ = await remoteConfigService.FetchConfigAsync(); return true; }
-                                    catch (Exception ex) { logger.Warning($"ServerAction rotate_config failed: {ex.Message}"); return false; }
-                                },
-                                uploadDiagnosticsAsync: async (suffix) =>
-                                    await diagnosticsService.CreateAndUploadAsync(enrollmentSucceeded: false, fileNameSuffix: suffix),
-                                onTerminateRequested: action =>
-                                {
-                                    // Codex Finding 1 (defensive) — re-entry short-circuit. If a
-                                    // nested drain (e.g. orchestrator.Stop's terminal drain) parses
-                                    // a NEW ActionId out of a late response, the dispatcher would
-                                    // otherwise call us again on a thread that is ALREADY inside the
-                                    // shutdown sequence. That thread is responsible for setting
-                                    // shutdownComplete, so waiting on it below would self-deadlock.
-                                    // ActionId dedup in ServerActionDispatcher handles the same-id
-                                    // case; this handles pathological different-id re-entries.
-                                    if (shutdown.IsSet)
-                                    {
-                                        logger.Debug("Terminate callback: shutdown already in progress — short-circuiting re-entry.");
-                                        return Task.CompletedTask;
-                                    }
-
-                                    var forceSelfDestruct = action?.Params != null
-                                        && action.Params.TryGetValue("forceSelfDestruct", out var f)
-                                        && string.Equals(f, "true", StringComparison.OrdinalIgnoreCase);
-                                    if (forceSelfDestruct && !agentConfig.SelfDestructOnComplete)
-                                    {
-                                        logger.Warning("ServerAction terminate_session: forceSelfDestruct=true overrides SelfDestructOnComplete=false.");
-                                        agentConfig.SelfDestructOnComplete = true;
-                                    }
-
-                                    // Codex Finding 2: forward adminOutcome from the ServerAction params so
-                                    // a portal Mark-Succeeded really lands as Succeeded locally (was
-                                    // hard-coded to Failed before, masquerading every admin override as an
-                                    // error in SummaryDialog + firing spurious diagnostics uploads).
-                                    var mappedOutcome = MapAdminOutcome(action?.Params);
-
-                                    logger.Warning($"ServerAction terminate_session received (ruleId={action?.RuleId}, reason={action?.Reason}, outcome={mappedOutcome}) — invoking termination handler.");
-                                    // Synthesise a Terminated event as if the kernel fired it.
-                                    terminationHandler.Handle(
-                                        sender: null,
-                                        args: new EnrollmentTerminatedEventArgs(
-                                            reason: EnrollmentTerminationReason.DecisionTerminalStage,
-                                            outcome: mappedOutcome,
-                                            stageName: orchestrator.CurrentState?.Stage.ToString(),
-                                            terminatedAtUtc: DateTime.UtcNow,
-                                            details: $"Server-requested termination: ruleId={action?.RuleId}, reason={action?.Reason}"));
-
-                                    // Plan §6.2 synchronous-shutdown — block the ingest dispatcher
-                                    // thread until the main-thread cleanup (orchestrator.Stop, client
-                                    // disposal) has fully run. This prevents the agent from issuing
-                                    // another ingest call after terminationHandler.Handle returns but
-                                    // before the process actually exits, which would give the backend
-                                    // another window to re-deliver terminate_session. The dedup in
-                                    // ServerActionDispatcher already squelches those re-deliveries,
-                                    // but waiting here keeps the ingest loop itself quiet. 60s bound
-                                    // covers the 10s spool drain + cleanup-service launch + orchestrator
-                                    // stop; if it times out the agent is misbehaving and we return
-                                    // anyway rather than deadlock the ingest thread forever.
-                                    //
-                                    // Codex Finding 1: the deadlock that previously fired here came
-                                    // from TelemetryUploadOrchestrator raising ServerResponseReceived
-                                    // WHILE holding its _drainGuard. That is fixed at source — events
-                                    // are now raised AFTER guard release, so orchestrator.Stop's
-                                    // terminal DrainAllAsync on the main thread can acquire the guard
-                                    // and actually upload agent_shutting_down before we unblock.
-                                    if (!shutdownComplete.Wait(TimeSpan.FromSeconds(60)))
-                                    {
-                                        logger.Warning("Terminate callback: shutdownComplete wait timed out after 60s — returning without confirmed shutdown.");
-                                    }
-                                    return Task.CompletedTask;
-                                },
-                                post: lifecyclePost);
+                            // ServerActionDispatcher (plan §5.3) — constructed inside this hook so
+                            // lifecyclePost + terminationHandler are guaranteed non-null. Logic
+                            // (rotate_config / upload_diagnostics / terminate_session callbacks +
+                            // the synchronous-shutdown wait) lives in Runtime/ServerControlPlane.cs.
+                            serverActionDispatcher = Runtime.ServerControlPlane.BuildDispatcher(
+                                agentConfig: agentConfig,
+                                orchestrator: orchestrator,
+                                terminationHandler: terminationHandler,
+                                remoteConfigService: remoteConfigService,
+                                diagnosticsService: diagnosticsService,
+                                shutdown: shutdown,
+                                shutdownComplete: shutdownComplete,
+                                post: lifecyclePost,
+                                logger: logger);
                         });
 
-                        // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator parses
-                        // DeviceBlocked / DeviceKillSignal / AdminAction / Actions out of the 2xx
-                        // response body (see BackendTelemetryUploader.TryReadControlSignalsAsync) and
-                        // raises ServerResponseReceived. We translate those into ServerActions and
-                        // dispatch. Legacy parity with IngestEventsResponse synthesis in
-                        // EventUploadOrchestrator.OnEventsUploaded().
-                        //
-                        // MUST be wired AFTER Start() — orchestrator.Transport throws
-                        // InvalidOperationException before Start() because the
-                        // TelemetryUploadOrchestrator is constructed inside Start() at step 311.
-                        WireTelemetryServerResponse(
+                        // M4.6.ε — BackendTelemetryUploader response-plumbing. The orchestrator
+                        // parses DeviceBlocked / DeviceKillSignal / AdminAction / Actions out of
+                        // the 2xx response body and raises ServerResponseReceived; we translate
+                        // those into ServerActions and dispatch. MUST be wired AFTER Start() —
+                        // orchestrator.Transport throws before Start because the
+                        // TelemetryUploadOrchestrator is constructed inside Start at step 311.
+                        Runtime.ServerControlPlane.Wire(
                             orchestrator,
                             serverActionDispatcher,
                             lifecyclePost,
@@ -630,7 +481,7 @@ namespace AutopilotMonitor.Agent.V2
                         // the fact and emits the system_reboot_detected timeline entry.
                         if (string.Equals(previousExit?.ExitType, "reboot_kill", StringComparison.OrdinalIgnoreCase))
                         {
-                            PostSystemRebootObservedSignal(orchestrator.IngressSink, previousExit, logger);
+                            Runtime.LifecycleEmitters.PostSystemRebootObserved(orchestrator.IngressSink, previousExit, logger);
                         }
 
                         // V2 parity — post SessionStarted so the reducer establishes the session anchor
@@ -641,7 +492,7 @@ namespace AutopilotMonitor.Agent.V2
                         //     session straight to a terminal stage; SessionStarted first would be noise.
                         if (!isWhiteGloveResume && string.IsNullOrEmpty(registrationResult.AdminAction))
                         {
-                            PostSessionStartedSignal(orchestrator.IngressSink, registrationResult, agentConfig, logger);
+                            Runtime.LifecycleEmitters.PostSessionStarted(orchestrator.IngressSink, registrationResult, agentConfig, GetAgentVersion(), logger);
                         }
 
                         // V1 parity (MonitoringService.cs:388-413 "ADMIN OVERRIDE on startup") —
@@ -655,7 +506,7 @@ namespace AutopilotMonitor.Agent.V2
                         // handler — no direct synthesis needed.
                         if (!string.IsNullOrEmpty(registrationResult.AdminAction))
                         {
-                            PostAdminPreemptionSignal(orchestrator.IngressSink, registrationResult, logger);
+                            Runtime.LifecycleEmitters.PostAdminPreemption(orchestrator.IngressSink, registrationResult, logger);
                         }
 
                         // M4.6.δ — fire-and-forget startup analyzers (LocalAdmin / SoftwareInventory /
@@ -717,187 +568,6 @@ namespace AutopilotMonitor.Agent.V2
             return 0;
         }
 
-        /// <summary>
-        /// Routes <see cref="TelemetryUploadOrchestrator.ServerResponseReceived"/> backend control
-        /// signals to the correct handler. Three distinct semantic paths, not one:
-        /// <list type="bullet">
-        ///   <item><b>DeviceKillSignal</b> — hard kill by administrator. Synthesises a
-        ///     <c>terminate_session</c> <see cref="ServerAction"/> with
-        ///     <c>forceSelfDestruct=true</c> and routes it through the dispatcher, overriding
-        ///     local <c>SelfDestructOnComplete=false</c>.</item>
-        ///   <item><b>AdminAction=Succeeded</b> — informational. Admin clicked Mark-Succeeded in
-        ///     the portal. Emits a single <c>admin_marked_session</c> timeline entry and lets
-        ///     the agent finish its own path. The agent does NOT repurpose the admin click as a
-        ///     termination trigger.</item>
-        ///   <item><b>AdminAction=Failed</b> — soft admin-driven shutdown. Calls the agent's own
-        ///     <see cref="EnrollmentTerminationHandler.Handle"/> with <c>outcome=Failed</c>, which
-        ///     runs the same analyzers / diagnostics / summary / self-destruct sequence as a
-        ///     locally-detected failure. Self-destruct is governed by local
-        ///     <c>SelfDestructOnComplete</c> — no forced override. Idempotent when the agent has
-        ///     already terminated (<c>_handled</c> guard in the handler).</item>
-        ///   <item><b>upload.Actions[]</b> — genuinely backend-queued <see cref="ServerAction"/>s
-        ///     (<c>rotate_config</c>, <c>request_diagnostics</c>). Still routed through the
-        ///     dispatcher because these are real actions, not admin-button echoes.</item>
-        ///   <item><b>DeviceBlocked</b> — non-terminal upload pause. Transport already reacted in
-        ///     <c>TelemetryUploadOrchestrator.ApplyControlSignals</c>; here we only log.</item>
-        /// </list>
-        /// <para>
-        /// <b>Shutdown race guard</b>: if the agent has already finished its own termination
-        /// sequence (<paramref name="shutdownComplete"/> set), the SignalIngress is disposed
-        /// and any further emit would throw <see cref="InvalidOperationException"/>. Short-circuit
-        /// up front rather than crash deep in the dispatcher / post stack.
-        /// </para>
-        /// </summary>
-        private static void WireTelemetryServerResponse(
-            EnrollmentOrchestrator orchestrator,
-            ServerActionDispatcher dispatcher,
-            InformationalEventPost post,
-            Func<EnrollmentTerminationHandler> terminationHandlerAccessor,
-            AgentConfiguration agentConfig,
-            System.Threading.ManualResetEventSlim shutdownComplete,
-            AgentLogger logger)
-        {
-            orchestrator.Transport.ServerResponseReceived += (sender, upload) =>
-            {
-                if (shutdownComplete.IsSet)
-                {
-                    logger.Debug("WireTelemetryServerResponse: shutdown already complete — ignoring backend control signals on this response.");
-                    return;
-                }
-
-                if (upload.DeviceKillSignal)
-                {
-                    logger.Warning("Backend signalled DeviceKillSignal — synthesising terminate_session (force self-destruct).");
-                    var killAction = new ServerAction
-                    {
-                        Type = ServerActionTypes.TerminateSession,
-                        Reason = "DeviceKillSignal from administrator",
-                        QueuedAt = DateTime.UtcNow,
-                        Params = new System.Collections.Generic.Dictionary<string, string>
-                        {
-                            { "forceSelfDestruct", "true" },
-                            { "gracePeriodSeconds", "0" },
-                            { "origin", "kill_signal" },
-                        },
-                    };
-                    try { dispatcher.DispatchAsync(new System.Collections.Generic.List<ServerAction> { killAction }).GetAwaiter().GetResult(); }
-                    catch (Exception ex) { logger.Error("ServerActionDispatcher.DispatchAsync (kill) threw during server-response wiring.", ex); }
-                }
-                else if (!string.IsNullOrEmpty(upload.AdminAction))
-                {
-                    Func<string> stageNameAccessor = () =>
-                    {
-                        try { return orchestrator.CurrentState?.Stage.ToString(); }
-                        catch (InvalidOperationException) { return null; }
-                    };
-                    Action<EnrollmentTerminatedEventArgs> onAdminFailed = args =>
-                    {
-                        var handler = terminationHandlerAccessor();
-                        if (handler == null)
-                        {
-                            logger.Warning("AdminAction=Failed received but terminationHandler not constructed yet — ignoring.");
-                            return;
-                        }
-                        handler.Handle(sender: null, args: args);
-                    };
-                    HandleAdminAction(upload.AdminAction, stageNameAccessor, post, onAdminFailed, agentConfig, logger);
-                }
-
-                if (upload.Actions != null && upload.Actions.Count > 0)
-                {
-                    var explicitActions = new System.Collections.Generic.List<ServerAction>(upload.Actions);
-                    try { dispatcher.DispatchAsync(explicitActions).GetAwaiter().GetResult(); }
-                    catch (Exception ex) { logger.Error("ServerActionDispatcher.DispatchAsync (explicit actions) threw during server-response wiring.", ex); }
-                }
-
-                if (upload.DeviceBlocked)
-                {
-                    var until = upload.UnblockAt.HasValue ? $"until {upload.UnblockAt.Value:O}" : "indefinitely";
-                    logger.Warning($"Backend signalled DeviceBlocked {until} — uploads paused, session remains alive.");
-                }
-            };
-        }
-
-        /// <summary>
-        /// Soft admin-override handling. Portal Mark-Succeeded / Mark-Failed is an echo of an
-        /// admin button click, not a ServerAction: it bypasses the dispatcher (no
-        /// <c>server_action_received / _executed</c> noise) and flows straight into the agent's
-        /// own timeline / termination pipeline.
-        /// <list type="bullet">
-        ///   <item><c>Succeeded</c>: informational timeline entry only. The agent keeps running
-        ///     its own decision path; later rules/analyzers can read the marker from the event
-        ///     stream if they need to correlate.</item>
-        ///   <item><c>Failed</c>: emits the same marker and invokes the agent's own
-        ///     <see cref="EnrollmentTerminationHandler"/> with <c>outcome=Failed</c>, never
-        ///     forcing self-destruct. Equivalent to the agent self-detecting a failure.</item>
-        /// </list>
-        /// </summary>
-        internal static void HandleAdminAction(
-            string adminAction,
-            Func<string> stageNameAccessor,
-            InformationalEventPost post,
-            Action<EnrollmentTerminatedEventArgs> onAdminFailed,
-            AgentConfiguration agentConfig,
-            AgentLogger logger)
-        {
-            var outcome = string.Equals(adminAction, "Succeeded", StringComparison.OrdinalIgnoreCase)
-                ? EnrollmentTerminationOutcome.Succeeded
-                : EnrollmentTerminationOutcome.Failed;
-
-            logger.Warning($"Backend signalled AdminAction={adminAction} — soft admin-override (outcome={outcome}).");
-
-            try
-            {
-                post.Emit(new EnrollmentEvent
-                {
-                    SessionId = agentConfig.SessionId,
-                    TenantId = agentConfig.TenantId,
-                    EventType = "admin_marked_session",
-                    Severity = outcome == EnrollmentTerminationOutcome.Succeeded ? EventSeverity.Info : EventSeverity.Warning,
-                    Source = "WireTelemetryServerResponse",
-                    Phase = EnrollmentPhase.Unknown,
-                    Message = $"Administrator marked session as {adminAction} via portal.",
-                    Data = new System.Collections.Generic.Dictionary<string, object>
-                    {
-                        { "adminOutcome", adminAction ?? string.Empty },
-                        { "origin", "admin_action" },
-                    },
-                    ImmediateUpload = true,
-                });
-            }
-            catch (InvalidOperationException ex)
-            {
-                // Race: SignalIngress was stopped between the shutdownComplete check above and
-                // this emit. Debug-only — the admin click will surface in the next session.
-                logger.Debug($"admin_marked_session emit suppressed (ingress stopped): {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"admin_marked_session emit failed: {ex.Message}");
-            }
-
-            if (outcome != EnrollmentTerminationOutcome.Failed) return;
-            if (onAdminFailed == null) return;
-
-            string stageName = null;
-            try { stageName = stageNameAccessor?.Invoke(); }
-            catch { /* accessor faulted — leave stageName null */ }
-
-            try
-            {
-                onAdminFailed(new EnrollmentTerminatedEventArgs(
-                    reason: EnrollmentTerminationReason.DecisionTerminalStage,
-                    outcome: EnrollmentTerminationOutcome.Failed,
-                    stageName: stageName,
-                    terminatedAtUtc: DateTime.UtcNow,
-                    details: "Admin marked session as Failed via portal."));
-            }
-            catch (Exception ex)
-            {
-                logger.Error("onAdminFailed (AdminAction=Failed) threw.", ex);
-            }
-        }
-
         // Clamp bounds for the tenant-controlled telemetry cadence knobs. The orchestrator
         // throws on non-positive values; the upper bounds are sanity guards so a typo in
         // tenant config can't push the drain to an absurd cadence (e.g. 1 sec hammer-poll
@@ -923,255 +593,6 @@ namespace AutopilotMonitor.Agent.V2
             if (requested < MinUploadBatchSize) return MinUploadBatchSize;
             if (requested > MaxUploadBatchSize) return MaxUploadBatchSize;
             return requested;
-        }
-
-        /// <summary>
-        /// V1 parity — when <see cref="RemoteConfigMerger"/> flips the tenant-controlled
-        /// <c>UnrestrictedMode</c> guardrail, surface the transition as an auditable event on
-        /// the session timeline so operators can correlate subsequent gather-rule exec with the
-        /// elevated policy. The V1 code lives in
-        /// <c>MonitoringService.AuditUnrestrictedModeChange</c>.
-        /// </summary>
-        private static void EmitUnrestrictedModeAuditIfChanged(
-            InformationalEventPost post,
-            AgentConfiguration agentConfig,
-            RemoteConfigMergeResult mergeResult,
-            AgentLogger logger)
-        {
-            if (mergeResult == null || !mergeResult.UnrestrictedModeChanged) return;
-
-            try
-            {
-                var newValue = mergeResult.NewUnrestrictedMode;
-                logger.Warning(
-                    $"UnrestrictedMode changed: {mergeResult.OldUnrestrictedMode} → {newValue}. Emitting audit event.");
-
-                post.Emit(new EnrollmentEvent
-                {
-                    SessionId = agentConfig.SessionId,
-                    TenantId = agentConfig.TenantId,
-                    EventType = "agent_unrestricted_mode_changed",
-                    Severity = newValue ? EventSeverity.Warning : EventSeverity.Info,
-                    Source = "RemoteConfigMerger",
-                    Phase = EnrollmentPhase.Unknown,
-                    Message = newValue
-                        ? "Agent unrestricted mode ENABLED — gather rules can now execute without AllowList checks"
-                        : "Agent unrestricted mode disabled — gather rules revert to AllowList checks",
-                    Data = new System.Collections.Generic.Dictionary<string, object>
-                    {
-                        { "oldValue", mergeResult.OldUnrestrictedMode },
-                        { "newValue", newValue },
-                        { "changedAtUtc", DateTime.UtcNow.ToString("o") },
-                    },
-                    ImmediateUpload = true,
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"EmitUnrestrictedModeAuditIfChanged: emission failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// V2 parity — post <see cref="DecisionSignalKind.AdminPreemptionDetected"/> when the
-        /// register-session response carried an <c>AdminAction</c>. The reducer handler at
-        /// DecisionEngine.Shared.cs#HandleAdminPreemptionDetectedV1 transitions Stage to the
-        /// terminal state and emits the enrollment_complete/_failed telemetry event; the
-        /// orchestrator's DecisionStepProcessor then raises the Terminated event, which the
-        /// subscribed <c>EnrollmentTerminationHandler</c> picks up — no direct synthesis needed.
-        /// </summary>
-        private static void PostAdminPreemptionSignal(
-            ISignalIngressSink ingressSink,
-            SessionRegistrationResult registrationResult,
-            AgentLogger logger)
-        {
-            try
-            {
-                var adminOutcome = registrationResult.AdminAction; // "Succeeded" | "Failed"
-                logger.Warning(
-                    $"=== ADMIN OVERRIDE on startup: session already marked as {adminOutcome} by administrator — posting AdminPreemptionDetected signal ===");
-
-                ingressSink.Post(
-                    kind: DecisionSignalKind.AdminPreemptionDetected,
-                    occurredAtUtc: DateTime.UtcNow,
-                    sourceOrigin: "register_session_response",
-                    evidence: new Evidence(
-                        kind: EvidenceKind.Synthetic,
-                        identifier: $"admin_preemption:{adminOutcome}",
-                        summary: $"Operator marked session as {adminOutcome} via portal before agent startup."),
-                    payload: new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        ["adminOutcome"] = adminOutcome,
-                    });
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"AdminPreemptionDetected post failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// V2 parity — post a <see cref="DecisionSignalKind.SessionStarted"/> signal with the
-        /// tenant-registered session metadata (EnrollmentType / IsHybridJoin / ValidatedBy) so the
-        /// reducer's session-anchor handler runs. Without this the DecisionState.Stage stays at
-        /// the initial value and subsequent raw signals (ESP / Hello) see an uninitialised session.
-        /// </summary>
-        internal static void PostSessionStartedSignal(
-            ISignalIngressSink ingressSink,
-            SessionRegistrationResult registrationResult,
-            AgentConfiguration agentConfig,
-            AgentLogger logger)
-        {
-            try
-            {
-                var payload = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["enrollmentType"] = EnrollmentRegistryDetector.DetectEnrollmentType(),
-                    ["isHybridJoin"] = EnrollmentRegistryDetector.DetectHybridJoin() ? "true" : "false",
-                    ["validatedBy"] = registrationResult.ValidatedBy.ToString(),
-                    ["agentVersion"] = GetAgentVersion(),
-                    ["isBootstrapSession"] = agentConfig.UseBootstrapTokenAuth ? "true" : "false",
-                };
-
-                var evidence = new Evidence(
-                    kind: EvidenceKind.Synthetic,
-                    identifier: "register_session_success",
-                    summary: "Session registration handshake succeeded; posting SessionStarted anchor for reducer.");
-
-                ingressSink.Post(
-                    kind: DecisionSignalKind.SessionStarted,
-                    occurredAtUtc: DateTime.UtcNow,
-                    sourceOrigin: "Program.RunAgent",
-                    evidence: evidence,
-                    payload: payload);
-
-                logger.Debug($"SessionStarted signal posted (validatedBy={registrationResult.ValidatedBy}, enrollmentType={payload["enrollmentType"]}).");
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"SessionStarted post failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// V1 parity — fire-and-forget <c>agent_started</c> event emitted after
-        /// <see cref="EnrollmentOrchestrator.Start"/>. Carries a snapshot of the boot classification
-        /// (<paramref name="previousExit"/>) and the tenant-influenced runtime knobs so dashboards
-        /// can classify crash-loops, backend-rejected sessions and forced self-destruct runs.
-        /// Phase stays <see cref="EnrollmentPhase.Unknown"/> — the event is NOT a phase declaration.
-        /// </summary>
-        private static void EmitAgentStartedEvent(
-            InformationalEventPost post,
-            AgentConfiguration agentConfig,
-            PreviousExitSummary previousExit,
-            AgentLogger logger)
-        {
-            try
-            {
-                var data = new System.Collections.Generic.Dictionary<string, object>
-                {
-                    { "agentVersion", GetAgentVersion() },
-                    { "commandLineArgs", agentConfig.CommandLineArgs ?? string.Empty },
-                    { "isBootstrapSession", agentConfig.UseBootstrapTokenAuth },
-                    { "awaitEnrollment", agentConfig.AwaitEnrollment },
-                    { "selfDestructOnComplete", agentConfig.SelfDestructOnComplete },
-                    { "certAuth", !agentConfig.UseBootstrapTokenAuth },
-                    { "agentMaxLifetimeMinutes", agentConfig.AgentMaxLifetimeMinutes },
-                    { "diagnosticsUploadMode", agentConfig.DiagnosticsUploadMode ?? "Off" },
-                    { "previousExitType", previousExit?.ExitType ?? "unknown" },
-                    { "unrestrictedMode", agentConfig.UnrestrictedMode },
-                };
-
-                if (!string.IsNullOrEmpty(previousExit?.CrashExceptionType))
-                    data["previousCrashException"] = previousExit.CrashExceptionType;
-
-                if (previousExit?.LastBootUtc.HasValue == true)
-                    data["previousBootUtc"] = previousExit.LastBootUtc.Value.ToString("o");
-
-                post.Emit(new EnrollmentEvent
-                {
-                    SessionId = agentConfig.SessionId,
-                    TenantId = agentConfig.TenantId,
-                    EventType = "agent_started",
-                    Severity = EventSeverity.Info,
-                    Source = "Agent",
-                    Phase = EnrollmentPhase.Unknown,
-                    Message = $"Agent v{GetAgentVersion()} started (previousExit={previousExit?.ExitType ?? "unknown"}).",
-                    Data = data,
-                    ImmediateUpload = true,
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"agent_started emission failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// V2 parity — post <see cref="DecisionSignalKind.SystemRebootObserved"/> when the prior
-        /// agent process was terminated by an OS reboot. The reducer handler at
-        /// DecisionEngine.Edge.cs#HandleSystemRebootObservedV1 records the reboot fact on the
-        /// state (used by the WhiteGlove reboot-observed scoring weight, plan §2.4) and emits
-        /// the <c>system_reboot_detected</c> telemetry event as a side effect.
-        /// </summary>
-        private static void PostSystemRebootObservedSignal(
-            ISignalIngressSink ingressSink,
-            PreviousExitSummary previousExit,
-            AgentLogger logger)
-        {
-            try
-            {
-                var payload = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["previousExitType"] = previousExit?.ExitType ?? string.Empty,
-                    ["lastBootUtc"] = previousExit?.LastBootUtc?.ToString("o") ?? string.Empty,
-                };
-
-                ingressSink.Post(
-                    kind: DecisionSignalKind.SystemRebootObserved,
-                    occurredAtUtc: DateTime.UtcNow,
-                    sourceOrigin: "Program.DetectPreviousExit",
-                    evidence: new Evidence(
-                        kind: EvidenceKind.Synthetic,
-                        identifier: "previous_exit_reboot_kill",
-                        summary: $"Prior agent process terminated by OS reboot (exitType={previousExit?.ExitType})."),
-                    payload: payload);
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"SystemRebootObserved post failed: {ex.Message}");
-            }
-        }
-
-        private static void EmitVersionCheckEventIfAny(
-            InformationalEventPost post,
-            AgentConfiguration agentConfig,
-            AgentLogger logger)
-        {
-            try
-            {
-                var buildResult = VersionCheckEventBuilder.TryBuild(
-                    sessionId: agentConfig.SessionId,
-                    tenantId: agentConfig.TenantId,
-                    agentStartTimeUtc: DateTime.UtcNow);
-
-                if (!string.IsNullOrEmpty(buildResult?.ParseError))
-                    logger.Warning($"VersionCheckEventBuilder parse error: {buildResult.ParseError}");
-
-                if (buildResult?.Event != null)
-                {
-                    post.Emit(buildResult.Event);
-                    logger.Info($"agent_version_check emitted (outcome={buildResult.Outcome}).");
-                }
-                else if (buildResult?.Deduped == true)
-                {
-                    logger.Debug($"agent_version_check deduped (outcome={buildResult.Outcome}).");
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.Warning($"VersionCheckEventBuilder emission failed: {ex.Message}");
-            }
         }
 
         // ---------------------------------------------------------------- Configuration
