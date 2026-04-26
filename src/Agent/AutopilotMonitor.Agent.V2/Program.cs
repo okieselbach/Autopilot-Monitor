@@ -224,33 +224,16 @@ namespace AutopilotMonitor.Agent.V2
             var mtlsHttpClient = telemetry.MtlsHttpClient;
             var uploader = telemetry.Uploader;
 
-            // V1 parity (MonitoringService.Start, MonitoringService.RegisterSessionAsync) —
-            // POST /api/agent/register-session with 5-retry exponential backoff (2s/4s/8s/16s)
-            // BEFORE the orchestrator starts. Without this call the backend's Sessions table
-            // never gets a row for this session, so IncrementSessionEventCountAsync /
-            // UpdateSessionStatusAsync silently no-op — events still land in the Events table
-            // but session status, phase, admin-overrides and validator reconcile all break.
-            // On failure we follow V1's rule: collectors MUST NOT start to prevent orphaned events.
-            var registrationResult = SessionRegistrationHelper.RegisterWithRetryAsync(
-                apiClient: backendApiClient,
-                agentConfig: agentConfig,
-                agentVersion: GetAgentVersion(),
-                logger: logger,
-                authFailureTracker: authFailureTracker,
-                emergencyReporter: emergencyReporter).GetAwaiter().GetResult();
-
-            if (registrationResult.Outcome != SessionRegistrationOutcome.Succeeded)
+            // Phase 6 (POST /api/agent/register-session with retry + outcome-based exit-code
+            // mapping + on-failure client disposal) is encapsulated in BackendSessionRegistration.
+            // Exit codes: 6 = AuthFailed, 7 = anything else. See Runtime/BackendSessionRegistration.cs.
+            var registration = Runtime.BackendSessionRegistration.Register(
+                agentConfig, auth, mtlsHttpClient, GetAgentVersion(), consoleMode, logger);
+            if (registration.ShouldExit)
             {
-                logger.Error(
-                    $"=== SESSION REGISTRATION FAILED ({registrationResult.Outcome}: {registrationResult.ErrorMessage}) — " +
-                    "collectors will NOT start to prevent orphaned events. ===");
-                if (consoleMode)
-                    Console.Error.WriteLine($"FATAL: session registration failed ({registrationResult.Outcome}). Agent exiting.");
-                try { mtlsHttpClient?.Dispose(); } catch { }
-                try { backendApiClient?.Dispose(); } catch { }
-                // Exit code differs so the diag skill can distinguish Auth vs Network in Scheduled-Task history.
-                return registrationResult.Outcome == SessionRegistrationOutcome.AuthFailed ? 6 : 7;
+                return registration.ExitCode;
             }
+            var registrationResult = registration.Registration;
 
             var classifiers = new IClassifier[]
             {
