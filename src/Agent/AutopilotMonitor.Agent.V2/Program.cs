@@ -181,99 +181,21 @@ namespace AutopilotMonitor.Agent.V2
             var stateSubdir = Path.Combine(dataDirectory, DefaultStateSubdirectory);
             var transportDir = Path.Combine(dataDirectory, DefaultSpoolSubdirectory);
 
-            // Previous-exit classification (for the agent_started event + observability).
-            var previousExit = DetectPreviousExit(dataDirectory, logDirectory);
-            if (previousExit.ExitType != "first_run")
+            // Phase 1+2 (previous-exit, persisted-config, TenantId, AgentConfig, SessionId,
+            // completion-marker / emergency-break guards, optional --await-enrollment cert wait)
+            // is encapsulated in AgentBootstrap; see Runtime/AgentBootstrap.cs for the V1-parity
+            // exit-code mapping (0 = guard handled, 2 = no TenantId, 3 = await timeout).
+            var bootstrap = Runtime.AgentBootstrap.Run(args, logger, dataDirectory, logDirectory, stateSubdir, consoleMode);
+            if (bootstrap.ShouldExit)
             {
-                var crashSuffix = previousExit.CrashExceptionType != null ? $" ({previousExit.CrashExceptionType})" : "";
-                logger.Info($"Previous exit: {previousExit.ExitType}{crashSuffix}");
+                return bootstrap.ExitCode;
             }
 
-            // Merge persisted bootstrap-config.json + await-enrollment.json into CLI args early.
-            var bootstrapConfig = TryReadBootstrapConfig(dataDirectory, logger);
-            var awaitConfig = TryReadAwaitEnrollmentConfig(dataDirectory, logger);
-
-            var tenantIdFromRegistry = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
-            var tenantId = !string.IsNullOrEmpty(tenantIdFromRegistry)
-                ? tenantIdFromRegistry
-                : bootstrapConfig?.TenantId;
-
-            // --install time may have written a bootstrap config that holds a tenantId even when
-            // the registry is not yet populated (bootstrap token path). Honour that.
-
-            var agentConfig = BuildAgentConfiguration(args, tenantId, sessionId: null, bootstrapConfig, awaitConfig);
-
-            var sessionPersistence = new SessionIdPersistence(dataDirectory);
-            if (args.Contains("--new-session"))
-            {
-                sessionPersistence.Delete(logger);
-                logger.Info("--new-session: cleared persisted SessionId.");
-            }
-            // Snapshot the WhiteGlove-resume state BEFORE GetOrCreate: on Part-2 resume we want
-            // to emit the whiteglove_resumed event AFTER orchestrator.Start. Reading the marker
-            // up front avoids racing any downstream clear. V1 parity — the Part-2 detection is
-            // marker-based, and the agent announces resume on the session timeline so that
-            // dashboards can correlate the session's two boots.
-            var isWhiteGloveResume = sessionPersistence.IsWhiteGloveResume();
-            agentConfig.SessionId = sessionPersistence.GetOrCreate(logger);
-
-            // Build a cleanup-service factory used by guards: instantiated lazily and with the
-            // current agentConfig so command-line overrides (e.g. --no-cleanup) take effect.
-            Func<CleanupService> cleanupServiceFactory = () => new CleanupService(agentConfig, logger);
-
-            if (CheckEnrollmentCompleteMarker(
-                    stateSubdir,
-                    agentConfig.SelfDestructOnComplete, cleanupServiceFactory, logger, consoleMode))
-            {
-                logger.Info("Enrollment-complete marker handled — agent exiting.");
-                return 0;
-            }
-
-            if (CheckSessionAgeEmergencyBreak(
-                    dataDirectory, stateSubdir,
-                    agentConfig.AbsoluteMaxSessionHours, agentConfig.SelfDestructOnComplete,
-                    cleanupServiceFactory, logger, consoleMode))
-            {
-                logger.Info("Emergency break fired — agent exiting.");
-                return 0;
-            }
-
-            if (agentConfig.AwaitEnrollment)
-            {
-                logger.Info($"--await-enrollment: polling for MDM certificate (timeout: {agentConfig.AwaitEnrollmentTimeoutMinutes}min).");
-                using (var cts = new CancellationTokenSource())
-                {
-                    var cert = EnrollmentAwaiter
-                        .WaitForMdmCertificateAsync(
-                            thumbprint: null,
-                            timeoutMinutes: agentConfig.AwaitEnrollmentTimeoutMinutes,
-                            logger: logger,
-                            cancellationToken: cts.Token)
-                        .GetAwaiter().GetResult();
-                    if (cert == null)
-                    {
-                        logger.Error("Await-enrollment: timed out waiting for MDM certificate — exiting.");
-                        return 3;
-                    }
-                }
-
-                // Re-resolve TenantId — enrollment typically writes the registry key alongside the cert.
-                if (string.IsNullOrEmpty(agentConfig.TenantId))
-                {
-                    agentConfig.TenantId = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
-                    if (!string.IsNullOrEmpty(agentConfig.TenantId))
-                        logger.Info($"Await-enrollment: TenantId discovered from registry: {agentConfig.TenantId}");
-                }
-
-                // Await-enrollment is one-shot — remove the persisted config so subsequent restarts proceed normally.
-                DeleteAwaitEnrollmentConfig(dataDirectory, logger);
-            }
-
-            if (string.IsNullOrEmpty(agentConfig.TenantId))
-            {
-                logger.Error("V2 agent cannot start: TenantId not available (registry empty + no bootstrap config).");
-                return 2;
-            }
+            var agentConfig = bootstrap.AgentConfig;
+            var sessionPersistence = bootstrap.SessionPersistence;
+            var previousExit = bootstrap.PreviousExit;
+            var isWhiteGloveResume = bootstrap.IsWhiteGloveResume;
+            var cleanupServiceFactory = bootstrap.CleanupServiceFactory;
 
             var backendApiClient = new BackendApiClient(
                 baseUrl: agentConfig.ApiBaseUrl,
