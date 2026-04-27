@@ -139,8 +139,8 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "sessions",                  EndpointPolicy.MemberRead),
         new("GET",    "sessions/{sessionId}",      EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/events", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
-        new("GET",    "sessions/{sessionId}/signals", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
-        new("GET",    "sessions/{sessionId}/decision-graph", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        // sessions/{sessionId}/signals + /decision-graph live in the GlobalAdminOnly block below
+        // (Inspector v1 — Plan §M6). Lift back to MemberRead+QueryParam at the v2 adminMode lift.
         new("GET",    "sessions/{sessionId}/analysis", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "sessions/{sessionId}/vulnerability-report", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "metrics/app",               EndpointPolicy.MemberRead),
@@ -203,6 +203,12 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "metrics/mcp-usage/me",                  EndpointPolicy.AuthenticatedUser),
 
         // ── GlobalAdminOnly ────────────────────────────────────────────
+        // Inspector v1 endpoints (Plan §M6 — temporarily GlobalAdminOnly while the UI
+        // matures; lift to MemberRead+QueryParam scoping at the v2 adminMode lift).
+        // Cross-tenant resolution for GAs happens inside the functions via SessionsIndex,
+        // so TenantScoping.None on the catalog is fine.
+        new("GET",    "sessions/{sessionId}/signals",              EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "sessions/{sessionId}/decision-graph",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "sessions/{sessionId}/reducer-verification", EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),

@@ -242,6 +242,29 @@ public class EndpointPolicyCatalogCompletenessTests
     }
 
     /// <summary>
+    /// Inspector v1 endpoints (signals, decision-graph, reducer-verification) MUST be locked
+    /// to GlobalAdminOnly while the UI matures (Plan §M6 — primary use case is modelling
+    /// 2-stage WhiteGlove deployments). Defense-in-depth against an accidental policy
+    /// downgrade that would expose decision internals to tenant admins before the lift.
+    ///
+    /// When the v2 adminMode lift happens, signals+decision-graph move back to MemberRead
+    /// with TenantScoping.QueryParam. reducer-verification stays GlobalAdminOnly forever.
+    /// </summary>
+    [Theory]
+    [InlineData("GET", "/api/sessions/abc-123/signals",              "sessions/{sessionId}/signals")]
+    [InlineData("GET", "/api/sessions/abc-123/decision-graph",       "sessions/{sessionId}/decision-graph")]
+    [InlineData("GET", "/api/sessions/abc-123/reducer-verification", "sessions/{sessionId}/reducer-verification")]
+    public void InspectorRoutes_AreGlobalAdminOnly(string method, string path, string expectedTemplate)
+    {
+        var entry = EndpointAccessPolicyCatalog.FindPolicy(method, path);
+
+        Assert.NotNull(entry);
+        Assert.Equal(expectedTemplate, entry!.RouteTemplate);
+        Assert.Equal(EndpointPolicy.GlobalAdminOnly, entry.Policy);
+        Assert.Equal(TenantScoping.None, entry.TenantScoping);
+    }
+
+    /// <summary>
     /// Named capture group for {tenantId} correctly extracts the value from request paths.
     /// </summary>
     [Theory]
