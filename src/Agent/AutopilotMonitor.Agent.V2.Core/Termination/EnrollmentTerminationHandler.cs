@@ -62,6 +62,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         // DeviceSetup apps from app_tracking_summary and the SummaryDialog).
         private readonly Func<IReadOnlyList<AppPackageState>> _packageStatesAccessor;
         private readonly Func<IReadOnlyDictionary<string, AppInstallTiming>> _appTimingsAccessor;
+        // V1-parity field: count of IME apps the tracker has marked as "ignored" (e.g. uninstall
+        // intents that don't surface in the install pipeline). Lives on the live
+        // <c>AppPackageStateList</c> only, hence a separate accessor — the deduped phase-snapshot
+        // union accessed via <see cref="_packageStatesAccessor"/> doesn't carry it.
+        private readonly Func<int> _ignoredCountAccessor;
         private readonly Func<CleanupService> _cleanupServiceFactory;
         private readonly Func<bool, string, Task<DiagnosticsUploadResult>> _uploadDiagnosticsAsync;
         private readonly Action _signalShutdown;
@@ -96,7 +101,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             TimeSpan? spoolDrainPeriod = null,
             Func<IReadOnlyDictionary<string, AppInstallTiming>> appTimingsAccessor = null,
             string agentVersion = null,
-            Action stopPeripheralCollectors = null)
+            Action stopPeripheralCollectors = null,
+            Func<int> ignoredCountAccessor = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -107,6 +113,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             // Plan §5 Fix 4 — optional timing accessor (older call sites / tests without IME
             // plumbing pass null → empty timings, which is handled below).
             _appTimingsAccessor = appTimingsAccessor ?? (() => new Dictionary<string, AppInstallTiming>());
+            // Default to 0 when the host doesn't supply an accessor (e.g. tests without an
+            // ImeLogTracker wired up). Live ignoredCount only matters when there's a real tracker.
+            _ignoredCountAccessor = ignoredCountAccessor ?? (() => 0);
             _cleanupServiceFactory = cleanupServiceFactory ?? throw new ArgumentNullException(nameof(cleanupServiceFactory));
             _uploadDiagnosticsAsync = uploadDiagnosticsAsync ?? throw new ArgumentNullException(nameof(uploadDiagnosticsAsync));
             _signalShutdown = signalShutdown ?? throw new ArgumentNullException(nameof(signalShutdown));
@@ -303,8 +312,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         /// <summary>
         /// Plan §5 Fix 4b — emit a single <c>app_tracking_summary</c> event at termination time
         /// with aggregate counts, per-phase breakdown, and per-app install-lifecycle timing.
-        /// Consumed by the Web UI's <c>useSessionDerivedData</c> hook to build authoritative
-        /// per-app durations (matching V1's <c>EnrollmentTracker.Diagnostics.cs:164</c> behaviour).
         /// Best-effort: if any accessor throws, we log a warning and skip — the dialog has
         /// already written <c>final-status.json</c> at this point, so the summary event is
         /// supplementary observability, not load-bearing.
@@ -320,15 +327,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             try
             {
                 var packages = TryGetPackageStates();
-                var timings = TryGetAppTimings();
+                var ignoredCount = TryGetIgnoredCount();
 
-                // Terminal emit: include `perApp`/`byPhase` for the SummaryDialog and
-                // post-mortem diagnostics in the Web UI. Live snapshots from the adapter
-                // ship without detail — we are the single source of full-session detail.
-                var data = AppTrackingSummaryBuilder.Build(packages, timings, includePerAppDetail: true);
+                var data = AppTrackingSummaryBuilder.Build(packages, ignoredCount);
                 var totalApps = (int)data["totalApps"];
                 var completedApps = (int)data["completedApps"];
-                var failedApps = (int)data["failedApps"];
+                var failed = (int)data["failed"];
 
                 _post.Emit(new EnrollmentEvent
                 {
@@ -338,7 +342,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     Severity = EventSeverity.Info,
                     Source = "EnrollmentTerminationHandler",
                     Phase = EnrollmentPhase.Unknown,
-                    Message = $"App summary: {completedApps}/{totalApps} completed, {failedApps} failed.",
+                    Message = $"App summary: {completedApps}/{totalApps} completed, {failed} failed.",
                     Data = data,
                     ImmediateUpload = true,
                 });
@@ -346,6 +350,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             catch (Exception ex)
             {
                 _logger.Warning($"EnrollmentTerminationHandler: app_tracking_summary emit failed: {ex.Message}");
+            }
+        }
+
+        private int TryGetIgnoredCount()
+        {
+            try { return _ignoredCountAccessor(); }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: ignoredCount accessor threw: {ex.Message}");
+                return 0;
             }
         }
 

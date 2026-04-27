@@ -737,13 +737,11 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 // (`componentFactory.AllKnownPackageStates`); without this, the Web header
                 // counters would drop back to user-only apps after AccountSetup begins.
                 var packagesSnapshot = _tracker.GetAllKnownPackageStates();
-                var timingsSnapshot = AppTimings;
-                // Live snapshots ship counters only — `perApp`/`byPhase` are O(N) per emit
-                // and only needed once at session close for the SummaryDialog/post-mortem.
-                var data = AppTrackingSummaryBuilder.Build(packagesSnapshot, timingsSnapshot, includePerAppDetail: false);
+                var ignoredCount = _tracker.PackageStates?.IgnoreList?.Count ?? 0;
+                var data = AppTrackingSummaryBuilder.Build(packagesSnapshot, ignoredCount);
                 var totalApps = (int)data["totalApps"];
                 var completedApps = (int)data["completedApps"];
-                var failedApps = (int)data["failedApps"];
+                var failed = (int)data["failed"];
 
                 _post.Emit(new EnrollmentEvent
                 {
@@ -751,7 +749,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                     Severity = EventSeverity.Info,
                     Source = SourceLabel,
                     Phase = EnrollmentPhase.Unknown,
-                    Message = $"App summary: {completedApps}/{totalApps} completed, {failedApps} failed.",
+                    Message = $"App summary: {completedApps}/{totalApps} completed, {failed} failed.",
                     Timestamp = now,
                     Data = data,
                     // Aggregate header counter — sub-second freshness not required, ride

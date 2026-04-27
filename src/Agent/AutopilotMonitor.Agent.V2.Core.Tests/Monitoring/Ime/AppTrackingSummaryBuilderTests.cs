@@ -1,5 +1,4 @@
 #nullable enable
-using System;
 using System.Collections.Generic;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using Xunit;
@@ -7,15 +6,16 @@ using Xunit;
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Ime
 {
     /// <summary>
-    /// Locks down the <c>app_tracking_summary</c> data shape produced by
-    /// <see cref="AppTrackingSummaryBuilder"/>. The Web's
-    /// <c>useSessionDerivedData</c> / <c>useProgressDerivedData</c> hooks read these keys
-    /// directly; the per-transition emit in <c>ImeLogTrackerAdapter</c> and the terminal
-    /// emit in <c>EnrollmentTerminationHandler</c> share this builder.
+    /// Locks down the flat V1 <c>app_tracking_summary</c> schema produced by
+    /// <see cref="AppTrackingSummaryBuilder"/>. The Web hooks
+    /// (<c>useSessionDerivedData</c> / <c>useProgressDerivedData</c>) and analyze rules
+    /// (e.g. ANALYZE-APP-007's <c>errorCount</c>) read these keys directly. The same builder
+    /// drives the per-transition snapshot in <c>ImeLogTrackerAdapter</c> and the terminal
+    /// emit in <c>EnrollmentTerminationHandler</c> — both consume the same shape.
     /// </summary>
     public sealed class AppTrackingSummaryBuilderTests
     {
-        private static AppPackageState NewPkg(string id, AppTargeted targeted, AppInstallationState state)
+        private static AppPackageState NewPkg(string id, AppTargeted targeted, AppInstallationState state, string? name = null)
         {
             var pkg = new AppPackageState(id, listPos: 0);
             // UpdateState's inverse-detection guard rewrites Installed→Skipped without a
@@ -24,55 +24,119 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Ime
                 pkg.UpdateState(AppInstallationState.Installing);
             pkg.UpdateState(state);
             typeof(AppPackageState).GetProperty(nameof(AppPackageState.Targeted))!.SetValue(pkg, targeted);
+            if (name != null)
+                typeof(AppPackageState).GetProperty(nameof(AppPackageState.Name))!.SetValue(pkg, name);
             return pkg;
         }
 
         [Fact]
-        public void Build_EmptyInputs_YieldsZeroAggregatesAndEmptyCollections()
+        public void Build_EmptyInputs_YieldsZeroAggregatesAndEmptyNameLists()
         {
-            var data = AppTrackingSummaryBuilder.Build(packages: null, timings: null);
+            var data = AppTrackingSummaryBuilder.Build(packages: null);
 
             Assert.Equal(0, (int)data["totalApps"]);
             Assert.Equal(0, (int)data["completedApps"]);
-            Assert.Equal(0, (int)data["installedApps"]);
-            Assert.Equal(0, (int)data["failedApps"]);
+            Assert.Equal(0, (int)data["errorCount"]);
+            Assert.Equal(0, (int)data["deviceErrors"]);
+            Assert.Equal(0, (int)data["userErrors"]);
+            Assert.False((bool)data["hasErrors"]);
+            Assert.False((bool)data["isAllCompleted"]);
+            Assert.Equal(0, (int)data["ignoredCount"]);
+            Assert.Equal(0, (int)data["installed"]);
             Assert.Equal(0, (int)data["downloading"]);
-            Assert.Equal(0, (int)data["installing"]);
             Assert.Equal(0, (int)data["pending"]);
 
-            var byPhase = (Dictionary<string, Dictionary<string, int>>)data["byPhase"];
-            Assert.Empty(byPhase);
-
-            var perApp = (List<Dictionary<string, object>>)data["perApp"];
-            Assert.Empty(perApp);
+            Assert.Empty((List<string>)data["installedNames"]);
+            Assert.Empty((List<string>)data["failedNames"]);
+            Assert.Empty((List<string>)data["pendingNames"]);
         }
 
         [Fact]
-        public void Build_MixedTerminalAndLiveStates_PopulatesAllBucketsCorrectly()
+        public void Build_MixedTerminalAndLiveStates_PopulatesV1Schema()
+        {
+            var packages = new List<AppPackageState>
+            {
+                NewPkg("a", AppTargeted.Device, AppInstallationState.Installed,    "App A"),
+                NewPkg("b", AppTargeted.Device, AppInstallationState.Installed,    "App B"),
+                NewPkg("c", AppTargeted.Device, AppInstallationState.Error,        "App C"),
+                NewPkg("d", AppTargeted.User,   AppInstallationState.Skipped,      "App D"),
+                NewPkg("e", AppTargeted.User,   AppInstallationState.Postponed,    "App E"),
+                NewPkg("f", AppTargeted.Device, AppInstallationState.Downloading,  "App F"),
+                NewPkg("g", AppTargeted.Device, AppInstallationState.Installing,   "App G"),
+                NewPkg("h", AppTargeted.Device, AppInstallationState.NotInstalled, "App H"),
+            };
+
+            var data = AppTrackingSummaryBuilder.Build(packages, ignoredCount: 2);
+
+            Assert.Equal(8, (int)data["totalApps"]);
+            Assert.Equal(2, (int)data["installed"]);
+            Assert.Equal(1, (int)data["failed"]);
+            Assert.Equal(1, (int)data["errorCount"]);
+            Assert.Equal(1, (int)data["skipped"]);
+            Assert.Equal(1, (int)data["postponed"]);
+            Assert.Equal(1, (int)data["downloading"]);
+            Assert.Equal(1, (int)data["installing"]);
+            Assert.Equal(5, (int)data["completedApps"]);
+            Assert.Equal(1, (int)data["pending"]);
+            Assert.Equal(2, (int)data["ignoredCount"]);
+
+            Assert.True((bool)data["hasErrors"]);
+            Assert.False((bool)data["isAllCompleted"]);
+        }
+
+        [Fact]
+        public void Build_DeviceVsUserErrors_SplitByAppTargeted()
+        {
+            var packages = new List<AppPackageState>
+            {
+                NewPkg("a", AppTargeted.Device, AppInstallationState.Error),
+                NewPkg("b", AppTargeted.Device, AppInstallationState.Error),
+                NewPkg("c", AppTargeted.User,   AppInstallationState.Error),
+            };
+
+            var data = AppTrackingSummaryBuilder.Build(packages);
+
+            Assert.Equal(3, (int)data["errorCount"]);
+            Assert.Equal(2, (int)data["deviceErrors"]);
+            Assert.Equal(1, (int)data["userErrors"]);
+        }
+
+        [Fact]
+        public void Build_AllInstalled_FlipsIsAllCompletedTrue()
         {
             var packages = new List<AppPackageState>
             {
                 NewPkg("a", AppTargeted.Device, AppInstallationState.Installed),
-                NewPkg("b", AppTargeted.Device, AppInstallationState.Installed),
-                NewPkg("c", AppTargeted.Device, AppInstallationState.Error),
-                NewPkg("d", AppTargeted.User,   AppInstallationState.Skipped),
-                NewPkg("e", AppTargeted.User,   AppInstallationState.Postponed),
-                NewPkg("f", AppTargeted.Device, AppInstallationState.Downloading),
-                NewPkg("g", AppTargeted.Device, AppInstallationState.Installing),
-                NewPkg("h", AppTargeted.Device, AppInstallationState.NotInstalled),
+                NewPkg("b", AppTargeted.Device, AppInstallationState.Skipped),
+                NewPkg("c", AppTargeted.User,   AppInstallationState.Postponed),
             };
 
-            var data = AppTrackingSummaryBuilder.Build(packages, timings: null);
+            var data = AppTrackingSummaryBuilder.Build(packages);
 
-            Assert.Equal(8, (int)data["totalApps"]);
-            Assert.Equal(2, (int)data["installedApps"]);
-            Assert.Equal(1, (int)data["failedApps"]);
-            Assert.Equal(1, (int)data["skippedApps"]);
-            Assert.Equal(1, (int)data["postponedApps"]);
-            Assert.Equal(1, (int)data["downloading"]);
-            Assert.Equal(1, (int)data["installing"]);
-            Assert.Equal(5, (int)data["completedApps"]); // 2 installed + 1 failed + 1 skipped + 1 postponed
-            Assert.Equal(1, (int)data["pending"]);       // total - completed - downloading - installing = 8-5-1-1
+            Assert.Equal(3, (int)data["completedApps"]);
+            Assert.Equal(3, (int)data["totalApps"]);
+            Assert.True((bool)data["isAllCompleted"]);
+        }
+
+        [Fact]
+        public void Build_NameLists_ContainAppNamesPerBucket()
+        {
+            var packages = new List<AppPackageState>
+            {
+                NewPkg("a", AppTargeted.Device, AppInstallationState.Installed,    "Sysinternals"),
+                NewPkg("b", AppTargeted.Device, AppInstallationState.Error,        "BrokenApp"),
+                NewPkg("c", AppTargeted.User,   AppInstallationState.Skipped,      "OptionalApp"),
+                NewPkg("d", AppTargeted.User,   AppInstallationState.Postponed,    "LaterApp"),
+                NewPkg("e", AppTargeted.Device, AppInstallationState.NotInstalled, "PendingApp"),
+            };
+
+            var data = AppTrackingSummaryBuilder.Build(packages);
+
+            Assert.Equal(new[] { "Sysinternals" }, (List<string>)data["installedNames"]);
+            Assert.Equal(new[] { "BrokenApp" },    (List<string>)data["failedNames"]);
+            Assert.Equal(new[] { "OptionalApp" },  (List<string>)data["skippedNames"]);
+            Assert.Equal(new[] { "LaterApp" },     (List<string>)data["postponedNames"]);
+            Assert.Equal(new[] { "PendingApp" },   (List<string>)data["pendingNames"]);
         }
 
         [Fact]
@@ -86,107 +150,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Ime
                 NewPkg("c", AppTargeted.Device, AppInstallationState.Installing),
             };
 
-            var data = AppTrackingSummaryBuilder.Build(packages, timings: null);
+            var data = AppTrackingSummaryBuilder.Build(packages);
 
             Assert.Equal(0, (int)data["pending"]);
         }
 
         [Fact]
-        public void Build_ByPhase_GroupsByTargetedAndCountsTerminals()
+        public void Build_DropsV2NestedKeys_EnsuresFlatSchema()
         {
+            // The schema is intentionally flat — no perApp/byPhase nested objects. Pinning
+            // this so a future refactor doesn't silently re-introduce nested structures
+            // (which the RuleEngine flat-lookup path can't traverse without dot-paths).
             var packages = new List<AppPackageState>
             {
                 NewPkg("a", AppTargeted.Device, AppInstallationState.Installed),
-                NewPkg("b", AppTargeted.Device, AppInstallationState.Error),
-                NewPkg("c", AppTargeted.User,   AppInstallationState.Installed),
-                NewPkg("d", AppTargeted.User,   AppInstallationState.Skipped),
             };
 
-            var data = AppTrackingSummaryBuilder.Build(packages, timings: null);
-            var byPhase = (Dictionary<string, Dictionary<string, int>>)data["byPhase"];
+            var data = AppTrackingSummaryBuilder.Build(packages);
 
-            Assert.Equal(2, byPhase["Device"]["total"]);
-            Assert.Equal(1, byPhase["Device"]["installed"]);
-            Assert.Equal(1, byPhase["Device"]["failed"]);
-            Assert.Equal(2, byPhase["User"]["total"]);
-            Assert.Equal(1, byPhase["User"]["installed"]);
-            Assert.Equal(1, byPhase["User"]["skipped"]);
-        }
-
-        [Fact]
-        public void Build_LiveSchema_OmitsPerAppAndByPhase_PreservesCounters()
-        {
-            // Live snapshots (per-transition emit from ImeLogTrackerAdapter) intentionally
-            // strip the per-app/per-phase detail to keep storage cost O(N) instead of O(N²).
-            // The terminal emit in EnrollmentTerminationHandler is the single source of detail.
-            var packages = new List<AppPackageState>
-            {
-                NewPkg("a", AppTargeted.Device, AppInstallationState.Installed),
-                NewPkg("b", AppTargeted.Device, AppInstallationState.Error),
-                NewPkg("c", AppTargeted.User,   AppInstallationState.Downloading),
-            };
-
-            var data = AppTrackingSummaryBuilder.Build(packages, timings: null, includePerAppDetail: false);
-
-            // Detail keys must NOT be present.
             Assert.False(data.ContainsKey("perApp"));
             Assert.False(data.ContainsKey("byPhase"));
-
-            // Counter keys must be present and correct.
-            Assert.Equal(3, (int)data["totalApps"]);
-            Assert.Equal(1, (int)data["installedApps"]);
-            Assert.Equal(1, (int)data["failedApps"]);
-            Assert.Equal(1, (int)data["downloading"]);
-            Assert.Equal(2, (int)data["completedApps"]);
-            Assert.Equal(0, (int)data["pending"]);
-        }
-
-        [Fact]
-        public void Build_DefaultsToFullDetail_ForBackwardCompatibility()
-        {
-            // Callers that don't pass the flag (e.g. terminal emit, older code) get the
-            // full schema with perApp/byPhase. Pinning the default here so a future
-            // refactor doesn't silently flip behavior.
-            var packages = new List<AppPackageState>
-            {
-                NewPkg("a", AppTargeted.Device, AppInstallationState.Installed),
-            };
-
-            var data = AppTrackingSummaryBuilder.Build(packages, timings: null);
-
-            Assert.True(data.ContainsKey("perApp"));
-            Assert.True(data.ContainsKey("byPhase"));
-        }
-
-        [Fact]
-        public void Build_PerApp_IncludesTimingsWhenPresent()
-        {
-            var startedAt = new DateTime(2026, 4, 27, 10, 0, 0, DateTimeKind.Utc);
-            var completedAt = startedAt.AddSeconds(42);
-            var packages = new List<AppPackageState>
-            {
-                NewPkg("with-timing", AppTargeted.Device, AppInstallationState.Installed),
-                NewPkg("no-timing",   AppTargeted.Device, AppInstallationState.Installed),
-            };
-            var timings = new Dictionary<string, AppInstallTiming>
-            {
-                ["with-timing"] = new AppInstallTiming(startedAt, completedAt),
-            };
-
-            var data = AppTrackingSummaryBuilder.Build(packages, timings);
-            var perApp = (List<Dictionary<string, object>>)data["perApp"];
-
-            Assert.Equal(2, perApp.Count);
-
-            var withTiming = perApp.Find(e => (string)e["appId"] == "with-timing")!;
-            Assert.Equal(startedAt.ToString("o"), withTiming["startedAt"]);
-            Assert.Equal(completedAt.ToString("o"), withTiming["completedAt"]);
-            Assert.Equal(42.0, (double)withTiming["durationSeconds"]);
-
-            var noTiming = perApp.Find(e => (string)e["appId"] == "no-timing")!;
-            Assert.False(noTiming.ContainsKey("startedAt"));
-            Assert.False(noTiming.ContainsKey("completedAt"));
-            Assert.False(noTiming.ContainsKey("durationSeconds"));
+            Assert.False(data.ContainsKey("installedApps"));
+            Assert.False(data.ContainsKey("failedApps"));
+            Assert.False(data.ContainsKey("skippedApps"));
+            Assert.False(data.ContainsKey("postponedApps"));
         }
     }
 }

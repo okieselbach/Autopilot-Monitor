@@ -94,6 +94,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// </summary>
         public IReadOnlyDictionary<string, AppInstallTiming>? ImeAppTimings => _imeLogHost?.AppTimings;
 
+        /// <summary>
+        /// V1-parity field: count of IME apps in the tracker's ignore list (e.g. uninstall
+        /// intents that don't surface in the install pipeline). Lives on the live
+        /// <see cref="AppPackageStateList"/> only — phase snapshots don't carry it. Returns 0
+        /// before <see cref="CreateCollectorHosts"/> has been called.
+        /// </summary>
+        public int ImeIgnoredCount => _imeLogHost?.PackageStates?.IgnoreList?.Count ?? 0;
+
         public DefaultComponentFactory(
             AgentConfiguration agentConfig,
             AgentConfigResponse remoteConfig,

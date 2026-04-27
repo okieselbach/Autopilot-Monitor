@@ -12,7 +12,7 @@
       "signal": "summary_errors",
       "source": "event_type",
       "eventType": "app_tracking_summary",
-      "dataField": "failedApps",
+      "dataField": "errorCount",
       "operator": "gte",
       "value": "2",
       "required": true

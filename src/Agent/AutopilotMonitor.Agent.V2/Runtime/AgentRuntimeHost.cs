@@ -240,7 +240,10 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                                 // built, so no late `performance_snapshot` slips in after
                                 // `diagnostics_collecting`. Idempotent on the orchestrator
                                 // side — the full Stop() call later is a no-op for hosts.
-                                stopPeripheralCollectors: () => orchestrator.StopCollectorHosts());
+                                stopPeripheralCollectors: () => orchestrator.StopCollectorHosts(),
+                                // V1-parity ignoredCount for app_tracking_summary — lives on the
+                                // live AppPackageStateList only (phase snapshots don't carry it).
+                                ignoredCountAccessor: () => componentFactory.ImeIgnoredCount);
 
                             // ServerActionDispatcher (plan §5.3) — constructed inside this
                             // hook so lifecyclePost + terminationHandler are guaranteed
