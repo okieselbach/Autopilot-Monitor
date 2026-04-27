@@ -1,5 +1,7 @@
 using System;
+using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography.X509Certificates;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
@@ -17,17 +19,24 @@ namespace AutopilotMonitor.Agent.V2.Runtime
     /// uploader. Phase 4 (RemoteConfig fetch + merge + binary-integrity check) lives in
     /// <c>RunAgent</c> between the two factory calls and consumes Phase 3's clients to
     /// produce the merged <see cref="AgentConfigResponse"/>.
+    /// <para>
+    /// <b>NetworkMetrics ownership</b>: the bundle owns one <see cref="NetworkMetrics"/>
+    /// instance which is shared by both HttpClients (BackendApiClient + telemetry uploader)
+    /// via <see cref="NetworkMetricsRecordingHandler"/> in each pipeline. Without this
+    /// share <c>agent_metrics_snapshot.net_total_requests</c> would only reflect the few
+    /// BackendApiClient calls and undercount by ~25-30x.
+    /// </para>
     /// </summary>
     internal static class BackendClientFactory
     {
         /// <summary>
         /// Phase 3 — construct the backend HTTP clients, the distress / emergency reporters
-        /// and the auth-failure tracker. Fires a one-shot <c>AuthCertificateMissing</c>
-        /// distress when client-cert auth is configured but no cert was found in either
-        /// LocalMachine or CurrentUser store (Legacy parity — pre-MDM-enrollment dead-end
-        /// surface). Tracker ceilings reflect the CLI/bootstrap defaults; tenant-policy
-        /// overrides are applied later via <see cref="AuthFailureTracker.UpdateLimits"/>
-        /// once <c>RemoteConfigMerger</c> has run.
+        /// and the auth-failure tracker. Resolves the MDM client certificate when cert-mode
+        /// is enabled; on cert-missing the agent still starts (V1 parity — config-fetch will
+        /// 401, AuthCertificateMissing distress fires, Phase 5's mTLS pipeline then refuses
+        /// to start with Exit 4). Tracker ceilings reflect the CLI/bootstrap defaults;
+        /// tenant-policy overrides are applied later via
+        /// <see cref="AuthFailureTracker.UpdateLimits"/> once <c>RemoteConfigMerger</c> has run.
         /// </summary>
         public static BackendAuthBundle BuildAuthClients(
             AgentConfiguration agentConfig,
@@ -37,18 +46,54 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             if (agentConfig == null) throw new ArgumentNullException(nameof(agentConfig));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
 
+            // Single source of truth for HTTP request/byte counters. Shared with the mTLS
+            // telemetry pipeline in BuildTelemetryClients so net_total_requests reflects every
+            // outbound call (legacy BackendApiClient calls + dominant /api/agent/telemetry POSTs).
+            var networkMetrics = new NetworkMetrics();
+
+            var hardware = HardwareInfo.GetHardwareInfo(logger);
+
+            // Resolve the MDM client cert when cert-mode is on. Cert-missing is non-fatal here:
+            // BackendApiClient still gets a plain (no-cert) HttpClient and the agent continues so
+            // (a) Phase 4 config-fetch can fall back to cached config on 401 and (b) the
+            // AuthCertificateMissing distress reaches the backend before Phase 5's mTLS gate.
+            X509Certificate2 clientCertificate = null;
+            if (agentConfig.UseClientCertAuth)
+            {
+                logger.Debug("Client certificate authentication enabled — searching for certificate...");
+                clientCertificate = new DefaultCertificateResolver().FindClientCertificate(logger);
+                if (clientCertificate != null)
+                {
+                    logger.Info($"Client certificate loaded successfully (Thumbprint={clientCertificate.Thumbprint}).");
+                }
+                else
+                {
+                    logger.Warning("Client certificate authentication enabled but no certificate found — requests will be sent WITHOUT certificate (will likely fail security validation).");
+                }
+            }
+            else
+            {
+                logger.Debug("Client certificate authentication disabled.");
+            }
+
+            var apiHttpClient = BuildBackendApiHttpClient(networkMetrics, clientCertificate, agentVersion);
+
             var backendApiClient = new BackendApiClient(
+                httpClient: apiHttpClient,
                 baseUrl: agentConfig.ApiBaseUrl,
-                configuration: agentConfig,
-                logger: logger,
-                agentVersion: agentVersion);
+                manufacturer: hardware.Manufacturer,
+                model: hardware.Model,
+                serialNumber: hardware.SerialNumber,
+                useBootstrapTokenAuth: agentConfig.UseBootstrapTokenAuth,
+                bootstrapToken: agentConfig.BootstrapToken,
+                agentVersion: agentVersion,
+                logger: logger);
 
             // M4.6.γ — Emergency + Distress reporters. Plumbed into RemoteConfigService so
             // Config-fetch failures (auth vs network) flow to the correct channel. Also fires
             // an initial AuthCertificateMissing distress when the MDM cert was expected but
             // not found (Legacy parity — surfaces pre-MDM-enrollment dead-ends to the backend
             // via the cert-less distress channel).
-            var hardware = HardwareInfo.GetHardwareInfo(logger);
             var distressReporter = new DistressReporter(
                 baseUrl: agentConfig.ApiBaseUrl,
                 tenantId: agentConfig.TenantId,
@@ -65,7 +110,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 agentVersion: agentVersion,
                 logger: logger);
 
-            if (agentConfig.UseClientCertAuth && backendApiClient.ClientCertificate == null)
+            if (agentConfig.UseClientCertAuth && clientCertificate == null)
             {
                 _ = distressReporter.TrySendAsync(
                     DistressErrorType.AuthCertificateMissing,
@@ -87,6 +132,8 @@ namespace AutopilotMonitor.Agent.V2.Runtime
 
             return new BackendAuthBundle(
                 backendApiClient: backendApiClient,
+                networkMetrics: networkMetrics,
+                hasClientCertificate: clientCertificate != null,
                 manufacturer: hardware.Manufacturer,
                 model: hardware.Model,
                 serialNumber: hardware.SerialNumber,
@@ -97,11 +144,9 @@ namespace AutopilotMonitor.Agent.V2.Runtime
 
         /// <summary>
         /// Phase 5 — construct the mTLS-backed <see cref="HttpClient"/> and the
-        /// <see cref="BackendTelemetryUploader"/>. The uploader's <see cref="NetworkMetrics"/>
-        /// instance is shared with the legacy <see cref="BackendApiClient"/>'s pipeline so
-        /// the agent_metrics_snapshot net_total_requests reflects every outbound HTTP call,
-        /// including the dominant <c>/api/agent/telemetry</c> POST (Plan §5 Fix 5 — without
-        /// this the counter undercounts ~25-30x).
+        /// <see cref="BackendTelemetryUploader"/>. Reads the bundle's shared
+        /// <see cref="NetworkMetrics"/> so the agent_metrics_snapshot
+        /// net_total_requests reflects the dominant <c>/api/agent/telemetry</c> POST stream.
         /// </summary>
         public static TelemetryClientResult BuildTelemetryClients(
             AgentConfiguration agentConfig,
@@ -116,15 +161,12 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             HttpClient mtlsHttpClient;
             try
             {
-                // Share BackendApiClient.NetworkMetrics so the mTLS pipeline records every
-                // outbound request — most importantly BackendTelemetryUploader's POST
-                // /api/agent/telemetry, which dominates per-session traffic. Without this the
-                // agent_metrics_snapshot net_total_requests undercounts ~25-30x (only the
-                // legacy BackendApiClient calls would show up).
+                // Telemetry path is cert-mandatory: MtlsHttpClientFactory.Create throws on
+                // missing cert which surfaces here as Exit 4 (V1 parity).
                 mtlsHttpClient = MtlsHttpClientFactory.Create(
                     resolver: new DefaultCertificateResolver(),
                     logger: logger,
-                    metrics: auth.BackendApiClient.NetworkMetrics);
+                    metrics: auth.NetworkMetrics);
             }
             catch (InvalidOperationException ex)
             {
@@ -155,16 +197,70 @@ namespace AutopilotMonitor.Agent.V2.Runtime
 
             return TelemetryClientResult.Continue(mtlsHttpClient, uploader);
         }
+
+        /// <summary>
+        /// Builds the cert-optional HttpClient used by <see cref="BackendApiClient"/>.
+        /// Cert is attached at the TLS layer when present; missing cert degrades to a plain
+        /// (no-cert) handler so the agent can continue starting up — the eventual 401 from
+        /// the backend then drives the AuthFailureTracker / shutdown gate.
+        /// <para>
+        /// Pipeline composition (top → bottom):
+        /// <list type="number">
+        ///   <item><see cref="NetworkMetricsRecordingHandler"/> — records every SendAsync into
+        ///     the shared <see cref="NetworkMetrics"/> counter.</item>
+        ///   <item><see cref="HttpClientHandler"/> — TLS, optional client cert,
+        ///     gzip/deflate response decompression.</item>
+        /// </list>
+        /// </para>
+        /// </summary>
+        internal static HttpClient BuildBackendApiHttpClient(
+            NetworkMetrics networkMetrics,
+            X509Certificate2 clientCertificate,
+            string agentVersion)
+        {
+            var inner = new HttpClientHandler();
+            if (inner.SupportsAutomaticDecompression)
+            {
+                inner.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            }
+            if (clientCertificate != null)
+            {
+                inner.ClientCertificates.Add(clientCertificate);
+            }
+
+            var pipeline = new NetworkMetricsRecordingHandler(networkMetrics, inner);
+            var client = new HttpClient(pipeline)
+            {
+                Timeout = TimeSpan.FromSeconds(30),
+            };
+
+            var ua = string.IsNullOrEmpty(agentVersion)
+                ? "AutopilotMonitor.Agent"
+                : $"AutopilotMonitor.Agent/{agentVersion}";
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(ua);
+
+            return client;
+        }
     }
 
     /// <summary>
-    /// Phase 3 outcome — the four backend-facing clients and the cached hardware identity
-    /// they were built with. RunAgent retains this bundle through the rest of startup so
-    /// the lifecycle / termination wiring can read each client without re-construction.
+    /// Phase 3 outcome — the backend-facing clients, the cached hardware identity they were
+    /// built with, and the shared <see cref="NetworkMetrics"/> counter (also injected into
+    /// the mTLS pipeline in Phase 5). RunAgent retains this bundle through the rest of
+    /// startup so the lifecycle / termination wiring can read each client without
+    /// re-construction.
     /// </summary>
     internal sealed class BackendAuthBundle
     {
         public BackendApiClient BackendApiClient { get; }
+        public NetworkMetrics NetworkMetrics { get; }
+        /// <summary>
+        /// True iff cert-mode was enabled and a client certificate was successfully resolved
+        /// from the Windows cert store. Used by tests as the observable proof that the
+        /// cert-lookup path was (or wasn't) exercised. Production code uses the bool to
+        /// decide whether <c>AuthCertificateMissing</c> distress should fire.
+        /// </summary>
+        public bool HasClientCertificate { get; }
         public string Manufacturer { get; }
         public string Model { get; }
         public string SerialNumber { get; }
@@ -174,6 +270,8 @@ namespace AutopilotMonitor.Agent.V2.Runtime
 
         public BackendAuthBundle(
             BackendApiClient backendApiClient,
+            NetworkMetrics networkMetrics,
+            bool hasClientCertificate,
             string manufacturer,
             string model,
             string serialNumber,
@@ -182,6 +280,8 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             AuthFailureTracker authFailureTracker)
         {
             BackendApiClient = backendApiClient;
+            NetworkMetrics = networkMetrics;
+            HasClientCertificate = hasClientCertificate;
             Manufacturer = manufacturer;
             Model = model;
             SerialNumber = serialNumber;

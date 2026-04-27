@@ -42,6 +42,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
 
             Assert.NotNull(bundle);
             Assert.NotNull(bundle.BackendApiClient);
+            Assert.NotNull(bundle.NetworkMetrics);
             Assert.NotNull(bundle.DistressReporter);
             Assert.NotNull(bundle.EmergencyReporter);
             Assert.NotNull(bundle.AuthFailureTracker);
@@ -61,10 +62,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
 
             var bundle = BackendClientFactory.BuildAuthClients(config, agentVersion: "1.2.3.4", logger: logger);
 
-            // With UseClientCertAuth=false, BackendApiClient skips the cert-store search
-            // entirely → ClientCertificate is null and no AuthCertificateMissing distress
-            // is dispatched. Asserts the bundle is consistent with that path.
-            Assert.Null(bundle.BackendApiClient.ClientCertificate);
+            // With UseClientCertAuth=false, the factory skips the cert-store search entirely
+            // → HasClientCertificate is false and no AuthCertificateMissing distress is
+            // dispatched. Asserts the bundle is consistent with that path.
+            Assert.False(bundle.HasClientCertificate);
         }
 
         // =========================================================== TelemetryClientResult

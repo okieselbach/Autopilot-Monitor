@@ -80,18 +80,65 @@ namespace AutopilotMonitor.Agent.V2
                     Console.WriteLine();
                 }
 
-                using (var apiClient = new BackendApiClient(apiBaseUrl, config, logger, agentVersion))
+                // gather-rules-mode runs single-shot on a fully-provisioned VM; cert is expected
+                // to be present. We mirror BackendClientFactory's cert-optional path: resolve
+                // the cert, log a warning if absent, and continue — the eventual 401 surfaces
+                // through register-session's catch block (line below) instead of crashing here.
+                var hardwareInfo = HardwareInfo.GetHardwareInfo(logger);
+                var clientCert = new DefaultCertificateResolver().FindClientCertificate(logger);
+                if (clientCert == null)
+                {
+                    logger.Warning("--run-gather-rules: no MDM client certificate found — backend calls will likely fail security validation.");
+                }
+                // BackendApiClient takes ownership of the HttpClient and disposes it via its
+                // own Dispose() — no outer using needed.
+                using (var apiClient = new BackendApiClient(
+                    httpClient: Runtime.BackendClientFactory.BuildBackendApiHttpClient(new NetworkMetrics(), clientCert, agentVersion),
+                    baseUrl: apiBaseUrl,
+                    manufacturer: hardwareInfo.Manufacturer,
+                    model: hardwareInfo.Model,
+                    serialNumber: hardwareInfo.SerialNumber,
+                    useBootstrapTokenAuth: false,
+                    bootstrapToken: null,
+                    agentVersion: agentVersion,
+                    logger: logger))
                 using (var remoteConfigService = new RemoteConfigService(apiClient, tenantId, logger))
                 {
-                    // Step 1 — fetch remote config.
+                    // Step 1 — fetch remote config. FetchConfigAsync swallows transport errors
+                    // internally and falls back to cached/default config, so the only way
+                    // CurrentConfig stays null after Wait is a timeout (task still in flight).
                     AgentConfigResponse remoteConfig = null;
                     try
                     {
                         var configTask = remoteConfigService.FetchConfigAsync();
-                        configTask.Wait(TimeSpan.FromSeconds(15));
-                        remoteConfig = remoteConfigService.CurrentConfig;
-                        logger.Info("Remote config fetched.");
-                        if (consoleMode) Console.WriteLine("Remote config fetched.");
+                        var completed = configTask.Wait(TimeSpan.FromSeconds(15));
+                        if (!completed)
+                        {
+                            logger.Warning("Remote config fetch timed out after 15s — continuing without it.");
+                            if (consoleMode) Console.WriteLine("WARNING: Remote config fetch timed out — continuing without it.");
+                            // The Task keeps running against the soon-to-be-disposed HttpClient.
+                            // FetchConfigAsync catches ObjectDisposedException internally so
+                            // there is no escape, but we still observe the eventual outcome
+                            // explicitly to satisfy the unobserved-task contract.
+                            _ = configTask.ContinueWith(
+                                t => { var _ignored = t.Exception; },
+                                System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted
+                                | System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
+                        }
+                        else
+                        {
+                            remoteConfig = remoteConfigService.CurrentConfig;
+                            if (remoteConfig != null)
+                            {
+                                logger.Info("Remote config fetched.");
+                                if (consoleMode) Console.WriteLine("Remote config fetched.");
+                            }
+                            else
+                            {
+                                logger.Warning("Remote config fetch completed but CurrentConfig is null — continuing without it.");
+                                if (consoleMode) Console.WriteLine("WARNING: Remote config fetch returned null — continuing without it.");
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -114,14 +161,13 @@ namespace AutopilotMonitor.Agent.V2
                     // Step 2 — register the ephemeral session.
                     try
                     {
-                        var hw = HardwareInfo.GetHardwareInfo(logger);
                         var registration = new SessionRegistration
                         {
                             SessionId = sessionId,
                             TenantId = tenantId,
-                            SerialNumber = hw.SerialNumber,
-                            Manufacturer = hw.Manufacturer,
-                            Model = hw.Model,
+                            SerialNumber = hardwareInfo.SerialNumber,
+                            Manufacturer = hardwareInfo.Manufacturer,
+                            Model = hardwareInfo.Model,
                             DeviceName = Environment.MachineName,
                             OsName = DeviceInfoProvider.GetOsName(),
                             OsBuild = DeviceInfoProvider.GetOsBuild(),

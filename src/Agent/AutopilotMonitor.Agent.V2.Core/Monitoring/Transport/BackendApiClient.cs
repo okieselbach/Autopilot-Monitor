@@ -1,13 +1,9 @@
 using System;
-using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using AutopilotMonitor.Agent.V2.Core.Configuration;
-using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Newtonsoft.Json;
@@ -15,107 +11,64 @@ using Newtonsoft.Json;
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
 {
     /// <summary>
-    /// Client for communicating with the backend API
+    /// Thin RPC client for the four backend endpoints that are not part of the telemetry-upload
+    /// path: <c>POST /api/agent/register-session</c>, <c>GET /api/agent/config</c>,
+    /// <c>POST /api/agent/upload-url</c> (diagnostics SAS), <c>POST /api/agent/error</c>.
+    /// <para>
+    /// Pipeline-agnostic: the caller supplies a fully configured <see cref="HttpClient"/> via the
+    /// constructor (built in <c>BackendClientFactory</c> with optional client cert,
+    /// gzip/deflate decompression, <c>NetworkMetricsRecordingHandler</c> and User-Agent already
+    /// wired). Disposal of the HttpClient transfers to this client so the existing
+    /// <c>TerminationPipeline</c> contract stays intact.
+    /// </para>
+    /// <para>
+    /// Network counters (<see cref="NetworkMetrics"/>) are recorded by the
+    /// <see cref="NetworkMetricsRecordingHandler"/> in the HttpClient pipeline — no inline
+    /// counting in this class. The handler treats every non-2xx as <c>failed=true</c>, matching
+    /// the legacy semantics where <c>EnsureSuccessStatusCode</c> would have triggered the
+    /// failed branch.
+    /// </para>
     /// </summary>
     public class BackendApiClient : IDisposable
     {
         private readonly HttpClient _httpClient;
         private readonly string _baseUrl;
-        private readonly X509Certificate2 _clientCertificate;
         private readonly string _manufacturer;
         private readonly string _model;
         private readonly string _serialNumber;
-        private readonly Logging.AgentLogger _logger;
-        private readonly NetworkMetrics _networkMetrics = new NetworkMetrics();
-        private readonly string _bootstrapToken;
         private readonly bool _useBootstrapTokenAuth;
+        private readonly string _bootstrapToken;
         private readonly string _agentVersion;
+        private readonly Logging.AgentLogger _logger;
 
         /// <summary>
-        /// Exposes the network metrics counters for AgentSelfMetricsCollector to read.
-        /// </summary>
-        public NetworkMetrics NetworkMetrics => _networkMetrics;
-
-        /// <summary>
-        /// The MDM client certificate loaded at construction time, or null if not found.
-        /// Used by DistressReporter to detect cert-missing scenarios.
-        /// </summary>
-        public X509Certificate2 ClientCertificate => _clientCertificate;
-
-        /// <summary>
-        /// Protected constructor for testability (Moq proxy creation).
+        /// Protected ctor for testability — <c>SessionRegistrationHelperTests.FakeApiClient</c>
+        /// subclasses this and overrides <see cref="RegisterSessionAsync"/> without spinning up
+        /// any HTTP plumbing.
         /// </summary>
         protected BackendApiClient() { }
 
-        public BackendApiClient(string baseUrl, AgentConfiguration configuration = null, Logging.AgentLogger logger = null, string agentVersion = null)
+        public BackendApiClient(
+            HttpClient httpClient,
+            string baseUrl,
+            string manufacturer,
+            string model,
+            string serialNumber,
+            bool useBootstrapTokenAuth,
+            string bootstrapToken,
+            string agentVersion,
+            Logging.AgentLogger logger)
         {
+            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            if (string.IsNullOrEmpty(baseUrl)) throw new ArgumentException("baseUrl is mandatory.", nameof(baseUrl));
             _baseUrl = baseUrl.TrimEnd('/');
-            _logger = logger;
-            _bootstrapToken = configuration?.BootstrapToken;
-            _useBootstrapTokenAuth = configuration?.UseBootstrapTokenAuth ?? false;
+            _manufacturer = manufacturer;
+            _model = model;
+            _serialNumber = serialNumber;
+            _useBootstrapTokenAuth = useBootstrapTokenAuth;
+            _bootstrapToken = bootstrapToken;
             _agentVersion = agentVersion;
-
-            // Find MDM certificate for client authentication if enabled
-            if (configuration?.UseClientCertAuth == true)
-            {
-                logger?.Debug("Client certificate authentication enabled - searching for certificate...");
-
-                _clientCertificate = CertificateHelper.FindMdmCertificate(
-                    logger: logger
-                );
-
-                if (_clientCertificate != null)
-                {
-                    logger?.Info($"Client certificate loaded successfully");
-                    logger?.Debug($"  Thumbprint: {_clientCertificate.Thumbprint}");
-                    logger?.Debug($"  Subject: {_clientCertificate.Subject}");
-                    logger?.Debug($"  Issuer: {_clientCertificate.Issuer}");
-                    logger?.Debug($"  Valid: {_clientCertificate.NotBefore:yyyy-MM-dd} to {_clientCertificate.NotAfter:yyyy-MM-dd}");
-                }
-                else
-                {
-                    logger?.Warning("Client certificate authentication enabled but no certificate found");
-                    logger?.Warning("  Request will be sent WITHOUT certificate (will likely fail security validation)");
-                }
-            }
-            else
-            {
-                logger?.Debug("Client certificate authentication disabled");
-            }
-
-            // Get hardware information for whitelist validation and Autopilot device verification
-            var hardwareInfo = HardwareInfo.GetHardwareInfo(logger);
-            _manufacturer = hardwareInfo.Manufacturer;
-            _model = hardwareInfo.Model;
-            _serialNumber = hardwareInfo.SerialNumber;
-
-            // Use HttpClientHandler with client certificate for TLS-level mTLS negotiation.
-            // Azure App Service extracts the cert from the TLS handshake and forwards it
-            // in the X-ARR-ClientCert header to the backend function.
-            var handler = new HttpClientHandler();
-            // AutomaticDecompression sends Accept-Encoding and transparently decompresses
-            // gzip/deflate responses. Bandwidth-sensitive links benefit a lot on JSON-heavy
-            // endpoints like GetAgentConfig.
-            if (handler.SupportsAutomaticDecompression)
-            {
-                handler.AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate;
-            }
-            if (_clientCertificate != null)
-            {
-                handler.ClientCertificates.Add(_clientCertificate);
-                logger?.Info("Client certificate attached to TLS handler for mTLS negotiation");
-            }
-
-            _httpClient = new HttpClient(handler)
-            {
-                Timeout = TimeSpan.FromSeconds(30)
-            };
-
-            // Set User-Agent for firewall allowlisting and server-side logging
-            var ua = string.IsNullOrEmpty(_agentVersion)
-                ? "AutopilotMonitor.Agent"
-                : $"AutopilotMonitor.Agent/{_agentVersion}";
-            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(ua);
+            _logger = logger;
         }
 
         /// <summary>
@@ -134,12 +87,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                 : Constants.ApiEndpoints.RegisterSession;
             var url = $"{_baseUrl}{endpoint}";
 
-            var response = await PostAsync<RegisterSessionRequest, RegisterSessionResponse>(url, request);
-            return response;
+            return await PostAsync<RegisterSessionRequest, RegisterSessionResponse>(url, request).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// Fetches the agent configuration (collector toggles + gather rules) from the backend
+        /// Fetches the agent configuration (collector toggles + gather rules) from the backend.
+        /// Retries up to 3 times on 503 (with Retry-After honored, capped at 120s).
         /// </summary>
         public async Task<AgentConfigResponse> GetAgentConfigAsync(string tenantId)
         {
@@ -148,71 +101,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                 : Constants.ApiEndpoints.GetAgentConfig;
             var url = $"{_baseUrl}{configEndpoint}?tenantId={Uri.EscapeDataString(tenantId)}";
 
-            // Retry on 503 (backend signals transient device validation failure)
             const int maxAttempts = 3;
-            const int maxRetryAfterSeconds = 120; // Cap Retry-After to prevent indefinite blocking
+            const int maxRetryAfterSeconds = 120;
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 using (var httpRequest = new HttpRequestMessage(HttpMethod.Get, url))
                 {
                     AddSecurityHeaders(httpRequest);
-
                     _logger?.Debug($"GetAgentConfigAsync: GET {url} (attempt {attempt}/{maxAttempts})");
 
-                    var sw = Stopwatch.StartNew();
-                    var failed = false;
-                    long bytesDown = 0;
-                    try
+                    using (var response = await _httpClient.SendAsync(httpRequest).ConfigureAwait(false))
                     {
-                        using (var response = await _httpClient.SendAsync(httpRequest))
+                        if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable && attempt < maxAttempts)
                         {
-                            if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable && attempt < maxAttempts)
+                            var retryAfterSeconds = 30;
+                            if (response.Headers.TryGetValues("Retry-After", out var retryValues) &&
+                                int.TryParse(retryValues.FirstOrDefault(), out var parsedRetry))
                             {
-                                // Backend says "try again" — parse Retry-After or default to 30s
-                                var retryAfterSeconds = 30;
-                                if (response.Headers.TryGetValues("Retry-After", out var retryValues) &&
-                                    int.TryParse(System.Linq.Enumerable.FirstOrDefault(retryValues), out var parsedRetry))
-                                {
-                                    retryAfterSeconds = Math.Min(parsedRetry, maxRetryAfterSeconds);
-                                }
-
-                                _logger?.Warning($"GetAgentConfigAsync: 503 Service Unavailable (attempt {attempt}/{maxAttempts}). Retrying in {retryAfterSeconds}s...");
-                                sw.Stop();
-                                _networkMetrics.RecordRequest(0, 0, sw.ElapsedMilliseconds, true);
-                                await System.Threading.Tasks.Task.Delay(retryAfterSeconds * 1000);
-                                continue;
+                                retryAfterSeconds = Math.Min(parsedRetry, maxRetryAfterSeconds);
                             }
 
-                            ThrowOnAuthFailure(response);
-                            response.EnsureSuccessStatusCode();
-
-                            var responseJson = await response.Content.ReadAsStringAsync();
-                            bytesDown = Encoding.UTF8.GetByteCount(responseJson);
-                            var result = JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
-                            return result;
+                            _logger?.Warning($"GetAgentConfigAsync: 503 Service Unavailable (attempt {attempt}/{maxAttempts}). Retrying in {retryAfterSeconds}s...");
+                            await Task.Delay(retryAfterSeconds * 1000).ConfigureAwait(false);
+                            continue;
                         }
-                    }
-                    catch
-                    {
-                        failed = true;
-                        throw;
-                    }
-                    finally
-                    {
-                        sw.Stop();
-                        _networkMetrics.RecordRequest(0, bytesDown, sw.ElapsedMilliseconds, failed);
+
+                        ThrowOnAuthFailure(response);
+                        response.EnsureSuccessStatusCode();
+
+                        var responseJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        return JsonConvert.DeserializeObject<AgentConfigResponse>(responseJson);
                     }
                 }
             }
 
-            // Final 503 after all retries — throw so caller falls back to cached/default config
             throw new Exception("GetAgentConfigAsync: backend returned 503 after all retry attempts");
         }
 
         /// <summary>
-        /// Requests a short-lived SAS URL for diagnostics package upload.
-        /// Called just before upload so the URL is never stored in config or on disk.
-        /// Returns null if the request fails (non-fatal — diagnostics upload is best-effort).
+        /// Requests a short-lived SAS URL for diagnostics package upload. Called just before
+        /// upload so the URL is never stored in config or on disk.
         /// </summary>
         public async Task<GetDiagnosticsUploadUrlResponse> GetDiagnosticsUploadUrlAsync(
             string tenantId, string sessionId, string fileName)
@@ -224,8 +152,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                 SessionId = sessionId,
                 FileName = fileName
             };
-            var response = await PostAsync<GetDiagnosticsUploadUrlRequest, GetDiagnosticsUploadUrlResponse>(url, request);
-            return response;
+            return await PostAsync<GetDiagnosticsUploadUrlRequest, GetDiagnosticsUploadUrlResponse>(url, request).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -248,22 +175,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                     Content = new StringContent(json, Encoding.UTF8, "application/json")
                 })
                 {
-                    // Security validation on the backend requires tenant ID before parsing the body
+                    // Backend security validation requires tenant id before parsing the body.
                     httpRequest.Headers.Add("X-Tenant-Id", report.TenantId);
-
-                    // Hardware headers are required for full security validation
                     AddSecurityHeaders(httpRequest);
 
                     using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
-                    using (var response = await _httpClient.SendAsync(httpRequest, cts.Token))
+                    using (var response = await _httpClient.SendAsync(httpRequest, cts.Token).ConfigureAwait(false))
                     {
-                        // Response status is deliberately ignored — endpoint always returns 200
+                        // Response status is deliberately ignored — endpoint always returns 200.
                     }
                 }
             }
             catch (Exception ex)
             {
-                // Swallow all exceptions — the emergency channel must never cascade failures
                 _logger?.Debug($"ReportAgentErrorAsync: emergency channel failed: {ex.Message}");
             }
         }
@@ -271,49 +195,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
         private async Task<TResponse> PostAsync<TRequest, TResponse>(string url, TRequest data)
         {
             var json = JsonConvert.SerializeObject(data);
-            var bytesUp = Encoding.UTF8.GetByteCount(json);
 
             using (var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             })
             {
-                // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
                 AddSecurityHeaders(httpRequest);
 
-                var sw = Stopwatch.StartNew();
-                var failed = false;
-                long bytesDown = 0;
-                try
+                using (var response = await _httpClient.SendAsync(httpRequest).ConfigureAwait(false))
                 {
-                    using (var response = await _httpClient.SendAsync(httpRequest))
-                    {
-                        ThrowOnAuthFailure(response);
-                        response.EnsureSuccessStatusCode();
+                    ThrowOnAuthFailure(response);
+                    response.EnsureSuccessStatusCode();
 
-                        var responseJson = await response.Content.ReadAsStringAsync();
-                        bytesDown = Encoding.UTF8.GetByteCount(responseJson);
-                        var result = JsonConvert.DeserializeObject<TResponse>(responseJson);
-
-                        return result;
-                    }
-                }
-                catch
-                {
-                    failed = true;
-                    throw;
-                }
-                finally
-                {
-                    sw.Stop();
-                    _networkMetrics.RecordRequest(bytesUp, bytesDown, sw.ElapsedMilliseconds, failed);
+                    var responseJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    return JsonConvert.DeserializeObject<TResponse>(responseJson);
                 }
             }
         }
 
         /// <summary>
-        /// Throws BackendAuthException for 401/403 responses so callers can distinguish
-        /// authentication failures from transient server errors.
+        /// Throws <see cref="BackendAuthException"/> for 401/403 responses so callers can
+        /// distinguish authentication failures from transient server errors.
         /// </summary>
         private static void ThrowOnAuthFailure(HttpResponseMessage response)
         {
@@ -328,48 +231,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
         }
 
         /// <summary>
-        /// Adds additional security headers for device authorization.
-        /// Client certificate is sent at TLS layer via HttpClientHandler.ClientCertificates.
+        /// Adds device / version / bootstrap-token security headers. Client certificate is sent
+        /// at the TLS layer via the externally-supplied HttpClient's HttpClientHandler.
         /// </summary>
         private void AddSecurityHeaders(HttpRequestMessage request)
         {
-            _logger?.Trace("Adding security headers to request...");
-
-            // Bootstrap token auth (pre-MDM, OOBE bootstrapped agents)
             if (_useBootstrapTokenAuth && !string.IsNullOrEmpty(_bootstrapToken))
-            {
                 request.Headers.Add("X-Bootstrap-Token", _bootstrapToken);
-                _logger?.Trace("  X-Bootstrap-Token: [set]");
-            }
 
-            // Client certificate is sent at TLS layer via HttpClientHandler.ClientCertificates (mTLS)
-
-            // Add hardware information for whitelist validation
             if (!string.IsNullOrEmpty(_manufacturer))
-            {
                 request.Headers.Add("X-Device-Manufacturer", _manufacturer);
-                _logger?.Trace($"  X-Device-Manufacturer: {_manufacturer}");
-            }
-
             if (!string.IsNullOrEmpty(_model))
-            {
                 request.Headers.Add("X-Device-Model", _model);
-                _logger?.Trace($"  X-Device-Model: {_model}");
-            }
-
-            // Add serial number for Autopilot device validation against Intune registration
             if (!string.IsNullOrEmpty(_serialNumber))
-            {
                 request.Headers.Add("X-Device-SerialNumber", _serialNumber);
-                _logger?.Trace($"  X-Device-SerialNumber: {_serialNumber}");
-            }
-
-            // Add agent version for version-based block/kill management
             if (!string.IsNullOrEmpty(_agentVersion))
-            {
                 request.Headers.Add("X-Agent-Version", _agentVersion);
-                _logger?.Trace($"  X-Agent-Version: {_agentVersion}");
-            }
         }
 
         public void Dispose()

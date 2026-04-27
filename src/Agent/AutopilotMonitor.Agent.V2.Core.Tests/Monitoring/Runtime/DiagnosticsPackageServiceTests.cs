@@ -48,9 +48,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
             public DiagnosticsPackageService Build()
             {
                 // BackendApiClient is required by the public ctor but BuildArchiveBytes
-                // never touches it — pass a real instance configured against an unreachable
-                // host, since BuildArchiveBytes returns before any HTTP traffic happens.
-                var apiClient = new BackendApiClient("http://localhost", Cfg(), Logger);
+                // never touches it — construct with a throwaway HttpClient. Tests only
+                // exercise BuildArchiveBytes, which returns before any HTTP traffic.
+                var apiClient = new BackendApiClient(
+                    httpClient: new System.Net.Http.HttpClient(),
+                    baseUrl: "http://localhost",
+                    manufacturer: string.Empty,
+                    model: string.Empty,
+                    serialNumber: string.Empty,
+                    useBootstrapTokenAuth: false,
+                    bootstrapToken: null,
+                    agentVersion: "0.0.0",
+                    logger: Logger);
                 return new DiagnosticsPackageService(
                     Cfg(),
                     Logger,

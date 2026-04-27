@@ -73,7 +73,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             var componentFactory = new DefaultComponentFactory(
                 agentConfig: agentConfig,
                 remoteConfig: remoteConfig,
-                networkMetrics: auth.BackendApiClient.NetworkMetrics,
+                networkMetrics: auth.NetworkMetrics,
                 agentVersion: agentVersion,
                 stateDirectory: stateSubdir);
 
