@@ -294,8 +294,14 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         //   - Admin preemption: the AdminPreemptionDetected signal below
                         //     drives the session straight to a terminal stage; SessionStarted
                         //     first would be noise.
+                        // V2 race-fix (10c8e0bf debrief, 2026-04-26): EnrollmentFactsObserved
+                        // is posted first so the registry-derived profile facts (enrollmentType
+                        // + isHybridJoin) seed ScenarioProfile via a stage-agnostic reducer
+                        // path. The reducer correctness no longer depends on this ordering —
+                        // the order here exists only for Inspector-timeline readability.
                         if (!isWhiteGloveResume && string.IsNullOrEmpty(registrationResult.AdminAction))
                         {
+                            LifecycleEmitters.PostEnrollmentFactsObserved(orchestrator.IngressSink, logger);
                             LifecycleEmitters.PostSessionStarted(orchestrator.IngressSink, registrationResult, agentConfig, agentVersion, logger);
                         }
 

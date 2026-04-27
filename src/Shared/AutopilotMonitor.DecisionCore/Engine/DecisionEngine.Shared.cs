@@ -53,17 +53,17 @@ namespace AutopilotMonitor.DecisionCore.Engine
             // periodically from the very start of the session — Plan §4.x M4.4.4.
             var classifierTick = BuildClassifierTickDeadline(signal.OccurredAtUtc);
 
-            // Codex follow-up #5 — seed the scenario profile from the registry-detector payload
-            // (enrollmentType + isHybridJoin). Stage stays SessionStarted; this transition is the
-            // "we saw the start" anchor.
+            // V2 race-fix (10c8e0bf debrief, 2026-04-26): SessionStarted is now a pure
+            // lifecycle anchor (stage / classifier-tick deadline / step bookkeeping).
+            // The registry-derived profile facts (enrollmentType + isHybridJoin) flow
+            // through the dedicated DecisionSignalKind.EnrollmentFactsObserved signal,
+            // which is stage-agnostic and therefore immune to the V2-Tracker /
+            // Backend-register-session race that previously dropped the JoinMode update.
             var builder = state.ToBuilder()
                 .WithStage(SessionStage.SessionStarted)
                 .WithStepIndex(state.StepIndex + 1)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .AddDeadline(classifierTick);
-
-            builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplySessionStarted(
-                builder.ScenarioProfile, signal);
 
             var newState = builder.Build();
 
@@ -496,6 +496,43 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 toStage: state.Stage,
                 nextStepIndex: nextStep,
                 trigger: nameof(DecisionSignalKind.EspConfigDetected));
+
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+        }
+
+        /// <summary>
+        /// V2 race-fix (10c8e0bf debrief, 2026-04-26) — record the registry-derived
+        /// enrollment facts (<c>enrollmentType</c> + <c>isHybridJoin</c>) on the
+        /// scenario profile. Stage is unchanged; this is a fact-only signal whose
+        /// reducer is intentionally stage-agnostic so it can land at any point in the
+        /// session without being swallowed by a Stage-Wache (the bug that motivated
+        /// this signal: the legacy <see cref="DecisionSignalKind.SessionStarted"/>
+        /// path lost the same payload when other signals had already advanced Stage
+        /// past <see cref="SessionStage.SessionStarted"/>).
+        /// <para>
+        /// Idempotency / monotonicity are owned by
+        /// <see cref="EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved"/> —
+        /// the handler delegates the merge logic and only carries out the standard
+        /// step bookkeeping + transition.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleEnrollmentFactsObservedV1(DecisionState state, DecisionSignal signal)
+        {
+            var nextStep = state.StepIndex + 1;
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+
+            builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(
+                builder.ScenarioProfile, signal);
+
+            var newState = builder.Build();
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.EnrollmentFactsObserved));
 
             return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }

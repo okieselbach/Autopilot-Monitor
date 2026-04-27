@@ -35,6 +35,24 @@ namespace AutopilotMonitor.DecisionCore.Signals
         // gate enrollment_complete — completion stays orthogonal to Hello policy.
         HelloPolicyDetected,
 
+        // V2 race-fix (10c8e0bf debrief, 2026-04-26) — static enrollment facts read
+        // from the Autopilot policy registry (EnrollmentRegistryDetector). Carries
+        // { "enrollmentType": "v1|v2", "isHybridJoin": "true|false" }.
+        // <para>
+        // Replaces the profile-seeding side of <see cref="SessionStarted"/>, which had
+        // a Stage-Wache that swallowed the update when the signal arrived after the
+        // first non-anchor signal had already moved Stage off SessionStarted (the
+        // V2-Tracker / Backend-register-session race).
+        // </para>
+        // <para>
+        // Reducer guarantees: stage-agnostic (no <see cref="DecisionState.Stage"/>
+        // restriction), idempotent (re-posting the same facts is a no-op on the
+        // profile, only the EvidenceOrdinal advances), and monotonic (a later signal
+        // with the registry default-fallback values cannot regress a value that was
+        // already established as Known).
+        // </para>
+        EnrollmentFactsObserved,
+
         // --- Raw — WhiteGlove Part 2 (Post-Reboot User-Sign-In) ---
         UserAadSignInComplete,
         HelloResolvedPart2,

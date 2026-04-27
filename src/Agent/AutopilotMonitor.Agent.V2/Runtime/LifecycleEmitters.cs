@@ -175,10 +175,14 @@ namespace AutopilotMonitor.Agent.V2.Runtime
         {
             try
             {
+                // V2 race-fix (10c8e0bf debrief, 2026-04-26) — registry-derived facts
+                // (enrollmentType + isHybridJoin) moved to PostEnrollmentFactsObserved
+                // because the legacy SessionStarted handler had a Stage-Wache that
+                // dropped the profile update whenever any other signal had already
+                // advanced Stage past SessionStarted by the time the post landed.
+                // SessionStarted now carries only lifecycle-anchor metadata.
                 var payload = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["enrollmentType"] = EnrollmentRegistryDetector.DetectEnrollmentType(),
-                    ["isHybridJoin"] = EnrollmentRegistryDetector.DetectHybridJoin() ? "true" : "false",
                     ["validatedBy"] = registrationResult.ValidatedBy.ToString(),
                     ["agentVersion"] = agentVersion,
                     ["isBootstrapSession"] = agentConfig.UseBootstrapTokenAuth ? "true" : "false",
@@ -196,11 +200,64 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     evidence: evidence,
                     payload: payload);
 
-                logger.Debug($"SessionStarted signal posted (validatedBy={registrationResult.ValidatedBy}, enrollmentType={payload["enrollmentType"]}).");
+                logger.Debug($"SessionStarted signal posted (validatedBy={registrationResult.ValidatedBy}).");
             }
             catch (Exception ex)
             {
                 logger.Warning($"SessionStarted post failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// V2 race-fix (10c8e0bf debrief, 2026-04-26) — post a
+        /// <see cref="DecisionSignalKind.EnrollmentFactsObserved"/> signal carrying the
+        /// registry-derived enrollment facts (<c>enrollmentType</c> + <c>isHybridJoin</c>)
+        /// so the reducer can seed <see cref="State.EnrollmentScenarioProfile"/> via the
+        /// stage-agnostic <c>HandleEnrollmentFactsObservedV1</c> handler.
+        /// <para>
+        /// Posted immediately before <see cref="PostSessionStarted"/> so the Inspector
+        /// timeline reads naturally (facts → anchor) — but the reducer correctness does
+        /// not depend on the order, which is the whole point of the new signal.
+        /// </para>
+        /// <para>
+        /// AwaitEnrollment-mode is transparently covered: the bootstrap layer
+        /// (<c>AgentBootstrap</c>) blocks until the MDM certificate is present, so by
+        /// the time this method runs the Autopilot policy registry is guaranteed to
+        /// hold the final enrollment values — a single post per agent run is enough.
+        /// </para>
+        /// </summary>
+        public static void PostEnrollmentFactsObserved(
+            ISignalIngressSink ingressSink,
+            AgentLogger logger)
+        {
+            try
+            {
+                var enrollmentType = EnrollmentRegistryDetector.DetectEnrollmentType();
+                var isHybridJoin = EnrollmentRegistryDetector.DetectHybridJoin();
+
+                var payload = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["enrollmentType"] = enrollmentType,
+                    ["isHybridJoin"] = isHybridJoin ? "true" : "false",
+                };
+
+                var evidence = new Evidence(
+                    kind: EvidenceKind.Synthetic,
+                    identifier: "enrollment_registry_facts_read",
+                    summary: "Registry-derived enrollment facts read for scenario-profile seeding.");
+
+                ingressSink.Post(
+                    kind: DecisionSignalKind.EnrollmentFactsObserved,
+                    occurredAtUtc: DateTime.UtcNow,
+                    sourceOrigin: "Program.RunAgent",
+                    evidence: evidence,
+                    payload: payload);
+
+                logger.Debug($"EnrollmentFactsObserved signal posted (enrollmentType={enrollmentType}, isHybridJoin={isHybridJoin}).");
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"EnrollmentFactsObserved post failed: {ex.Message}");
             }
         }
 

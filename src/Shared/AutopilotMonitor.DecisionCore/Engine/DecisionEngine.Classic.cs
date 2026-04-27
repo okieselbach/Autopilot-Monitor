@@ -320,8 +320,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// terminal event is emitted. Codex follow-up #5: the user-presence flag lives in
         /// <see cref="EnrollmentScenarioObservations.AadUserJoinWithUserObserved"/> (NOT
         /// <see cref="EnrollmentScenarioProfile.JoinMode"/> — that is strictly the
-        /// <c>SessionStarted.payload.isHybridJoin</c> value), and the profile's
-        /// <see cref="EnrollmentScenarioProfile.Reason"/> is annotated without touching Mode.
+        /// <see cref="DecisionSignalKind.EnrollmentFactsObserved"/> <c>isHybridJoin</c>
+        /// payload), and the profile's <see cref="EnrollmentScenarioProfile.Reason"/> is
+        /// annotated without touching Mode.
         /// </para>
         /// </summary>
         private DecisionStep HandleAadUserJoinedLateV1(DecisionState state, DecisionSignal signal)

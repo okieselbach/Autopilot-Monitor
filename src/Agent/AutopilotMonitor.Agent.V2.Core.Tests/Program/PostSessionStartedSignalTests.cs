@@ -74,8 +74,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         }
 
         [Fact]
-        public void Payload_includes_registration_metadata_keys()
+        public void Payload_carries_only_lifecycle_anchor_metadata()
         {
+            // V2 race-fix (10c8e0bf debrief, 2026-04-26) — enrollmentType / isHybridJoin
+            // moved to DecisionSignalKind.EnrollmentFactsObserved (covered by
+            // PostEnrollmentFactsObservedSignalTests). SessionStarted is now a pure
+            // lifecycle anchor with only the registration-metadata payload.
             using var tmp = new TempDirectory();
             var sink = new FakeSignalIngressSink();
             var logger = NewLogger(tmp.Path);
@@ -87,9 +91,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             Assert.NotNull(payload);
             Assert.Equal("CorporateIdentifier", payload!["validatedBy"]);
             Assert.Equal("true", payload["isBootstrapSession"]);
-            Assert.Contains("enrollmentType", (System.Collections.Generic.IDictionary<string, string>)payload);
-            Assert.Contains("isHybridJoin", (System.Collections.Generic.IDictionary<string, string>)payload);
-            Assert.Contains("agentVersion", (System.Collections.Generic.IDictionary<string, string>)payload);
+            Assert.Equal("1.2.3.4", payload["agentVersion"]);
+            Assert.DoesNotContain("enrollmentType", (System.Collections.Generic.IDictionary<string, string>)payload);
+            Assert.DoesNotContain("isHybridJoin", (System.Collections.Generic.IDictionary<string, string>)payload);
         }
 
         [Fact]

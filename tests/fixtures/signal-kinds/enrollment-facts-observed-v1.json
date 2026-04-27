@@ -1,0 +1,11 @@
+# EnrollmentFactsObserved v1 — V2 race-fix (10c8e0bf debrief, 2026-04-26).
+# Carries the registry-derived enrollment facts read by EnrollmentRegistryDetector
+# (CloudAssignedDomainJoinMethod + CloudAssignedDeviceRegistration / CloudAssignedEspEnabled).
+# Reducer handler HandleEnrollmentFactsObservedV1 is stage-agnostic: it does NOT
+# mutate DecisionState.Stage and can land at any point in the session without being
+# swallowed by a Stage-Wache. The handler delegates to
+# EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved which is idempotent
+# (re-posting the same facts produces no profile change) and monotonic (a later signal
+# with the registry default-fallback values cannot regress a value already set to Known).
+# Standard fixture sample = Classic AADJ enrollment (CloudAssignedDomainJoinMethod=0).
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"EnrollmentFactsObserved","KindSchemaVersion":1,"OccurredAtUtc":"2026-04-26T11:42:17.4030000Z","SourceOrigin":"Program.RunAgent","Evidence":{"Kind":"Synthetic","Identifier":"enrollment_registry_facts_read","Summary":"Registry-derived enrollment facts read for scenario-profile seeding."},"Payload":{"enrollmentType":"v1","isHybridJoin":"false"}}

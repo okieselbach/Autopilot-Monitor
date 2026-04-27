@@ -95,6 +95,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.AutopilotProfileRead, 1)               => HandleAutopilotProfileReadV1(state, signal),
                 (DecisionSignalKind.EspConfigDetected, 1)                  => HandleEspConfigDetectedV1(state, signal),
                 (DecisionSignalKind.HelloPolicyDetected, 1)                => HandleHelloPolicyDetectedV1(state, signal),
+                (DecisionSignalKind.EnrollmentFactsObserved, 1)            => HandleEnrollmentFactsObservedV1(state, signal),
 
                 // ----- Informational pass-through (DecisionEngine.Shared.cs) — single-rail §1.3 -----
                 (DecisionSignalKind.InformationalEvent, 1)                 => HandleInformationalEventV1(state, signal),

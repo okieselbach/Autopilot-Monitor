@@ -17,13 +17,20 @@ namespace AutopilotMonitor.DecisionCore.Tests.State
     {
         private static readonly DateTime FixedUtc = new DateTime(2026, 4, 24, 12, 0, 0, DateTimeKind.Utc);
 
-        // ================================================================== SessionStarted
+        // ================================================================== EnrollmentFactsObserved
+
+        // V2 race-fix (10c8e0bf debrief, 2026-04-26) — these tests cover the new
+        // dedicated facts signal that replaced the profile-seeding side of
+        // SessionStarted. Behaviour parity with the legacy tests is preserved
+        // (same payload keys, same Mode/JoinMode mapping); the reason token now
+        // reads `enrollment_facts_observed:*` so it can be told apart in the
+        // Inspector trace.
 
         [Fact]
-        public void SessionStarted_v2_setsDevicePreparation_mediumConfidence()
+        public void EnrollmentFactsObserved_v2_setsDevicePreparation_mediumConfidence()
         {
             var signal = MakeSignal(
-                DecisionSignalKind.SessionStarted,
+                DecisionSignalKind.EnrollmentFactsObserved,
                 ordinal: 0,
                 payload: new Dictionary<string, string>
                 {
@@ -31,21 +38,21 @@ namespace AutopilotMonitor.DecisionCore.Tests.State
                     [SignalPayloadKeys.IsHybridJoin] = "false",
                 });
 
-            var profile = EnrollmentScenarioProfileUpdater.ApplySessionStarted(
+            var profile = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(
                 EnrollmentScenarioProfile.Empty, signal);
 
             Assert.Equal(EnrollmentMode.DevicePreparation, profile.Mode);
             Assert.Equal(ProfileConfidence.Medium, profile.Confidence);
             Assert.Equal(EnrollmentJoinMode.AzureAdJoin, profile.JoinMode);
-            Assert.Equal("session_started:v2", profile.Reason);
+            Assert.Equal("enrollment_facts_observed:v2", profile.Reason);
             Assert.Equal(0, profile.EvidenceOrdinal);
         }
 
         [Fact]
-        public void SessionStarted_v1_leavesModeUnknown_recordsReason()
+        public void EnrollmentFactsObserved_v1_leavesModeUnknown_recordsReason()
         {
             var signal = MakeSignal(
-                DecisionSignalKind.SessionStarted,
+                DecisionSignalKind.EnrollmentFactsObserved,
                 ordinal: 0,
                 payload: new Dictionary<string, string>
                 {
@@ -53,24 +60,83 @@ namespace AutopilotMonitor.DecisionCore.Tests.State
                     [SignalPayloadKeys.IsHybridJoin] = "true",
                 });
 
-            var profile = EnrollmentScenarioProfileUpdater.ApplySessionStarted(
+            var profile = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(
                 EnrollmentScenarioProfile.Empty, signal);
 
             // v1 is ambiguous (Classic / SelfDeploying / WhiteGlove); later signals resolve it.
             Assert.Equal(EnrollmentMode.Unknown, profile.Mode);
             Assert.Equal(EnrollmentJoinMode.HybridAzureAdJoin, profile.JoinMode);
-            Assert.Equal("session_started:v1", profile.Reason);
+            Assert.Equal("enrollment_facts_observed:v1", profile.Reason);
         }
 
         [Fact]
-        public void SessionStarted_emptyPayload_returnsSameInstance()
+        public void EnrollmentFactsObserved_emptyPayload_returnsSameInstance()
         {
-            var signal = MakeSignal(DecisionSignalKind.SessionStarted, ordinal: 0, payload: null);
+            var signal = MakeSignal(DecisionSignalKind.EnrollmentFactsObserved, ordinal: 0, payload: null);
 
-            var profile = EnrollmentScenarioProfileUpdater.ApplySessionStarted(
+            var profile = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(
                 EnrollmentScenarioProfile.Empty, signal);
 
             Assert.Same(EnrollmentScenarioProfile.Empty, profile);
+        }
+
+        [Fact]
+        public void EnrollmentFactsObserved_repeatPostWithSameFacts_isIdempotent()
+        {
+            var first = MakeSignal(
+                DecisionSignalKind.EnrollmentFactsObserved,
+                ordinal: 0,
+                payload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.EnrollmentType] = "v1",
+                    [SignalPayloadKeys.IsHybridJoin] = "false",
+                });
+            var second = MakeSignal(
+                DecisionSignalKind.EnrollmentFactsObserved,
+                ordinal: 7,
+                payload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.EnrollmentType] = "v1",
+                    [SignalPayloadKeys.IsHybridJoin] = "false",
+                });
+
+            var p1 = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(
+                EnrollmentScenarioProfile.Empty, first);
+            var p2 = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(p1, second);
+
+            // Idempotent: second post is a no-op on the profile, including the EvidenceOrdinal —
+            // the Unknown-guards short-circuit because every dimension is already set.
+            Assert.Same(p1, p2);
+            Assert.Equal(EnrollmentJoinMode.AzureAdJoin, p2.JoinMode);
+            Assert.Equal(0, p2.EvidenceOrdinal);
+        }
+
+        [Fact]
+        public void EnrollmentFactsObserved_laterSignalCannotRegressJoinMode()
+        {
+            // Initial post sets HADJ.
+            var firstSignal = MakeSignal(
+                DecisionSignalKind.EnrollmentFactsObserved,
+                ordinal: 0,
+                payload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.IsHybridJoin] = "true",
+                });
+            var p1 = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(
+                EnrollmentScenarioProfile.Empty, firstSignal);
+            Assert.Equal(EnrollmentJoinMode.HybridAzureAdJoin, p1.JoinMode);
+
+            // A later, flaky re-read claims AADJ — must NOT overwrite the already-known value.
+            var flapped = MakeSignal(
+                DecisionSignalKind.EnrollmentFactsObserved,
+                ordinal: 12,
+                payload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.IsHybridJoin] = "false",
+                });
+            var p2 = EnrollmentScenarioProfileUpdater.ApplyEnrollmentFactsObserved(p1, flapped);
+
+            Assert.Equal(EnrollmentJoinMode.HybridAzureAdJoin, p2.JoinMode);
         }
 
         // ================================================================== EspConfigDetected
