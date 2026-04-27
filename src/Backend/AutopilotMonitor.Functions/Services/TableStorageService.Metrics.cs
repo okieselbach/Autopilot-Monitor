@@ -264,6 +264,8 @@ namespace AutopilotMonitor.Functions.Services
                         if (!string.IsNullOrEmpty(existingDetection))
                             summary.DetectionResult = existingDetection;
                     }
+
+                    PreserveTerminalStateIfIncomingIsNotTerminal(summary, existing);
                 }
 
                 var entity = new TableEntity(summary.TenantId, rowKey)
@@ -918,6 +920,40 @@ namespace AutopilotMonitor.Functions.Services
                 ConfidenceScoreSum = entity.GetInt64("ConfidenceScoreSum") ?? 0,
                 UpdatedAt = entity.GetDateTimeOffset("UpdatedAt")?.UtcDateTime ?? DateTime.UtcNow
             };
+        }
+
+        // A fresh AppInstallSummary defaults Status="InProgress". Late batches that contain only
+        // download_progress / do_telemetry events for an app never enter a Status-mutating switch
+        // case, so the upsert would clobber a prior terminal state. Preserve the terminal columns
+        // whenever the incoming batch did not observe its own terminal event.
+        internal static void PreserveTerminalStateIfIncomingIsNotTerminal(AppInstallSummary summary, TableEntity existing)
+        {
+            var existingStatus = existing.GetString("Status");
+            var isExistingTerminal = existingStatus == "Succeeded" || existingStatus == "Failed";
+            var isIncomingTerminal = summary.Status == "Succeeded" || summary.Status == "Failed";
+            if (!isExistingTerminal || isIncomingTerminal)
+                return;
+
+            summary.Status = existingStatus!;
+            if (!summary.CompletedAt.HasValue)
+            {
+                var existingCompletedAt = existing.GetDateTimeOffset("CompletedAt")?.UtcDateTime;
+                if (existingCompletedAt.HasValue && existingCompletedAt.Value != DateTime.MinValue)
+                    summary.CompletedAt = existingCompletedAt.Value;
+            }
+            if (summary.DurationSeconds <= 0)
+            {
+                var existingDuration = existing.GetInt32("DurationSeconds");
+                if (existingDuration.HasValue && existingDuration.Value > 0)
+                    summary.DurationSeconds = existingDuration.Value;
+            }
+            if (existingStatus == "Failed")
+            {
+                if (string.IsNullOrEmpty(summary.FailureCode))
+                    summary.FailureCode = existing.GetString("FailureCode") ?? string.Empty;
+                if (string.IsNullOrEmpty(summary.FailureMessage))
+                    summary.FailureMessage = existing.GetString("FailureMessage") ?? string.Empty;
+            }
         }
     }
 }
