@@ -173,6 +173,16 @@ builder.Services.AddSingleton<
 builder.Services.AddSingleton<
     AutopilotMonitor.Functions.Services.Indexing.IndexReconcileHandler>();
 
+// Background poll-loop for the telemetry-index-reconcile queue (Plan §M5.d.3). Replaces the
+// earlier QueueTrigger function, which required a Functions-host-specific
+// `<Connection>__queueServiceUri` app-setting that diverged from the rest of the project's
+// AzureStorageAccountName + DefaultAzureCredential pattern. This worker uses the same
+// resolution as AzureQueueIndexReconcileProducer — Managed Identity by account name, with
+// connection-string fallback — and provides full QueueTrigger parity (visibility-timeout
+// retries, poison-queue move after 5 failed attempts).
+builder.Services.AddHostedService<
+    AutopilotMonitor.Functions.Services.Indexing.IndexReconcileQueueWorker>();
+
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
 
