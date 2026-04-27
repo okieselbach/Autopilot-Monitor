@@ -43,6 +43,16 @@ export const api = {
       `${API_BASE_URL}/api/search/quick${qs({ q })}`,
   },
 
+  // ── Inspector v1 (global admin only — Plan §M6) ───────────────────────────
+  inspector: {
+    signals: (sessionId: string, opts?: { tenantId?: string; maxResults?: number }) =>
+      `${API_BASE_URL}/api/sessions/${sessionId}/signals${qs({ tenantId: opts?.tenantId, maxResults: opts?.maxResults?.toString() })}`,
+    decisionGraph: (sessionId: string, tenantId?: string) =>
+      `${API_BASE_URL}/api/sessions/${sessionId}/decision-graph${qs({ tenantId })}`,
+    reducerVerification: (sessionId: string, tenantId?: string) =>
+      `${API_BASE_URL}/api/sessions/${sessionId}/reducer-verification${qs({ tenantId })}`,
+  },
+
   // ── Global Sessions (global admin) ────────────────────────────────────────
   globalSessions: {
     list: (tenantId?: string, days?: number, limit?: number) =>
