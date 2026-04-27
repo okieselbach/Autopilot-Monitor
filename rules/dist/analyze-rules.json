@@ -254,7 +254,7 @@
           "signal": "summary_errors",
           "source": "event_type",
           "eventType": "app_tracking_summary",
-          "dataField": "errorCount",
+          "dataField": "failedApps",
           "operator": "gte",
           "value": "2",
           "required": true
@@ -1326,7 +1326,7 @@
           "signal": "ca2023_not_updated",
           "source": "event_data",
           "eventType": "secureboot_status",
-          "dataField": "data.uefiCA2023Status",
+          "dataField": "uefiCA2023Status",
           "operator": "not_equals",
           "value": "Updated",
           "required": true
@@ -1335,7 +1335,7 @@
           "signal": "secureboot_enabled",
           "source": "event_data",
           "eventType": "secureboot_status",
-          "dataField": "data.uefiSecureBootEnabled",
+          "dataField": "uefiSecureBootEnabled",
           "operator": "equals",
           "value": "true",
           "required": true
@@ -1353,7 +1353,7 @@
           "weight": 10
         }
       ],
-      "explanation": "This device has Secure Boot enabled but the **Windows UEFI CA 2023** certificate has not been deployed to the Secure Boot DB yet.\n\nThe original Windows UEFI CA 2011 certificates expire on **June 27, 2026**. After expiration, devices without the 2023 certificate will no longer receive Secure Boot security updates and may fail to boot with updated boot managers.\n\nCurrent UEFI CA 2023 status: `{{data.uefiCA2023Status}}`",
+      "explanation": "This device has Secure Boot enabled but the **Windows UEFI CA 2023** certificate has not been deployed to the Secure Boot DB yet.\n\nThe original Windows UEFI CA 2011 certificates expire on **June 27, 2026**. After expiration, devices without the 2023 certificate will no longer receive Secure Boot security updates and may fail to boot with updated boot managers.\n\nCurrent UEFI CA 2023 status: `{{uefiCA2023Status}}`",
       "remediation": [
         {
           "title": "Deploy UEFI CA 2023 certificate",
