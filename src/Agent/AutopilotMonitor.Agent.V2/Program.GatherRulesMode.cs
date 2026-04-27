@@ -7,9 +7,12 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Gather;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Security;
+using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
+using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Agent.V2
 {
@@ -210,34 +213,19 @@ namespace AutopilotMonitor.Agent.V2
                     });
                     lock (evtLock) eventsToUpload = new List<EnrollmentEvent>(collectedEvents);
 
-                    // Step 6 — upload.
+                    // Step 6 — upload via the V2 telemetry endpoint (POST /api/agent/telemetry).
+                    // Single-shot, no spool, no orchestrator: gather-rules collects everything in
+                    // memory above and posts one batch at the end.
                     if (eventsToUpload.Count > 0)
                     {
-                        try
-                        {
-                            var request = new IngestEventsRequest
-                            {
-                                SessionId = sessionId,
-                                TenantId = tenantId,
-                                Events = eventsToUpload,
-                            };
-                            var uploadResponse = apiClient.IngestEventsAsync(request).GetAwaiter().GetResult();
-                            if (uploadResponse != null && uploadResponse.Success)
-                            {
-                                logger.Info($"Uploaded {uploadResponse.EventsProcessed} event(s) successfully.");
-                                if (consoleMode) Console.WriteLine($"Uploaded {uploadResponse.EventsProcessed} event(s) successfully.");
-                            }
-                            else
-                            {
-                                logger.Warning($"Upload failed: {uploadResponse?.Message ?? "null response"}");
-                                if (consoleMode) Console.WriteLine($"Upload failed: {uploadResponse?.Message ?? "null response"}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.Error("Failed to upload events.", ex);
-                            if (consoleMode) Console.Error.WriteLine($"ERROR uploading events: {ex.Message}");
-                        }
+                        UploadGatheredEvents(
+                            apiBaseUrl: apiBaseUrl,
+                            tenantId: tenantId,
+                            sessionId: sessionId,
+                            agentVersion: agentVersion,
+                            events: eventsToUpload,
+                            logger: logger,
+                            consoleMode: consoleMode);
                     }
                     else
                     {
@@ -258,5 +246,90 @@ namespace AutopilotMonitor.Agent.V2
         }
 
         private static string FormatArgsForGatherLog(string[] args) => FormatArgsForLog(args);
+
+        /// <summary>
+        /// Wraps the in-memory <see cref="EnrollmentEvent"/> batch as <see cref="TelemetryItem"/>s
+        /// (Kind=Event) and POSTs once to <c>/api/agent/telemetry</c> via
+        /// <see cref="BackendTelemetryUploader"/>. The mTLS pipeline is built fresh for this run —
+        /// gather-rules-mode is a standalone diagnostic on a fully-provisioned VM, not concurrent
+        /// with a live enrollment, so a private <see cref="NetworkMetrics"/> instance is fine
+        /// (we do not want to pollute the live agent's pipeline counter, which does not exist
+        /// in this process anyway).
+        /// </summary>
+        private static void UploadGatheredEvents(
+            string apiBaseUrl,
+            string tenantId,
+            string sessionId,
+            string agentVersion,
+            List<EnrollmentEvent> events,
+            AgentLogger logger,
+            bool consoleMode)
+        {
+            try
+            {
+                var hardware = HardwareInfo.GetHardwareInfo(logger);
+                var partitionKey = $"{tenantId}_{sessionId}";
+                var enqueuedAt = DateTime.UtcNow;
+
+                var items = new List<TelemetryItem>(events.Count);
+                for (int i = 0; i < events.Count; i++)
+                {
+                    var evt = events[i];
+                    if (string.IsNullOrEmpty(evt.SessionId)) evt.SessionId = sessionId;
+                    if (string.IsNullOrEmpty(evt.TenantId)) evt.TenantId = tenantId;
+
+                    var rowKey = $"{evt.Timestamp:yyyyMMddHHmmssfff}_{evt.Sequence:D10}";
+                    evt.RowKey = rowKey;
+
+                    var payloadJson = JsonConvert.SerializeObject(evt, Formatting.None);
+
+                    items.Add(new TelemetryItem(
+                        kind: TelemetryItemKind.Event,
+                        partitionKey: partitionKey,
+                        rowKey: rowKey,
+                        telemetryItemId: i,
+                        sessionTraceOrdinal: null,
+                        payloadJson: payloadJson,
+                        requiresImmediateFlush: false,
+                        enqueuedAtUtc: enqueuedAt,
+                        retryCount: 0));
+                }
+
+                using (var httpClient = MtlsHttpClientFactory.Create(
+                    resolver: new DefaultCertificateResolver(),
+                    logger: logger,
+                    metrics: new NetworkMetrics()))
+                {
+                    var uploader = new BackendTelemetryUploader(
+                        httpClient: httpClient,
+                        baseUrl: apiBaseUrl,
+                        tenantId: tenantId,
+                        manufacturer: hardware.Manufacturer,
+                        model: hardware.Model,
+                        serialNumber: hardware.SerialNumber,
+                        bootstrapToken: null,
+                        agentVersion: agentVersion,
+                        authFailureTracker: null,
+                        logger: logger);
+
+                    var result = uploader.UploadBatchAsync(items, CancellationToken.None).GetAwaiter().GetResult();
+                    if (result.Success)
+                    {
+                        logger.Info($"Uploaded {items.Count} event(s) successfully via /api/agent/telemetry.");
+                        if (consoleMode) Console.WriteLine($"Uploaded {items.Count} event(s) successfully.");
+                    }
+                    else
+                    {
+                        logger.Warning($"Upload failed ({(result.IsTransient ? "transient" : "permanent")}): {result.ErrorReason}");
+                        if (consoleMode) Console.WriteLine($"Upload failed: {result.ErrorReason}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Error("Failed to upload events.", ex);
+                if (consoleMode) Console.Error.WriteLine($"ERROR uploading events: {ex.Message}");
+            }
+        }
     }
 }

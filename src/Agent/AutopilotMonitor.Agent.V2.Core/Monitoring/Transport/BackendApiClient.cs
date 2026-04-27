@@ -1,7 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography.X509Certificates;
@@ -138,69 +136,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
 
             var response = await PostAsync<RegisterSessionRequest, RegisterSessionResponse>(url, request);
             return response;
-        }
-
-        /// <summary>
-        /// Ingests a batch of events using NDJSON + gzip compression for bandwidth optimization
-        /// </summary>
-        public virtual async Task<IngestEventsResponse> IngestEventsAsync(IngestEventsRequest request)
-        {
-            var ingestEndpoint = _useBootstrapTokenAuth
-                ? Constants.ApiEndpoints.BootstrapIngestEvents
-                : Constants.ApiEndpoints.IngestEvents;
-            var url = $"{_baseUrl}{ingestEndpoint}";
-
-            // Use NDJSON (newline-delimited JSON) + gzip for efficient event upload
-            // This reduces bandwidth significantly (70-80% compression typical for JSON)
-            var ndjson = CreateNdjson(request);
-            var ndjsonLength = System.Text.Encoding.UTF8.GetByteCount(ndjson);
-            var compressedContent = CompressWithGzip(ndjson);
-
-            _logger?.Debug($"IngestEventsAsync: POST {url} — {request.Events.Count} events, {compressedContent.Length} bytes compressed");
-            _logger?.Verbose($"IngestEventsAsync: NDJSON {ndjsonLength} bytes → gzip {compressedContent.Length} bytes ({(ndjsonLength > 0 ? (100 - compressedContent.Length * 100 / ndjsonLength) : 0)}% reduction)");
-
-            using (var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
-            {
-                Content = new ByteArrayContent(compressedContent)
-            })
-            {
-                httpRequest.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/x-ndjson");
-                httpRequest.Content.Headers.Add("Content-Encoding", "gzip");
-
-                // Add TenantId header so the backend can run security checks before parsing the body
-                httpRequest.Headers.Add("X-Tenant-Id", request.TenantId);
-
-                // Add additional security headers for device authorization (client cert is at TLS layer, but we can add hardware info in headers for whitelist validation and Autopilot device verification)
-                AddSecurityHeaders(httpRequest);
-
-                var sw = Stopwatch.StartNew();
-                var failed = false;
-                long bytesDown = 0;
-                try
-                {
-                    using (var httpResponse = await _httpClient.SendAsync(httpRequest))
-                    {
-                        ThrowOnAuthFailure(httpResponse);
-                        httpResponse.EnsureSuccessStatusCode();
-
-                        var responseJson = await httpResponse.Content.ReadAsStringAsync();
-                        bytesDown = Encoding.UTF8.GetByteCount(responseJson);
-                        var response = JsonConvert.DeserializeObject<IngestEventsResponse>(responseJson);
-
-                        return response;
-                    }
-                }
-                catch
-                {
-                    failed = true;
-                    throw;
-                }
-                finally
-                {
-                    sw.Stop();
-                    _networkMetrics.RecordRequest(compressedContent.Length, bytesDown, sw.ElapsedMilliseconds, failed);
-                }
-            }
         }
 
         /// <summary>
@@ -389,48 +324,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                     $"Backend returned {(int)response.StatusCode} {response.StatusCode}. " +
                     "The device is not authorized. Check client certificate and Autopilot device validation.",
                     (int)response.StatusCode);
-            }
-        }
-
-        /// <summary>
-        /// Creates NDJSON (newline-delimited JSON) from IngestEventsRequest
-        /// Format: metadata line + one event per line
-        /// </summary>
-        private string CreateNdjson(IngestEventsRequest request)
-        {
-            var lines = new System.Collections.Generic.List<string>();
-
-            // First line: metadata (sessionId, tenantId)
-            var metadata = new
-            {
-                sessionId = request.SessionId,
-                tenantId = request.TenantId
-            };
-            lines.Add(JsonConvert.SerializeObject(metadata));
-
-            // Subsequent lines: one event per line
-            foreach (var evt in request.Events)
-            {
-                lines.Add(JsonConvert.SerializeObject(evt));
-            }
-
-            return string.Join("\n", lines);
-        }
-
-        /// <summary>
-        /// Compresses a string using gzip
-        /// </summary>
-        private byte[] CompressWithGzip(string text)
-        {
-            var bytes = Encoding.UTF8.GetBytes(text);
-
-            using (var output = new MemoryStream())
-            {
-                using (var gzip = new GZipStream(output, CompressionMode.Compress))
-                {
-                    gzip.Write(bytes, 0, bytes.Length);
-                }
-                return output.ToArray();
             }
         }
 
