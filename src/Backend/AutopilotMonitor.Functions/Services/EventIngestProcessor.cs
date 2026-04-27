@@ -344,6 +344,24 @@ namespace AutopilotMonitor.Functions.Services
                                     "{Prefix} Vulnerability correlation complete (async, whiteGlovePart={Part})",
                                     capturedPrefix, capturedWhiteGlovePart?.ToString() ?? "none");
 
+                                // Synthetic `vulnerability_report` event so analyze rules can
+                                // match against `scan_summary.*` fields. The full report stays in
+                                // the VulnerabilityReports table — this event carries only the
+                                // summary slice that rule conditions need.
+                                await EmitVulnerabilityReportEventAsync(
+                                    capturedTenantId, capturedSessionId, capturedPrefix, reportData, phaseLabel);
+
+                                // Re-evaluate analyze rules now that the synth event is in the
+                                // table. The end-of-session analysis at the top of ProcessEventsAsync
+                                // is triggered by classification.CompletionEvent and may finish
+                                // before this vulnerability task does — without this re-analyze,
+                                // vulnerability-driven rules (ANALYZE-ID-003) miss their evidence.
+                                // Uses reanalyze=false: rules with stored results are skipped, so
+                                // there's no duplicate-result risk if the initial run already saw
+                                // the synth event in a tight race.
+                                await ReanalyzeAfterVulnerabilityEmitAsync(
+                                    capturedTenantId, capturedSessionId, capturedPrefix);
+
                                 var findings = reportData.ContainsKey("findings")
                                     ? reportData["findings"] as List<Dictionary<string, object>>
                                     : null;
@@ -478,6 +496,105 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
+        /// <summary>
+        /// Stores a synthetic <c>vulnerability_report</c> event after a successful scan so analyze
+        /// rules can fire on the same event-stream surface as agent-emitted events. Carries only
+        /// <c>scan_summary</c> + <c>reportAvailable</c> + <c>phase</c>; the full per-CVE list lives
+        /// in the <c>VulnerabilityReports</c> table (read separately by the report API).
+        /// </summary>
+        private async Task EmitVulnerabilityReportEventAsync(
+            string tenantId,
+            string sessionId,
+            string sessionPrefix,
+            Dictionary<string, object> reportData,
+            string? phaseLabel)
+        {
+            try
+            {
+                var scanSummary = reportData.TryGetValue("scan_summary", out var summaryObj)
+                    && summaryObj is Dictionary<string, object> summaryDict
+                    ? summaryDict
+                    : new Dictionary<string, object>();
+
+                var overallRisk = scanSummary.TryGetValue("overall_risk", out var riskObj)
+                    ? riskObj?.ToString()
+                    : null;
+
+                var data = new Dictionary<string, object>(StringComparer.Ordinal)
+                {
+                    ["scan_summary"] = scanSummary,
+                    ["reportAvailable"] = true,
+                    ["phase"] = phaseLabel ?? "single",
+                };
+
+                var evt = new EnrollmentEvent
+                {
+                    TenantId = tenantId,
+                    SessionId = sessionId,
+                    EventType = "vulnerability_report",
+                    Severity = MapVulnerabilityRiskToSeverity(overallRisk),
+                    Source = "VulnerabilityCorrelationService",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Vulnerability scan complete (risk={overallRisk ?? "unknown"}).",
+                    Timestamp = DateTime.UtcNow,
+                    Data = data,
+                };
+
+                await _sessionRepo.StoreEventsBatchAsync(new List<EnrollmentEvent> { evt });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "{Prefix} vulnerability_report synth-event emit failed (non-fatal)", sessionPrefix);
+            }
+        }
+
+        /// <summary>
+        /// Runs <see cref="RuleEngine.AnalyzeSessionAsync"/> after the vulnerability synth event
+        /// has been persisted, so vulnerability-driven rules (e.g. ANALYZE-ID-003) can match
+        /// even when the initial enrollment-end analysis completed before the async correlation
+        /// finished. Skips rules that already have stored results — no duplicates.
+        /// </summary>
+        private async Task ReanalyzeAfterVulnerabilityEmitAsync(
+            string tenantId,
+            string sessionId,
+            string sessionPrefix)
+        {
+            try
+            {
+                var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
+                var outcome = await ruleEngine.AnalyzeSessionAsync(tenantId, sessionId);
+
+                foreach (var result in outcome.Results)
+                {
+                    await _ruleRepo.StoreRuleResultAsync(result);
+                }
+
+                if (outcome.Results.Count > 0)
+                {
+                    _logger.LogInformation(
+                        "{Prefix} Vulnerability re-analysis: {Count} additional rule result(s)",
+                        sessionPrefix, outcome.Results.Count);
+
+                    await _signalRNotification.NotifyRuleResultsAvailableAsync(
+                        tenantId, sessionId, outcome.Results.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "{Prefix} Vulnerability re-analysis failed (async, non-fatal)", sessionPrefix);
+            }
+        }
+
+        private static EventSeverity MapVulnerabilityRiskToSeverity(string? overallRisk) =>
+            (overallRisk ?? string.Empty).ToLowerInvariant() switch
+            {
+                "critical" => EventSeverity.Critical,
+                "high"     => EventSeverity.Error,
+                "medium"   => EventSeverity.Warning,
+                _          => EventSeverity.Info,
+            };
     }
 
     /// <summary>

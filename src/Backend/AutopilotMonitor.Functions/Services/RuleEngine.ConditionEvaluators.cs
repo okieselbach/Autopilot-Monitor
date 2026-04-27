@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging;
@@ -318,16 +319,92 @@ namespace AutopilotMonitor.Functions.Services
             if (dataField.Equals("message", StringComparison.OrdinalIgnoreCase))
                 return evt.Message;
 
-            // Check in Data dictionary
-            if (evt.Data.TryGetValue(dataField, out var value))
-                return value?.ToString();
+            // Flat lookup first — preserves the legacy contract for keys that contain a
+            // literal dot (e.g. v1 events that wrote "scan_summary.critical_cves" as a
+            // single key) and is the cheap path for the common case.
+            if (TryFlatLookup(evt.Data, dataField, out var flat))
+                return flat;
 
-            // Try case-insensitive lookup
-            var key = evt.Data.Keys.FirstOrDefault(k => k.Equals(dataField, StringComparison.OrdinalIgnoreCase));
-            if (key != null)
-                return evt.Data[key]?.ToString();
+            // Dot-path traversal for nested Dictionary<string,object> / JsonElement values.
+            // Used by rules that target a structured payload (e.g. `scan_summary.kev_matches`
+            // when the emitter wrote `scan_summary` as a nested dict).
+            if (dataField.IndexOf('.') >= 0)
+                return ResolveDotPath(evt.Data, dataField);
 
             return null;
+        }
+
+        internal static bool TryFlatLookup(Dictionary<string, object> data, string key, out string? value)
+        {
+            if (data.TryGetValue(key, out var raw))
+            {
+                value = raw?.ToString();
+                return true;
+            }
+            var hit = data.Keys.FirstOrDefault(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (hit != null)
+            {
+                value = data[hit]?.ToString();
+                return true;
+            }
+            value = null;
+            return false;
+        }
+
+        internal static string? ResolveDotPath(Dictionary<string, object> root, string path)
+        {
+            var parts = path.Split('.');
+            object? current = root;
+            foreach (var part in parts)
+            {
+                if (current == null) return null;
+
+                switch (current)
+                {
+                    case IDictionary<string, object> dict:
+                        if (!dict.TryGetValue(part, out var next))
+                        {
+                            var hit = dict.Keys.FirstOrDefault(k => k.Equals(part, StringComparison.OrdinalIgnoreCase));
+                            if (hit == null) return null;
+                            next = dict[hit];
+                        }
+                        current = next;
+                        break;
+
+                    case JsonElement jel when jel.ValueKind == JsonValueKind.Object:
+                        if (jel.TryGetProperty(part, out var prop))
+                        {
+                            current = prop;
+                        }
+                        else
+                        {
+                            // Case-insensitive fallback for JsonElement.
+                            JsonElement? found = null;
+                            foreach (var p in jel.EnumerateObject())
+                            {
+                                if (p.Name.Equals(part, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    found = p.Value;
+                                    break;
+                                }
+                            }
+                            if (found == null) return null;
+                            current = found.Value;
+                        }
+                        break;
+
+                    default:
+                        // Scalar reached before path was exhausted — no descent possible.
+                        return null;
+                }
+            }
+
+            return current switch
+            {
+                null => null,
+                JsonElement jel => jel.ValueKind == JsonValueKind.String ? jel.GetString() : jel.ToString(),
+                _ => current.ToString(),
+            };
         }
 
         private bool MatchesOperator(string fieldValue, string op, string compareValue)
