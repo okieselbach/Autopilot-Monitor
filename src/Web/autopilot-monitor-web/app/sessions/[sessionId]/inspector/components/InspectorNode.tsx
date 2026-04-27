@@ -29,18 +29,37 @@ const STYLE_BY_CATEGORY: Record<
   },
 };
 
-export function InspectorNode({ data }: NodeProps<Node<InspectorNodeData>>) {
+export function InspectorNode({ data, selected }: NodeProps<Node<InspectorNodeData>>) {
   const style = STYLE_BY_CATEGORY[data.category];
   return (
     <div
-      className={`rounded-lg border border-gray-200 ring-2 ${style.ring} ${style.bg} px-3 py-2 shadow-sm`}
-      style={{ width: 180 }}
+      className={`rounded-lg border border-gray-200 ring-2 ${style.ring} ${style.bg} px-3 py-2 shadow-sm ${
+        selected ? "ring-4" : ""
+      }`}
+      style={{ width: 200 }}
     >
       <Handle type="target" position={Position.Top} className="!bg-gray-400" />
       <div className={`text-sm font-medium ${style.text}`}>{data.label}</div>
-      <div className="mt-0.5 flex items-center justify-between text-[10px] text-gray-500">
+      <div className="mt-1 flex items-center justify-between text-[10px] text-gray-500">
         <span>{style.label}</span>
-        <span>visits: {data.visitCount}</span>
+        <span title="Inter-stage transitions that landed on this stage (taken).">
+          entered: {data.entered}
+        </span>
+      </div>
+      <div className="mt-0.5 flex items-center justify-between text-[10px] text-gray-500">
+        <span title="Self-loop steps inside this stage — reducer-step that didn't change the stage.">
+          internal: {data.internal}
+        </span>
+        {data.blocked > 0 ? (
+          <span
+            className="rounded border border-amber-400 bg-amber-50 px-1 text-[10px] font-medium text-amber-800"
+            title={`${data.blocked} self-loop dead-ends — click to inspect reasons`}
+          >
+            🚫 blocked: {data.blocked}
+          </span>
+        ) : (
+          <span className="text-gray-400">blocked: 0</span>
+        )}
       </div>
       <Handle type="source" position={Position.Bottom} className="!bg-gray-400" />
     </div>

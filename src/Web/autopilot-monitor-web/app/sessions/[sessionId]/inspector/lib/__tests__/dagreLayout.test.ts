@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLayout } from "../dagreLayout";
+import { buildLayout, computeGraphStats } from "../dagreLayout";
 import type { DecisionGraphNode, DecisionGraphEdge } from "../../types";
 
 const node = (id: string, isTerminal = false, terminalOutcome: string | null = null): DecisionGraphNode => ({
@@ -77,7 +77,7 @@ describe("buildLayout", () => {
     expect(ids).toEqual(["e1", "e2"]);
   });
 
-  it("propagates dead-end metadata onto the rendered edge", () => {
+  it("propagates dead-end metadata onto inter-stage edges", () => {
     const result = buildLayout(
       [node("A"), node("B")],
       [edge(1, "A", "B", false, "guard:esp_gate_blocking")],
@@ -96,10 +96,10 @@ describe("buildLayout", () => {
     expect(result.edges[0].data?.classifierHypothesisLevel).toBe("Confirmed");
   });
 
-  it("renders both taken and dead-end branches when given a fork", () => {
+  it("renders both taken and dead-end branches when given an inter-stage fork", () => {
     // Reproduces a 2-stage WhiteGlove pattern: from EspInProgress, the agent
     // attempts WhiteGloveSealed (taken) but a guard initially rejects it
-    // (dead-end). Both must appear in the layout output.
+    // (dead-end). Both must appear in the layout output as edges.
     const nodes = [node("EspInProgress"), node("WhiteGloveSealed", true, "PausedForPart2")];
     const edges = [
       edge(10, "EspInProgress", "WhiteGloveSealed", false, "guard:hello_pending"),
@@ -109,5 +109,118 @@ describe("buildLayout", () => {
     expect(result.edges).toHaveLength(2);
     expect(result.edges.some((e) => e.data?.taken === false)).toBe(true);
     expect(result.edges.some((e) => e.data?.taken === true)).toBe(true);
+  });
+
+  // ── Self-loop aggregation (the WG-modelling fix) ────────────────────────
+
+  it("strips self-loops from the rendered edge list", () => {
+    // Self-loops must not appear as ReactFlow edges — dagre would render
+    // them as 0-px segments that overlap the node and hide the dead-end
+    // label. They get aggregated into NodeData instead.
+    const result = buildLayout(
+      [node("EspDeviceSetup")],
+      [
+        edge(1, "EspDeviceSetup", "EspDeviceSetup", true),
+        edge(2, "EspDeviceSetup", "EspDeviceSetup", false, "guard:hello_pending"),
+      ],
+    );
+    expect(result.edges).toHaveLength(0);
+  });
+
+  it("counts self-loop taken steps as 'internal' on the source node", () => {
+    const result = buildLayout(
+      [node("EspDeviceSetup")],
+      [
+        edge(1, "EspDeviceSetup", "EspDeviceSetup", true),
+        edge(2, "EspDeviceSetup", "EspDeviceSetup", true),
+        edge(3, "EspDeviceSetup", "EspDeviceSetup", true),
+      ],
+    );
+    expect(result.nodes[0].data.internal).toBe(3);
+    expect(result.nodes[0].data.blocked).toBe(0);
+  });
+
+  it("counts self-loop dead-ends as 'blocked' and aggregates reasons", () => {
+    const result = buildLayout(
+      [node("EspDeviceSetup")],
+      [
+        edge(1, "EspDeviceSetup", "EspDeviceSetup", false, "guard:hello_pending"),
+        edge(2, "EspDeviceSetup", "EspDeviceSetup", false, "guard:hello_pending"),
+        edge(3, "EspDeviceSetup", "EspDeviceSetup", false, "guard:esp_settling"),
+      ],
+    );
+    const data = result.nodes[0].data;
+    expect(data.blocked).toBe(3);
+    // Reasons are sorted by count descending so the dominant guard surfaces first.
+    expect(data.blockedReasons).toEqual([
+      { reason: "guard:hello_pending", count: 2 },
+      { reason: "guard:esp_settling", count: 1 },
+    ]);
+  });
+
+  it("counts inter-stage taken transitions as 'entered' on the target node", () => {
+    // Three taken transitions A→B (e.g. retry path) plus one self-loop on B
+    // — entered must be 3 (A→B), internal must be 1.
+    const result = buildLayout(
+      [node("A"), node("B")],
+      [
+        edge(1, "A", "B", true),
+        edge(2, "A", "B", true),
+        edge(3, "A", "B", true),
+        edge(4, "B", "B", true),
+      ],
+    );
+    const byId = Object.fromEntries(result.nodes.map((n) => [n.id, n.data]));
+    expect(byId["B"].entered).toBe(3);
+    expect(byId["B"].internal).toBe(1);
+    expect(byId["A"].entered).toBe(0);
+  });
+
+  it("substitutes '(unknown)' when a self-loop dead-end has no reason", () => {
+    const result = buildLayout(
+      [node("X")],
+      [edge(1, "X", "X", false, null)],
+    );
+    expect(result.nodes[0].data.blockedReasons).toEqual([
+      { reason: "(unknown)", count: 1 },
+    ]);
+  });
+});
+
+describe("computeGraphStats", () => {
+  it("returns zeros for an empty edge list", () => {
+    expect(computeGraphStats([])).toEqual({
+      totalEdges: 0,
+      interStageTaken: 0,
+      interStageBlocked: 0,
+      selfLoopTaken: 0,
+      selfLoopBlocked: 0,
+    });
+  });
+
+  it("classifies edges into the four buckets", () => {
+    // Reproduces the screenshot scenario in miniature:
+    //   3 inter-stage taken + 1 inter-stage dead-end + 5 self-loop taken
+    //   + 2 self-loop dead-ends.
+    const edges = [
+      edge(1, "A", "B", true),
+      edge(2, "B", "C", true),
+      edge(3, "C", "D", true),
+      edge(4, "C", "D", false, "guard:foo"),
+      edge(5, "B", "B", true),
+      edge(6, "B", "B", true),
+      edge(7, "B", "B", true),
+      edge(8, "B", "B", true),
+      edge(9, "B", "B", true),
+      edge(10, "B", "B", false, "guard:hello"),
+      edge(11, "B", "B", false, "guard:hello"),
+    ];
+    expect(computeGraphStats(edges)).toEqual({
+      totalEdges: 11,
+      interStageTaken: 3,
+      interStageBlocked: 1,
+      selfLoopTaken: 5,
+      selfLoopBlocked: 2,
+    });
   });
 });
