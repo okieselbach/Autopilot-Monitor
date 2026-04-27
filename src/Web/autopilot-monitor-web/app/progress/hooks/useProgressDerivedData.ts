@@ -58,10 +58,12 @@ export function useProgressDerivedData(
       if (d) {
         const total = parseInt(d.totalApps ?? d.total_apps ?? "0", 10);
         if (total > 0) {
+          // V2 emits final-bucket keys (`installedApps`, `failedApps`); V1 emitted them
+          // as (`installed`, `failed`). Read V2 first, fall back to V1 for old sessions.
           return {
             total,
-            installed: parseInt(d.installed ?? "0", 10),
-            failed: parseInt(d.failed ?? "0", 10),
+            installed: parseInt(d.installedApps ?? d.installed ?? "0", 10),
+            failed: parseInt(d.failedApps ?? d.failed ?? "0", 10),
             installing: parseInt(d.installing ?? "0", 10),
             downloading: parseInt(d.downloading ?? "0", 10),
           };

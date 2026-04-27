@@ -412,6 +412,16 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                     occurredAtUtc: now);
             }
 
+            // Event-driven `app_tracking_summary` snapshot: emit a fresh aggregate after
+            // every terminal app-state transition. Drives the Web Live-Header
+            // (`X of Y installed`) without resorting to periodic ticks. The terminal
+            // emit in EnrollmentTerminationHandler still runs at session close to
+            // guarantee a final snapshot with `perApp` timings.
+            if (terminalKind != null)
+            {
+                EmitAppTrackingSummarySnapshot(now);
+            }
+
             // PR3-D4: app state transitions are the heaviest cardinality observability target —
             // a forensic reader needs (oldState->newState, terminal flag, sub-phase emit) to
             // reconstruct why the UI shows what it shows.
@@ -707,6 +717,52 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                     return DecisionSignalKind.AppInstallFailed;
                 default:
                     return null;
+            }
+        }
+
+        /// <summary>
+        /// Builds and emits an <c>app_tracking_summary</c> snapshot from the current
+        /// <see cref="ImeLogTracker.PackageStates"/> + <see cref="AppTimings"/>. Called
+        /// from <see cref="EmitAppState"/> after every terminal app-state transition.
+        /// Best-effort: any accessor failure is logged at warning level and swallowed —
+        /// the per-app event itself has already been emitted.
+        /// </summary>
+        private void EmitAppTrackingSummarySnapshot(DateTime now)
+        {
+            try
+            {
+                // Use the deduped phase-snapshot+live union so DeviceSetup apps that were
+                // cleared from `_packageStates` on the AccountSetup transition still appear
+                // in the live snapshot. Mirrors the termination path in AgentRuntimeHost
+                // (`componentFactory.AllKnownPackageStates`); without this, the Web header
+                // counters would drop back to user-only apps after AccountSetup begins.
+                var packagesSnapshot = _tracker.GetAllKnownPackageStates();
+                var timingsSnapshot = AppTimings;
+                // Live snapshots ship counters only — `perApp`/`byPhase` are O(N) per emit
+                // and only needed once at session close for the SummaryDialog/post-mortem.
+                var data = AppTrackingSummaryBuilder.Build(packagesSnapshot, timingsSnapshot, includePerAppDetail: false);
+                var totalApps = (int)data["totalApps"];
+                var completedApps = (int)data["completedApps"];
+                var failedApps = (int)data["failedApps"];
+
+                _post.Emit(new EnrollmentEvent
+                {
+                    EventType = SharedEventTypes.AppTrackingSummary,
+                    Severity = EventSeverity.Info,
+                    Source = SourceLabel,
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"App summary: {completedApps}/{totalApps} completed, {failedApps} failed.",
+                    Timestamp = now,
+                    Data = data,
+                    // Aggregate header counter — sub-second freshness not required, ride
+                    // the next regular telemetry batch instead of triggering an extra
+                    // HTTP roundtrip per terminal app transition.
+                    ImmediateUpload = false,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger?.Warning($"ImeAdapter: app_tracking_summary snapshot failed: {ex.Message}");
             }
         }
 

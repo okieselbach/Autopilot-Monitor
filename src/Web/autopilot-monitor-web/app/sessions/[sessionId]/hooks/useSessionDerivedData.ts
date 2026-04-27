@@ -60,7 +60,10 @@ export function useSessionDerivedData(
     [events, severityFilters]
   );
 
-  // Extract latest app_tracking_summary state-breakdown for progress headers
+  // Extract latest app_tracking_summary state-breakdown for progress headers.
+  // V2 emits final-bucket keys (`installedApps`, `failedApps`, `skippedApps`,
+  // `postponedApps`); V1 emitted them as (`installed`, `failed`, `skipped`).
+  // Read V2 first, fall back to V1 for old sessions in the events table.
   const appSummaryStats = useMemo(() => {
     const summaryEvents = events.filter(e => e.eventType === "app_tracking_summary");
     if (summaryEvents.length === 0) return null;
@@ -72,9 +75,9 @@ export function useSessionDerivedData(
       completedApps: parseInt(d.completedApps ?? "0", 10),
       downloading: parseInt(d.downloading ?? "0", 10),
       installing: parseInt(d.installing ?? "0", 10),
-      installed: parseInt(d.installed ?? "0", 10),
-      skipped: parseInt(d.skipped ?? "0", 10),
-      failed: parseInt(d.failed ?? "0", 10),
+      installed: parseInt(d.installedApps ?? d.installed ?? "0", 10),
+      skipped: parseInt(d.skippedApps ?? d.skipped ?? "0", 10),
+      failed: parseInt(d.failedApps ?? d.failed ?? "0", 10),
       pending: parseInt(d.pending ?? "0", 10),
     };
   }, [events]);

@@ -322,70 +322,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 var packages = TryGetPackageStates();
                 var timings = TryGetAppTimings();
 
-                var totalApps = 0;
-                var installedApps = 0;
-                var skippedApps = 0;
-                var postponedApps = 0;
-                var failedApps = 0;
-                var byPhase = new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
-                var perApp = new List<Dictionary<string, object>>();
-
-                if (packages != null)
-                {
-                    foreach (var pkg in packages)
-                    {
-                        totalApps++;
-                        switch (pkg.InstallationState)
-                        {
-                            case AppInstallationState.Installed: installedApps++; break;
-                            case AppInstallationState.Skipped: skippedApps++; break;
-                            case AppInstallationState.Postponed: postponedApps++; break;
-                            case AppInstallationState.Error: failedApps++; break;
-                        }
-
-                        var phaseKey = pkg.Targeted.ToString();
-                        if (!byPhase.TryGetValue(phaseKey, out var bucket))
-                        {
-                            bucket = new Dictionary<string, int>(StringComparer.Ordinal)
-                            {
-                                ["total"] = 0, ["installed"] = 0, ["skipped"] = 0, ["postponed"] = 0, ["failed"] = 0,
-                            };
-                            byPhase[phaseKey] = bucket;
-                        }
-                        bucket["total"]++;
-                        if (pkg.InstallationState == AppInstallationState.Installed) bucket["installed"]++;
-                        else if (pkg.InstallationState == AppInstallationState.Skipped) bucket["skipped"]++;
-                        else if (pkg.InstallationState == AppInstallationState.Postponed) bucket["postponed"]++;
-                        else if (pkg.InstallationState == AppInstallationState.Error) bucket["failed"]++;
-
-                        timings.TryGetValue(pkg.Id, out var timing);
-                        var appEntry = new Dictionary<string, object>(StringComparer.Ordinal)
-                        {
-                            ["appId"] = pkg.Id,
-                            ["appName"] = pkg.Name ?? string.Empty,
-                            ["phase"] = phaseKey,
-                            ["finalState"] = pkg.InstallationState.ToString(),
-                        };
-                        if (timing?.StartedAtUtc != null) appEntry["startedAt"] = timing.StartedAtUtc.Value.ToString("o");
-                        if (timing?.CompletedAtUtc != null) appEntry["completedAt"] = timing.CompletedAtUtc.Value.ToString("o");
-                        if (timing?.DurationSeconds != null) appEntry["durationSeconds"] = timing.DurationSeconds.Value;
-                        perApp.Add(appEntry);
-                    }
-                }
-
-                var completedApps = installedApps + skippedApps + postponedApps + failedApps;
-
-                var data = new Dictionary<string, object>(StringComparer.Ordinal)
-                {
-                    ["totalApps"] = totalApps,
-                    ["completedApps"] = completedApps,
-                    ["installedApps"] = installedApps,
-                    ["skippedApps"] = skippedApps,
-                    ["postponedApps"] = postponedApps,
-                    ["failedApps"] = failedApps,
-                    ["byPhase"] = byPhase,
-                    ["perApp"] = perApp,
-                };
+                // Terminal emit: include `perApp`/`byPhase` for the SummaryDialog and
+                // post-mortem diagnostics in the Web UI. Live snapshots from the adapter
+                // ship without detail — we are the single source of full-session detail.
+                var data = AppTrackingSummaryBuilder.Build(packages, timings, includePerAppDetail: true);
+                var totalApps = (int)data["totalApps"];
+                var completedApps = (int)data["completedApps"];
+                var failedApps = (int)data["failedApps"];
 
                 _post.Emit(new EnrollmentEvent
                 {
