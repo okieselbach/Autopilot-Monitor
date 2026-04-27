@@ -8,9 +8,6 @@ using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.Shared.Models;
-using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment;
-using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
-using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 {
