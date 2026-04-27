@@ -12,8 +12,16 @@ namespace AutopilotMonitor.Shared.Models
         public string SessionId { get; set; } = string.Empty;
         public string TenantId { get; set; } = string.Empty;
 
-        /// <summary>Succeeded, Failed, InProgress</summary>
-        public string Status { get; set; } = "InProgress";
+        /// <summary>
+        /// Lifecycle status: Succeeded, Failed, InProgress, or empty.
+        /// Empty (default) is a sentinel meaning "no status-relevant event observed in the current
+        /// aggregation batch". Aggregators only set a real value when they see started / completed /
+        /// failed / skipped. The storage layer omits the column from the upsert when this is empty
+        /// so Merge-mode preserves any prior real value across batches that contain only progress
+        /// or telemetry events. Readers fall back to "InProgress" when the column is missing on a
+        /// row, so the UI/API contract remains stable.
+        /// </summary>
+        public string Status { get; set; } = string.Empty;
 
         /// <summary>Total installation duration in seconds (from start to complete/failed)</summary>
         public int DurationSeconds { get; set; }

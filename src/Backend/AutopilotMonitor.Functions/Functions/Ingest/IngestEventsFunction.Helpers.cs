@@ -155,8 +155,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     break;
 
                 case "app_install_skipped":
-                    // Mark as succeeded (skipped = already installed / not applicable) with 0 duration
-                    if (summary.Status == "InProgress")
+                    // Mark as succeeded (skipped = already installed / not applicable) with 0 duration.
+                    // Empty (sentinel: no observation yet) and "InProgress" both flip to Succeeded.
+                    if (summary.Status == "InProgress" || summary.Status == string.Empty)
                         summary.Status = "Succeeded";
                     break;
 

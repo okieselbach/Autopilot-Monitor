@@ -119,7 +119,9 @@ namespace AutopilotMonitor.Functions.Services
                     break;
 
                 case "app_install_skipped":
-                    if (summary.Status == "InProgress")
+                    // Skipped is treated as terminal-success unless we already have a real terminal.
+                    // Empty (sentinel: no observation yet) and "InProgress" both flip to Succeeded.
+                    if (summary.Status == "InProgress" || summary.Status == string.Empty)
                         summary.Status = "Succeeded";
                     break;
 

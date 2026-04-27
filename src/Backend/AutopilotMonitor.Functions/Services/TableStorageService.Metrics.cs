@@ -265,43 +265,15 @@ namespace AutopilotMonitor.Functions.Services
                             summary.DetectionResult = existingDetection;
                     }
 
-                    PreserveTerminalStateIfIncomingIsNotTerminal(summary, existing);
                 }
 
-                var entity = new TableEntity(summary.TenantId, rowKey)
-                {
-                    ["AppName"] = summary.AppName ?? string.Empty,
-                    ["SessionId"] = summary.SessionId ?? string.Empty,
-                    ["TenantId"] = summary.TenantId ?? string.Empty,
-                    ["Status"] = summary.Status ?? "InProgress",
-                    ["DurationSeconds"] = summary.DurationSeconds,
-                    ["DownloadBytes"] = summary.DownloadBytes,
-                    ["DownloadDurationSeconds"] = summary.DownloadDurationSeconds,
-                    ["FailureCode"] = summary.FailureCode ?? string.Empty,
-                    ["FailureMessage"] = summary.FailureMessage ?? string.Empty,
-                    ["StartedAt"] = EnsureUtc(summary.StartedAt),
-                    ["CompletedAt"] = summary.CompletedAt.HasValue ? EnsureUtc(summary.CompletedAt.Value) : (DateTime?)null,
-                    // Delivery Optimization telemetry
-                    ["DoFileSize"] = summary.DoFileSize,
-                    ["DoTotalBytesDownloaded"] = summary.DoTotalBytesDownloaded,
-                    ["DoBytesFromPeers"] = summary.DoBytesFromPeers,
-                    ["DoBytesFromHttp"] = summary.DoBytesFromHttp,
-                    ["DoPercentPeerCaching"] = summary.DoPercentPeerCaching,
-                    ["DoDownloadMode"] = summary.DoDownloadMode,
-                    ["DoDownloadDuration"] = summary.DoDownloadDuration ?? string.Empty,
-                    ["DoBytesFromLanPeers"] = summary.DoBytesFromLanPeers,
-                    ["DoBytesFromGroupPeers"] = summary.DoBytesFromGroupPeers,
-                    ["DoBytesFromInternetPeers"] = summary.DoBytesFromInternetPeers,
-                    // App metadata (from IME log parsing)
-                    ["AppVersion"] = summary.AppVersion ?? string.Empty,
-                    ["AppType"] = summary.AppType ?? string.Empty,
-                    ["AttemptNumber"] = summary.AttemptNumber,
-                    ["InstallerPhase"] = summary.InstallerPhase ?? string.Empty,
-                    ["ExitCode"] = summary.ExitCode,
-                    ["DetectionResult"] = summary.DetectionResult ?? string.Empty
-                };
+                var entity = BuildAppInstallSummaryEntity(summary, rowKey);
 
-                await tableClient.UpsertEntityAsync(entity);
+                // Merge-mode (default) preserves columns absent from the entity. Combined with the
+                // dynamic property-add inside BuildAppInstallSummaryEntity this means a batch that
+                // observed only progress / telemetry events for an app cannot clobber a prior
+                // terminal Status / CompletedAt / DurationSeconds / FailureCode / FailureMessage.
+                await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Merge);
                 return true;
             }
             catch (Exception ex)
@@ -922,38 +894,57 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
-        // A fresh AppInstallSummary defaults Status="InProgress". Late batches that contain only
-        // download_progress / do_telemetry events for an app never enter a Status-mutating switch
-        // case, so the upsert would clobber a prior terminal state. Preserve the terminal columns
-        // whenever the incoming batch did not observe its own terminal event.
-        internal static void PreserveTerminalStateIfIncomingIsNotTerminal(AppInstallSummary summary, TableEntity existing)
+        // Builds the TableEntity for an upsert in such a way that "no observation" sentinels
+        // (empty Status, null CompletedAt, non-positive DurationSeconds, empty FailureCode /
+        // FailureMessage) are simply absent from the entity. Combined with TableUpdateMode.Merge
+        // this prevents a progress / telemetry-only batch from clobbering a prior terminal state.
+        // Always-known fields (AppName, SessionId, TenantId, StartedAt) and fields whose own
+        // sentinel handling lives elsewhere (DownloadBytes, DO telemetry, app metadata) stay
+        // present unconditionally — those have established preserve-from-existing logic upstream
+        // in StoreAppInstallSummaryAsync.
+        internal static TableEntity BuildAppInstallSummaryEntity(AppInstallSummary summary, string rowKey)
         {
-            var existingStatus = existing.GetString("Status");
-            var isExistingTerminal = existingStatus == "Succeeded" || existingStatus == "Failed";
-            var isIncomingTerminal = summary.Status == "Succeeded" || summary.Status == "Failed";
-            if (!isExistingTerminal || isIncomingTerminal)
-                return;
+            var entity = new TableEntity(summary.TenantId, rowKey)
+            {
+                ["AppName"] = summary.AppName ?? string.Empty,
+                ["SessionId"] = summary.SessionId ?? string.Empty,
+                ["TenantId"] = summary.TenantId ?? string.Empty,
+                ["DownloadBytes"] = summary.DownloadBytes,
+                ["DownloadDurationSeconds"] = summary.DownloadDurationSeconds,
+                ["StartedAt"] = EnsureUtc(summary.StartedAt),
+                // Delivery Optimization telemetry
+                ["DoFileSize"] = summary.DoFileSize,
+                ["DoTotalBytesDownloaded"] = summary.DoTotalBytesDownloaded,
+                ["DoBytesFromPeers"] = summary.DoBytesFromPeers,
+                ["DoBytesFromHttp"] = summary.DoBytesFromHttp,
+                ["DoPercentPeerCaching"] = summary.DoPercentPeerCaching,
+                ["DoDownloadMode"] = summary.DoDownloadMode,
+                ["DoDownloadDuration"] = summary.DoDownloadDuration ?? string.Empty,
+                ["DoBytesFromLanPeers"] = summary.DoBytesFromLanPeers,
+                ["DoBytesFromGroupPeers"] = summary.DoBytesFromGroupPeers,
+                ["DoBytesFromInternetPeers"] = summary.DoBytesFromInternetPeers,
+                // App metadata (from IME log parsing)
+                ["AppVersion"] = summary.AppVersion ?? string.Empty,
+                ["AppType"] = summary.AppType ?? string.Empty,
+                ["AttemptNumber"] = summary.AttemptNumber,
+                ["InstallerPhase"] = summary.InstallerPhase ?? string.Empty,
+                ["ExitCode"] = summary.ExitCode,
+                ["DetectionResult"] = summary.DetectionResult ?? string.Empty
+            };
 
-            summary.Status = existingStatus!;
-            if (!summary.CompletedAt.HasValue)
-            {
-                var existingCompletedAt = existing.GetDateTimeOffset("CompletedAt")?.UtcDateTime;
-                if (existingCompletedAt.HasValue && existingCompletedAt.Value != DateTime.MinValue)
-                    summary.CompletedAt = existingCompletedAt.Value;
-            }
-            if (summary.DurationSeconds <= 0)
-            {
-                var existingDuration = existing.GetInt32("DurationSeconds");
-                if (existingDuration.HasValue && existingDuration.Value > 0)
-                    summary.DurationSeconds = existingDuration.Value;
-            }
-            if (existingStatus == "Failed")
-            {
-                if (string.IsNullOrEmpty(summary.FailureCode))
-                    summary.FailureCode = existing.GetString("FailureCode") ?? string.Empty;
-                if (string.IsNullOrEmpty(summary.FailureMessage))
-                    summary.FailureMessage = existing.GetString("FailureMessage") ?? string.Empty;
-            }
+            // Sentinel-gated lifecycle columns: only write when the current batch observed them.
+            if (!string.IsNullOrEmpty(summary.Status))
+                entity["Status"] = summary.Status;
+            if (summary.DurationSeconds > 0)
+                entity["DurationSeconds"] = summary.DurationSeconds;
+            if (summary.CompletedAt.HasValue)
+                entity["CompletedAt"] = EnsureUtc(summary.CompletedAt.Value);
+            if (!string.IsNullOrEmpty(summary.FailureCode))
+                entity["FailureCode"] = summary.FailureCode;
+            if (!string.IsNullOrEmpty(summary.FailureMessage))
+                entity["FailureMessage"] = summary.FailureMessage;
+
+            return entity;
         }
     }
 }
