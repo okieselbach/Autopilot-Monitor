@@ -286,6 +286,23 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             LifecycleEmitters.PostSystemRebootObserved(orchestrator.IngressSink, previousExit, logger);
                         }
 
+                        // V2 race-fix follow-up (10c8e0bf review, 2026-04-27) —
+                        // EnrollmentFactsObserved is posted unconditionally except on
+                        // WhiteGlove Part-2 resume. The facts handler is stage-agnostic,
+                        // idempotent, and monotonic, so it composes cleanly with whatever
+                        // lifecycle anchor follows (SessionStarted, AdminPreemptionDetected).
+                        // Why also for AdminPreemption: even a session that goes straight to
+                        // terminal benefits from a populated ScenarioProfile (JoinMode /
+                        // EnrollmentType) for completion-event reporting and downstream
+                        // analytics. WhiteGlove Part-2 resume hydrates the profile from the
+                        // persisted snapshot and the SessionRecovered signal — re-posting
+                        // facts there would be a no-op via monotonicity but adds noise to
+                        // the Inspector trace, so the existing exclusion stays.
+                        if (!isWhiteGloveResume)
+                        {
+                            LifecycleEmitters.PostEnrollmentFactsObserved(orchestrator.IngressSink, logger);
+                        }
+
                         // V2 parity — post SessionStarted so the reducer establishes the session
                         // anchor (HandleSessionStartedV1 in DecisionEngine.Shared.cs). Skipped on:
                         //   - WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already
@@ -294,14 +311,8 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         //   - Admin preemption: the AdminPreemptionDetected signal below
                         //     drives the session straight to a terminal stage; SessionStarted
                         //     first would be noise.
-                        // V2 race-fix (10c8e0bf debrief, 2026-04-26): EnrollmentFactsObserved
-                        // is posted first so the registry-derived profile facts (enrollmentType
-                        // + isHybridJoin) seed ScenarioProfile via a stage-agnostic reducer
-                        // path. The reducer correctness no longer depends on this ordering —
-                        // the order here exists only for Inspector-timeline readability.
                         if (!isWhiteGloveResume && string.IsNullOrEmpty(registrationResult.AdminAction))
                         {
-                            LifecycleEmitters.PostEnrollmentFactsObserved(orchestrator.IngressSink, logger);
                             LifecycleEmitters.PostSessionStarted(orchestrator.IngressSink, registrationResult, agentConfig, agentVersion, logger);
                         }
 
