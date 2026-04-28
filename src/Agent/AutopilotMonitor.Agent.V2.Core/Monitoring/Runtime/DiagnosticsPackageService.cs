@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
@@ -38,6 +39,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
     }
 
     /// <summary>
+    /// Caps that bound a diagnostics archive build. Files beyond these limits are skipped
+    /// and recorded in <c>_TRUNCATED.txt</c>. Defaults are sized to keep an upload below
+    /// ~500 MB uncompressed; a single runaway log cannot exceed 100 MB.
+    /// </summary>
+    internal sealed class DiagnosticsBudget
+    {
+        public long MaxSingleFileBytes { get; set; }
+        public long MaxTotalUncompressedBytes { get; set; }
+        public int MaxFileCount { get; set; }
+
+        public static DiagnosticsBudget Default => new DiagnosticsBudget
+        {
+            MaxSingleFileBytes = 100L * 1024 * 1024,
+            MaxTotalUncompressedBytes = 500L * 1024 * 1024,
+            MaxFileCount = 5000,
+        };
+    }
+
+    /// <summary>
     /// Creates and uploads a diagnostics ZIP package (agent logs + IME logs + session info)
     /// to the tenant's Azure Blob Storage container via a short-lived SAS URL.
     /// The SAS URL is fetched on-demand just before upload and never stored in config or on disk.
@@ -48,6 +68,50 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         private readonly AgentLogger _logger;
         private readonly BackendApiClient _apiClient;
         private readonly HttpClient _httpClient;
+
+        // Test seam: tests can shrink caps to trigger truncation paths without producing
+        // hundreds of MB of fixture data. Production callers leave this at Default.
+        internal DiagnosticsBudget Budget { get; set; } = DiagnosticsBudget.Default;
+
+        // Tracks per-build inclusion totals + skip reasons. Threaded through every
+        // AddLogFiles call so caps are global across all sections, not per section.
+        private sealed class BudgetTracker
+        {
+            public DiagnosticsBudget Budget { get; }
+            public long TotalBytes { get; private set; }
+            public int FileCount { get; private set; }
+            public List<SkipRecord> Skipped { get; } = new List<SkipRecord>();
+
+            public BudgetTracker(DiagnosticsBudget budget) { Budget = budget; }
+
+            public bool WouldExceedTotal(long fileSize) =>
+                TotalBytes + fileSize > Budget.MaxTotalUncompressedBytes;
+
+            public bool WouldExceedCount() =>
+                FileCount + 1 > Budget.MaxFileCount;
+
+            public void RecordIncluded(long size)
+            {
+                TotalBytes += size;
+                FileCount++;
+            }
+
+            public void RecordSkip(string path, string reason, long size) =>
+                Skipped.Add(new SkipRecord(path, reason, size));
+
+            public bool HasSkips => Skipped.Count > 0;
+        }
+
+        private readonly struct SkipRecord
+        {
+            public string Path { get; }
+            public string Reason { get; }
+            public long Size { get; }
+            public SkipRecord(string path, string reason, long size)
+            {
+                Path = path; Reason = reason; Size = size;
+            }
+        }
 
         private readonly string _imeLogFolder;
         private readonly string _agentLogFolder;
@@ -246,36 +310,37 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         // tests can assert archive contents without going through the upload path.
         internal virtual byte[] BuildArchiveBytes(bool enrollmentSucceeded)
         {
+            var tracker = new BudgetTracker(Budget);
             using (var ms = new MemoryStream())
             {
                 using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
                 {
-                    // 1. sessioninfo.txt
+                    // 1. sessioninfo.txt — informational metadata, not subject to caps.
                     AddSessionInfo(archive, enrollmentSucceeded);
 
                     // 2. Agent logs
                     foreach (var pattern in LogFilePatterns)
-                        AddLogFiles(archive, _agentLogFolder, "AgentLogs", pattern);
+                        AddLogFiles(archive, _agentLogFolder, "AgentLogs", pattern, tracker);
 
                     // 3. IME logs (all relevant files in the IME log folder)
                     foreach (var pattern in LogFilePatterns)
-                        AddLogFiles(archive, _imeLogFolder, "ImeLogs", pattern);
+                        AddLogFiles(archive, _imeLogFolder, "ImeLogs", pattern, tracker);
 
                     // 4. Agent state: snapshot, journal, signal-log, ime-tracker-state,
                     //    enrollment-complete.marker, final-status.json, whiteglove-backfill-state.json.
                     //    Recursive to include `.quarantine` subfolders if present.
                     foreach (var pattern in StateFilePatterns)
-                        AddLogFiles(archive, _agentStateFolder, "AgentState", pattern, includeSubfolders: true);
+                        AddLogFiles(archive, _agentStateFolder, "AgentState", pattern, tracker, includeSubfolders: true);
 
                     // 5. Telemetry spool — pending uploads + upload cursor (forensic: what didn't ship?)
                     foreach (var pattern in SpoolFilePatterns)
-                        AddLogFiles(archive, _agentSpoolFolder, "AgentSpool", pattern, includeSubfolders: false);
+                        AddLogFiles(archive, _agentSpoolFolder, "AgentSpool", pattern, tracker, includeSubfolders: false);
 
                     // 6. Top-level markers (whiteglove.complete, clean-exit marker) — Part-1/Part-2
                     //    bridge + ghost-restart guard. Top-directory only to avoid re-zipping
                     //    State/Spool/Logs/Agent which already have their own sections.
                     foreach (var pattern in RootMarkerPatterns)
-                        AddLogFiles(archive, _agentDataFolder, "AgentMarkers", pattern, includeSubfolders: false);
+                        AddLogFiles(archive, _agentDataFolder, "AgentMarkers", pattern, tracker, includeSubfolders: false);
 
                     // 7. Configured additional log paths (global + tenant, validated by guards)
                     foreach (var entry in _configuration.DiagnosticsLogPaths ?? new System.Collections.Generic.List<Shared.Models.DiagnosticsLogPath>())
@@ -300,8 +365,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                         if (string.IsNullOrEmpty(folder)) continue;
                         if (string.IsNullOrEmpty(pattern) || !pattern.Contains(".")) pattern = "*";
                         var zipFolder = $"AdditionalLogs/{Path.GetFileName(folder)}";
-                        AddLogFiles(archive, folder, zipFolder, pattern, entry.IncludeSubfolders);
+                        AddLogFiles(archive, folder, zipFolder, pattern, tracker, entry.IncludeSubfolders);
                     }
+
+                    // Always last: emit truncation report only if any file was skipped.
+                    if (tracker.HasSkips)
+                        WriteTruncatedMarker(archive, tracker);
                 }
 
                 return ms.ToArray();
@@ -327,8 +396,47 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             writer.Write(sb.ToString());
         }
 
+        // Pure decision helper: file/dir attributes that mark NTFS reparse points
+        // (junctions, symlinks, mount points). We never follow these to avoid traversing
+        // outside the intended source folder or creating cycles in the recursive walk.
+        internal static bool IsReparsePoint(FileAttributes attrs) =>
+            (attrs & FileAttributes.ReparsePoint) != 0;
+
+        // Recursive enumeration that skips reparse-point directories. Materializes the
+        // result into a list so the caller can iterate without holding a directory handle.
+        // Errors during enumeration are swallowed (logged via _logger by the caller).
+        private static List<string> EnumerateFilesNoReparseDirs(string folder, string pattern, bool recurse)
+        {
+            var result = new List<string>();
+            CollectFilesNoReparseDirs(folder, pattern, recurse, result);
+            return result;
+        }
+
+        private static void CollectFilesNoReparseDirs(string folder, string pattern, bool recurse, List<string> result)
+        {
+            string[] files;
+            try { files = Directory.GetFiles(folder, pattern, SearchOption.TopDirectoryOnly); }
+            catch { return; }
+            result.AddRange(files);
+
+            if (!recurse) return;
+
+            string[] dirs;
+            try { dirs = Directory.GetDirectories(folder); }
+            catch { return; }
+
+            foreach (var sub in dirs)
+            {
+                FileAttributes attrs;
+                try { attrs = File.GetAttributes(sub); }
+                catch { continue; }
+                if (IsReparsePoint(attrs)) continue;
+                CollectFilesNoReparseDirs(sub, pattern, recurse: true, result);
+            }
+        }
+
         private void AddLogFiles(ZipArchive archive, string sourceFolder, string zipFolder, string searchPattern,
-            bool includeSubfolders = false)
+            BudgetTracker tracker, bool includeSubfolders = false)
         {
             if (!Directory.Exists(sourceFolder))
             {
@@ -336,43 +444,109 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 return;
             }
 
+            List<string> files;
             try
             {
-                var searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                var files = Directory.GetFiles(sourceFolder, searchPattern, searchOption);
-                foreach (var file in files)
-                {
-                    try
-                    {
-                        // Preserve subfolder structure in the ZIP when includeSubfolders is enabled
-                        var relativePath = file.Substring(sourceFolder.Length).TrimStart(Path.DirectorySeparatorChar);
-                        var entryName = $"{zipFolder}/{relativePath.Replace(Path.DirectorySeparatorChar, '/')}";
-
-                        // Read with FileShare.ReadWrite to avoid locking conflicts with active log writers
-                        byte[] content;
-                        using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                        using (var reader = new MemoryStream())
-                        {
-                            fs.CopyTo(reader);
-                            content = reader.ToArray();
-                        }
-
-                        var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
-                        using var entryStream = entry.Open();
-                        entryStream.Write(content, 0, content.Length);
-
-                        _logger.Debug($"Added to diagnostics package: {entryName} ({content.Length / 1024} KB)");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warning($"Failed to add log file to diagnostics package: {file} - {ex.Message}");
-                    }
-                }
+                files = EnumerateFilesNoReparseDirs(sourceFolder, searchPattern, includeSubfolders);
             }
             catch (Exception ex)
             {
                 _logger.Warning($"Failed to enumerate log files in {sourceFolder}: {ex.Message}");
+                return;
             }
+
+            foreach (var file in files)
+            {
+                try
+                {
+                    // Per-file reparse check: a top-level file in the folder may itself be a
+                    // symlink/junction even though its parent directory is real.
+                    FileAttributes attrs;
+                    try { attrs = File.GetAttributes(file); }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"Failed to read attributes for {file}: {ex.Message}");
+                        continue;
+                    }
+                    if (IsReparsePoint(attrs))
+                    {
+                        _logger.Warning($"Skipping reparse-point file: {file}");
+                        tracker.RecordSkip(file, "reparse", 0);
+                        continue;
+                    }
+
+                    long length;
+                    try { length = new FileInfo(file).Length; }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning($"Failed to stat {file}: {ex.Message}");
+                        continue;
+                    }
+
+                    if (length > tracker.Budget.MaxSingleFileBytes)
+                    {
+                        _logger.Warning($"Skipping oversized file ({length} bytes > {tracker.Budget.MaxSingleFileBytes} cap): {file}");
+                        tracker.RecordSkip(file, "size", length);
+                        continue;
+                    }
+                    if (tracker.WouldExceedCount())
+                    {
+                        _logger.Warning($"Skipping file (file-count cap {tracker.Budget.MaxFileCount} reached): {file}");
+                        tracker.RecordSkip(file, "count", length);
+                        continue;
+                    }
+                    if (tracker.WouldExceedTotal(length))
+                    {
+                        _logger.Warning($"Skipping file (total-bytes cap {tracker.Budget.MaxTotalUncompressedBytes} reached): {file}");
+                        tracker.RecordSkip(file, "total", length);
+                        continue;
+                    }
+
+                    // Preserve subfolder structure in the ZIP when includeSubfolders is enabled
+                    var relativePath = file.Substring(sourceFolder.Length).TrimStart(Path.DirectorySeparatorChar);
+                    var entryName = $"{zipFolder}/{relativePath.Replace(Path.DirectorySeparatorChar, '/')}";
+
+                    var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+                    // Stream directly from disk into the entry — no per-file MemoryStream/byte[]
+                    // copy. FileShare.ReadWrite avoids locking conflicts with active log writers.
+                    using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var entryStream = entry.Open())
+                    {
+                        fs.CopyTo(entryStream);
+                    }
+
+                    tracker.RecordIncluded(length);
+                    _logger.Debug($"Added to diagnostics package: {entryName} ({length / 1024} KB)");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"Failed to add log file to diagnostics package: {file} - {ex.Message}");
+                }
+            }
+        }
+
+        private static void WriteTruncatedMarker(ZipArchive archive, BudgetTracker tracker)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Diagnostics package was truncated. Some files were not included.");
+            sb.AppendLine();
+            sb.AppendLine("Caps in effect:");
+            sb.AppendLine($"  MaxSingleFileBytes:        {tracker.Budget.MaxSingleFileBytes}");
+            sb.AppendLine($"  MaxTotalUncompressedBytes: {tracker.Budget.MaxTotalUncompressedBytes}");
+            sb.AppendLine($"  MaxFileCount:              {tracker.Budget.MaxFileCount}");
+            sb.AppendLine();
+            sb.AppendLine($"Included: {tracker.FileCount} files, {tracker.TotalBytes} bytes");
+            sb.AppendLine($"Skipped:  {tracker.Skipped.Count} files");
+            sb.AppendLine();
+            sb.AppendLine("Skip list (path | reason | size):");
+            foreach (var s in tracker.Skipped)
+            {
+                sb.AppendLine($"  {s.Path} | {s.Reason} | {s.Size}");
+            }
+
+            var entry = archive.CreateEntry("_TRUNCATED.txt");
+            using (var writer = new StreamWriter(entry.Open(), Encoding.UTF8))
+                writer.Write(sb.ToString());
         }
 
         /// <summary>

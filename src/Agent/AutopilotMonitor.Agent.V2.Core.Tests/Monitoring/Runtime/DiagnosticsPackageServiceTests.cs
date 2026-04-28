@@ -2,6 +2,7 @@
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
@@ -198,6 +199,173 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
             using var ms = new MemoryStream(zipBytes);
             using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
             return archive.Entries.Select(e => e.FullName).ToArray();
+        }
+
+        private static string ReadEntry(byte[] zipBytes, string entryName)
+        {
+            using var ms = new MemoryStream(zipBytes);
+            using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+            var entry = archive.Entries.First(e => e.FullName == entryName);
+            using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+            return reader.ReadToEnd();
+        }
+
+        // Isolated rig for budget/cap tests: keeps the agent logger output OUT of the
+        // archive scope so cap assertions are not contaminated by logger noise.
+        // Test files are written to ContentDir (mapped to AgentLogs in the archive);
+        // every other source folder override points at an empty dir.
+        private sealed class BudgetRig : System.IDisposable
+        {
+            public TempDirectory LoggerDir { get; } = new TempDirectory();   // logger writes here, not enumerated
+            public TempDirectory ContentDir { get; } = new TempDirectory();  // test writes go here → AgentLogs
+            public TempDirectory EmptyDir { get; } = new TempDirectory();    // unused source folders
+            public AgentLogger Logger { get; }
+
+            public BudgetRig()
+            {
+                Logger = new AgentLogger(LoggerDir.Path);
+            }
+
+            public DiagnosticsPackageService Build(DiagnosticsBudget? budget = null)
+            {
+                var apiClient = new BackendApiClient(
+                    httpClient: new System.Net.Http.HttpClient(),
+                    baseUrl: "http://localhost",
+                    manufacturer: string.Empty,
+                    model: string.Empty,
+                    serialNumber: string.Empty,
+                    useBootstrapTokenAuth: false,
+                    bootstrapToken: null,
+                    agentVersion: "0.0.0",
+                    logger: Logger);
+
+                var svc = new DiagnosticsPackageService(
+                    Cfg(),
+                    Logger,
+                    apiClient,
+                    agentLogFolderOverride: ContentDir.Path,
+                    imeLogFolderOverride: EmptyDir.Path,
+                    agentStateFolderOverride: EmptyDir.Path,
+                    agentSpoolFolderOverride: EmptyDir.Path,
+                    agentDataFolderOverride: EmptyDir.Path);
+
+                if (budget != null) svc.Budget = budget;
+                return svc;
+            }
+
+            public void Dispose()
+            {
+                LoggerDir.Dispose();
+                ContentDir.Dispose();
+                EmptyDir.Dispose();
+            }
+        }
+
+        [Fact]
+        public void BuildArchiveBytes_skips_file_exceeding_per_file_cap()
+        {
+            using var rig = new BudgetRig();
+            File.WriteAllBytes(Path.Combine(rig.ContentDir.Path, "huge.log"), new byte[5000]);
+            File.WriteAllBytes(Path.Combine(rig.ContentDir.Path, "small.log"), new byte[500]);
+
+            var svc = rig.Build(new DiagnosticsBudget
+            {
+                MaxSingleFileBytes = 1024,
+                MaxTotalUncompressedBytes = 1024L * 1024 * 1024,
+                MaxFileCount = 1000,
+            });
+
+            var bytes = svc.BuildArchiveBytes(enrollmentSucceeded: true);
+            var entries = ZipEntryNames(bytes);
+
+            Assert.DoesNotContain("AgentLogs/huge.log", entries);
+            Assert.Contains("AgentLogs/small.log", entries);
+            Assert.Contains("_TRUNCATED.txt", entries);
+
+            var truncated = ReadEntry(bytes, "_TRUNCATED.txt");
+            Assert.Contains("huge.log", truncated);
+            Assert.Contains("size", truncated);
+        }
+
+        [Fact]
+        public void BuildArchiveBytes_stops_at_total_cap()
+        {
+            using var rig = new BudgetRig();
+            for (int i = 0; i < 10; i++)
+                File.WriteAllBytes(Path.Combine(rig.ContentDir.Path, $"f{i:D2}.log"), new byte[1024]);
+
+            var svc = rig.Build(new DiagnosticsBudget
+            {
+                MaxSingleFileBytes = 100L * 1024 * 1024,
+                MaxTotalUncompressedBytes = 4096,
+                MaxFileCount = 1000,
+            });
+
+            var bytes = svc.BuildArchiveBytes(enrollmentSucceeded: true);
+            var entries = ZipEntryNames(bytes);
+
+            var fileEntries = entries.Where(e => e.StartsWith("AgentLogs/")).ToArray();
+            // 4096 / 1024 = 4 max files fit; subsequent files are skipped.
+            Assert.Equal(4, fileEntries.Length);
+            Assert.Contains("_TRUNCATED.txt", entries);
+            var truncated = ReadEntry(bytes, "_TRUNCATED.txt");
+            Assert.Contains("total", truncated);
+        }
+
+        [Fact]
+        public void BuildArchiveBytes_stops_at_file_count_cap()
+        {
+            using var rig = new BudgetRig();
+            for (int i = 0; i < 10; i++)
+                File.WriteAllBytes(Path.Combine(rig.ContentDir.Path, $"f{i:D2}.log"), new byte[100]);
+
+            var svc = rig.Build(new DiagnosticsBudget
+            {
+                MaxSingleFileBytes = 100L * 1024 * 1024,
+                MaxTotalUncompressedBytes = 100L * 1024 * 1024,
+                MaxFileCount = 3,
+            });
+
+            var bytes = svc.BuildArchiveBytes(enrollmentSucceeded: true);
+            var entries = ZipEntryNames(bytes);
+
+            var fileEntries = entries.Where(e => e.StartsWith("AgentLogs/")).ToArray();
+            Assert.Equal(3, fileEntries.Length);
+            Assert.Contains("_TRUNCATED.txt", entries);
+            var truncated = ReadEntry(bytes, "_TRUNCATED.txt");
+            Assert.Contains("count", truncated);
+        }
+
+        [Fact]
+        public void BuildArchiveBytes_omits_truncated_marker_when_no_skips()
+        {
+            using var rig = new BudgetRig();
+            File.WriteAllBytes(Path.Combine(rig.ContentDir.Path, "tiny.log"), new byte[100]);
+
+            var svc = rig.Build();   // default budget: 100 MB / 500 MB / 5000
+
+            var bytes = svc.BuildArchiveBytes(enrollmentSucceeded: true);
+            var entries = ZipEntryNames(bytes);
+
+            Assert.Contains("AgentLogs/tiny.log", entries);
+            Assert.DoesNotContain("_TRUNCATED.txt", entries);
+        }
+
+        [Fact]
+        public void IsReparsePoint_returns_true_for_reparse_attribute()
+        {
+            Assert.True(DiagnosticsPackageService.IsReparsePoint(FileAttributes.ReparsePoint));
+            Assert.True(DiagnosticsPackageService.IsReparsePoint(FileAttributes.ReparsePoint | FileAttributes.Directory));
+            Assert.True(DiagnosticsPackageService.IsReparsePoint(FileAttributes.ReparsePoint | FileAttributes.Hidden));
+        }
+
+        [Fact]
+        public void IsReparsePoint_returns_false_for_normal_files()
+        {
+            Assert.False(DiagnosticsPackageService.IsReparsePoint(FileAttributes.Normal));
+            Assert.False(DiagnosticsPackageService.IsReparsePoint(FileAttributes.Directory));
+            Assert.False(DiagnosticsPackageService.IsReparsePoint(FileAttributes.ReadOnly | FileAttributes.Hidden));
+            Assert.False(DiagnosticsPackageService.IsReparsePoint(FileAttributes.Archive));
         }
     }
 }
