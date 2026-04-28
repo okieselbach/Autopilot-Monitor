@@ -11,6 +11,52 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public partial class RuleEngine
     {
+        /// <summary>
+        /// Evaluates a single precondition (AND-semantics gate, silent skip on failure).
+        ///
+        /// Semantics:
+        ///   - Source must be <c>event_data</c> (the only currently supported source).
+        ///   - <c>exists</c>: passes when at least one event of <see cref="RulePrecondition.EventType"/>
+        ///     carries a non-null value at <see cref="RulePrecondition.DataField"/>.
+        ///   - <c>not_exists</c>: passes when no event of that type carries the field
+        ///     (also passes when the event type itself is absent — common case for "no VM detected").
+        ///   - All other operators: pass when at least one event of that type matches the
+        ///     <see cref="RulePrecondition.Operator"/> against <see cref="RulePrecondition.Value"/>.
+        ///     Missing event type or missing field → fail closed (rule skipped).
+        /// </summary>
+        private bool EvaluatePrecondition(RulePrecondition precondition, List<EnrollmentEvent> events)
+        {
+            if (!string.Equals(precondition.Source, "event_data", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Unsupported precondition source '{Source}' — failing closed", precondition.Source);
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(precondition.EventType) || string.IsNullOrEmpty(precondition.DataField))
+                return false;
+
+            var matchingEvents = events.Where(e => MatchesEventType(e, precondition.EventType)).ToList();
+            var op = precondition.Operator?.ToLowerInvariant() ?? string.Empty;
+
+            if (op == "not_exists")
+            {
+                if (matchingEvents.Count == 0) return true;
+                return matchingEvents.All(e => string.IsNullOrEmpty(GetDataFieldValue(e, precondition.DataField)));
+            }
+
+            if (matchingEvents.Count == 0)
+                return false;
+
+            if (op == "exists")
+                return matchingEvents.Any(e => !string.IsNullOrEmpty(GetDataFieldValue(e, precondition.DataField)));
+
+            return matchingEvents.Any(e =>
+            {
+                var fieldValue = GetDataFieldValue(e, precondition.DataField);
+                return fieldValue != null && MatchesOperator(fieldValue, precondition.Operator ?? string.Empty, precondition.Value ?? string.Empty);
+            });
+        }
+
         private (bool matched, object evidence) EvaluateCondition(RuleCondition condition, List<EnrollmentEvent> events)
         {
             switch (condition.Source)

@@ -222,6 +222,23 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         private RuleResult? EvaluateRule(AnalyzeRule rule, List<EnrollmentEvent> events)
         {
+            // Preconditions gate (AND-semantics, silent skip): if any precondition fails the
+            // rule is not evaluated at all — no result row, no UI card. Distinct from
+            // conditions, which decide whether the rule fires given that it applies.
+            if (rule.Preconditions != null && rule.Preconditions.Count > 0)
+            {
+                foreach (var pre in rule.Preconditions)
+                {
+                    if (!EvaluatePrecondition(pre, events))
+                    {
+                        _logger.LogDebug(
+                            "Rule {RuleId} skipped by precondition (eventType={EventType}, field={Field}, op={Op}, value={Value})",
+                            rule.RuleId, pre.EventType, pre.DataField, pre.Operator, pre.Value);
+                        return null;
+                    }
+                }
+            }
+
             var matchedConditions = new Dictionary<string, object>();
             int confidence = rule.BaseConfidence;
             bool allRequiredMet = true;

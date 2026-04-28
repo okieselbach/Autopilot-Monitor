@@ -31,6 +31,15 @@ export interface RuleCondition {
   eventAFilterValue?: string;
 }
 
+export interface RulePrecondition {
+  source: string;
+  eventType: string;
+  dataField: string;
+  operator: string;
+  value: string;
+  description?: string;
+}
+
 export interface TemplateVariable {
   name: string;
   label: string;
@@ -53,6 +62,7 @@ export interface AnalyzeRule {
   enabled: boolean;
   isBuiltIn: boolean;
   isCommunity: boolean;
+  preconditions?: RulePrecondition[];
   conditions: RuleCondition[];
   baseConfidence: number;
   confidenceFactors: ConfidenceFactor[];
@@ -81,6 +91,7 @@ export interface RuleForm {
   explanation: string;
   baseConfidence: number;
   confidenceThreshold: number;
+  preconditions: RulePrecondition[];
   conditions: RuleCondition[];
   confidenceFactors: ConfidenceFactor[];
   remediation: RemediationStep[];
@@ -92,6 +103,7 @@ export const SEVERITIES = ["info", "warning", "high", "critical"] as const;
 export const TRIGGERS = ["single", "correlation"] as const;
 export const OPERATORS = ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "count_gte", "count_per_group_gte", "in", "not_in"] as const;
 export const SOURCES = ["event_type", "event_data", "phase_duration", "event_count", "event_correlation"] as const;
+export const PRECONDITION_OPERATORS = ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "in", "not_in"] as const;
 
 export const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
   critical: { bg: "bg-red-100", text: "text-red-800", border: "border-red-300", dot: "bg-red-500" },
@@ -139,6 +151,15 @@ export const EMPTY_FACTOR: ConfidenceFactor = {
   weight: 10,
 };
 
+export const EMPTY_PRECONDITION: RulePrecondition = {
+  source: "event_data",
+  eventType: "",
+  dataField: "",
+  operator: "equals",
+  value: "",
+  description: "",
+};
+
 export const EMPTY_FORM: RuleForm = {
   ruleId: "",
   title: "",
@@ -149,6 +170,7 @@ export const EMPTY_FORM: RuleForm = {
   explanation: "",
   baseConfidence: 50,
   confidenceThreshold: 40,
+  preconditions: [],
   conditions: [{ ...EMPTY_CONDITION }],
   confidenceFactors: [],
   remediation: [],
@@ -166,6 +188,7 @@ export function ruleToForm(rule: AnalyzeRule): RuleForm {
     explanation: rule.explanation || "",
     baseConfidence: rule.baseConfidence,
     confidenceThreshold: rule.confidenceThreshold,
+    preconditions: (rule.preconditions ?? []).map(p => ({ ...p })),
     conditions: rule.conditions.length > 0 ? rule.conditions.map(c => ({ ...c })) : [{ ...EMPTY_CONDITION }],
     confidenceFactors: rule.confidenceFactors.map(f => ({ ...f })),
     remediation: rule.remediation.map(r => ({ title: r.title, steps: [...r.steps] })),

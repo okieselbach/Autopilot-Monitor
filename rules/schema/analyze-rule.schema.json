@@ -81,6 +81,12 @@
           "items": { "$ref": "#/$defs/ruleCondition" },
           "minItems": 1
         },
+        "preconditions": {
+          "type": "array",
+          "description": "Optional device-fact gates evaluated BEFORE conditions. ALL preconditions must pass; if any fails the rule is silently skipped — no result, no UI card. Useful for filtering out hardware/OS profiles where the rule does not apply (e.g. virtual machines).",
+          "items": { "$ref": "#/$defs/rulePrecondition" },
+          "default": []
+        },
         "baseConfidence": {
           "type": "integer",
           "description": "Base confidence score (0-100) when required conditions match.",
@@ -221,6 +227,41 @@
         }
       },
       "required": ["signal", "source"],
+      "additionalProperties": false
+    },
+    "rulePrecondition": {
+      "type": "object",
+      "description": "A device-fact gate evaluated before conditions. Pure boolean filter — does not contribute to evidence or confidence.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Currently only event_data is supported.",
+          "enum": ["event_data"],
+          "default": "event_data"
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Event type carrying the field to test (e.g., \"hardware_spec\", \"os_info\", \"tpm_status\")."
+        },
+        "dataField": {
+          "type": "string",
+          "description": "Data field to test. Uses dot notation for nested fields."
+        },
+        "operator": {
+          "type": "string",
+          "description": "Comparison operator. Same vocabulary as conditions.",
+          "enum": ["equals", "not_equals", "contains", "not_contains", "regex", "not_regex", "gt", "lt", "gte", "lte", "exists", "not_exists", "in", "not_in"]
+        },
+        "value": {
+          "type": "string",
+          "description": "Value to compare against. Boolean values are stringified (\"true\"/\"false\")."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable note explaining the intent (e.g., \"skip on virtual machines\")."
+        }
+      },
+      "required": ["source", "operator"],
       "additionalProperties": false
     },
     "confidenceFactor": {

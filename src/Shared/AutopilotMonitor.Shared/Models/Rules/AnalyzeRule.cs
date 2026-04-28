@@ -70,6 +70,13 @@ namespace AutopilotMonitor.Shared.Models
         // ===== MATCHING CONDITIONS =====
 
         /// <summary>
+        /// Optional device-fact gates evaluated BEFORE conditions. ALL preconditions must pass;
+        /// if any fails the rule is silently skipped — no result, no UI card. Used to filter out
+        /// hardware/OS profiles where a rule does not apply (e.g. "skip on virtual machines").
+        /// </summary>
+        public List<RulePrecondition> Preconditions { get; set; } = new List<RulePrecondition>();
+
+        /// <summary>
         /// Conditions that must be evaluated against the event stream
         /// All required conditions must match for the rule to fire
         /// </summary>
@@ -253,6 +260,47 @@ namespace AutopilotMonitor.Shared.Models
         /// Value for the Event A filter.
         /// </summary>
         public string EventAFilterValue { get; set; } = default!;
+    }
+
+    /// <summary>
+    /// A device-fact gate evaluated before a rule's conditions. Pure boolean filter —
+    /// does not contribute to evidence or confidence. When any precondition on a rule
+    /// fails, the rule is silently skipped (no result emitted). Currently only
+    /// <c>event_data</c> source is supported.
+    /// </summary>
+    public class RulePrecondition
+    {
+        /// <summary>
+        /// Source of the fact. Currently only <c>event_data</c>.
+        /// </summary>
+        public string Source { get; set; } = "event_data";
+
+        /// <summary>
+        /// Event type carrying the field to test (e.g., <c>hardware_spec</c>, <c>os_info</c>).
+        /// </summary>
+        public string EventType { get; set; } = default!;
+
+        /// <summary>
+        /// Data field to test (dot notation supported for nested fields).
+        /// </summary>
+        public string DataField { get; set; } = default!;
+
+        /// <summary>
+        /// Comparison operator. Same vocabulary as <see cref="RuleCondition.Operator"/>
+        /// minus the count_/correlation-specific operators.
+        /// </summary>
+        public string Operator { get; set; } = default!;
+
+        /// <summary>
+        /// Value to compare against. Boolean values are stringified (<c>"true"</c>/<c>"false"</c>).
+        /// </summary>
+        public string Value { get; set; } = default!;
+
+        /// <summary>
+        /// Optional human-readable note explaining the intent
+        /// (e.g., <c>"skip on virtual machines"</c>). Not evaluated.
+        /// </summary>
+        public string? Description { get; set; }
     }
 
     /// <summary>

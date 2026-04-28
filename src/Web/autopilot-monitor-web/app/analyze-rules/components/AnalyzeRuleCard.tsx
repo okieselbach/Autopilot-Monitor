@@ -192,6 +192,27 @@ export default function AnalyzeRuleCard({
             <p className="text-sm text-gray-600 leading-relaxed">{rule.description}</p>
           </div>
 
+          {rule.preconditions && rule.preconditions.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2">Preconditions ({rule.preconditions.length})</h4>
+              <p className="text-xs text-gray-500 mb-2">Rule is silently skipped if any of these fails.</p>
+              <div className="space-y-2">
+                {rule.preconditions.map((pre, idx) => (
+                  <div key={idx} className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                    <p className="text-gray-700">
+                      <span className="text-gray-600 font-medium">Event:</span> {pre.eventType}
+                      {pre.dataField && (<span> | <span className="text-gray-600 font-medium">Field:</span> <code className="bg-amber-100 px-1 rounded text-xs">{pre.dataField}</code></span>)}
+                      {" "}
+                      <code className="bg-amber-100 px-1 rounded text-xs">{pre.operator}</code>
+                      {pre.value !== "" && (<> <code className="bg-amber-100 px-1 rounded text-xs">{pre.value}</code></>)}
+                    </p>
+                    {pre.description && (<p className="text-xs text-gray-500 italic mt-1">{pre.description}</p>)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {rule.conditions.length > 0 && (
             <div>
               <h4 className="text-sm font-semibold text-gray-700 mb-2">Conditions ({rule.conditions.length})</h4>

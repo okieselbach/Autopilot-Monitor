@@ -1,9 +1,9 @@
 "use client";
 
 import {
-  RuleForm, RuleCondition,
-  CATEGORIES, SEVERITIES, TRIGGERS, OPERATORS, SOURCES,
-  EMPTY_CONDITION, EMPTY_FACTOR,
+  RuleForm, RuleCondition, RulePrecondition,
+  CATEGORIES, SEVERITIES, TRIGGERS, OPERATORS, SOURCES, PRECONDITION_OPERATORS,
+  EMPTY_CONDITION, EMPTY_FACTOR, EMPTY_PRECONDITION,
 } from "../types";
 
 interface AnalyzeRuleFormFieldsProps {
@@ -61,6 +61,47 @@ export default function AnalyzeRuleFormFields({ form, setForm, showRuleId, exist
             {TRIGGERS.map((t) => (<option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>))}
           </select>
         </div>
+      </div>
+
+      {/* Preconditions (device-fact gates evaluated BEFORE conditions) */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700">Preconditions</label>
+            <p className="text-xs text-gray-500">Optional. Rule is silently skipped (no result) when ANY precondition fails. Useful e.g. to skip on virtual machines.</p>
+          </div>
+          <button type="button" onClick={() => setForm({ ...form, preconditions: [...form.preconditions, { ...EMPTY_PRECONDITION }] })} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add Precondition</button>
+        </div>
+        {form.preconditions.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">No preconditions. Rule applies to every device.</p>
+        ) : (
+          <div className="space-y-2">
+            {form.preconditions.map((pre, idx) => {
+              const updatePre = (patch: Partial<RulePrecondition>) => {
+                const p = [...form.preconditions];
+                p[idx] = { ...p[idx], ...patch };
+                setForm({ ...form, preconditions: p });
+              };
+              return (
+                <div key={idx} className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-amber-700">Precondition {idx + 1}</span>
+                    <button type="button" onClick={() => setForm({ ...form, preconditions: form.preconditions.filter((_, i) => i !== idx) })} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <input type="text" value={pre.eventType} onChange={(e) => updatePre({ eventType: e.target.value })} placeholder="Event type (e.g. hardware_spec)" autoComplete="off" className="px-3 py-1.5 border border-amber-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                    <input type="text" value={pre.dataField} onChange={(e) => updatePre({ dataField: e.target.value })} placeholder="Data field (e.g. isVirtualMachine)" autoComplete="off" className="px-3 py-1.5 border border-amber-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                    <select value={pre.operator} onChange={(e) => updatePre({ operator: e.target.value })} className="px-3 py-1.5 border border-amber-300 rounded text-sm text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-amber-500">
+                      {PRECONDITION_OPERATORS.map((o) => (<option key={o} value={o}>{o}</option>))}
+                    </select>
+                    <input type="text" value={pre.value} onChange={(e) => updatePre({ value: e.target.value })} placeholder="Value (e.g. false)" autoComplete="off" className="px-3 py-1.5 border border-amber-300 rounded text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                  </div>
+                  <input type="text" value={pre.description ?? ""} onChange={(e) => updatePre({ description: e.target.value })} placeholder="Description (optional, e.g. 'skip on VMs')" autoComplete="off" className="w-full px-3 py-1.5 border border-amber-200 rounded text-sm text-gray-700 placeholder-gray-400 bg-white focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Conditions */}
