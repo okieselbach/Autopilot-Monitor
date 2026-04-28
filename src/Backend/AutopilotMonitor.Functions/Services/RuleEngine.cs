@@ -30,79 +30,95 @@ namespace AutopilotMonitor.Functions.Services
         /// Called once at enrollment end or on-demand. Fetches events internally.
         /// When reanalyze=true, all rules are re-evaluated regardless of existing results.
         /// Returns both the fired results and metadata about all rules that were evaluated (for telemetry).
+        /// <para>
+        /// <b>Failure semantics:</b> storage-layer exceptions from rule loading, event reading
+        /// or existing-results lookup propagate to the caller. The queue worker relies on this
+        /// to leave its message un-deleted so a transient Table Storage failure can be retried
+        /// via visibility-timeout (<see cref="AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndQueueWorker"/>).
+        /// The on-demand HTTP path (<see cref="AutopilotMonitor.Functions.Functions.Rules.GetRuleResultsFunction"/>)
+        /// wraps the call in its own try/catch and logs failures as warnings — the user sees
+        /// the previously-stored results until they re-trigger.
+        /// </para>
+        /// <para>
+        /// Per-rule evaluation failures are caught locally and logged: a single buggy rule must
+        /// not abort the whole session pass. Rules that throw are simply absent from
+        /// <see cref="AnalysisOutcome.Results"/>; they remain in <see cref="AnalysisOutcome.EvaluatedRules"/>
+        /// so telemetry counts the attempt.
+        /// </para>
         /// </summary>
         public async Task<AnalysisOutcome> AnalyzeSessionAsync(string tenantId, string sessionId, bool reanalyze = false)
         {
             var outcome = new AnalysisOutcome();
 
-            try
+            var activeRules = await _ruleService.GetActiveRulesForTenantAsync(tenantId);
+            var allEvents = await _sessionRepo.GetSessionEventsAsync(tenantId, sessionId);
+
+            if (allEvents.Count == 0)
             {
-                var activeRules = await _ruleService.GetActiveRulesForTenantAsync(tenantId);
-                var allEvents = await _sessionRepo.GetSessionEventsAsync(tenantId, sessionId);
+                // NOTE: TableStorageService.GetSessionEventsAsync swallows Storage exceptions
+                // and returns an empty list. A transient read failure is therefore indistinguishable
+                // from a genuinely empty session here. Tracked as a follow-up: storage helpers
+                // should fail loud so the queue worker retries instead of deleting the message.
+                _logger.LogInformation($"No events found for session {sessionId}, skipping analysis");
+                return outcome;
+            }
 
-                if (allEvents.Count == 0)
+            // Backfill derived fields for backward compatibility with events produced by older agents.
+            // This is a pure read-time projection — we never persist the synthesized values.
+            BackfillDerivedEventFields(allEvents);
+
+            // On reanalyze: skip deduplication so all rules are re-evaluated from scratch
+            // On normal run: skip rules already evaluated to avoid duplicate storage
+            HashSet<string> existingRuleIds;
+            if (reanalyze)
+            {
+                existingRuleIds = new HashSet<string>();
+            }
+            else
+            {
+                var existingResults = await _ruleRepo.GetRuleResultsAsync(tenantId, sessionId);
+                existingRuleIds = new HashSet<string>(existingResults.Select(r => r.RuleId));
+            }
+
+            _logger.LogInformation($"Analyzing session {sessionId}: {allEvents.Count} events, {activeRules.Count} rules ({existingRuleIds.Count} already evaluated)");
+
+            foreach (var rule in activeRules)
+            {
+                try
                 {
-                    _logger.LogInformation($"No events found for session {sessionId}, skipping analysis");
-                    return outcome;
-                }
+                    // Skip if we already have a result for this rule
+                    if (existingRuleIds.Contains(rule.RuleId))
+                        continue;
 
-                // Backfill derived fields for backward compatibility with events produced by older agents.
-                // This is a pure read-time projection — we never persist the synthesized values.
-                BackfillDerivedEventFields(allEvents);
+                    // Track that this rule was evaluated (for telemetry)
+                    outcome.EvaluatedRules.Add(rule);
 
-                // On reanalyze: skip deduplication so all rules are re-evaluated from scratch
-                // On normal run: skip rules already evaluated to avoid duplicate storage
-                HashSet<string> existingRuleIds;
-                if (reanalyze)
-                {
-                    existingRuleIds = new HashSet<string>();
-                }
-                else
-                {
-                    var existingResults = await _ruleRepo.GetRuleResultsAsync(tenantId, sessionId);
-                    existingRuleIds = new HashSet<string>(existingResults.Select(r => r.RuleId));
-                }
-
-                _logger.LogInformation($"Analyzing session {sessionId}: {allEvents.Count} events, {activeRules.Count} rules ({existingRuleIds.Count} already evaluated)");
-
-                foreach (var rule in activeRules)
-                {
-                    try
+                    var result = EvaluateRule(rule, allEvents);
+                    if (result != null)
                     {
-                        // Skip if we already have a result for this rule
-                        if (existingRuleIds.Contains(rule.RuleId))
-                            continue;
+                        result.SessionId = sessionId;
+                        result.TenantId = tenantId;
+                        outcome.Results.Add(result);
+                        _logger.LogInformation($"Rule {rule.RuleId} ({rule.Trigger}) fired for session {sessionId} with confidence {result.ConfidenceScore}%");
 
-                        // Track that this rule was evaluated (for telemetry)
-                        outcome.EvaluatedRules.Add(rule);
-
-                        var result = EvaluateRule(rule, allEvents);
-                        if (result != null)
+                        // KO-criterion: if the (effective) MarkSessionAsFailed flag is on,
+                        // escalate the rule finding to a terminal session status. Tenant override
+                        // wins; otherwise we honor the rule-definition default.
+                        var shouldFailSession = rule.MarkSessionAsFailed ?? rule.MarkSessionAsFailedDefault;
+                        if (shouldFailSession)
                         {
-                            result.SessionId = sessionId;
-                            result.TenantId = tenantId;
-                            outcome.Results.Add(result);
-                            _logger.LogInformation($"Rule {rule.RuleId} ({rule.Trigger}) fired for session {sessionId} with confidence {result.ConfidenceScore}%");
-
-                            // KO-criterion: if the (effective) MarkSessionAsFailed flag is on,
-                            // escalate the rule finding to a terminal session status. Tenant override
-                            // wins; otherwise we honor the rule-definition default.
-                            var shouldFailSession = rule.MarkSessionAsFailed ?? rule.MarkSessionAsFailedDefault;
-                            if (shouldFailSession)
-                            {
-                                await TryMarkSessionFailedFromRuleAsync(tenantId, sessionId, rule);
-                            }
+                            await TryMarkSessionFailedFromRuleAsync(tenantId, sessionId, rule);
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, $"Error evaluating rule {rule.RuleId}");
-                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error analyzing session");
+                catch (Exception ex)
+                {
+                    // Per-rule evaluation failures are isolated: a buggy rule must not kill the
+                    // whole pass. Storage-layer exceptions from the surrounding code (rule loading,
+                    // event reading, results lookup, KO-criterion side-effects) are NOT caught here
+                    // and propagate to the caller — the queue worker depends on this for retry.
+                    _logger.LogWarning(ex, $"Error evaluating rule {rule.RuleId}");
+                }
             }
 
             return outcome;

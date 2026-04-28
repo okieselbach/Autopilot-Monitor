@@ -183,6 +183,19 @@ builder.Services.AddSingleton<
 builder.Services.AddHostedService<
     AutopilotMonitor.Functions.Services.Indexing.IndexReconcileQueueWorker>();
 
+// Auto-analyze fan-out at session end. Replaces the previous in-function fire-and-forget
+// Task.Run that ran the rule engine after enrollment_complete / enrollment_failed / async
+// vulnerability correlation — Functions scale-in could kill the Task.Run mid-flight, leaving
+// rule results un-persisted (manual "Analyze Now" was the only recovery). Same producer +
+// worker pattern as IndexReconcile above.
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer,
+    AutopilotMonitor.Functions.Services.Analyze.AzureQueueAnalyzeOnEnrollmentEndProducer>();
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndHandler>();
+builder.Services.AddHostedService<
+    AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndQueueWorker>();
+
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
 

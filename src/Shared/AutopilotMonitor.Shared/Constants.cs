@@ -445,6 +445,15 @@ namespace AutopilotMonitor.Shared
             /// the safety net on queue failures.
             /// </summary>
             public const string TelemetryIndexReconcile = "telemetry-index-reconcile";
+
+            /// <summary>
+            /// Auto-analyze fan-out at session end (enrollment_complete / enrollment_failed)
+            /// and after async vulnerability correlation. Replaces the in-function
+            /// fire-and-forget Task.Run that could be killed mid-flight by Functions
+            /// scale-in. Consumer runs <c>RuleEngine.AnalyzeSessionAsync</c> and persists
+            /// rule results. Manual "Analyze Now" remains the user-side fallback.
+            /// </summary>
+            public const string AnalyzeOnEnrollmentEnd = "analyze-on-enrollment-end";
         }
     }
 }

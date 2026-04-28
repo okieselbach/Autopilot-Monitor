@@ -252,53 +252,28 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     );
                 }
 
-                // Run full analysis when enrollment ends — fire-and-forget so the agent
-                // gets its HTTP 200 immediately. Rule results are stored in Table Storage and
-                // the UI picks them up on the next poll or via the existing "Re-Analyze" button.
-                // This avoids 500ms-10s+ blocking on the critical ingest path.
+                // Auto-analyze fan-out: enqueue a queue message instead of running fire-and-forget
+                // Task.Run inside the function. The previous in-function approach could be killed
+                // mid-flight by Functions scale-in (HTTP 200 returned → worker unloaded → rules
+                // never persisted → user had to click "Analyze Now"). The queue worker runs the
+                // RuleEngine in a separate invocation with retry + poison-queue semantics.
+                // Manual "Analyze Now" remains as the user-side fallback if the enqueue itself
+                // fails (producer is fail-soft and never throws on send errors).
+                //
+                // newRuleResults stays empty here — the rule engine now runs asynchronously and
+                // results are not available before SendWebhookNotificationsAsync below. Webhooks
+                // never received auto-analyze results in the previous fire-and-forget design either.
                 var newRuleResults = new List<AutopilotMonitor.Shared.Models.RuleResult>();
                 if (classification.CompletionEvent != null || classification.FailureEvent != null)
                 {
-                    var ruleSessionId = request.SessionId;
-                    var ruleTenantId = request.TenantId;
-                    var rulePrefix = sessionPrefix;
-                    _ = Task.Run(async () =>
+                    await _analyzeProducer.EnqueueAsync(new AutopilotMonitor.Shared.Models.AnalyzeOnEnrollmentEndEnvelope
                     {
-                        try
-                        {
-                            var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
-                            var outcome = await ruleEngine.AnalyzeSessionAsync(ruleTenantId, ruleSessionId);
-
-                            foreach (var result in outcome.Results)
-                            {
-                                await _ruleRepo.StoreRuleResultAsync(result);
-                            }
-
-                            if (outcome.Results.Count > 0)
-                            {
-                                _logger.LogInformation("{Prefix} Enrollment-end analysis (async): {Count} issue(s) detected",
-                                    rulePrefix, outcome.Results.Count);
-
-                                // Push SignalR notification so the UI fetches results immediately
-                                await _signalRNotification.NotifyRuleResultsAvailableAsync(
-                                    ruleTenantId, ruleSessionId, outcome.Results.Count);
-                            }
-
-                            // Increment platform stats for detected issues
-                            if (outcome.Results.Count > 0)
-                            {
-                                _ = _metricsRepo.IncrementPlatformStatAsync("IssuesDetected", outcome.Results.Count)
-                                    .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
-                                        "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
-                            }
-
-                            // Record rule telemetry: increment stats for every evaluated rule
-                            _ = RecordAnalyzeRuleStatsAsync(ruleTenantId, outcome);
-                        }
-                        catch (Exception ruleEx)
-                        {
-                            _logger.LogWarning(ruleEx, "{Prefix} Enrollment-end analysis failed (async, non-fatal)", rulePrefix);
-                        }
+                        TenantId = request.TenantId,
+                        SessionId = request.SessionId,
+                        Reason = classification.CompletionEvent != null
+                            ? AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndHandler.ReasonEnrollmentComplete
+                            : AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndHandler.ReasonEnrollmentFailed,
+                        EnqueuedAt = DateTime.UtcNow,
                     });
                 }
 
@@ -1098,45 +1073,6 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
         }
 
-        /// <summary>
-        /// Records rule telemetry for all evaluated analyze rules.
-        /// Fire-and-forget — failures are logged but never propagated.
-        /// </summary>
-        private async Task RecordAnalyzeRuleStatsAsync(string tenantId, AnalysisOutcome outcome)
-        {
-            try
-            {
-                var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
-                var firedRuleIds = new HashSet<string>(outcome.Results.Select(r => r.RuleId));
-
-                foreach (var rule in outcome.EvaluatedRules)
-                {
-                    var fired = firedRuleIds.Contains(rule.RuleId);
-                    int? confidence = null;
-                    if (fired)
-                    {
-                        var result = outcome.Results.FirstOrDefault(r => r.RuleId == rule.RuleId);
-                        confidence = result?.ConfidenceScore;
-                    }
-
-                    // Tenant-specific row
-                    await _metricsRepo.IncrementRuleStatAsync(
-                        today, tenantId, rule.RuleId, "analyze",
-                        rule.Title, rule.Category, rule.Severity,
-                        fired, confidence);
-
-                    // Global aggregate row
-                    await _metricsRepo.IncrementRuleStatAsync(
-                        today, "global", rule.RuleId, "analyze",
-                        rule.Title, rule.Category, rule.Severity,
-                        fired, confidence);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to record analyze rule stats (non-fatal)");
-            }
-        }
     }
 
     /// <summary>

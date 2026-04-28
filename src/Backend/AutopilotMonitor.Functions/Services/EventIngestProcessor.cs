@@ -59,6 +59,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly OpsEventService _opsEventService;
         private readonly SlaBreachEvaluationService _slaBreachService;
         private readonly TelemetryClient _telemetryClient;
+        private readonly AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer _analyzeProducer;
 
         public EventIngestProcessor(
             ILogger<EventIngestProcessor> logger,
@@ -74,7 +75,8 @@ namespace AutopilotMonitor.Functions.Services
             SignalRNotificationService signalRNotification,
             OpsEventService opsEventService,
             SlaBreachEvaluationService slaBreachService,
-            TelemetryClient telemetryClient)
+            TelemetryClient telemetryClient,
+            AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer analyzeProducer)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
@@ -90,6 +92,7 @@ namespace AutopilotMonitor.Functions.Services
             _opsEventService = opsEventService;
             _slaBreachService = slaBreachService;
             _telemetryClient = telemetryClient;
+            _analyzeProducer = analyzeProducer;
         }
 
         /// <summary>
@@ -196,47 +199,28 @@ namespace AutopilotMonitor.Functions.Services
                     remediationScriptIncrement: classification.RemediationScriptCount);
             }
 
+            // Auto-analyze fan-out: enqueue a queue message instead of running fire-and-forget
+            // Task.Run inside the function. The previous in-function approach could be killed
+            // mid-flight by Functions scale-in (HTTP 200 returned → worker unloaded → rules
+            // never persisted → user had to click "Analyze Now"). The queue worker runs the
+            // RuleEngine in a separate invocation with retry + poison-queue semantics.
+            // Manual "Analyze Now" remains as the user-side fallback if the enqueue itself
+            // fails (producer is fail-soft and never throws on send errors).
+            //
+            // newRuleResults stays empty here — the rule engine now runs asynchronously and
+            // results are not available before SendWebhookNotificationsAsync below. Webhooks
+            // never received auto-analyze results in the previous fire-and-forget design either.
             var newRuleResults = new List<RuleResult>();
             if (classification.CompletionEvent != null || classification.FailureEvent != null)
             {
-                var ruleSessionId = request.SessionId;
-                var ruleTenantId = request.TenantId;
-                var rulePrefix = sessionPrefix;
-                _ = Task.Run(async () =>
+                await _analyzeProducer.EnqueueAsync(new AutopilotMonitor.Shared.Models.AnalyzeOnEnrollmentEndEnvelope
                 {
-                    try
-                    {
-                        var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
-                        var outcome = await ruleEngine.AnalyzeSessionAsync(ruleTenantId, ruleSessionId);
-
-                        foreach (var result in outcome.Results)
-                        {
-                            await _ruleRepo.StoreRuleResultAsync(result);
-                        }
-
-                        if (outcome.Results.Count > 0)
-                        {
-                            _logger.LogInformation(
-                                "{Prefix} Enrollment-end analysis (async): {Count} issue(s) detected",
-                                rulePrefix, outcome.Results.Count);
-
-                            await _signalRNotification.NotifyRuleResultsAvailableAsync(
-                                ruleTenantId, ruleSessionId, outcome.Results.Count);
-                        }
-
-                        if (outcome.Results.Count > 0)
-                        {
-                            _ = _metricsRepo.IncrementPlatformStatAsync("IssuesDetected", outcome.Results.Count)
-                                .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
-                                    "Fire-and-forget IncrementPlatformStatAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
-                        }
-
-                        _ = RecordAnalyzeRuleStatsAsync(ruleTenantId, outcome);
-                    }
-                    catch (Exception ruleEx)
-                    {
-                        _logger.LogWarning(ruleEx, "{Prefix} Enrollment-end analysis failed (async, non-fatal)", rulePrefix);
-                    }
+                    TenantId = request.TenantId,
+                    SessionId = request.SessionId,
+                    Reason = classification.CompletionEvent != null
+                        ? AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndHandler.ReasonEnrollmentComplete
+                        : AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndHandler.ReasonEnrollmentFailed,
+                    EnqueuedAt = DateTime.UtcNow,
                 });
             }
 
@@ -352,15 +336,18 @@ namespace AutopilotMonitor.Functions.Services
                                     capturedTenantId, capturedSessionId, capturedPrefix, reportData, phaseLabel);
 
                                 // Re-evaluate analyze rules now that the synth event is in the
-                                // table. The end-of-session analysis at the top of ProcessEventsAsync
-                                // is triggered by classification.CompletionEvent and may finish
-                                // before this vulnerability task does — without this re-analyze,
-                                // vulnerability-driven rules (ANALYZE-ID-003) miss their evidence.
-                                // Uses reanalyze=false: rules with stored results are skipped, so
-                                // there's no duplicate-result risk if the initial run already saw
-                                // the synth event in a tight race.
-                                await ReanalyzeAfterVulnerabilityEmitAsync(
-                                    capturedTenantId, capturedSessionId, capturedPrefix);
+                                // table — vulnerability-driven rules (ANALYZE-ID-003) need this
+                                // synth event as evidence. Enqueued (not awaited) onto the same
+                                // analyze-on-enrollment-end queue as the primary trigger; the
+                                // worker runs RuleEngine with dedup so already-stored results
+                                // from the primary run are not duplicated.
+                                await _analyzeProducer.EnqueueAsync(new AutopilotMonitor.Shared.Models.AnalyzeOnEnrollmentEndEnvelope
+                                {
+                                    TenantId = capturedTenantId,
+                                    SessionId = capturedSessionId,
+                                    Reason = AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndHandler.ReasonVulnerabilityCorrelated,
+                                    EnqueuedAt = DateTime.UtcNow,
+                                });
 
                                 var findings = reportData.ContainsKey("findings")
                                     ? reportData["findings"] as List<Dictionary<string, object>>
@@ -546,44 +533,6 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogWarning(ex,
                     "{Prefix} vulnerability_report synth-event emit failed (non-fatal)", sessionPrefix);
-            }
-        }
-
-        /// <summary>
-        /// Runs <see cref="RuleEngine.AnalyzeSessionAsync"/> after the vulnerability synth event
-        /// has been persisted, so vulnerability-driven rules (e.g. ANALYZE-ID-003) can match
-        /// even when the initial enrollment-end analysis completed before the async correlation
-        /// finished. Skips rules that already have stored results — no duplicates.
-        /// </summary>
-        private async Task ReanalyzeAfterVulnerabilityEmitAsync(
-            string tenantId,
-            string sessionId,
-            string sessionPrefix)
-        {
-            try
-            {
-                var ruleEngine = new RuleEngine(_analyzeRuleService, _ruleRepo, _sessionRepo, _logger);
-                var outcome = await ruleEngine.AnalyzeSessionAsync(tenantId, sessionId);
-
-                foreach (var result in outcome.Results)
-                {
-                    await _ruleRepo.StoreRuleResultAsync(result);
-                }
-
-                if (outcome.Results.Count > 0)
-                {
-                    _logger.LogInformation(
-                        "{Prefix} Vulnerability re-analysis: {Count} additional rule result(s)",
-                        sessionPrefix, outcome.Results.Count);
-
-                    await _signalRNotification.NotifyRuleResultsAvailableAsync(
-                        tenantId, sessionId, outcome.Results.Count);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "{Prefix} Vulnerability re-analysis failed (async, non-fatal)", sessionPrefix);
             }
         }
 

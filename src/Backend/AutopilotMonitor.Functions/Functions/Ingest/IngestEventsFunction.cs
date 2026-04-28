@@ -37,6 +37,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly OpsEventService _opsEventService;
         private readonly SlaBreachEvaluationService _slaBreachService;
         private readonly TelemetryClient _telemetryClient;
+        private readonly AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer _analyzeProducer;
 
         public IngestEventsFunction(
             ILogger<IngestEventsFunction> logger,
@@ -60,7 +61,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             SignalRNotificationService signalRNotification,
             OpsEventService opsEventService,
             SlaBreachEvaluationService slaBreachService,
-            TelemetryClient telemetryClient)
+            TelemetryClient telemetryClient,
+            AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer analyzeProducer)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
@@ -84,6 +86,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _opsEventService = opsEventService;
             _slaBreachService = slaBreachService;
             _telemetryClient = telemetryClient;
+            _analyzeProducer = analyzeProducer;
         }
 
         [Function("IngestEvents")]

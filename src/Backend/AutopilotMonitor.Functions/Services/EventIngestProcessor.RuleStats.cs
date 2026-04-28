@@ -49,38 +49,5 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
-        private async Task RecordAnalyzeRuleStatsAsync(string tenantId, AnalysisOutcome outcome)
-        {
-            try
-            {
-                var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
-                var firedRuleIds = new HashSet<string>(outcome.Results.Select(r => r.RuleId));
-
-                foreach (var rule in outcome.EvaluatedRules)
-                {
-                    var fired = firedRuleIds.Contains(rule.RuleId);
-                    int? confidence = null;
-                    if (fired)
-                    {
-                        var result = outcome.Results.FirstOrDefault(r => r.RuleId == rule.RuleId);
-                        confidence = result?.ConfidenceScore;
-                    }
-
-                    await _metricsRepo.IncrementRuleStatAsync(
-                        today, tenantId, rule.RuleId, "analyze",
-                        rule.Title, rule.Category, rule.Severity,
-                        fired, confidence);
-
-                    await _metricsRepo.IncrementRuleStatAsync(
-                        today, "global", rule.RuleId, "analyze",
-                        rule.Title, rule.Category, rule.Severity,
-                        fired, confidence);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to record analyze rule stats (non-fatal)");
-            }
-        }
     }
 }
