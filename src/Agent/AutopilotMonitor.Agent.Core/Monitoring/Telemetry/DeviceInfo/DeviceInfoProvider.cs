@@ -70,6 +70,41 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
             return "Unknown";
         }
 
+        /// <summary>
+        /// Coarse VM detection from Win32_ComputerSystem manufacturer + model.
+        /// Conservative: false negatives are preferred over false positives — a misclassified
+        /// physical box still gets the rule fired (status quo), a misclassified VM gets the
+        /// rule skipped (the user-visible regression). The Microsoft Corporation case is the
+        /// only ambiguous one — Surface devices share the manufacturer with Hyper-V VMs, so
+        /// we disambiguate via the model string ("Virtual Machine" vs e.g. "Surface Laptop 5").
+        ///
+        /// Used by the rule engine's preconditions feature to skip rules that don't apply
+        /// inside VMs (e.g. Secure Boot CA 2023 — the firmware DB is host-controlled on
+        /// Hyper-V/VMware/etc, the inside-the-VM registry status is not actionable).
+        /// </summary>
+        public static bool IsVirtualMachine(string manufacturer, string model)
+        {
+            var mfr = manufacturer ?? string.Empty;
+            var mdl = model ?? string.Empty;
+
+            if (mfr.IndexOf("VMware",    StringComparison.OrdinalIgnoreCase) >= 0
+             || mfr.IndexOf("Xen",       StringComparison.OrdinalIgnoreCase) >= 0
+             || mfr.IndexOf("QEMU",      StringComparison.OrdinalIgnoreCase) >= 0
+             || mfr.IndexOf("innotek",   StringComparison.OrdinalIgnoreCase) >= 0   // VirtualBox
+             || mfr.IndexOf("Parallels", StringComparison.OrdinalIgnoreCase) >= 0
+             || mfr.IndexOf("Red Hat",   StringComparison.OrdinalIgnoreCase) >= 0)  // KVM/QEMU
+                return true;
+
+            if (mdl.IndexOf("Virtual Machine", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            if (mdl.IndexOf("VMware",     StringComparison.OrdinalIgnoreCase) >= 0
+             || mdl.IndexOf("VirtualBox", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            return false;
+        }
+
         public static string GetOsEdition()
         {
             try

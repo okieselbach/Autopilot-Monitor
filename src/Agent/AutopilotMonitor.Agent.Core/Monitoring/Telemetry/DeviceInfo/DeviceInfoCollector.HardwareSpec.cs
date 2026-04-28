@@ -18,6 +18,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
 
             try
             {
+                CollectSystemInfo(data);
                 CollectCpuInfo(data);
                 CollectMemoryInfo(data);
                 CollectDiskInfo(data);
@@ -31,6 +32,29 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.DeviceInfo
             catch (Exception ex)
             {
                 _logger.Warning($"EnrollmentTracker: failed to collect hardware spec: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Emits system manufacturer/model + a coarse virtual-machine flag onto the
+        /// hardware_spec event. Reuses <see cref="DeviceInfoProvider"/> so Lenovo's
+        /// quirk (model lives in Win32_ComputerSystemProduct.Version, not
+        /// Win32_ComputerSystem.Model) and the VM detection allowlist stay in one place
+        /// shared with MonitoringService / DiagnosticsPackage / GatherRulesMode.
+        /// </summary>
+        private void CollectSystemInfo(Dictionary<string, object> data)
+        {
+            try
+            {
+                var manufacturer = DeviceInfoProvider.GetManufacturer();
+                var model = DeviceInfoProvider.GetModel();
+                data["systemManufacturer"] = manufacturer;
+                data["systemModel"] = model;
+                data["isVirtualMachine"] = DeviceInfoProvider.IsVirtualMachine(manufacturer, model);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTracker: failed to collect system info: {ex.Message}");
             }
         }
 
