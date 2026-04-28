@@ -6,6 +6,7 @@ import { SignalRProvider } from "../contexts/SignalRContext";
 import { TenantProvider } from "../contexts/TenantContext";
 import { NotificationProvider } from "../contexts/NotificationContext";
 import { GlobalNotificationProvider } from "../contexts/GlobalNotificationContext";
+import { TenantNotificationProvider } from "../contexts/TenantNotificationContext";
 import { ThemeProvider } from "../contexts/ThemeContext";
 import Navbar from "../components/Navbar";
 import ScrollToTopButton from "../components/ScrollToTopButton";
@@ -119,19 +120,21 @@ export default function RootLayout({
           <AuthProvider>
             <NotificationProvider>
               <GlobalNotificationProvider>
-                <TenantProvider>
-                  <SignalRProvider>
-                    <SidebarProvider>
-                      <AppInsightsInit />
-                      <Navbar />
-                      <GlobalSidebar>
-                        {children}
-                      </GlobalSidebar>
-                      <ScrollToTopButton />
-                      <FeedbackBubble />
-                    </SidebarProvider>
-                  </SignalRProvider>
-                </TenantProvider>
+                <TenantNotificationProvider>
+                  <TenantProvider>
+                    <SignalRProvider>
+                      <SidebarProvider>
+                        <AppInsightsInit />
+                        <Navbar />
+                        <GlobalSidebar>
+                          {children}
+                        </GlobalSidebar>
+                        <ScrollToTopButton />
+                        <FeedbackBubble />
+                      </SidebarProvider>
+                    </SignalRProvider>
+                  </TenantProvider>
+                </TenantNotificationProvider>
               </GlobalNotificationProvider>
             </NotificationProvider>
           </AuthProvider>

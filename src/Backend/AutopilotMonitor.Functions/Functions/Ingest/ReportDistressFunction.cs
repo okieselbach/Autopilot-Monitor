@@ -37,6 +37,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly TelemetryClient _telemetryClient;
         private readonly HardwareRejectionThrottleService _hardwareThrottle;
         private readonly WebhookNotificationService _webhookNotification;
+        private readonly IHardwareRejectionNotificationTracker _hardwareBellTracker;
+        private readonly TenantNotificationService _tenantNotificationService;
 
         // Strict limits for the unauthenticated endpoint
         internal const int MaxContentLength = 1024;
@@ -61,7 +63,9 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             IDistressReportRepository repository,
             TelemetryClient telemetryClient,
             HardwareRejectionThrottleService hardwareThrottle,
-            WebhookNotificationService webhookNotification)
+            WebhookNotificationService webhookNotification,
+            IHardwareRejectionNotificationTracker hardwareBellTracker,
+            TenantNotificationService tenantNotificationService)
         {
             _logger = logger;
             _tenantConfigService = tenantConfigService;
@@ -70,6 +74,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _telemetryClient = telemetryClient;
             _hardwareThrottle = hardwareThrottle;
             _webhookNotification = webhookNotification;
+            _hardwareBellTracker = hardwareBellTracker;
+            _tenantNotificationService = tenantNotificationService;
         }
 
         [Function("ReportDistress")]
@@ -179,6 +185,32 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     catch (Exception notifyEx)
                     {
                         _logger.LogWarning(notifyEx, "HardwareRejected webhook notification failed for tenant {TenantId}", tenantId);
+                    }
+                }
+
+                // In-app bell notification on first-ever hardware rejection per (tenant, manufacturer, model).
+                // Lifetime dedup via tracker table — independent of the webhook 24h in-memory throttle so
+                // tenant admins see a one-shot persistent notification even if the webhook is not configured.
+                if (report.ErrorType == DistressErrorType.HardwareNotAllowed
+                    && !string.IsNullOrEmpty(manufacturer) && !string.IsNullOrEmpty(model))
+                {
+                    try
+                    {
+                        var isFirst = await _hardwareBellTracker
+                            .TryRegisterFirstNotificationAsync(tenantId, manufacturer, model);
+                        if (isFirst)
+                        {
+                            await _tenantNotificationService.CreateNotificationAsync(
+                                tenantId,
+                                type: "hardware_rejection",
+                                title: "New rejected hardware model",
+                                message: $"{manufacturer} {model} was rejected by the hardware whitelist.",
+                                href: "/settings/tenant/hardware-whitelist");
+                        }
+                    }
+                    catch (Exception bellEx)
+                    {
+                        _logger.LogWarning(bellEx, "HardwareRejected bell notification failed for tenant {TenantId}", tenantId);
                     }
                 }
 

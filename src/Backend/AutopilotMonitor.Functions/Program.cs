@@ -234,6 +234,7 @@ builder.Services.AddHttpClient<TelegramNotificationService>()
     .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().Notification);
 builder.Services.AddSingleton<ResendEmailService>();
 builder.Services.AddSingleton<GlobalNotificationService>();
+builder.Services.AddSingleton<TenantNotificationService>();
 
 var app = builder.Build();
 

@@ -271,6 +271,10 @@ export const api = {
     list: () => `${API_BASE_URL}/api/global/notifications`,
     dismiss: (id: string) => `${API_BASE_URL}/api/global/notifications/${id}/dismiss`,
     dismissAll: () => `${API_BASE_URL}/api/global/notifications/dismiss-all`,
+    // Tenant-scoped persistent notifications (bell). TenantId resolved server-side from JWT.
+    tenantList: () => `${API_BASE_URL}/api/notifications`,
+    tenantDismiss: (id: string) => `${API_BASE_URL}/api/notifications/${id}/dismiss`,
+    tenantDismissAll: () => `${API_BASE_URL}/api/notifications/dismiss-all`,
   },
 
   // ── Audit ─────────────────────────────────────────────────────────────────

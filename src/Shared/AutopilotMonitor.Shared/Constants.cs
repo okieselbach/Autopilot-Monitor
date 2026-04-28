@@ -335,6 +335,13 @@ namespace AutopilotMonitor.Shared
             // Global Admin in-app notifications (persistent until dismissed)
             public const string GlobalNotifications = "GlobalNotifications";
 
+            // Tenant-scoped in-app notifications (persistent until dismissed, PartitionKey = tenantId)
+            public const string TenantNotifications = "TenantNotifications";
+
+            // Per-tenant per-model dedup tracker for hardware-rejection bell notifications.
+            // PartitionKey = tenantId, RowKey = "{manufacturer-lower}|{model-lower}". Lifetime dedup.
+            public const string HardwareRejectionNotificationTracker = "HardwareRejectionNotificationTracker";
+
             // Vulnerability data cache (CPE mappings, CVE data)
             public const string VulnerabilityCache = "VulnerabilityCache";
 
@@ -410,6 +417,8 @@ namespace AutopilotMonitor.Shared
                 SessionReports,
                 BootstrapSessions,
                 GlobalNotifications,
+                TenantNotifications,
+                HardwareRejectionNotificationTracker,
                 VulnerabilityCache,
                 VulnerabilityReports,
                 SoftwareInventory,

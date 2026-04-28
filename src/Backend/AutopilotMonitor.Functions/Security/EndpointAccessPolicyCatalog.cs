@@ -287,6 +287,11 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "global/notifications",                            EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/notifications/dismiss-all",                EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/notifications/{notificationId}/dismiss",   EndpointPolicy.GlobalAdminOnly),
+        // Tenant-scoped persistent notifications (bell). TenantId comes from JWT — middleware enforces.
+        // TODO: when EndpointPolicy.TenantAdminOrOperator lands, switch these from TenantAdminOrGA so Operators see the bell too.
+        new("GET",    "notifications",                                   EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
+        new("POST",   "notifications/dismiss-all",                       EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
+        new("POST",   "notifications/{notificationId}/dismiss",          EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
         new("GET",    "global/ops-events",                              EndpointPolicy.GlobalAdminOnly),
     };
 
