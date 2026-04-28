@@ -14,6 +14,14 @@ interface AnalysisResultsSectionProps {
   analysisExpanded: boolean;
   setAnalysisExpanded: (expanded: boolean) => void;
   onReanalyze: () => void;
+  /**
+   * Rule IDs whose results failed to persist during the most recent reanalyze.
+   * Empty (or omitted) when everything stored cleanly. When non-empty the section
+   * renders a yellow warning banner — the rules that DID persist still render
+   * below as normal cards. Backend log line "On-demand re-analysis ... failed to
+   * persist" carries the underlying Storage error for diagnosis.
+   */
+  persistFailureRuleIds?: string[];
 }
 
 export default function AnalysisResultsSection({
@@ -22,6 +30,7 @@ export default function AnalysisResultsSection({
   analysisExpanded,
   setAnalysisExpanded,
   onReanalyze,
+  persistFailureRuleIds,
 }: AnalysisResultsSectionProps) {
   const { getAccessToken } = useAuth();
   const { tenantId } = useTenant();
@@ -118,6 +127,26 @@ export default function AnalysisResultsSection({
 
       {analysisExpanded && (
         <>
+          {persistFailureRuleIds && persistFailureRuleIds.length > 0 && (
+            <div
+              role="alert"
+              className="mb-3 rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900"
+            >
+              <div className="font-medium">
+                {persistFailureRuleIds.length === 1
+                  ? "1 rule result could not be persisted"
+                  : `${persistFailureRuleIds.length} rule results could not be persisted`}
+              </div>
+              <div className="mt-1 text-xs text-yellow-800">
+                The rules below loaded normally, but the following did not save during the last
+                re-analysis. Backend logs (severity Error) contain the underlying storage failure.
+                A subsequent &quot;Analyze Now&quot; click retries them.
+              </div>
+              <div className="mt-1 font-mono text-xs">
+                {persistFailureRuleIds.join(", ")}
+              </div>
+            </div>
+          )}
           {loadingAnalysis && analysisResults.length === 0 ? (
             <div className="text-center py-4 text-gray-500">Running analysis...</div>
           ) : analysisResults.length === 0 ? (

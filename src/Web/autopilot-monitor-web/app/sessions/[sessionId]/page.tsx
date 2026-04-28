@@ -104,7 +104,7 @@ export default function SessionDetailPage() {
   // Convenience local aliases (keeps the JSX below readable, matches previous names)
   const { session, setSession, sessionTenantId, loading } = detail;
   const events = eventsApi.events;
-  const { analysisResults, loadingAnalysis, vulnerabilityReport, fetchAnalysisResults, fetchVulnerabilityReport } = analysis;
+  const { analysisResults, loadingAnalysis, vulnerabilityReport, fetchAnalysisResults, fetchVulnerabilityReport, persistFailureRuleIds } = analysis;
   const { showScriptOutput, enableSoftwareInventoryAnalyzer, enableIntegrityBypassAnalyzer } = tenantConfig;
   const {
     filteredEvents,
@@ -509,6 +509,7 @@ export default function SessionDetailPage() {
               analysisExpanded={analysisExpanded}
               setAnalysisExpanded={setAnalysisExpanded}
               onReanalyze={() => { trackEvent("analyze_now_clicked", { sessionId: sessionId ?? "" }); fetchAnalysisResults(true); }}
+              persistFailureRuleIds={persistFailureRuleIds}
             />
             </div>
           )}

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
 import { RuleResult } from "@/types";
@@ -13,6 +13,10 @@ export function useSessionAnalysis(
   const [analysisResults, setAnalysisResults] = useState<RuleResult[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [vulnerabilityReport, setVulnerabilityReport] = useState<unknown>(null);
+  // Rule IDs whose results failed to persist during the most recent reanalyze.
+  // Backend reports them in /sessions/{id}/analysis response so the UI can render
+  // a warning banner without blocking the rules that DID persist.
+  const [persistFailureRuleIds, setPersistFailureRuleIds] = useState<string[]>([]);
 
   const fetchAnalysisResults = useCallback(async (reanalyze = false) => {
     if (!sessionTenantId || !isGuid(sessionTenantId)) return;
@@ -28,6 +32,10 @@ export function useSessionAnalysis(
         if (data.results) {
           setAnalysisResults(data.results.sort((a: RuleResult, b: RuleResult) => b.confidenceScore - a.confidenceScore));
         }
+        // persistFailureRuleIds is null/undefined for the happy path and a string[] when one or
+        // more StoreRuleResultAsync calls returned false during the reanalyze loop. We always
+        // set it so a successful retry clears a previous warning.
+        setPersistFailureRuleIds(Array.isArray(data.persistFailureRuleIds) ? data.persistFailureRuleIds : []);
       }
     } catch (error) {
       console.error("Failed to fetch analysis results:", error);
@@ -35,6 +43,14 @@ export function useSessionAnalysis(
       setLoadingAnalysis(false);
     }
   }, [sessionId, sessionTenantId, getAccessToken]);
+
+  // Initial fetch on mount / when sessionTenantId resolves. Without this the page-reload path
+  // shows "No issues detected yet" for completed sessions whose results are already stored —
+  // the only previous trigger paths were a manual "Analyze Now" click or a live SignalR push.
+  useEffect(() => {
+    if (!sessionId || !sessionTenantId || !isGuid(sessionTenantId)) return;
+    fetchAnalysisResults();
+  }, [sessionId, sessionTenantId, fetchAnalysisResults]);
 
   const fetchVulnerabilityReport = useCallback(async (rescan = false) => {
     if (!sessionTenantId || !isGuid(sessionTenantId)) return;
@@ -59,5 +75,6 @@ export function useSessionAnalysis(
     setVulnerabilityReport,
     fetchAnalysisResults,
     fetchVulnerabilityReport,
+    persistFailureRuleIds,
   };
 }
