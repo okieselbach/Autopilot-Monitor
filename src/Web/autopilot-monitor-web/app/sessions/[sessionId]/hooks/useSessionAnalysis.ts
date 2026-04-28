@@ -44,14 +44,6 @@ export function useSessionAnalysis(
     }
   }, [sessionId, sessionTenantId, getAccessToken]);
 
-  // Initial fetch on mount / when sessionTenantId resolves. Without this the page-reload path
-  // shows "No issues detected yet" for completed sessions whose results are already stored —
-  // the only previous trigger paths were a manual "Analyze Now" click or a live SignalR push.
-  useEffect(() => {
-    if (!sessionId || !sessionTenantId || !isGuid(sessionTenantId)) return;
-    fetchAnalysisResults();
-  }, [sessionId, sessionTenantId, fetchAnalysisResults]);
-
   const fetchVulnerabilityReport = useCallback(async (rescan = false) => {
     if (!sessionTenantId || !isGuid(sessionTenantId)) return;
     try {
@@ -67,6 +59,17 @@ export function useSessionAnalysis(
       console.error("Failed to fetch vulnerability report:", error);
     }
   }, [sessionId, sessionTenantId, getAccessToken]);
+
+  // Initial fetch on mount / when sessionTenantId resolves. Without these calls the
+  // page-reload path shows empty placeholders ("No issues detected yet" / "No vulnerability
+  // findings reported") for completed sessions whose results are already stored — the only
+  // previous trigger paths were manual "Analyze Now" / "Re-Scan" clicks or live SignalR
+  // pushes. fired in parallel via Promise.all so a slow vulnerability fetch does not
+  // delay the analysis render.
+  useEffect(() => {
+    if (!sessionId || !sessionTenantId || !isGuid(sessionTenantId)) return;
+    Promise.all([fetchAnalysisResults(), fetchVulnerabilityReport()]);
+  }, [sessionId, sessionTenantId, fetchAnalysisResults, fetchVulnerabilityReport]);
 
   return {
     analysisResults,
