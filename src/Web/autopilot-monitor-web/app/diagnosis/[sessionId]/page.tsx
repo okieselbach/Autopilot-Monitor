@@ -9,6 +9,7 @@ import { useNotifications } from "../../../contexts/NotificationContext";
 import { ProtectedRoute } from "../../../components/ProtectedRoute";
 import { api } from "@/lib/api";
 import { formatInlineMarkdown } from "@/lib/formatInlineMarkdown";
+import { interpolateRuleTemplate } from "@/lib/interpolateRuleTemplate";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { ConfidenceBadge, SeverityBadge } from "./components/DiagnosisBadges";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
@@ -190,7 +191,13 @@ export default function DiagnosisPage() {
 
   const copyRemediation = (result: RuleResult) => {
     const text = result.remediation
-      .map((r) => `${r.title}\n${r.steps.map((s) => `  - ${s}`).join("\n")}`)
+      .map((r) => {
+        const title = interpolateRuleTemplate(r.title, result.matchedConditions);
+        const steps = r.steps
+          .map((s) => `  - ${interpolateRuleTemplate(s, result.matchedConditions)}`)
+          .join("\n");
+        return `${title}\n${steps}`;
+      })
       .join("\n\n");
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(result.ruleId);
@@ -379,7 +386,7 @@ export default function DiagnosisPage() {
                     </h2>
 
                     <p className="text-gray-600 leading-relaxed mb-6">
-                      {primaryResult.explanation}
+                      {interpolateRuleTemplate(primaryResult.explanation, primaryResult.matchedConditions)}
                     </p>
 
                     {/* Evidence Summary */}
@@ -435,7 +442,7 @@ export default function DiagnosisPage() {
                           {primaryResult.remediation.map((rem, i) => (
                             <div key={i} className="mb-3 last:mb-0">
                               <p className="text-sm font-medium text-green-700 mb-1">
-                                {rem.title}
+                                {interpolateRuleTemplate(rem.title, primaryResult.matchedConditions)}
                               </p>
                               <ul className="space-y-1">
                                 {rem.steps.map((step, j) => (
@@ -446,7 +453,7 @@ export default function DiagnosisPage() {
                                     <span className="text-green-400 mt-0.5">
                                       &#x2022;
                                     </span>
-                                    <span>{step}</span>
+                                    <span>{interpolateRuleTemplate(step, primaryResult.matchedConditions)}</span>
                                   </li>
                                 ))}
                               </ul>
@@ -581,7 +588,7 @@ export default function DiagnosisPage() {
                         {expandedResult === result.ruleId && (
                           <div className="mt-4 pl-16 space-y-3">
                             <p className="text-sm text-gray-600">
-                              {formatInlineMarkdown(result.explanation)}
+                              {formatInlineMarkdown(interpolateRuleTemplate(result.explanation, result.matchedConditions))}
                             </p>
 
                             {result.remediation?.length > 0 && (
@@ -605,11 +612,11 @@ export default function DiagnosisPage() {
                                 {result.remediation.map((rem, i) => (
                                   <div key={i} className="mb-2 last:mb-0">
                                     <p className="text-xs font-medium text-gray-700">
-                                      {rem.title}
+                                      {interpolateRuleTemplate(rem.title, result.matchedConditions)}
                                     </p>
                                     <ul className="list-disc list-inside text-xs text-gray-600 ml-2">
                                       {rem.steps.map((step, j) => (
-                                        <li key={j}>{step}</li>
+                                        <li key={j}>{interpolateRuleTemplate(step, result.matchedConditions)}</li>
                                       ))}
                                     </ul>
                                   </div>

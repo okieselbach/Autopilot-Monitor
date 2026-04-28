@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { RuleResult } from "@/types";
 import { formatInlineMarkdown } from "@/lib/formatInlineMarkdown";
+import { interpolateRuleTemplate } from "@/lib/interpolateRuleTemplate";
 import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
 import { useAuth } from "@/contexts/AuthContext";
@@ -230,7 +231,9 @@ function AnalysisResultCard({ result, hitRate }: { result: RuleResult; hitRate?:
           {result.explanation && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-1">Explanation</h4>
-              <p className="text-sm text-gray-600">{formatInlineMarkdown(result.explanation)}</p>
+              <p className="text-sm text-gray-600">
+                {formatInlineMarkdown(interpolateRuleTemplate(result.explanation, result.matchedConditions))}
+              </p>
             </div>
           )}
 
@@ -239,10 +242,12 @@ function AnalysisResultCard({ result, hitRate }: { result: RuleResult; hitRate?:
               <h4 className="text-sm font-medium text-gray-700 mb-1">Remediation</h4>
               {result.remediation.map((rem, i) => (
                 <div key={i} className="mb-2">
-                  <p className="text-sm font-medium text-gray-600">{rem.title}</p>
+                  <p className="text-sm font-medium text-gray-600">
+                    {interpolateRuleTemplate(rem.title, result.matchedConditions)}
+                  </p>
                   <ul className="list-disc list-inside text-sm text-gray-600 ml-2">
                     {rem.steps.map((step, j) => (
-                      <li key={j}>{step}</li>
+                      <li key={j}>{interpolateRuleTemplate(step, result.matchedConditions)}</li>
                     ))}
                   </ul>
                 </div>
