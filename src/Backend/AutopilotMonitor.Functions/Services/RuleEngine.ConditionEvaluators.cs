@@ -668,21 +668,23 @@ namespace AutopilotMonitor.Functions.Services
             // Cap protects against runaway evidence size — sessions with hundreds of correlated
             // pairs would otherwise produce MatchedConditionsJson > 64KB and fail Table Storage
             // persistence (see also defense-in-depth check in TableStorageService.StoreRuleResultAsync).
+            //
+            // CRITICAL: allMatches MUST be a list of cloned dictionaries, not the matchedPairs
+            // list itself. matchedPairs[0] IS primary by reference — if we assigned the raw list,
+            // primary["allMatches"][0] would point back to primary and Newtonsoft.Json would
+            // throw "Self referencing loop detected" on the StoreRuleResultAsync UpsertEntity
+            // serialize step. The flat clone via `new Dictionary<string, object>(p)` snapshots
+            // each pair's data BEFORE primary["allMatches"] is set, so the clones never contain
+            // the back-reference. Pre-existing latent bug from before slim-down — never fired
+            // in production until a 12-day stuck session matched multiple correlation pairs.
             const int MaxAllMatches = 10;
             var primary = matchedPairs[0];
             primary["totalMatches"] = matchedPairs.Count;
             if (matchedPairs.Count > 1)
             {
-                if (matchedPairs.Count > MaxAllMatches)
-                {
-                    primary["allMatches"] = matchedPairs.Take(MaxAllMatches).ToList();
-                    primary["matchesTruncated"] = true;
-                }
-                else
-                {
-                    primary["allMatches"] = matchedPairs;
-                    primary["matchesTruncated"] = false;
-                }
+                var capped = matchedPairs.Take(MaxAllMatches);
+                primary["allMatches"] = capped.Select(p => new Dictionary<string, object>(p)).ToList();
+                primary["matchesTruncated"] = matchedPairs.Count > MaxAllMatches;
             }
             return (true, primary);
         }

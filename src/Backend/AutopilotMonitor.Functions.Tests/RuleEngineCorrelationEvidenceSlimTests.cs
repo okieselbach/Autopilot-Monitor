@@ -3,6 +3,7 @@ using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Newtonsoft.Json;
 
 namespace AutopilotMonitor.Functions.Tests;
 
@@ -74,6 +75,38 @@ public class RuleEngineCorrelationEvidenceSlimTests
         var allMatches = (List<Dictionary<string, object>>)primary["allMatches"];
         Assert.Equal(10, allMatches.Count);
         Assert.True((bool)primary["matchesTruncated"]);
+    }
+
+    [Fact]
+    public async Task Correlation_with_multiple_pairs_serializes_without_self_referencing_loop()
+    {
+        // Regression pin: production session d434a3ba (2026-04-28) hit
+        //   "Self referencing loop detected with type 'Dictionary<String,Object>'.
+        //    Path 'enforcement_error_resolved.allMatches'."
+        // because matchedPairs[0] WAS primary by reference, and primary["allMatches"] = matchedPairs
+        // looped primary -> allMatches[0] -> primary. Cloning the dicts in allMatches breaks the
+        // cycle. This test fails fast if a future refactor re-introduces the shared reference.
+        var rule = BuildCorrelationRule();
+        var baseTime = new DateTime(2026, 4, 28, 12, 0, 0, DateTimeKind.Utc);
+        var events = new List<EnrollmentEvent>();
+        for (var i = 0; i < 5; i++)
+        {
+            events.Add(BuildEvent($"evt-A-{i}", "app_install_failed",    appId: $"app-{i}", sequence: i * 2,     timestamp: baseTime.AddSeconds(i * 10)));
+            events.Add(BuildEvent($"evt-B-{i}", "app_install_completed", appId: $"app-{i}", sequence: i * 2 + 1, timestamp: baseTime.AddSeconds(i * 10 + 5)));
+        }
+
+        var (engine, _) = SutWithRule(rule, events);
+        var outcome = await engine.AnalyzeSessionAsync(TenantId, SessionId);
+
+        Assert.Single(outcome.Results);
+
+        // The actual production failure was JsonConvert.SerializeObject throwing
+        // JsonSerializationException at the StoreRuleResultAsync persist step. Reproduce that
+        // exact serialize call here — if the loop sneaks back, this throws.
+        var json = JsonConvert.SerializeObject(outcome.Results[0].MatchedConditions);
+        Assert.False(string.IsNullOrEmpty(json));
+        Assert.Contains("allMatches", json);
+        Assert.Contains("totalMatches", json);
     }
 
     [Fact]
