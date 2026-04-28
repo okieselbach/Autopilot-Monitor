@@ -311,7 +311,11 @@ export const api = {
     cpeMappings: () => `${API_BASE_URL}/api/vulnerability/cpe-mappings`,
     cpeMapping: () => `${API_BASE_URL}/api/vulnerability/cpe-mapping`,
     cpeAutoResolve: () => `${API_BASE_URL}/api/vulnerability/cpe-mapping/auto-resolve`,
-    unmatchedSoftware: () => `${API_BASE_URL}/api/vulnerability/unmatched-software`,
+    unmatchedSoftware: (skip?: number, take?: number) =>
+      `${API_BASE_URL}/api/vulnerability/unmatched-software${qs({
+        skip: skip !== undefined ? String(skip) : undefined,
+        take: take !== undefined ? String(take) : undefined,
+      })}`,
     ignoredSoftware: () => `${API_BASE_URL}/api/vulnerability/ignored-software`,
   },
 

@@ -23,12 +23,13 @@ export function UnmappedSoftwareTab({
   onCountChanged,
   refreshTrigger,
 }: UnmappedSoftwareTabProps) {
-  // Unmapped state
+  // Unmapped state — server-side pagination
+  const pageSize = 20;
   const [loading, setLoading] = useState(false);
+  const [initialLoaded, setInitialLoaded] = useState(false);
   const [entries, setEntries] = useState<UnmatchedSoftwareEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 20;
 
   // CPE mapping state
   const [expandedMappingRow, setExpandedMappingRow] = useState<string | null>(null);
@@ -36,8 +37,8 @@ export function UnmappedSoftwareTab({
   const [savingMapping, setSavingMapping] = useState<string | null>(null);
   const [savedMappings, setSavedMappings] = useState<Set<string>>(new Set());
 
-  // Bulk auto-resolve state
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  // Bulk auto-resolve state — selection persists across pages, keyed by softwareName::publisher
+  const [selectedEntries, setSelectedEntries] = useState<Map<string, UnmatchedSoftwareEntry>>(new Map());
   const [autoResolving, setAutoResolving] = useState(false);
   const [autoResolveProgress, setAutoResolveProgress] = useState<{
     batchIndex: number;
@@ -57,62 +58,74 @@ export function UnmappedSoftwareTab({
 
   // --- Fetching ---
 
-  const fetchUnmatchedSoftware = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  // Server-paginated fetch. Returns the server total so callers can react to range changes.
+  const fetchPage = useCallback(
+    async (page: number): Promise<number | null> => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      const response = await authenticatedFetch(
-        api.vulnerability.unmatchedSoftware(),
-        getAccessToken
-      );
+        const response = await authenticatedFetch(
+          api.vulnerability.unmatchedSoftware(page * pageSize, pageSize),
+          getAccessToken
+        );
 
-      if (!response.ok) {
-        throw new Error(`Failed to load unmatched software: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(`Failed to load unmatched software: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const items: UnmatchedSoftwareEntry[] = data.software || [];
+        const serverTotal: number = data.total ?? items.length;
+        setEntries(items);
+        setTotal(serverTotal);
+        setInitialLoaded(true);
+        return serverTotal;
+      } catch (err) {
+        if (err instanceof TokenExpiredError) {
+          console.error("Session expired while fetching unmatched software");
+        } else {
+          console.error("Error fetching unmatched software:", err);
+        }
+        setError(err instanceof Error ? err.message : "Failed to load unmatched software");
+        return null;
+      } finally {
+        setLoading(false);
       }
+    },
+    [getAccessToken, setError]
+  );
 
-      const data = await response.json();
-      const sorted = (data.software || []).sort(
-        (a: UnmatchedSoftwareEntry, b: UnmatchedSoftwareEntry) => b.frequency - a.frequency
-      );
-      setEntries(sorted);
-      setTotal(data.total ?? sorted.length);
-      setCurrentPage(0);
-    } catch (err) {
-      if (err instanceof TokenExpiredError) {
-        console.error("Session expired while fetching unmatched software");
-      } else {
-        console.error("Error fetching unmatched software:", err);
-      }
-      setError(err instanceof Error ? err.message : "Failed to load unmatched software");
-    } finally {
-      setLoading(false);
+  // Refetch current page; if it slides past the new last page (after deletions), step back.
+  const refreshCurrentPage = useCallback(async () => {
+    const serverTotal = await fetchPage(currentPage);
+    if (serverTotal === null) return;
+    const lastPage = Math.max(0, Math.ceil(serverTotal / pageSize) - 1);
+    if (currentPage > lastPage) {
+      setCurrentPage(lastPage);
     }
-  }, [getAccessToken, setError]);
+  }, [currentPage, fetchPage]);
 
-  // Load on mount
+  // Load on mount + whenever the page index changes
   useEffect(() => {
-    if (entries.length === 0 && !loading) {
-      fetchUnmatchedSoftware();
-    }
+    fetchPage(currentPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentPage]);
 
-  // Refresh when parent signals (e.g. item restored from ignored tab)
+  // Refresh when parent signals (e.g. item restored from ignored tab) — reset to page 0
   useEffect(() => {
     if (refreshTrigger > 0) {
-      fetchUnmatchedSoftware();
+      setSavedMappings(new Set());
+      setSelectedEntries(new Map());
+      if (currentPage !== 0) setCurrentPage(0);
+      else fetchPage(0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshTrigger]);
 
   // --- Helpers ---
 
-  const totalPages = Math.ceil(entries.length / pageSize);
-  const paginatedEntries = entries.slice(
-    currentPage * pageSize,
-    (currentPage + 1) * pageSize
-  );
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const formatDate = (dateStr: string): string => {
     try {
@@ -197,39 +210,41 @@ export function UnmappedSoftwareTab({
   };
 
   // --- Selection ---
+  // Selection is keyed by row-key but stores the full entry, so bulk actions can run
+  // across pages without needing to re-fetch entries that have scrolled out of view.
 
-  const toggleRowSelection = (key: string) => {
-    setSelectedRows((prev) => {
-      const next = new Set(prev);
+  const toggleRowSelection = (entry: UnmatchedSoftwareEntry) => {
+    const key = getRowKey(entry);
+    setSelectedEntries((prev) => {
+      const next = new Map(prev);
       if (next.has(key)) next.delete(key);
-      else next.add(key);
+      else next.set(key, entry);
       return next;
     });
   };
 
   const selectAllOnPage = () => {
-    const pageKeys = paginatedEntries
-      .filter((e) => !savedMappings.has(getRowKey(e)))
-      .map((e) => getRowKey(e));
-    setSelectedRows((prev) => {
-      const next = new Set(prev);
-      pageKeys.forEach((k) => next.add(k));
+    setSelectedEntries((prev) => {
+      const next = new Map(prev);
+      for (const e of entries) {
+        if (!savedMappings.has(getRowKey(e))) next.set(getRowKey(e), e);
+      }
       return next;
     });
   };
 
-  const deselectAll = () => setSelectedRows(new Set());
+  const deselectAll = () => setSelectedEntries(new Map());
 
-  const allOnPageSelected = paginatedEntries.length > 0 &&
-    paginatedEntries
+  const allOnPageSelected = entries.length > 0 &&
+    entries
       .filter((e) => !savedMappings.has(getRowKey(e)))
-      .every((e) => selectedRows.has(getRowKey(e)));
+      .every((e) => selectedEntries.has(getRowKey(e)));
 
   // --- Auto-resolve ---
 
   const handleAutoResolveSelected = async () => {
-    const selectedEntries = entries.filter((e) => selectedRows.has(getRowKey(e)));
-    if (selectedEntries.length === 0) return;
+    const selectedList = Array.from(selectedEntries.values());
+    if (selectedList.length === 0) return;
 
     setAutoResolving(true);
     setAutoResolveResults(null);
@@ -237,8 +252,8 @@ export function UnmappedSoftwareTab({
 
     const BATCH_SIZE = 25;
     const batches: UnmatchedSoftwareEntry[][] = [];
-    for (let i = 0; i < selectedEntries.length; i += BATCH_SIZE) {
-      batches.push(selectedEntries.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < selectedList.length; i += BATCH_SIZE) {
+      batches.push(selectedList.slice(i, i + BATCH_SIZE));
     }
 
     const cumulativeResolved: AutoResolveResult["resolved"] = [];
@@ -277,9 +292,9 @@ export function UnmappedSoftwareTab({
         cumulativeResolved.push(...data.resolved);
         cumulativeFailed.push(...data.failed);
 
-        // Mark resolved items
+        // Mark resolved items so the row badge flips to "Mapped" without a refetch
         data.resolved.forEach((r) => {
-          const entry = selectedEntries.find((e) => e.softwareName === r.softwareName);
+          const entry = selectedList.find((e) => e.softwareName === r.softwareName);
           if (entry) setSavedMappings((prev) => new Set(prev).add(getRowKey(entry)));
         });
       }
@@ -291,11 +306,11 @@ export function UnmappedSoftwareTab({
         totalResolved: cumulativeResolved.length,
         totalFailed: cumulativeFailed.length,
       });
-      setSelectedRows(new Set());
+      setSelectedEntries(new Map());
       onMappingChanged();
 
       trackEvent("bulk_auto_resolve_completed", {
-        totalSelected: selectedEntries.length.toString(),
+        totalSelected: selectedList.length.toString(),
         totalResolved: cumulativeResolved.length.toString(),
         totalFailed: cumulativeFailed.length.toString(),
       });
@@ -322,11 +337,9 @@ export function UnmappedSoftwareTab({
         }),
       });
       if (!response.ok) throw new Error(`Failed to ignore software: ${response.statusText}`);
-      // Remove from unmapped list
-      setEntries((prev) => prev.filter((e) => getRowKey(e) !== key));
-      setTotal((prev) => Math.max(0, prev - 1));
-      setSelectedRows((prev) => { const n = new Set(prev); n.delete(key); return n; });
+      setSelectedEntries((prev) => { const n = new Map(prev); n.delete(key); return n; });
       onIgnored();
+      await refreshCurrentPage();
     } catch (err) {
       console.error("Error ignoring software:", err);
       setError(err instanceof Error ? err.message : "Failed to ignore software");
@@ -336,8 +349,8 @@ export function UnmappedSoftwareTab({
   };
 
   const handleBulkIgnoreSelected = async () => {
-    const selectedEntries = entries.filter((e) => selectedRows.has(getRowKey(e)));
-    if (selectedEntries.length === 0) return;
+    const selectedList = Array.from(selectedEntries.values());
+    if (selectedList.length === 0) return;
 
     try {
       setIgnoringRow("bulk");
@@ -346,15 +359,13 @@ export function UnmappedSoftwareTab({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: selectedEntries.map((e) => ({ softwareName: e.softwareName, publisher: e.publisher || "", reason: "manual" })),
+          items: selectedList.map((e) => ({ softwareName: e.softwareName, publisher: e.publisher || "", reason: "manual" })),
         }),
       });
       if (!response.ok) throw new Error(`Failed to ignore software: ${response.statusText}`);
-      const keys = new Set(selectedEntries.map(getRowKey));
-      setEntries((prev) => prev.filter((e) => !keys.has(getRowKey(e))));
-      setTotal((prev) => Math.max(0, prev - selectedEntries.length));
-      setSelectedRows(new Set());
+      setSelectedEntries(new Map());
       onIgnored();
+      await refreshCurrentPage();
     } catch (err) {
       console.error("Error bulk ignoring software:", err);
       setError(err instanceof Error ? err.message : "Failed to ignore software");
@@ -365,14 +376,16 @@ export function UnmappedSoftwareTab({
 
   // --- Render ---
 
+  // Full-page spinner only on initial load. Subsequent page fetches keep the table visible
+  // to avoid flicker; controls are disabled via the `loading` state.
   return (
     <>
-      {loading ? (
+      {loading && !initialLoaded ? (
         <div className="flex items-center justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-600" />
           <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Loading unmatched software...</span>
         </div>
-      ) : entries.length === 0 ? (
+      ) : initialLoaded && total === 0 ? (
         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <svg className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
@@ -387,8 +400,13 @@ export function UnmappedSoftwareTab({
               <span className="font-semibold text-amber-600 dark:text-amber-400">{total}</span> unmatched software entries
             </span>
             <button
-              onClick={fetchUnmatchedSoftware}
-              disabled={autoResolving}
+              onClick={() => {
+                setSavedMappings(new Set());
+                setSelectedEntries(new Map());
+                if (currentPage !== 0) setCurrentPage(0);
+                else fetchPage(0);
+              }}
+              disabled={autoResolving || loading}
               className="ml-auto text-sm text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 flex items-center gap-1.5 disabled:opacity-40"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
@@ -399,19 +417,19 @@ export function UnmappedSoftwareTab({
           </div>
 
           {/* Selection toolbar */}
-          {(selectedRows.size > 0 || autoResolving) && (
+          {(selectedEntries.size > 0 || autoResolving) && (
             <div className="flex flex-wrap items-center gap-3 pb-3 text-sm">
               <span className="text-gray-600 dark:text-gray-300 font-medium">
-                {selectedRows.size} selected
+                {selectedEntries.size} selected
               </span>
               <button
                 onClick={allOnPageSelected ? deselectAll : selectAllOnPage}
                 disabled={autoResolving}
                 className="text-xs px-2.5 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 transition-colors"
               >
-                {allOnPageSelected ? "Deselect All" : "Select All"}
+                {allOnPageSelected ? "Deselect Page" : "Select Page"}
               </button>
-              {selectedRows.size > 0 && (
+              {selectedEntries.size > 0 && (
                 <button
                   onClick={deselectAll}
                   disabled={autoResolving}
@@ -422,14 +440,14 @@ export function UnmappedSoftwareTab({
               )}
               <button
                 onClick={handleBulkIgnoreSelected}
-                disabled={autoResolving || ignoringRow === "bulk" || selectedRows.size === 0}
+                disabled={autoResolving || ignoringRow === "bulk" || selectedEntries.size === 0}
                 className="text-xs px-2.5 py-1 rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300 dark:hover:bg-red-900/20 dark:hover:text-red-400 disabled:opacity-40 transition-colors"
               >
                 {ignoringRow === "bulk" ? "Ignoring..." : "Ignore Selected"}
               </button>
               <button
                 onClick={handleAutoResolveSelected}
-                disabled={autoResolving || selectedRows.size === 0}
+                disabled={autoResolving || selectedEntries.size === 0}
                 className="ml-auto text-xs px-3 py-1.5 rounded-md font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
               >
                 {autoResolving ? (
@@ -510,7 +528,7 @@ export function UnmappedSoftwareTab({
                   <th className="px-2 py-3">
                     <input
                       type="checkbox"
-                      checked={allOnPageSelected && paginatedEntries.length > 0}
+                      checked={allOnPageSelected && entries.length > 0}
                       onChange={allOnPageSelected ? deselectAll : selectAllOnPage}
                       disabled={autoResolving}
                       className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 disabled:opacity-40"
@@ -525,7 +543,7 @@ export function UnmappedSoftwareTab({
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {paginatedEntries.map((entry) => {
+                {entries.map((entry) => {
                   const key = getRowKey(entry);
                   const isMapped = savedMappings.has(key);
                   const isMappingExpanded = expandedMappingRow === key;
@@ -539,8 +557,8 @@ export function UnmappedSoftwareTab({
                               {!isMapped && (
                                 <input
                                   type="checkbox"
-                                  checked={selectedRows.has(key)}
-                                  onChange={() => toggleRowSelection(key)}
+                                  checked={selectedEntries.has(key)}
+                                  onChange={() => toggleRowSelection(entry)}
                                   disabled={autoResolving}
                                   className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 disabled:opacity-40"
                                 />
@@ -692,16 +710,17 @@ export function UnmappedSoftwareTab({
             </table>
           </div>
 
-          {/* Pagination */}
+          {/* Pagination — server-side; range computed from total */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-md mt-2">
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {currentPage * pageSize + 1}&ndash;{Math.min((currentPage + 1) * pageSize, entries.length)} of {entries.length}
+                {total === 0 ? 0 : currentPage * pageSize + 1}&ndash;
+                {Math.min((currentPage + 1) * pageSize, total)} of {total}
               </span>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setCurrentPage((p) => p - 1)}
-                  disabled={currentPage === 0}
+                  onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
+                  disabled={currentPage === 0 || loading}
                   className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   Previous
@@ -711,7 +730,7 @@ export function UnmappedSoftwareTab({
                 </span>
                 <button
                   onClick={() => setCurrentPage((p) => p + 1)}
-                  disabled={(currentPage + 1) * pageSize >= entries.length}
+                  disabled={currentPage + 1 >= totalPages || loading}
                   className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   Next
