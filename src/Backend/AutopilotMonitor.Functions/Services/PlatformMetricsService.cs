@@ -102,7 +102,18 @@ namespace AutopilotMonitor.Functions.Services
                     var wsValues = snapshots.Select(s => GetDouble(s, "agent_working_set_mb")).ToList();
                     var pbValues = snapshots.Select(s => GetDouble(s, "agent_private_bytes_mb")).ToList();
                     var latValues = snapshots.Select(s => GetDouble(s, "net_avg_latency_ms")).Where(v => v > 0).ToList();
-                    var spoolValues = snapshots.Select(s => GetDouble(s, "spool_queue_depth")).ToList();
+                    // V2 emits `spool_pending_item_count`; V1 emitted `spool_queue_depth`.
+                    // Read V2 primary, fall back to V1 so legacy sessions still aggregate.
+                    var spoolValues = snapshots.Select(s => GetDoubleFirst(s, "spool_pending_item_count", "spool_queue_depth")).ToList();
+
+                    // V2-only spool fields. Each has a different aggregation semantic:
+                    //   peak_pending_item_count → monotonic per-process counter; Last() = best estimate of intra-tick peak
+                    //   file_size_bytes        → instantaneous; Max() across snapshots
+                    //   total_enqueued_count   → monotonic counter; Last() = total events emitted in session
+                    var peakValues = snapshots.Select(s => GetDouble(s, "spool_peak_pending_item_count")).ToList();
+                    var fileSizeValues = snapshots.Select(s => GetDouble(s, "spool_file_size_bytes")).ToList();
+                    var totalEnqueuedValues = snapshots.Select(s => GetDouble(s, "spool_total_enqueued_count")).ToList();
+                    var spoolPressureDetected = events.Any(e => e.EventType == "spool_pressure_detected");
 
                     var lastSnapshot = snapshots.Last();
 
@@ -134,7 +145,11 @@ namespace AutopilotMonitor.Functions.Services
                         AvgPrivateBytes = pbValues.Count > 0 ? pbValues.Average() : 0,
                         AvgLatency = latValues.Count > 0 ? latValues.Average() : 0,
                         AvgSpoolDepth = spoolValues.Count > 0 ? spoolValues.Average() : 0,
-                        MaxSpoolDepth = spoolValues.Count > 0 ? spoolValues.Max() : 0
+                        MaxSpoolDepth = spoolValues.Count > 0 ? spoolValues.Max() : 0,
+                        PeakSpoolDepth = peakValues.Count > 0 ? peakValues.Last() : 0,
+                        MaxSpoolFileBytes = fileSizeValues.Count > 0 ? fileSizeValues.Max() : 0,
+                        TotalEventsEmitted = totalEnqueuedValues.Count > 0 ? totalEnqueuedValues.Last() : 0,
+                        SpoolPressureDetected = spoolPressureDetected
                     };
                 }
                 catch (Exception ex)
@@ -315,6 +330,17 @@ namespace AutopilotMonitor.Functions.Services
             return 0;
         }
 
+        // Returns the value of the first key that is present in `data`. Lets us read a V2 field
+        // name with a V1 fallback without conflating "key missing" with "key present but zero".
+        private static double GetDoubleFirst(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.ContainsKey(key)) return GetDouble(data, key);
+            }
+            return 0;
+        }
+
         private static string GetString(Dictionary<string, object> data, string key)
         {
             if (data.TryGetValue(key, out var value))
@@ -359,6 +385,10 @@ namespace AutopilotMonitor.Functions.Services
         public double AvgLatency { get; set; }
         public double AvgSpoolDepth { get; set; }
         public double MaxSpoolDepth { get; set; }
+        public double PeakSpoolDepth { get; set; }
+        public double MaxSpoolFileBytes { get; set; }
+        public double TotalEventsEmitted { get; set; }
+        public bool SpoolPressureDetected { get; set; }
     }
 
     public class DeliveryLatencyMetrics

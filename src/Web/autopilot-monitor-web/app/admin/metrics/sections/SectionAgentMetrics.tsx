@@ -30,6 +30,10 @@ interface SessionAgentMetricDTO {
   avgLatency: number;
   avgSpoolDepth: number;
   maxSpoolDepth: number;
+  peakSpoolDepth: number;
+  maxSpoolFileBytes: number;
+  totalEventsEmitted: number;
+  spoolPressureDetected: boolean;
 }
 
 interface DeliveryLatencyMetricsDTO {
@@ -80,6 +84,10 @@ interface SessionAgentMetrics {
   avgLatency: number;
   avgSpoolDepth: number;
   maxSpoolDepth: number;
+  peakSpoolDepth: number;
+  maxSpoolFileBytes: number;
+  totalEventsEmitted: number;
+  spoolPressureDetected: boolean;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -189,6 +197,10 @@ export function SectionAgentMetrics() {
         avgLatency: s.avgLatency,
         avgSpoolDepth: s.avgSpoolDepth,
         maxSpoolDepth: s.maxSpoolDepth,
+        peakSpoolDepth: s.peakSpoolDepth ?? 0,
+        maxSpoolFileBytes: s.maxSpoolFileBytes ?? 0,
+        totalEventsEmitted: s.totalEventsEmitted ?? 0,
+        spoolPressureDetected: s.spoolPressureDetected ?? false,
       }));
 
       setSessionMetrics(mapped);
@@ -687,9 +699,22 @@ export function SectionAgentMetrics() {
                   {(() => {
                     const spoolAvgs = filteredMetrics.map(s => s.avgSpoolDepth);
                     const spoolMaxes = filteredMetrics.map(s => s.maxSpoolDepth);
-                    const hasData = spoolAvgs.some(v => v > 0) || spoolMaxes.some(v => v > 0);
+                    const peakValues = filteredMetrics.map(s => s.peakSpoolDepth);
+                    const fileSizeMaxes = filteredMetrics.map(s => s.maxSpoolFileBytes);
+                    const totalEventsValues = filteredMetrics.map(s => s.totalEventsEmitted);
+                    const pressureCount = filteredMetrics.filter(s => s.spoolPressureDetected).length;
+                    const hasData = spoolAvgs.some(v => v > 0) || spoolMaxes.some(v => v > 0)
+                      || peakValues.some(v => v > 0) || totalEventsValues.some(v => v > 0);
                     const overallAvg = avg(spoolAvgs);
-                    const overallMax = max(spoolMaxes);
+                    // Sampled max (max-of-snapshots) vs. true intra-tick peak (V2 only).
+                    // V2 sessions: peak >= sampled. V1 sessions: peak = 0 → falls back to sampled.
+                    const truePeak = Math.max(max(spoolMaxes), max(peakValues));
+                    const maxFileBytes = max(fileSizeMaxes);
+                    const avgEvents = avg(totalEventsValues);
+                    const maxEvents = max(totalEventsValues);
+                    const pressurePct = filteredMetrics.length > 0
+                      ? (pressureCount / filteredMetrics.length) * 100
+                      : 0;
                     return hasData ? (
                       <div className="space-y-2">
                         <div className="flex items-baseline gap-2">
@@ -703,13 +728,31 @@ export function SectionAgentMetrics() {
                             <span className="text-gray-500">Avg across sessions</span>
                             <span className="font-mono text-gray-900">{overallAvg.toFixed(1)}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Peak max</span>
-                            <span className={`font-mono ${overallMax > 50 ? 'text-red-600' : 'text-gray-900'}`}>{overallMax.toFixed(0)}</span>
+                          <div className="flex justify-between" title="Highest pending count seen at any tick (V2 reports true intra-tick peak; V1 = 60s sample max)">
+                            <span className="text-gray-500">Peak (worst seen)</span>
+                            <span className={`font-mono ${truePeak > 50 ? 'text-red-600' : 'text-gray-900'}`}>{truePeak.toFixed(0)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-500">p95 max</span>
                             <span className="font-mono text-gray-900">{pN(spoolMaxes, 95).toFixed(0)}</span>
+                          </div>
+                          <div className="flex justify-between border-t border-gray-100 pt-1 mt-1" title="Largest on-disk spool file across sessions (V2 only)">
+                            <span className="text-gray-500">Max file size</span>
+                            <span className={`font-mono ${maxFileBytes > 5 * 1024 * 1024 ? 'text-red-600' : 'text-gray-900'}`}>
+                              {maxFileBytes > 0 ? formatBytes(maxFileBytes) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between" title="Total events emitted by the agent during the session (V2 only)">
+                            <span className="text-gray-500">Events emitted (avg / max)</span>
+                            <span className="font-mono text-gray-900">
+                              {avgEvents > 0 ? `${avgEvents.toFixed(0)} / ${maxEvents.toFixed(0)}` : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between" title="One-shot pressure event (pending > 2000 OR file > 5 MB) — V2 only">
+                            <span className="text-gray-500">Pressure detected</span>
+                            <span className={`font-mono ${pressureCount > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                              {pressureCount} ({pressurePct.toFixed(0)}%)
+                            </span>
                           </div>
                         </div>
                         <p className="text-xs text-gray-400 mt-1">
