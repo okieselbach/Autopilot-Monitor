@@ -388,10 +388,20 @@ namespace AutopilotMonitor.Shared.Models
         public bool EnableIndexDualWrite { get; set; } = false;
 
         /// <summary>
-        /// Last successful vulnerability data sync timestamp (UTC ISO 8601).
-        /// Updated by VulnerabilityDataSyncFunction.
+        /// Last successful CISA KEV catalog sync timestamp (UTC ISO 8601).
+        /// Updated by VulnerabilityDataSyncFunction (daily timer) and TriggerVulnerabilityDataSyncFunction
+        /// (manual /api/vulnerability/sync). Pre-existing field — semantically means "last KEV sync"
+        /// since KEV is the only live data refresh that ran via the manual endpoint historically.
         /// </summary>
         public string VulnerabilityDataLastSyncUtc { get; set; } = default!;
+
+        /// <summary>
+        /// Last successful MSRC CVRF index refresh timestamp (UTC ISO 8601).
+        /// Updated by VulnerabilityDataSyncFunction (daily timer) and TriggerMsrcSyncFunction
+        /// (manual /api/vulnerability/sync-msrc). Empty/null means MSRC has never refreshed
+        /// successfully since this field was introduced.
+        /// </summary>
+        public string MsrcLastSyncUtc { get; set; } = default!;
 
         /// <summary>
         /// Creates default configuration

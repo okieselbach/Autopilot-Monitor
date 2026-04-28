@@ -265,6 +265,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "vulnerability/unmatched-software", EndpointPolicy.GlobalAdminOnly),
         new("GET",    "vulnerability/software-inventory", EndpointPolicy.GlobalAdminOnly),
         new("POST",   "vulnerability/sync",              EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "vulnerability/sync-msrc",         EndpointPolicy.GlobalAdminOnly),
         new("POST",   "vulnerability/cpe-mapping",       EndpointPolicy.GlobalAdminOnly),
         new("POST",   "vulnerability/cpe-mapping/auto-resolve", EndpointPolicy.GlobalAdminOnly),
         new("DELETE", "vulnerability/cpe-mapping",       EndpointPolicy.GlobalAdminOnly),

@@ -15,6 +15,7 @@ export interface AdminConfiguration {
   nvdApiKey?: string;
   vulnerabilityCorrelationEnabled?: boolean;
   vulnerabilityDataLastSyncUtc?: string;
+  msrcLastSyncUtc?: string;
   opsAlertRulesJson?: string;
   opsAlertTelegramEnabled?: boolean;
   opsAlertTelegramChatId?: string;
