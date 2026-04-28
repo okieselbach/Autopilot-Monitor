@@ -632,7 +632,13 @@ namespace AutopilotMonitor.Functions.Services
                     continue;
                 matchedJoinKeys.Add(bKey);
 
-                // Build evidence for this correlated pair
+                // Build evidence for this correlated pair. Keep it slim — store only event
+                // references (id/type/sequence/timestamp) plus the join key and a small set of
+                // short identifying data fields. The UI lazy-loads the full event via /events/{id}
+                // when the user expands the evidence row, so we don't need to embed Message or
+                // multi-KB stack-traces here. This caps per-pair evidence at ~500 bytes and keeps
+                // RuleResult.MatchedConditionsJson well below Table Storage's 64KB property limit
+                // even when many pairs match (e.g. ANALYZE-APP-012 on long-running stuck sessions).
                 var pair = new Dictionary<string, object>
                 {
                     ["joinField"] = condition.JoinField,
@@ -641,16 +647,14 @@ namespace AutopilotMonitor.Functions.Services
                     ["eventA_eventType"] = matchingA.EventType ?? string.Empty,
                     ["eventA_timestamp"] = matchingA.Timestamp,
                     ["eventA_sequence"] = matchingA.Sequence,
-                    ["eventA_message"] = matchingA.Message ?? string.Empty,
                     ["eventB_eventId"] = eventB.EventId ?? string.Empty,
                     ["eventB_eventType"] = eventB.EventType ?? string.Empty,
                     ["eventB_timestamp"] = eventB.Timestamp,
                     ["eventB_sequence"] = eventB.Sequence,
-                    ["eventB_message"] = eventB.Message ?? string.Empty,
                     ["timeDeltaSeconds"] = (eventB.Timestamp - matchingA.Timestamp).TotalSeconds
                 };
 
-                // Add well-known data fields from both events
+                // Add slim identifying fields from both events (no free-text fields).
                 AddDataFieldsToEvidence(pair, matchingA, "eventA_", condition.JoinField);
                 AddDataFieldsToEvidence(pair, eventB, "eventB_", condition.JoinField);
 
@@ -660,24 +664,41 @@ namespace AutopilotMonitor.Functions.Services
             if (!matchedPairs.Any())
                 return (false, "no correlated event pairs found");
 
-            // Single match: flat dictionary; multiple: first as primary + allMatches list
+            // Single match: flat dictionary; multiple: first as primary + capped allMatches list.
+            // Cap protects against runaway evidence size — sessions with hundreds of correlated
+            // pairs would otherwise produce MatchedConditionsJson > 64KB and fail Table Storage
+            // persistence (see also defense-in-depth check in TableStorageService.StoreRuleResultAsync).
+            const int MaxAllMatches = 10;
             var primary = matchedPairs[0];
             primary["totalMatches"] = matchedPairs.Count;
             if (matchedPairs.Count > 1)
             {
-                primary["allMatches"] = matchedPairs;
+                if (matchedPairs.Count > MaxAllMatches)
+                {
+                    primary["allMatches"] = matchedPairs.Take(MaxAllMatches).ToList();
+                    primary["matchesTruncated"] = true;
+                }
+                else
+                {
+                    primary["allMatches"] = matchedPairs;
+                    primary["matchesTruncated"] = false;
+                }
             }
             return (true, primary);
         }
 
         /// <summary>
-        /// Adds well-known data fields from an event to the evidence dictionary with a prefix.
+        /// Adds slim identifying data fields from an event to the evidence dictionary with a prefix.
+        /// Free-text fields like <c>errorDetail</c> (often a stack trace) and <c>message</c> are
+        /// deliberately excluded to keep <see cref="RuleResult.MatchedConditions"/> below Table
+        /// Storage's 64KB property limit. UI fetches the full event on demand via /events/{id}.
         /// </summary>
         private void AddDataFieldsToEvidence(Dictionary<string, object> evidence, EnrollmentEvent evt, string prefix, string joinField)
         {
             if (evt.Data == null) return;
 
-            var knownFields = new[] { "appId", "appName", "errorPatternId", "errorDetail", "errorCode", "exitCode", "status" };
+            // Whitelist: short identifiers only. errorDetail/message removed (can be multi-KB).
+            var knownFields = new[] { "appId", "appName", "errorPatternId", "errorCode", "exitCode", "status" };
 
             foreach (var field in knownFields)
             {

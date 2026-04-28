@@ -57,6 +57,13 @@ namespace AutopilotMonitor.Functions.Functions.Rules
 
             var reanalyze = string.Equals(req.Query["reanalyze"], "true", StringComparison.OrdinalIgnoreCase);
 
+            // Rules whose StoreRuleResultAsync returned false during the on-demand reanalyze.
+            // Reported back to the caller so the UI can render a warning banner without losing
+            // the rules that DID persist. Mirrors the queue-path's throw-on-false retry trigger,
+            // but stays partial-success here because the user is on a synchronous HTTP wait
+            // and a 500 would blank the page even when most rules persisted fine.
+            var persistFailureRuleIds = new List<string>();
+
             if (reanalyze)
             {
                 try
@@ -69,10 +76,26 @@ namespace AutopilotMonitor.Functions.Functions.Rules
 
                     foreach (var result in outcome.Results)
                     {
-                        await _ruleRepo.StoreRuleResultAsync(result);
+                        var stored = await _ruleRepo.StoreRuleResultAsync(result);
+                        if (!stored)
+                        {
+                            persistFailureRuleIds.Add(result.RuleId);
+                        }
                     }
 
-                    _logger.LogInformation($"On-demand re-analysis for session {sessionId}: {outcome.Results.Count} issue(s) detected");
+                    if (persistFailureRuleIds.Count > 0)
+                    {
+                        _logger.LogError(
+                            "On-demand re-analysis for session {SessionId}: {FailedCount} of {TotalCount} rule result(s) failed to persist: [{FailedRuleIds}]",
+                            sessionId,
+                            persistFailureRuleIds.Count,
+                            outcome.Results.Count,
+                            string.Join(", ", persistFailureRuleIds));
+                    }
+                    else
+                    {
+                        _logger.LogInformation($"On-demand re-analysis for session {sessionId}: {outcome.Results.Count} issue(s) detected");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -85,13 +108,19 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
             {
-                success = true,
+                // success=false when any rule failed to persist during the reanalyze loop above.
+                // UI keeps showing the persisted results; consumers can branch on persistFailureCount
+                // to render a warning banner. persistFailureRuleIds is omitted entirely (null) when
+                // there were no failures, so the existing UI contract stays unchanged for the happy path.
+                success = persistFailureRuleIds.Count == 0,
                 sessionId,
                 results,
                 totalIssues = results.Count,
                 criticalCount = results.Count(r => r.Severity == "critical"),
                 highCount = results.Count(r => r.Severity == "high"),
-                warningCount = results.Count(r => r.Severity == "warning")
+                warningCount = results.Count(r => r.Severity == "warning"),
+                persistFailureCount = persistFailureRuleIds.Count,
+                persistFailureRuleIds = persistFailureRuleIds.Count > 0 ? persistFailureRuleIds : null
             });
             return response;
         }

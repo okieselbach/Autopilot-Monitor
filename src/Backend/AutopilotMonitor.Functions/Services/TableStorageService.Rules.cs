@@ -15,8 +15,23 @@ namespace AutopilotMonitor.Functions.Services
         // ===== RULE RESULTS METHODS =====
 
         /// <summary>
+        /// Azure Table Storage hard-limits each property to 64 KiB (UTF-16). We trip the
+        /// guard rail at 60 KiB to leave headroom for the property-name prefix + framing
+        /// bytes the storage layer adds on the wire.
+        /// </summary>
+        private const int MatchedConditionsJsonByteLimit = 60 * 1024;
+
+        /// <summary>
         /// Stores a rule evaluation result
         /// PartitionKey: {TenantId}_{SessionId}, RowKey: RuleId
+        /// <para>
+        /// Defense-in-depth: rule authors should keep <see cref="RuleResult.MatchedConditions"/>
+        /// under <see cref="MatchedConditionsJsonByteLimit"/> bytes (correlation evidence
+        /// already caps and slims its pairs). If a future rule still produces oversized
+        /// output, we substitute a truncation marker rather than letting the entire write
+        /// fail — the rule still fires, the UI sees the explanation + flag, and we get an
+        /// observable warning instead of an opaque store failure.
+        /// </para>
         /// </summary>
         public async Task<bool> StoreRuleResultAsync(RuleResult result)
         {
@@ -24,6 +39,22 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleResults);
                 var partitionKey = $"{result.TenantId}_{result.SessionId}";
+
+                var matchedJson = JsonConvert.SerializeObject(result.MatchedConditions ?? new Dictionary<string, object>());
+                if (matchedJson.Length > MatchedConditionsJsonByteLimit)
+                {
+                    _logger.LogWarning(
+                        "Rule result {RuleId} (session {SessionId}) MatchedConditionsJson is {Bytes} bytes, exceeds {Limit} byte guard. Substituting truncation marker so the rule still persists.",
+                        result.RuleId, result.SessionId, matchedJson.Length, MatchedConditionsJsonByteLimit);
+
+                    var truncated = new Dictionary<string, object>
+                    {
+                        ["_truncated"] = true,
+                        ["_originalBytes"] = matchedJson.Length,
+                        ["_reason"] = "MatchedConditions exceeded Table Storage 64KB property limit"
+                    };
+                    matchedJson = JsonConvert.SerializeObject(truncated);
+                }
 
                 var entity = new TableEntity(partitionKey, result.RuleId)
                 {
@@ -38,7 +69,7 @@ namespace AutopilotMonitor.Functions.Services
                     ["Explanation"] = result.Explanation ?? string.Empty,
                     ["RemediationJson"] = JsonConvert.SerializeObject(result.Remediation ?? new List<RemediationStep>()),
                     ["RelatedDocsJson"] = JsonConvert.SerializeObject(result.RelatedDocs ?? new List<RelatedDoc>()),
-                    ["MatchedConditionsJson"] = JsonConvert.SerializeObject(result.MatchedConditions ?? new Dictionary<string, object>()),
+                    ["MatchedConditionsJson"] = matchedJson,
                     ["DetectedAt"] = result.DetectedAt
                 };
 
