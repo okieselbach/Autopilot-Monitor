@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Shared;
 using Microsoft.Win32;
 using Newtonsoft.Json;
@@ -101,7 +102,7 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Info($"Registering Scheduled Task '{taskName}' for executable: {targetExePath}");
 
                 var createExitCode = RunProcess(
-                    "schtasks.exe",
+                    SystemPaths.Schtasks,
                     $"/Create /TN \"{taskName}\" /TR \"{taskCommand}\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F",
                     logger);
 
@@ -112,7 +113,7 @@ namespace AutopilotMonitor.Agent.V2
                 logger.Info($"Scheduled Task '{taskName}' created/updated successfully.");
 
                 var startExitCode = RunProcess(
-                    "schtasks.exe",
+                    SystemPaths.Schtasks,
                     $"/Run /TN \"{taskName}\"",
                     logger);
 

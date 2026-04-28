@@ -38,6 +38,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         /// <summary>C:\Windows\System32\netsh.exe</summary>
         public static readonly string Netsh = Path.Combine(System32, "netsh.exe");
 
+        /// <summary>C:\Windows\System32\schtasks.exe</summary>
+        public static readonly string Schtasks = Path.Combine(System32, "schtasks.exe");
+
         /// <summary>
         /// C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
         /// Note: the "v1.0" folder is historical — it hosts every in-box PowerShell
