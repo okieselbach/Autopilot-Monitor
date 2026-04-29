@@ -50,7 +50,7 @@ export default function SessionInfoCard({ session, enrollmentDuration, displaySt
           }
           copyText={session.sessionId}
         />
-        <InfoItem label="Status" value={<StatusBadge status={displayStatus} failureReason={session.failureReason} failureSource={session.failureSource} />} />
+        <InfoItem label="Status" value={<StatusBadge status={displayStatus} failureReason={session.failureReason} failureSource={session.failureSource} adminMarkedAction={session.adminMarkedAction} />} />
         <InfoItem label="Started" value={new Date(session.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} />
         <InfoItem label="Duration" value={enrollmentDuration ?? `${Math.round(session.durationSeconds / 60)} min`} />
         <InfoItem label="Events" value={session.eventCount.toString()} />
@@ -129,7 +129,7 @@ function InfoItem({ label, value, copyText }: { label: string; value: React.Reac
   );
 }
 
-function StatusBadge({ status, failureReason, failureSource }: { status: string; failureReason?: string; failureSource?: string }) {
+function StatusBadge({ status, failureReason, failureSource, adminMarkedAction }: { status: string; failureReason?: string; failureSource?: string; adminMarkedAction?: string }) {
   const statusConfig = {
     InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
     Pending: { color: "bg-amber-100 text-amber-800", text: "Pending" },
@@ -167,6 +167,14 @@ function StatusBadge({ status, failureReason, failureSource }: { status: string;
         >
           via rule {ruleId}
         </a>
+      )}
+      {adminMarkedAction && (
+        <span
+          className="px-1.5 py-0.5 text-[10px] leading-4 font-semibold rounded border border-gray-300 bg-gray-50 text-gray-600"
+          title={`Manually marked as ${adminMarkedAction} by administrator`}
+        >
+          manual
+        </span>
       )}
     </span>
   );

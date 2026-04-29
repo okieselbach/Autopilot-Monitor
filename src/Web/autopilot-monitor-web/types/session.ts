@@ -14,6 +14,8 @@ export interface Session {
   failureReason?: string;
   /** Origin of a Failed status — "" for agent-reported, "rule:<RuleId>" for rule-based, "manual" for portal. */
   failureSource?: string;
+  /** Non-null only when an administrator flipped the session manually via the portal. Values: "Succeeded" | "Failed". */
+  adminMarkedAction?: string;
   enrollmentType?: string; // "v1" | "v2" — absent for sessions before this feature
   diagnosticsBlobName?: string;
   lastEventAt?: string;

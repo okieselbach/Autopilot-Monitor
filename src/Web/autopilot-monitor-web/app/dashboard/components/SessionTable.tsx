@@ -892,7 +892,7 @@ function SessionCell({
       return (
         <td className="px-6 py-4 whitespace-nowrap">
           <div className="flex items-center gap-1.5">
-            <StatusBadge status={session.status} failureReason={session.failureReason} />
+            <StatusBadge status={session.status} failureReason={session.failureReason} adminMarkedAction={session.adminMarkedAction} />
             {session.isHybridJoin && (
               <span
                 className="px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800"
@@ -1171,7 +1171,7 @@ function SortableHeader({
   );
 }
 
-function StatusBadge({ status, failureReason }: { status: string; failureReason?: string }) {
+function StatusBadge({ status, failureReason, adminMarkedAction }: { status: string; failureReason?: string; adminMarkedAction?: string }) {
   const statusConfig = {
     InProgress: { color: "bg-blue-100 text-blue-800", text: "In Progress" },
     Pending: { color: "bg-amber-100 text-amber-800", text: "Pending" },
@@ -1186,14 +1186,24 @@ function StatusBadge({ status, failureReason }: { status: string; failureReason?
   const isTimeout = status === "Failed" && failureReason && failureReason.toLowerCase().includes("timed out");
 
   return (
-    <span
-      className={`px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${config.color}`}
-      title={failureReason || undefined}
-    >
-      {config.text}
-      {isTimeout && (
-        <span title={failureReason} className="inline-flex items-center">
-          ⏱️
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className={`px-2 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${config.color}`}
+        title={failureReason || undefined}
+      >
+        {config.text}
+        {isTimeout && (
+          <span title={failureReason} className="inline-flex items-center">
+            ⏱️
+          </span>
+        )}
+      </span>
+      {adminMarkedAction && (
+        <span
+          className="px-1.5 py-0.5 text-[10px] leading-4 font-semibold rounded border border-gray-300 bg-gray-50 text-gray-600"
+          title={`Manually marked as ${adminMarkedAction} by administrator`}
+        >
+          manual
         </span>
       )}
     </span>
