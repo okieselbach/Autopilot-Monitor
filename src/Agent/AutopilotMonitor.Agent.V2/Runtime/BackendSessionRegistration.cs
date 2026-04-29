@@ -1,8 +1,11 @@
 using System;
+using System.Net;
 using System.Net.Http;
+using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Security;
+using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Runtime
 {
@@ -36,7 +39,9 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 agentVersion: agentVersion,
                 logger: logger,
                 authFailureTracker: auth.AuthFailureTracker,
-                emergencyReporter: auth.EmergencyReporter).GetAwaiter().GetResult();
+                emergencyReporter: auth.EmergencyReporter,
+                onTerminalTransportFailure: ex => DiagnoseTerminalTransportFailure(ex, auth, logger))
+                .GetAwaiter().GetResult();
 
             if (registrationResult.Outcome != SessionRegistrationOutcome.Succeeded)
             {
@@ -53,6 +58,89 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             }
 
             return SessionRegistrationOutcomeResult.Continue(registrationResult);
+        }
+
+        /// <summary>
+        /// Off-hot-path diagnostic invoked once after all session-registration retries fail.
+        /// Detects whether the terminal exception was a TLS-layer <c>SecureChannelFailure</c>
+        /// and, if so, runs the TPM-PSS capability probe to distinguish "generic Schannel
+        /// failure" from "TPM firmware can't do RSA-PSS so Schannel filters the cert out".
+        /// On confirmation, emits a <see cref="DistressErrorType.TpmPssUnsupported"/> distress
+        /// signal so tenant admins see this device's specific blocker rather than a generic
+        /// network failure.
+        /// <para>
+        /// Never throws — diagnostic-only side effects.
+        /// </para>
+        /// </summary>
+        private static Task DiagnoseTerminalTransportFailure(
+            Exception ex,
+            BackendAuthBundle auth,
+            AgentLogger logger)
+        {
+            try
+            {
+                if (!IsSecureChannelFailure(ex))
+                    return Task.CompletedTask;
+
+                if (auth?.DistressReporter == null || !auth.HasClientCertificate)
+                    return Task.CompletedTask;
+
+                logger.Info(
+                    "SessionRegistration: terminal SecureChannelFailure detected — running TPM PSS capability probe to classify the cause.");
+
+                // Re-resolve the cert here rather than holding it on BackendAuthBundle. This
+                // path runs at most once per agent run, only on terminal failure, so the extra
+                // store lookup is negligible and keeps the bundle's surface clean.
+                var cert = new DefaultCertificateResolver().FindClientCertificate(logger);
+                var probe = TpmPssCapabilityProbe.Probe(cert, logger);
+
+                logger.Info(
+                    $"TpmPssCapabilityProbe: provider={probe.ProviderName} keySize={probe.KeySizeBits} " +
+                    $"pkcs1Sha256={probe.Pkcs1Sha256Works} pssSha256={probe.PssSha256Works} pssSha384={probe.PssSha384Works}");
+
+                if (probe.IsTpmPssBroken && probe.IsTpmBacked)
+                {
+                    logger.Error(
+                        "TpmPssCapabilityProbe: device's TPM-backed key cannot perform RSA-PSS — " +
+                        "modern Schannel filters the cert out of TLS client-auth, blocking mTLS to the backend. " +
+                        "Likely fix: update TPM firmware (common on 2015-era Infineon TPM 2.0).");
+
+                    _ = auth.DistressReporter.TrySendAsync(
+                        DistressErrorType.TpmPssUnsupported,
+                        probe.ToDistressMessage());
+                }
+                else if (probe.IsTpmPssBroken)
+                {
+                    // PSS broken but key isn't TPM-backed — different bug, don't mis-classify.
+                    logger.Warning(
+                        $"TpmPssCapabilityProbe: PSS signing failed on a non-TPM provider ({probe.ProviderName}). " +
+                        "Not emitting TpmPssUnsupported distress. Investigate as a separate crypto issue.");
+                }
+            }
+            catch (Exception probeEx)
+            {
+                logger?.Warning($"DiagnoseTerminalTransportFailure: unexpected error: {probeEx.Message}");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Walks the inner-exception chain looking for <c>WebException.Status == SecureChannelFailure</c>,
+        /// which is the .NET surface of a TLS handshake/credential rejection. Other failure modes
+        /// (timeout, DNS, connect-refused) surface as different statuses and are not classified
+        /// here.
+        /// </summary>
+        private static bool IsSecureChannelFailure(Exception ex)
+        {
+            var current = ex;
+            while (current != null)
+            {
+                if (current is WebException we && we.Status == WebExceptionStatus.SecureChannelFailure)
+                    return true;
+                current = current.InnerException;
+            }
+            return false;
         }
     }
 

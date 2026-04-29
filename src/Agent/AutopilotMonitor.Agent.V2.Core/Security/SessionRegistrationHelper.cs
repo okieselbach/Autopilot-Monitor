@@ -54,7 +54,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             AgentLogger logger,
             AuthFailureTracker authFailureTracker = null,
             EmergencyReporter emergencyReporter = null,
-            Func<int, Task> backoffDelay = null)
+            Func<int, Task> backoffDelay = null,
+            Func<Exception, Task> onTerminalTransportFailure = null)
         {
             if (apiClient == null) throw new ArgumentNullException(nameof(apiClient));
             if (agentConfig == null) throw new ArgumentNullException(nameof(agentConfig));
@@ -63,6 +64,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             backoffDelay ??= DefaultBackoffDelay;
             var registration = BuildRegistration(agentConfig, agentVersion);
             string lastError = null;
+            Exception lastException = null;
 
             for (int attempt = 1; attempt <= MaxAttempts; attempt++)
             {
@@ -92,6 +94,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                 catch (Exception ex)
                 {
                     lastError = ex.Message;
+                    lastException = ex;
                     logger.Error($"Failed to register session (attempt {attempt}/{MaxAttempts}): {ex.Message}", ex);
 
                     if (attempt == MaxAttempts)
@@ -112,6 +115,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                     var delaySeconds = (int)Math.Pow(2, attempt); // 2, 4, 8, 16
                     logger.Info($"Retrying session registration in {delaySeconds}s");
                     await backoffDelay(attempt).ConfigureAwait(false);
+                }
+            }
+
+            // Terminal failure path. The caller can hook diagnostic side-effects here (e.g. the
+            // TPM-PSS capability probe that distinguishes a generic SecureChannelFailure from
+            // the specific case where Schannel filtered the cert out because the TPM firmware
+            // can't sign with RSA-PSS). Kept off the hot path on purpose — a healthy device
+            // never reaches this code.
+            if (lastException != null && onTerminalTransportFailure != null)
+            {
+                try
+                {
+                    await onTerminalTransportFailure(lastException).ConfigureAwait(false);
+                }
+                catch (Exception probeEx)
+                {
+                    logger.Warning($"onTerminalTransportFailure callback threw: {probeEx.Message}");
                 }
             }
 

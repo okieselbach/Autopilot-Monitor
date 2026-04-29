@@ -110,7 +110,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                     AddSecurityHeaders(httpRequest);
                     _logger?.Debug($"GetAgentConfigAsync: GET {url} (attempt {attempt}/{maxAttempts})");
 
-                    using (var response = await _httpClient.SendAsync(httpRequest).ConfigureAwait(false))
+                    HttpResponseMessage response;
+                    try
+                    {
+                        response = await _httpClient.SendAsync(httpRequest).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogTransportFailure($"GetAgentConfigAsync GET {url}", ex);
+                        throw;
+                    }
+
+                    using (response)
                     {
                         if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable && attempt < maxAttempts)
                         {
@@ -203,7 +214,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
             {
                 AddSecurityHeaders(httpRequest);
 
-                using (var response = await _httpClient.SendAsync(httpRequest).ConfigureAwait(false))
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _httpClient.SendAsync(httpRequest).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    LogTransportFailure($"PostAsync POST {url}", ex);
+                    throw;
+                }
+
+                using (response)
                 {
                     ThrowOnAuthFailure(response);
                     response.EnsureSuccessStatusCode();
@@ -211,6 +233,40 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                     var responseJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     return JsonConvert.DeserializeObject<TResponse>(responseJson);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Walks the inner-exception chain of a transport failure and logs every link with
+        /// type, message, and (for <see cref="System.Net.WebException"/>) the
+        /// <see cref="System.Net.WebException.Status"/> code. The status code distinguishes
+        /// TLS-layer failures (<c>SecureChannelFailure</c>) from network/timeout/DNS failures
+        /// — useful for any future transport-failure investigation, not just the TPM-PSS one
+        /// this was originally added for.
+        /// </summary>
+        private void LogTransportFailure(string operation, Exception ex)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"{operation} — transport failure exception chain:");
+                var current = ex;
+                int depth = 0;
+                while (current != null)
+                {
+                    sb.AppendLine($"  [{depth}] {current.GetType().FullName}: {current.Message}");
+                    if (current is System.Net.WebException we)
+                    {
+                        sb.AppendLine($"       WebException.Status = {we.Status}");
+                    }
+                    current = current.InnerException;
+                    depth++;
+                }
+                _logger?.Error(sb.ToString());
+            }
+            catch
+            {
+                // Diagnostic logging must never mask the original exception.
             }
         }
 

@@ -31,6 +31,17 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>POST /api/agent/register-session returned an auth error (401/403).</summary>
         SessionRegistrationDenied = 7,
+
+        /// <summary>
+        /// The device's TPM-backed client certificate cannot perform RSA-PSS signing — Schannel
+        /// silently filters the cert out of TLS client-auth on Windows 11 25H2+ (which prefers
+        /// PSS), so every mTLS handshake completes with no client cert and the backend rejects
+        /// it. Surfaced after a terminal <c>SecureChannelFailure</c> when the PSS capability
+        /// probe (<c>TpmPssCapabilityProbe</c>) confirms PKCS#1 works but PSS fails. Common on
+        /// 2015-era Infineon TPM 2.0 firmware (e.g. Surface Book 1 SLB 9665); the fix is a TPM
+        /// firmware update or device replacement, not an agent change.
+        /// </summary>
+        TpmPssUnsupported = 8,
     }
 
     /// <summary>
