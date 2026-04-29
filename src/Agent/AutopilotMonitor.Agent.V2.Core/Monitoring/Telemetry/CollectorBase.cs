@@ -26,6 +26,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry
         private readonly int _intervalSeconds;
         private Timer _timer;
         private bool _disposed;
+        // 0 = idle, 1 = a Collect call is in flight. System.Threading.Timer is documented to
+        // fire callbacks on different ThreadPool threads when the previous callback exceeds
+        // the period — observed in production on stall-recovery (network reinit makes the
+        // PerformanceCollector's NetworkInterface.GetAllNetworkInterfaces() call slow enough
+        // to overlap the next 30s tick), producing two parallel Collect calls that race on
+        // the collector's shared baseline state and emit duplicate snapshots. Using
+        // Interlocked here keeps the sample interval honest and prevents ghost samples.
+        private int _collecting;
 
         protected CollectorBase(
             string sessionId,
@@ -96,10 +104,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry
             _timer.Change(TimeSpan.Zero, interval);
         }
 
-        private void CollectSafe()
+        /// <summary>
+        /// Reentrancy-guarded entry point invoked by <see cref="_timer"/>. <c>internal</c> so the
+        /// V2 test assembly (via <c>InternalsVisibleTo</c>) can drive the guard directly without
+        /// having to spin up a real timer + wait on real wall-clock time.
+        /// </summary>
+        internal void CollectSafe()
         {
+            // Skip the tick if a previous Collect is still running. The Timer keeps firing in
+            // the background, so the next eligible tick will pick up where this one declined —
+            // the sample cadence stays aligned with the configured interval rather than the
+            // duration of any single slow Collect.
+            if (Interlocked.CompareExchange(ref _collecting, 1, 0) != 0)
+            {
+                Logger.Debug($"[{GetType().Name}] tick skipped — previous Collect still running");
+                return;
+            }
+
             try { Collect(); }
             catch (Exception ex) { Logger.Error($"[{GetType().Name}] Collection error: {ex.Message}", ex); }
+            finally { Interlocked.Exchange(ref _collecting, 0); }
         }
     }
 }

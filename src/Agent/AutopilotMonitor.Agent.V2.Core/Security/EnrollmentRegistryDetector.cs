@@ -22,6 +22,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         /// Reads <c>CloudAssignedDomainJoinMethod</c> from the Autopilot policy cache. Returns
         /// <c>true</c> when the profile was deployed with Hybrid Azure AD Join
         /// (<c>CloudAssignedDomainJoinMethod == 1</c>), <c>false</c> otherwise or on any error.
+        /// <para>
+        /// On some Windows builds (observed on Win11 23H2 Lenovo / 22631.4317) the
+        /// <c>CloudAssignedDomainJoinMethod</c> value is not persisted as a top-level registry
+        /// value — it lives only inside the JSON blob stored under <c>PolicyJsonCache</c>. The
+        /// <c>DeviceInfoCollector</c> already handles this when emitting the
+        /// <c>autopilot_profile</c> event; this detector mirrors the same fallback so the
+        /// session is registered with the correct <c>IsHybridJoin</c> flag instead of a stale
+        /// <c>false</c>.
+        /// </para>
         /// </summary>
         public static bool DetectHybridJoin()
         {
@@ -30,14 +39,53 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                 using (var key = Registry.LocalMachine.OpenSubKey(AutopilotPolicyCacheKey))
                 {
                     if (key == null) return false;
-                    var domainJoinMethod = key.GetValue("CloudAssignedDomainJoinMethod")?.ToString();
-                    return domainJoinMethod == "1";
+                    return ResolveHybridJoinFromValues(key.GetValue);
                 }
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Pure decision logic for <see cref="DetectHybridJoin"/>. Exposed internally so the
+        /// fallback can be exercised without a real registry. <paramref name="getValue"/> is
+        /// expected to behave like <see cref="RegistryKey.GetValue(string)"/> — returns
+        /// <c>null</c> when the named value is absent.
+        /// </summary>
+        internal static bool ResolveHybridJoinFromValues(Func<string, object> getValue)
+        {
+            if (getValue == null) return false;
+
+            // Top-level value is authoritative when present (covers both "0" and "1").
+            var topLevel = getValue("CloudAssignedDomainJoinMethod")?.ToString();
+            if (topLevel != null)
+            {
+                return topLevel == "1";
+            }
+
+            // Fallback: on devices where the policy cache only carries the embedded JSON
+            // blob, look up the same key inside PolicyJsonCache.
+            var policyJson = getValue("PolicyJsonCache")?.ToString();
+            if (string.IsNullOrWhiteSpace(policyJson)) return false;
+
+            try
+            {
+                using (var doc = System.Text.Json.JsonDocument.Parse(policyJson))
+                {
+                    if (doc.RootElement.TryGetProperty("CloudAssignedDomainJoinMethod", out var prop))
+                    {
+                        return prop.ToString() == "1";
+                    }
+                }
+            }
+            catch
+            {
+                // Malformed PolicyJsonCache → conservative non-HAADJ default. Detection is
+                // best-effort and must never throw at session-registration time.
+            }
+            return false;
         }
 
         /// <summary>
