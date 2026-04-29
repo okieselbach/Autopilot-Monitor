@@ -16,11 +16,10 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Setup .NET 10
+      - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'ga'
+          dotnet-version: '8.0.x'
 
       - name: Restore dependencies
         run: dotnet restore src/Backend/AutopilotMonitor.Functions/AutopilotMonitor.Functions.csproj
