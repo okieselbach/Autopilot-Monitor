@@ -950,6 +950,12 @@ namespace AutopilotMonitor.Functions.Services
         /// Event count is maintained atomically by IncrementSessionEventCountAsync and is not
         /// recounted here — avoiding an expensive full-partition scan on every status change.
         /// </summary>
+        /// <param name="completedAt">
+        /// Authoritative completion timestamp from the triggering event (e.g. CompletionEvent.Timestamp).
+        /// When null — admin-marked terminals, rule-engine, maintenance auto-fail — the writer falls
+        /// back to the session's LastEventAt and only to UtcNow as a last resort, so DurationSeconds
+        /// reflects when the session went silent rather than when the operator clicked the button.
+        /// </param>
         public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false, string? failureSource = null, string? adminMarkedAction = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
@@ -1031,8 +1037,10 @@ namespace AutopilotMonitor.Functions.Services
                     // Set completion time if succeeded or failed
                     if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
                     {
-                        // Use the provided completedAt timestamp (from event) if available, otherwise use current time
-                        var effectiveCompletedAt = EnsureUtc(completedAt ?? DateTime.UtcNow);
+                        var effectiveCompletedAt = EnsureUtc(ResolveCompletionTimestamp(
+                            completedAt,
+                            session.GetDateTimeOffset("LastEventAt")?.UtcDateTime,
+                            DateTime.UtcNow));
                         update["CompletedAt"] = effectiveCompletedAt;
 
                         // Check if this is a WhiteGlove session with a stored Part 1 duration
@@ -1240,7 +1248,10 @@ namespace AutopilotMonitor.Functions.Services
 
                             if (status == SessionStatus.Succeeded || status == SessionStatus.Failed)
                             {
-                                var effectiveCompletedAt = EnsureUtc(completedAt ?? DateTime.UtcNow);
+                                var effectiveCompletedAt = EnsureUtc(ResolveCompletionTimestamp(
+                                    completedAt,
+                                    freshSession.GetDateTimeOffset("LastEventAt")?.UtcDateTime,
+                                    DateTime.UtcNow));
                                 forceUpdate["CompletedAt"] = effectiveCompletedAt;
 
                                 var freshIsPreProvisioned = freshSession.GetBoolean("IsPreProvisioned") ?? false;
@@ -1847,6 +1858,17 @@ namespace AutopilotMonitor.Functions.Services
                 ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false
             };
         }
+
+        /// <summary>
+        /// Resolves the timestamp recorded as <c>CompletedAt</c> when a session transitions to
+        /// Succeeded/Failed. Caller-supplied <paramref name="completedAt"/> wins (agent CompletionEvent);
+        /// otherwise falls back to the last observed event time so admin-marked terminals,
+        /// rule-engine, and maintenance auto-fail anchor on when the session actually went
+        /// silent rather than on the click/tick time. Caller is responsible for normalizing the
+        /// returned value to UTC kind via <c>EnsureUtc</c> before persisting.
+        /// </summary>
+        internal static DateTime ResolveCompletionTimestamp(DateTime? completedAt, DateTime? lastEventAt, DateTime nowUtc)
+            => completedAt ?? lastEventAt ?? nowUtc;
 
         /// <summary>
         /// Computes the effective duration for dashboard display.

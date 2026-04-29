@@ -203,11 +203,14 @@ namespace AutopilotMonitor.Functions.Services
                 var failureSource = $"rule:{rule.RuleId}";
                 var failureReason = $"Rule: {rule.Title}";
 
+                // No completedAt: rule firing is decoupled from real-time session activity
+                // (analysis can run minutes after the last event), so UtcNow would inflate
+                // DurationSeconds. Letting UpdateSessionStatusAsync fall back to LastEventAt
+                // anchors duration on when the session actually went silent.
                 await _sessionRepo.UpdateSessionStatusAsync(
                     tenantId, sessionId, SessionStatus.Failed,
                     failureReason: failureReason,
-                    failureSource: failureSource,
-                    completedAt: DateTime.UtcNow);
+                    failureSource: failureSource);
 
                 _logger.LogWarning($"Session {sessionId} marked as failed by rule {rule.RuleId} ('{rule.Title}')");
             }
