@@ -108,13 +108,11 @@ tmpclaude-*-cwd
 # Claude skills and scripts are now in a private submodule (.claude/commands/)
 # No individual file ignores needed — the submodule handles everything
 
-# Deployment scripts (local only)
-scripts/Deployment/build_and_upload_debug_agent_build_dev.ps1
-scripts/Deployment/build_and_upload_debug_agent_build.ps1
-scripts/Deployment/build_and_upload_release_agent_build.ps1
+# Deployment scripts (local only — contain tokens + SAS URLs)
+scripts/Deployment/
 
-# V2 Deployment scripts (tokens + SAS URLs, analog to Legacy) — plan §4 M2
-scripts/Deployment/V2/
+# Infra (local only)
+infra/
 
 # M2 — local raw session fixtures before anonymization (plan §4 M2)
 tests/fixtures/enrollment-sessions-local/
