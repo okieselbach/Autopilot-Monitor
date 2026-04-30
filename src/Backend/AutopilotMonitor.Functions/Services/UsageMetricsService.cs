@@ -18,11 +18,12 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IMaintenanceRepository _maintenanceRepo;
         private readonly ILogger<UsageMetricsService> _logger;
 
-        // In-memory cache
-        private static PlatformUsageMetrics? _cachedMetrics;
-        private static DateTime _cacheExpiry = DateTime.MinValue;
+        // In-memory cache (per-window, since results differ by days)
+        private static readonly Dictionary<int, (PlatformUsageMetrics metrics, DateTime expiry)> _cachedByDays = new();
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
         private static readonly object _cacheLock = new object();
+
+        private const int DefaultWindowDays = 90;
 
         public UsageMetricsService(
             IMetricsRepository metricsRepo,
@@ -35,71 +36,79 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Computes platform usage metrics (with 5-minute cache)
+        /// Computes platform usage metrics (with 5-minute per-window cache).
         /// </summary>
-        public async Task<PlatformUsageMetrics> ComputeUsageMetricsAsync()
+        public async Task<PlatformUsageMetrics> ComputeUsageMetricsAsync(int days = DefaultWindowDays)
         {
-            // Check cache first
+            days = ClampDays(days);
+
             lock (_cacheLock)
             {
-                if (_cachedMetrics != null && DateTime.UtcNow < _cacheExpiry)
+                if (_cachedByDays.TryGetValue(days, out var entry) && DateTime.UtcNow < entry.expiry)
                 {
-                    _logger.LogInformation("Returning cached usage metrics (expires in {Seconds}s)",
-                        (_cacheExpiry - DateTime.UtcNow).TotalSeconds);
-                    _cachedMetrics.FromCache = true;
-                    return _cachedMetrics;
+                    _logger.LogInformation("Returning cached usage metrics for days={Days} (expires in {Seconds}s)",
+                        days, (entry.expiry - DateTime.UtcNow).TotalSeconds);
+                    entry.metrics.FromCache = true;
+                    return entry.metrics;
                 }
             }
 
-            // Compute fresh metrics
-            _logger.LogInformation("Computing fresh usage metrics...");
+            _logger.LogInformation("Computing fresh usage metrics for days={Days}...", days);
             var stopwatch = Stopwatch.StartNew();
 
-            var metrics = await ComputeUsageMetricsInternalAsync();
+            var metrics = await ComputeUsageMetricsInternalAsync(days);
 
             stopwatch.Stop();
             metrics.ComputeDurationMs = (int)stopwatch.ElapsedMilliseconds;
             metrics.ComputedAt = DateTime.UtcNow;
             metrics.FromCache = false;
+            metrics.WindowDays = days;
 
-            _logger.LogInformation("Usage metrics computed in {Ms}ms", metrics.ComputeDurationMs);
+            _logger.LogInformation("Usage metrics computed in {Ms}ms (days={Days})", metrics.ComputeDurationMs, days);
 
-            // Update cache
             lock (_cacheLock)
             {
-                _cachedMetrics = metrics;
-                _cacheExpiry = DateTime.UtcNow.Add(CacheDuration);
+                _cachedByDays[days] = (metrics, DateTime.UtcNow.Add(CacheDuration));
             }
 
             return metrics;
         }
 
         /// <summary>
-        /// Computes tenant-specific usage metrics (no caching for tenant-specific metrics)
+        /// Computes tenant-specific usage metrics (no caching for tenant-specific metrics).
         /// </summary>
-        public async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsAsync(string tenantId)
+        public async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsAsync(string tenantId, int days = DefaultWindowDays)
         {
-            _logger.LogInformation($"Computing usage metrics for tenant {tenantId}...");
+            days = ClampDays(days);
+            _logger.LogInformation("Computing usage metrics for tenant {TenantId} (days={Days})...", tenantId, days);
             var stopwatch = Stopwatch.StartNew();
 
-            var metrics = await ComputeTenantUsageMetricsInternalAsync(tenantId);
+            var metrics = await ComputeTenantUsageMetricsInternalAsync(tenantId, days);
 
             stopwatch.Stop();
             metrics.ComputeDurationMs = (int)stopwatch.ElapsedMilliseconds;
             metrics.ComputedAt = DateTime.UtcNow;
             metrics.FromCache = false;
+            metrics.WindowDays = days;
 
-            _logger.LogInformation($"Tenant usage metrics computed in {metrics.ComputeDurationMs}ms");
+            _logger.LogInformation("Tenant usage metrics computed in {Ms}ms (days={Days})", metrics.ComputeDurationMs, days);
 
             return metrics;
         }
 
-        private async Task<PlatformUsageMetrics> ComputeUsageMetricsInternalAsync()
+        private static int ClampDays(int days)
         {
-            // Query sessions from the last 90 days only — covers all displayed metrics (today/7d/30d)
-            // with a generous margin. Avoids loading the entire table into memory.
-            // "Total" counters use PlatformStats (cumulative, already tracked separately).
-            var allSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-90), DateTime.UtcNow.AddDays(1));
+            if (days < 1) return 1;
+            if (days > 365) return 365;
+            return days;
+        }
+
+        private async Task<PlatformUsageMetrics> ComputeUsageMetricsInternalAsync(int days)
+        {
+            // Query sessions over the requested window (days). Today/7d/30d sub-aggregates remain
+            // meaningful only when they fit inside the window; clients can read WindowDays to know
+            // the actual scope. "Total" counters use PlatformStats (cumulative, tracked separately).
+            var allSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-days), DateTime.UtcNow.AddDays(1));
 
             var now = DateTime.UtcNow;
             var today = now.Date;
@@ -241,10 +250,10 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
-        private async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsInternalAsync(string tenantId)
+        private async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsInternalAsync(string tenantId, int days)
         {
-            // Query sessions for specific tenant only — last 90 days
-            var tenantSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-90), DateTime.UtcNow.AddDays(1), tenantId);
+            // Query sessions for specific tenant over the requested window.
+            var tenantSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-days), DateTime.UtcNow.AddDays(1), tenantId);
 
             var now = DateTime.UtcNow;
             var today = now.Date;

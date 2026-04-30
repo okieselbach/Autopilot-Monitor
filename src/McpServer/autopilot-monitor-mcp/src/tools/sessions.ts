@@ -320,10 +320,12 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'get_metrics',
     'Get aggregated enrollment metrics: failure rates, slowest/most-failing apps, session counts. ' +
-    'Omit tenantId for cross-tenant platform overview (Global Admin). Specify tenantId for single-tenant metrics.',
+    'Omit tenantId for cross-tenant platform overview (Global Admin). Specify tenantId for single-tenant metrics. ' +
+    'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant overview (Global Admin only).'),
-      days: z.coerce.number().refine(v => [7, 30, 90].includes(v), { message: 'days must be 7, 30, or 90' }).optional().default(30),
+      days: z.coerce.number().int().min(1).max(365).optional().default(30)
+        .describe('Time window in days (1-365). Defaults to 30. Applied to both summary and app metrics.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_metrics', async () => {

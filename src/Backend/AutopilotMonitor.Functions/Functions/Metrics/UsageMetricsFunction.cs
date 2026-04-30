@@ -40,9 +40,10 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 string tenantId = TenantHelper.GetTenantId(req);
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                _logger.LogInformation($"Fetching usage metrics for tenant {tenantId} by user {userIdentifier}");
+                var days = ParseDays(req);
+                _logger.LogInformation("Fetching usage metrics for tenant {TenantId} by user {User} (days={Days})", tenantId, userIdentifier, days);
 
-                var metrics = await _usageMetricsService.ComputeTenantUsageMetricsAsync(tenantId);
+                var metrics = await _usageMetricsService.ComputeTenantUsageMetricsAsync(tenantId, days);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(metrics);
@@ -62,6 +63,18 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 return errorResponse;
             }
+        }
+
+        private static int ParseDays(HttpRequestData req)
+        {
+            var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            var raw = query["days"];
+            var days = 90;
+            if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var parsed) && parsed > 0)
+                days = parsed;
+            if (days < 1) days = 1;
+            if (days > 365) days = 365;
+            return days;
         }
     }
 }

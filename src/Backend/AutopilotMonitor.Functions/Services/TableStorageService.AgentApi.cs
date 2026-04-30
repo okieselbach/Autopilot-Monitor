@@ -903,12 +903,22 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Returns aggregated session metrics grouped by tenant.
+        /// Returns aggregated session metrics grouped by tenant, filtered to the last <paramref name="days"/> days.
+        /// Leverages the SessionsIndex inverted-tick RowKey ordering for an efficient server-side range scan.
         /// </summary>
-        public async Task<List<object>> GetMetricsSummaryAsync(string? tenantId)
+        public async Task<List<object>> GetMetricsSummaryAsync(string? tenantId, int days = 30)
         {
+            // Clamp to a sane range so callers can't accidentally trigger an unbounded scan.
+            if (days < 1) days = 1;
+            if (days > 365) days = 365;
+
             var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
-            var oDataFilter = string.IsNullOrEmpty(tenantId) ? null : $"PartitionKey eq '{tenantId}'";
+            var cutoffRowKeyPrefix = ComputeCutoffRowKeyPrefix(days);
+
+            var filterParts = new List<string> { $"RowKey lt '{cutoffRowKeyPrefix}'" };
+            if (!string.IsNullOrEmpty(tenantId))
+                filterParts.Add($"PartitionKey eq '{tenantId}'");
+            var oDataFilter = string.Join(" and ", filterParts);
 
             var groups = new Dictionary<string, (int total, int succeeded, int failed, int inProgress)>(StringComparer.OrdinalIgnoreCase);
 
@@ -936,7 +946,8 @@ namespace AutopilotMonitor.Functions.Services
                 inProgress = kvp.Value.inProgress,
                 failureRate = kvp.Value.total > 0
                     ? Math.Round((double)kvp.Value.failed / kvp.Value.total * 100, 1)
-                    : 0.0
+                    : 0.0,
+                windowDays = days
             }).ToList();
         }
     }

@@ -34,7 +34,7 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<(int uniqueUsers, int loginCount)> GetUserActivityForDateAsync(string? tenantId, DateTime date);
 
         // --- Metrics Summary (Agent API) ---
-        Task<List<object>> GetMetricsSummaryAsync(string? tenantId);
+        Task<List<object>> GetMetricsSummaryAsync(string? tenantId, int days = 30);
 
         // --- Rule Stats ---
         Task IncrementRuleStatAsync(string date, string tenantId, string ruleId, string ruleType,

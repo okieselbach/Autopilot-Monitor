@@ -38,13 +38,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
                 // Optional tenantId query parameter: when provided, return tenant-specific metrics
-                var tenantId = req.Url.Query?.Contains("tenantId=") == true
-                    ? System.Web.HttpUtility.ParseQueryString(req.Url.Query).Get("tenantId")
-                    : null;
+                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                var tenantId = query["tenantId"];
+                var days = ParseDays(query);
 
                 var metrics = !string.IsNullOrEmpty(tenantId)
-                    ? await _usageMetricsService.ComputeTenantUsageMetricsAsync(tenantId)
-                    : await _usageMetricsService.ComputeUsageMetricsAsync();
+                    ? await _usageMetricsService.ComputeTenantUsageMetricsAsync(tenantId, days)
+                    : await _usageMetricsService.ComputeUsageMetricsAsync(days);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(metrics);
@@ -64,6 +64,17 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 return errorResponse;
             }
+        }
+
+        private static int ParseDays(System.Collections.Specialized.NameValueCollection query)
+        {
+            var raw = query["days"];
+            var days = 90;
+            if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var parsed) && parsed > 0)
+                days = parsed;
+            if (days < 1) days = 1;
+            if (days > 365) days = 365;
+            return days;
         }
     }
 }

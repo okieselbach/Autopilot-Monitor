@@ -59,8 +59,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<(int uniqueUsers, int loginCount)> GetUserActivityForDateAsync(string? tenantId, DateTime date)
             => _storage.GetUserActivityForDateAsync(tenantId, date);
 
-        public Task<List<object>> GetMetricsSummaryAsync(string? tenantId)
-            => _storage.GetMetricsSummaryAsync(tenantId);
+        public Task<List<object>> GetMetricsSummaryAsync(string? tenantId, int days = 30)
+            => _storage.GetMetricsSummaryAsync(tenantId, days);
 
         public Task IncrementRuleStatAsync(string date, string tenantId, string ruleId, string ruleType,
             string ruleTitle, string category, string severity, bool fired, int? confidenceScore)

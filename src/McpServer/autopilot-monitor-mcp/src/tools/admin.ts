@@ -104,8 +104,12 @@ export function registerAdminTools(server: McpServer): void {
     'get_platform_metrics',
     'Get aggregated platform-level agent performance metrics across recent sessions. ' +
     'Returns: avg/max/p95 CPU, memory (working set, private bytes), network (bytes up/down, latency, requests), ' +
-    'top sessions by CPU/memory, and per-agent-version breakdown. Global Admin only.',
-    {},
+    'top sessions by CPU/memory, and per-agent-version breakdown. Global Admin only. ' +
+    'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
+    {
+      days: z.coerce.number().int().min(1).max(365).optional().default(30)
+        .describe('Time window in days (1-365). Defaults to 30.'),
+    },
     READ_ONLY,
     async (args) => withToolTelemetry('get_platform_metrics', async () => {
       try {
@@ -116,10 +120,10 @@ export function registerAdminTools(server: McpServer): void {
           avgPrivateBytes: number; avgLatency: number;
           totalBytesUp: number; totalBytesDown: number; totalRequests: number;
         };
-        const raw = await apiFetch('/api/global/metrics/platform') as { sessions?: SessionMetric[] };
+        const raw = await apiFetch(`/api/global/metrics/platform${buildQuery({ days: args.days })}`) as { sessions?: SessionMetric[] };
         const sessions = raw?.sessions ?? [];
         if (sessions.length === 0) {
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ sessionsAnalyzed: 0, message: 'No performance data available' }) }] };
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ windowDays: args.days, sessionsAnalyzed: 0, message: 'No performance data available' }) }] };
         }
 
         const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
@@ -153,6 +157,7 @@ export function registerAdminTools(server: McpServer): void {
         })).sort((a, b) => b.sessions - a.sessions);
 
         const summary = {
+          windowDays: args.days,
           sessionsAnalyzed: sessions.length,
           cpu: { avgPercent: round(avg(cpus)), maxPercent: round(Math.max(...maxCpus)), p95Percent: round(p95(maxCpus)) },
           memory: {
@@ -180,19 +185,18 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'get_usage_metrics',
     'Get platform usage statistics: active tenants, session volumes, feature adoption. ' +
-    'Omit tenantId for platform-wide overview (Global Admin), or specify tenantId for tenant-specific usage.',
+    'Omit tenantId for platform-wide overview (Global Admin), or specify tenantId for tenant-specific usage. ' +
+    'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
     {
       tenantId: z.string().optional().describe('Tenant ID for tenant-specific metrics. Omit for platform-wide overview (Global Admin only).'),
+      days: z.coerce.number().int().min(1).max(365).optional().default(30)
+        .describe('Time window in days (1-365). Defaults to 30. Sessions.Total / Tenants.Total reflect this window.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_usage_metrics', async () => {
       try {
-        const { tenantId } = args;
-        if (tenantId) {
-          const data = await apiFetch(`/api/global/metrics/usage${buildQuery({ tenantId })}`);
-          return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
-        }
-        const data = await apiFetch('/api/global/metrics/usage');
+        const { tenantId, days } = args;
+        const data = await apiFetch(`/api/global/metrics/usage${buildQuery({ tenantId, days })}`);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('get_usage_metrics', args, error);

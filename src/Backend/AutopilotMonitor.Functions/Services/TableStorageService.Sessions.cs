@@ -21,6 +21,17 @@ namespace AutopilotMonitor.Functions.Services
             => $"{(DateTime.MaxValue.Ticks - startedAt.Ticks):D19}_{sessionId}";
 
         /// <summary>
+        /// Computes the SessionsIndex RowKey upper bound (D19 inverted-tick prefix) for a
+        /// "last N days" window. Use with `RowKey lt '{prefix}'` — sessions newer than the
+        /// cutoff have smaller inverted-tick values than this prefix.
+        /// </summary>
+        internal static string ComputeCutoffRowKeyPrefix(int days)
+        {
+            var cutoffDate = DateTime.UtcNow.AddDays(-days);
+            return $"{(DateTime.MaxValue.Ticks - cutoffDate.Ticks):D19}";
+        }
+
+        /// <summary>
         /// Extracts the SessionId from an index RowKey ("{invertedTicks}_{sessionId}").
         /// </summary>
         private static string ExtractSessionIdFromIndexRowKey(string indexRowKey)
@@ -652,8 +663,7 @@ namespace AutopilotMonitor.Functions.Services
                 // Sessions older than cutoff have RowKey >= cutoffRowKeyPrefix.
                 if (days.HasValue)
                 {
-                    var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
-                    var cutoffRowKeyPrefix = $"{(DateTime.MaxValue.Ticks - cutoffDate.Ticks):D19}";
+                    var cutoffRowKeyPrefix = ComputeCutoffRowKeyPrefix(days.Value);
                     filter += $" and RowKey lt '{cutoffRowKeyPrefix}'";
                 }
 
@@ -789,12 +799,9 @@ namespace AutopilotMonitor.Functions.Services
                 var fetchPerTenant = days.HasValue ? 5000 : maxResults + 1;
 
                 // Compute RowKey upper bound for date filtering
-                string? cutoffRowKeyPrefix = null;
-                if (days.HasValue)
-                {
-                    var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
-                    cutoffRowKeyPrefix = $"{(DateTime.MaxValue.Ticks - cutoffDate.Ticks):D19}";
-                }
+                string? cutoffRowKeyPrefix = days.HasValue
+                    ? ComputeCutoffRowKeyPrefix(days.Value)
+                    : null;
 
                 // Parallel fan-out: query all tenants concurrently
                 var tasks = tenantIds.Select(async tenantId =>

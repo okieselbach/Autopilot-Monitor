@@ -18,11 +18,12 @@ namespace AutopilotMonitor.Functions.Services
         private readonly ISessionRepository _sessionRepo;
         private readonly ILogger<PlatformMetricsService> _logger;
 
-        // In-memory cache (same pattern as UsageMetricsService)
-        private static PlatformAgentMetricsResponse? _cachedMetrics;
-        private static DateTime _cacheExpiry = DateTime.MinValue;
+        // In-memory per-window cache
+        private static readonly Dictionary<int, (PlatformAgentMetricsResponse metrics, DateTime expiry)> _cachedByDays = new();
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
         private static readonly object _cacheLock = new object();
+
+        private const int DefaultWindowDays = 90;
 
         public PlatformMetricsService(
             ISessionRepository sessionRepo,
@@ -33,49 +34,56 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Computes platform agent metrics (with 5-minute cache)
+        /// Computes platform agent metrics over the last <paramref name="days"/> days (5-minute per-window cache).
         /// </summary>
-        public async Task<PlatformAgentMetricsResponse> ComputePlatformMetricsAsync()
+        public async Task<PlatformAgentMetricsResponse> ComputePlatformMetricsAsync(int days = DefaultWindowDays)
         {
-            // Check cache first
+            days = ClampDays(days);
+
             lock (_cacheLock)
             {
-                if (_cachedMetrics != null && DateTime.UtcNow < _cacheExpiry)
+                if (_cachedByDays.TryGetValue(days, out var entry) && DateTime.UtcNow < entry.expiry)
                 {
-                    _logger.LogInformation("Returning cached platform metrics (expires in {Seconds}s)",
-                        (_cacheExpiry - DateTime.UtcNow).TotalSeconds);
-                    _cachedMetrics.FromCache = true;
-                    return _cachedMetrics;
+                    _logger.LogInformation("Returning cached platform metrics for days={Days} (expires in {Seconds}s)",
+                        days, (entry.expiry - DateTime.UtcNow).TotalSeconds);
+                    entry.metrics.FromCache = true;
+                    return entry.metrics;
                 }
             }
 
-            // Compute fresh metrics
-            _logger.LogInformation("Computing fresh platform agent metrics...");
+            _logger.LogInformation("Computing fresh platform agent metrics for days={Days}...", days);
             var stopwatch = Stopwatch.StartNew();
 
-            var metrics = await ComputePlatformMetricsInternalAsync();
+            var metrics = await ComputePlatformMetricsInternalAsync(days);
 
             stopwatch.Stop();
             metrics.ComputeDurationMs = (int)stopwatch.ElapsedMilliseconds;
             metrics.ComputedAt = DateTime.UtcNow;
             metrics.FromCache = false;
+            metrics.WindowDays = days;
 
-            _logger.LogInformation("Platform agent metrics computed in {Ms}ms", metrics.ComputeDurationMs);
+            _logger.LogInformation("Platform agent metrics computed in {Ms}ms (days={Days})", metrics.ComputeDurationMs, days);
 
-            // Update cache
             lock (_cacheLock)
             {
-                _cachedMetrics = metrics;
-                _cacheExpiry = DateTime.UtcNow.Add(CacheDuration);
+                _cachedByDays[days] = (metrics, DateTime.UtcNow.Add(CacheDuration));
             }
 
             return metrics;
         }
 
-        private async Task<PlatformAgentMetricsResponse> ComputePlatformMetricsInternalAsync()
+        private static int ClampDays(int days)
         {
-            // 1. Fetch the 500 most recent sessions across all tenants
-            var page = await _sessionRepo.GetAllSessionsAsync(maxResults: 500);
+            if (days < 1) return 1;
+            if (days > 365) return 365;
+            return days;
+        }
+
+        private async Task<PlatformAgentMetricsResponse> ComputePlatformMetricsInternalAsync(int days)
+        {
+            // Fetch all sessions in the requested window across all tenants. When `days` is set,
+            // GetAllSessionsAsync ignores `maxResults` and returns the full date-bounded set.
+            var page = await _sessionRepo.GetAllSessionsAsync(maxResults: 500, days: days);
             var allSessions = page.Sessions;
 
             if (allSessions.Count == 0)
@@ -361,6 +369,7 @@ namespace AutopilotMonitor.Functions.Services
         public DateTime ComputedAt { get; set; }
         public int ComputeDurationMs { get; set; }
         public bool FromCache { get; set; }
+        public int WindowDays { get; set; }
     }
 
     public class SessionAgentMetric

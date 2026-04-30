@@ -63,6 +63,11 @@ namespace AutopilotMonitor.Shared.Models
         /// Whether result is from cache
         /// </summary>
         public bool FromCache { get; set; }
+
+        /// <summary>
+        /// Time window (in days) the metrics were computed over.
+        /// </summary>
+        public int WindowDays { get; set; }
     }
 
     public class SessionMetrics

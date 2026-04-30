@@ -33,7 +33,8 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             {
                 // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
 
-                var metrics = await _platformMetricsService.ComputePlatformMetricsAsync();
+                var days = ParseDays(req);
+                var metrics = await _platformMetricsService.ComputePlatformMetricsAsync(days);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(metrics);
@@ -53,6 +54,18 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 return errorResponse;
             }
+        }
+
+        private static int ParseDays(HttpRequestData req)
+        {
+            var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            var raw = query["days"];
+            var days = 90;
+            if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var parsed) && parsed > 0)
+                days = parsed;
+            if (days < 1) days = 1;
+            if (days > 365) days = 365;
+            return days;
         }
     }
 }
