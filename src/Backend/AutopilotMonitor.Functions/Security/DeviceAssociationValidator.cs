@@ -112,13 +112,14 @@ namespace AutopilotMonitor.Functions.Security
                 var graphClient = _httpClientFactory.CreateClient();
                 graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.AccessToken);
 
-                // TODO(devprep-followup): OData $filter support on tenantAssociatedDevices is not yet
-                // documented for the Private Preview surface — fall back to a server-side $top page
-                // sorted by recency and exact-match client-side. When MS adds eq-filter support, swap
-                // to `$filter=serialNumber eq '...'` (mirror AutopilotDeviceValidator's escape pattern).
-                // Tracked in memory/project_devprep_followups.md.
+                // Mirror the Intune portal's tenantAssociatedDevices search: server-side narrowing via
+                // `contains(serialNumber,'…')` (eq is not supported on this endpoint), then enforce
+                // exact match in ParseTenantAssociatedDevicesResponse to reject substring false-positives.
+                var escapedSerial = normalizedSerial.Replace("'", "''");
+                var filter = Uri.EscapeDataString($"contains(serialNumber,'{escapedSerial}')");
+                var orderby = Uri.EscapeDataString("preAssociationDateTime desc");
                 var graphUrl = "https://graph.microsoft.com/beta/deviceManagement/tenantAssociatedDevices"
-                               + "?$top=100&$orderby=preAssociationDateTime desc";
+                               + $"?$top=25&$filter={filter}&$orderby={orderby}";
 
                 var response = await graphClient.GetAsync(graphUrl);
                 var responseBody = await response.Content.ReadAsStringAsync();
