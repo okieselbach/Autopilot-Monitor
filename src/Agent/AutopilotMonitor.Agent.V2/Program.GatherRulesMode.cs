@@ -21,8 +21,8 @@ namespace AutopilotMonitor.Agent.V2
     /// <para>
     /// Fetches remote config, executes all startup gather rules against a freshly-registered
     /// ephemeral session, uploads the collected events, and exits. Parity with Legacy
-    /// <c>Program.GatherRulesMode.cs</c> — the V2 differences are minimal (V2 TenantIdResolver
-    /// instead of GetTenantIdFromRegistry, V2 BackendApiClient ctor).
+    /// <c>Program.GatherRulesMode.cs</c> — the V2 differences are minimal (V2 BackendApiClient
+    /// ctor; both rails now share the same TenantIdResolver shape).
     /// </para>
     /// </summary>
     public static partial class Program

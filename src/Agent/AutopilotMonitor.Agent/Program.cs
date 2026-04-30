@@ -220,20 +220,20 @@ namespace AutopilotMonitor.Agent
                     if (consoleMode)
                         Console.WriteLine($"MDM certificate found: {cert.Thumbprint}");
 
-                    // Re-read TenantId from registry — enrollment creates the registry key
-                    // alongside the certificate, so it should be available now.
+                    // Re-read TenantId — enrollment creates the registry key alongside the
+                    // certificate, so it should be available now. TenantIdResolver also probes
+                    // CloudDomainJoin as a fallback and emits a source-tagged log line on hit.
                     if (string.IsNullOrEmpty(config.TenantId))
                     {
-                        config.TenantId = GetTenantIdFromRegistry();
+                        config.TenantId = TenantIdResolver.Resolve(logger);
                         if (!string.IsNullOrEmpty(config.TenantId))
                         {
-                            logger.Info($"Await-enrollment: TenantId discovered from registry: {config.TenantId}");
                             if (consoleMode)
                                 Console.WriteLine($"Tenant ID:   {config.TenantId}");
                         }
                         else
                         {
-                            logger.Warning("Await-enrollment: MDM certificate found but TenantId not yet in registry");
+                            logger.Warning("Await-enrollment: MDM certificate found but TenantId still not resolvable.");
                         }
                     }
 
@@ -257,8 +257,18 @@ namespace AutopilotMonitor.Agent
 
                 // Pre-flight: bail cleanly if TenantId is missing instead of crashing inside
                 // MonitoringService.IsValid(). Mirrors V2's AgentBootstrap guard. Common cause:
-                // agent scheduled before MDM enrollment populated HKLM\SOFTWARE\Microsoft\Enrollments
-                // and no bootstrap-config.json present. The Scheduled Task will retry on next trigger.
+                // agent scheduled before MDM enrollment / AAD join populated the registry and
+                // no bootstrap-config.json present. The Scheduled Task will retry on next trigger.
+                //
+                // Re-probe with the logger if we never went through the await-enrollment branch
+                // (LoadConfiguration ran without a logger, so its initial probe was silent). The
+                // re-probe either resolves the race (registry caught up between config load and
+                // here) or emits the diagnostic block so the agent log captures registry state.
+                if (string.IsNullOrEmpty(config.TenantId) && !config.AwaitEnrollment)
+                {
+                    config.TenantId = TenantIdResolver.Resolve(logger);
+                }
+
                 if (string.IsNullOrEmpty(config.TenantId))
                 {
                     logger.Error("Agent cannot start: TenantId not available (registry empty + no bootstrap config). " +

@@ -5,6 +5,7 @@ using System.Reflection;
 using AutopilotMonitor.Agent.Core.Configuration;
 using AutopilotMonitor.Agent.Core.Logging;
 using AutopilotMonitor.Agent.Core.Monitoring.Runtime;
+using AutopilotMonitor.Agent.Core.Security;
 using AutopilotMonitor.Shared;
 using Microsoft.Win32;
 using AutopilotMonitor.Agent.Core.Monitoring.Enrollment;
@@ -17,39 +18,6 @@ namespace AutopilotMonitor.Agent
 {
     partial class Program
     {
-        static string GetTenantIdFromRegistry()
-        {
-            try
-            {
-                const string enrollmentsKeyPath = @"SOFTWARE\Microsoft\Enrollments";
-
-                using (var enrollmentsKey = Registry.LocalMachine.OpenSubKey(enrollmentsKeyPath))
-                {
-                    if (enrollmentsKey == null)
-                        return null;
-
-                    foreach (var enrollmentGuid in enrollmentsKey.GetSubKeyNames())
-                    {
-                        using (var enrollmentKey = enrollmentsKey.OpenSubKey(enrollmentGuid))
-                        {
-                            if (enrollmentKey == null) continue;
-
-                            var enrollmentType = enrollmentKey.GetValue("EnrollmentType");
-                            if (enrollmentType != null && Convert.ToInt32(enrollmentType) == 6)
-                            {
-                                var tenantId = enrollmentKey.GetValue("AADTenantID");
-                                if (tenantId != null)
-                                    return tenantId.ToString();
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            return null;
-        }
-
         static AgentConfiguration LoadConfiguration(string[] args = null)
         {
             var noCleanup         = args?.Contains("--no-cleanup") ?? false;
@@ -119,8 +87,10 @@ namespace AutopilotMonitor.Agent
                 selfDestructOnComplete = false;
             }
 
-            // Determine TenantId from registry (or bootstrap-config.json fallback below)
-            string tenantId = GetTenantIdFromRegistry();
+            // Determine TenantId from registry (or bootstrap-config.json fallback below).
+            // No logger available at config-load time — the bail-site below re-probes with
+            // a logger so the diagnostic block lands in the agent log on a real miss.
+            string tenantId = TenantIdResolver.Resolve(logger: null);
 
             var dataDirectory    = Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory);
             var sessionPersist   = new SessionPersistence(dataDirectory);

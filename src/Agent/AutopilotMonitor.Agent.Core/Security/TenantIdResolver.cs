@@ -1,0 +1,281 @@
+using System;
+using System.Collections.Generic;
+using AutopilotMonitor.Agent.Core.Logging;
+using Microsoft.Win32;
+
+namespace AutopilotMonitor.Agent.Core.Security
+{
+    /// <summary>
+    /// Resolves the device's AAD TenantId from one of several Windows registry signals.
+    /// V1 backport of the V2 resolver — same probe order, same diagnostic logging.
+    /// <para>
+    /// Probe order, first non-empty hit wins:
+    /// </para>
+    /// <list type="number">
+    /// <item><description>
+    /// <c>HKLM\SOFTWARE\Microsoft\Enrollments\{guid}</c> with <c>EnrollmentType=6</c>
+    /// (Intune MDM) and <c>AADTenantID</c>. Authoritative once MDM enrollment finished.
+    /// </description></item>
+    /// <item><description>
+    /// <c>HKLM\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\TenantInfo\{TenantId}</c>
+    /// — the sub-key name itself is the TenantId GUID. Written by AAD join, which in
+    /// Autopilot/OOBE happens before MDM enrollment.
+    /// </description></item>
+    /// <item><description>
+    /// <c>HKLM\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo\{thumbprint}</c>
+    /// value <c>TenantId</c>. Same AAD-join phase as TenantInfo, used as a secondary
+    /// reading because some flows populate one but not the other.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Returns <c>null</c> when no source carries a TenantId. Never throws. On miss the
+    /// resolver dumps a diagnostic summary of which keys/values it saw so the bootstrap
+    /// log carries enough evidence to classify "device truly not enrolled" vs. "agent
+    /// fired before enrollment finished writing".
+    /// </para>
+    /// </summary>
+    public static class TenantIdResolver
+    {
+        private const string EnrollmentsKeyPath = @"SOFTWARE\Microsoft\Enrollments";
+        private const string CloudDomainJoinTenantInfoPath = @"SYSTEM\CurrentControlSet\Control\CloudDomainJoin\TenantInfo";
+        private const string CloudDomainJoinJoinInfoPath = @"SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo";
+        private const int IntuneMdmEnrollmentType = 6;
+
+        public const string SourceEnrollmentsRegistry = "enrollments_registry";
+        public const string SourceCloudDomainJoinTenantInfo = "cloud_domain_join_tenant_info";
+        public const string SourceCloudDomainJoinJoinInfo = "cloud_domain_join_join_info";
+
+        /// <summary>
+        /// Tries each probe in order and returns the first non-empty TenantId.
+        /// Logs the winning source at Info level. On full miss, logs a diagnostic
+        /// summary at Warning level. Returns <c>null</c> when nothing resolves.
+        /// </summary>
+        public static string Resolve(AgentLogger logger = null)
+        {
+            var diagnostics = new ResolverDiagnostics();
+
+            var fromEnrollments = TryEnrollmentsRegistry(diagnostics);
+            if (!string.IsNullOrEmpty(fromEnrollments))
+            {
+                logger?.Info($"TenantIdResolver: resolved TenantId={fromEnrollments} from {SourceEnrollmentsRegistry}.");
+                return fromEnrollments;
+            }
+
+            var fromTenantInfo = TryCloudDomainJoinTenantInfo(diagnostics);
+            if (!string.IsNullOrEmpty(fromTenantInfo))
+            {
+                logger?.Info($"TenantIdResolver: resolved TenantId={fromTenantInfo} from {SourceCloudDomainJoinTenantInfo} (Enrollments registry had no Intune MDM hit).");
+                return fromTenantInfo;
+            }
+
+            var fromJoinInfo = TryCloudDomainJoinJoinInfo(diagnostics);
+            if (!string.IsNullOrEmpty(fromJoinInfo))
+            {
+                logger?.Info($"TenantIdResolver: resolved TenantId={fromJoinInfo} from {SourceCloudDomainJoinJoinInfo} (Enrollments registry + CloudDomainJoin\\TenantInfo had no hit).");
+                return fromJoinInfo;
+            }
+
+            LogResolutionMiss(logger, diagnostics);
+            return null;
+        }
+
+        private static string TryEnrollmentsRegistry(ResolverDiagnostics diag)
+        {
+            try
+            {
+                using (var enrollmentsKey = Registry.LocalMachine.OpenSubKey(EnrollmentsKeyPath))
+                {
+                    if (enrollmentsKey == null)
+                    {
+                        diag.EnrollmentsRootMissing = true;
+                        return null;
+                    }
+
+                    foreach (var enrollmentGuid in enrollmentsKey.GetSubKeyNames())
+                    {
+                        using (var enrollmentKey = enrollmentsKey.OpenSubKey(enrollmentGuid))
+                        {
+                            if (enrollmentKey == null) continue;
+
+                            var enrollmentType = enrollmentKey.GetValue("EnrollmentType");
+                            int? typeValue = null;
+                            if (enrollmentType != null)
+                            {
+                                try { typeValue = Convert.ToInt32(enrollmentType); }
+                                catch { /* unparseable — record as null */ }
+                            }
+
+                            var aadTenantId = enrollmentKey.GetValue("AADTenantID")?.ToString();
+                            var enrollmentState = enrollmentKey.GetValue("EnrollmentState")?.ToString();
+
+                            diag.EnrollmentsSeen.Add(new EnrollmentSnapshot
+                            {
+                                Guid = enrollmentGuid,
+                                EnrollmentType = typeValue,
+                                EnrollmentState = enrollmentState,
+                                HasAadTenantId = !string.IsNullOrEmpty(aadTenantId),
+                            });
+
+                            if (typeValue == IntuneMdmEnrollmentType && !string.IsNullOrEmpty(aadTenantId))
+                                return aadTenantId;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                diag.EnrollmentsProbeError = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            return null;
+        }
+
+        private static string TryCloudDomainJoinTenantInfo(ResolverDiagnostics diag)
+        {
+            try
+            {
+                using (var tenantInfoKey = Registry.LocalMachine.OpenSubKey(CloudDomainJoinTenantInfoPath))
+                {
+                    if (tenantInfoKey == null)
+                    {
+                        diag.TenantInfoRootMissing = true;
+                        return null;
+                    }
+
+                    var subKeys = tenantInfoKey.GetSubKeyNames();
+                    diag.TenantInfoSubKeys.AddRange(subKeys);
+
+                    foreach (var subKey in subKeys)
+                    {
+                        if (Guid.TryParse(subKey, out _))
+                            return subKey;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                diag.TenantInfoProbeError = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            return null;
+        }
+
+        private static string TryCloudDomainJoinJoinInfo(ResolverDiagnostics diag)
+        {
+            try
+            {
+                using (var joinInfoKey = Registry.LocalMachine.OpenSubKey(CloudDomainJoinJoinInfoPath))
+                {
+                    if (joinInfoKey == null)
+                    {
+                        diag.JoinInfoRootMissing = true;
+                        return null;
+                    }
+
+                    foreach (var thumbprint in joinInfoKey.GetSubKeyNames())
+                    {
+                        using (var entry = joinInfoKey.OpenSubKey(thumbprint))
+                        {
+                            if (entry == null) continue;
+
+                            var tenantId = entry.GetValue("TenantId")?.ToString();
+                            diag.JoinInfoEntries.Add(new JoinInfoSnapshot
+                            {
+                                Thumbprint = thumbprint,
+                                HasTenantId = !string.IsNullOrEmpty(tenantId),
+                            });
+
+                            if (!string.IsNullOrEmpty(tenantId))
+                                return tenantId;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                diag.JoinInfoProbeError = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            return null;
+        }
+
+        private static void LogResolutionMiss(AgentLogger logger, ResolverDiagnostics diag)
+        {
+            if (logger == null) return;
+
+            logger.Warning("TenantIdResolver: no TenantId resolvable from registry — device likely not yet AAD-joined / MDM-enrolled, or enrollment write hasn't completed.");
+
+            // Enrollments root.
+            if (diag.EnrollmentsProbeError != null)
+                logger.Warning($"TenantIdResolver: Enrollments probe failed: {diag.EnrollmentsProbeError}");
+            else if (diag.EnrollmentsRootMissing)
+                logger.Warning($"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} not found.");
+            else if (diag.EnrollmentsSeen.Count == 0)
+                logger.Warning($"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} present but empty.");
+            else
+            {
+                logger.Warning($"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} carries {diag.EnrollmentsSeen.Count} enrollment(s) but none was Intune MDM (Type=6) with AADTenantID:");
+                foreach (var e in diag.EnrollmentsSeen)
+                {
+                    logger.Warning(
+                        $"  - {e.Guid}: EnrollmentType={(e.EnrollmentType?.ToString() ?? "<missing>")}, " +
+                        $"EnrollmentState={e.EnrollmentState ?? "<missing>"}, " +
+                        $"AADTenantID={(e.HasAadTenantId ? "<present>" : "<missing>")}");
+                }
+            }
+
+            // CloudDomainJoin\TenantInfo.
+            if (diag.TenantInfoProbeError != null)
+                logger.Warning($"TenantIdResolver: TenantInfo probe failed: {diag.TenantInfoProbeError}");
+            else if (diag.TenantInfoRootMissing)
+                logger.Warning($"TenantIdResolver: HKLM\\{CloudDomainJoinTenantInfoPath} not found (device not AAD-joined yet).");
+            else if (diag.TenantInfoSubKeys.Count == 0)
+                logger.Warning($"TenantIdResolver: HKLM\\{CloudDomainJoinTenantInfoPath} present but no sub-keys.");
+            else
+                logger.Warning($"TenantIdResolver: HKLM\\{CloudDomainJoinTenantInfoPath} sub-keys: [{string.Join(", ", diag.TenantInfoSubKeys)}] — none parsed as a GUID.");
+
+            // CloudDomainJoin\JoinInfo.
+            if (diag.JoinInfoProbeError != null)
+                logger.Warning($"TenantIdResolver: JoinInfo probe failed: {diag.JoinInfoProbeError}");
+            else if (diag.JoinInfoRootMissing)
+                logger.Warning($"TenantIdResolver: HKLM\\{CloudDomainJoinJoinInfoPath} not found.");
+            else if (diag.JoinInfoEntries.Count == 0)
+                logger.Warning($"TenantIdResolver: HKLM\\{CloudDomainJoinJoinInfoPath} present but no thumbprint sub-keys.");
+            else
+            {
+                logger.Warning($"TenantIdResolver: HKLM\\{CloudDomainJoinJoinInfoPath} carries {diag.JoinInfoEntries.Count} entry/entries but none had a non-empty TenantId value:");
+                foreach (var j in diag.JoinInfoEntries)
+                    logger.Warning($"  - thumbprint={j.Thumbprint}, TenantId={(j.HasTenantId ? "<present>" : "<missing>")}");
+            }
+        }
+
+        private sealed class ResolverDiagnostics
+        {
+            public bool EnrollmentsRootMissing;
+            public string EnrollmentsProbeError;
+            public readonly List<EnrollmentSnapshot> EnrollmentsSeen = new List<EnrollmentSnapshot>();
+
+            public bool TenantInfoRootMissing;
+            public string TenantInfoProbeError;
+            public readonly List<string> TenantInfoSubKeys = new List<string>();
+
+            public bool JoinInfoRootMissing;
+            public string JoinInfoProbeError;
+            public readonly List<JoinInfoSnapshot> JoinInfoEntries = new List<JoinInfoSnapshot>();
+        }
+
+        private struct EnrollmentSnapshot
+        {
+            public string Guid;
+            public int? EnrollmentType;
+            public string EnrollmentState;
+            public bool HasAadTenantId;
+        }
+
+        private struct JoinInfoSnapshot
+        {
+            public string Thumbprint;
+            public bool HasTenantId;
+        }
+    }
+}
