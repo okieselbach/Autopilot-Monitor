@@ -65,35 +65,66 @@ namespace AutopilotMonitor.Agent.V2
                 // Persist bootstrap config if any of --bootstrap-token / --tenant-id /
                 // --tenant-id-wait was provided. The Scheduled Task command line has no args —
                 // the agent picks the persisted values up on the first post-install run.
+                //
+                // Read-merge-write: only fields explicitly set on this install invocation
+                // overwrite the persisted file. This protects against a redeploy that passes
+                // only --tenant-id-wait clobbering an existing BootstrapToken / TenantId, and
+                // lets an admin opt out of the wait by passing --tenant-id-wait 0 explicitly
+                // (which writes 0 over an old non-zero value).
                 var bootstrapTokenArg = GetArgValue(args, "--bootstrap-token");
                 var tenantIdArg = GetArgValue(args, "--tenant-id");
                 var tenantIdWaitArg = GetArgValue(args, "--tenant-id-wait");
+
+                bool bootstrapTokenGiven = !string.IsNullOrEmpty(bootstrapTokenArg);
+                bool tenantIdGiven = !string.IsNullOrEmpty(tenantIdArg);
+                bool tenantIdWaitGiven = !string.IsNullOrEmpty(tenantIdWaitArg);
+
                 int tenantIdWaitSeconds = 0;
-                if (!string.IsNullOrEmpty(tenantIdWaitArg) && !int.TryParse(tenantIdWaitArg, out tenantIdWaitSeconds))
+                if (tenantIdWaitGiven && !int.TryParse(tenantIdWaitArg, out tenantIdWaitSeconds))
                 {
                     logger.Warning($"Install: --tenant-id-wait '{tenantIdWaitArg}' is not a valid integer — ignoring.");
+                    tenantIdWaitGiven = false;
                     tenantIdWaitSeconds = 0;
                 }
 
-                if (!string.IsNullOrEmpty(bootstrapTokenArg) ||
-                    !string.IsNullOrEmpty(tenantIdArg) ||
-                    tenantIdWaitSeconds > 0)
+                if (bootstrapTokenGiven || tenantIdGiven || tenantIdWaitGiven)
                 {
                     var bootstrapConfigPath = Path.Combine(
                         Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory),
                         BootstrapConfigFileName);
-                    var bootstrapConfig = new BootstrapConfigFile
+
+                    BootstrapConfigFile existing = null;
+                    if (File.Exists(bootstrapConfigPath))
                     {
-                        BootstrapToken = bootstrapTokenArg,
-                        TenantId = tenantIdArg,
-                        TenantIdWaitSeconds = tenantIdWaitSeconds,
-                    };
-                    File.WriteAllText(bootstrapConfigPath, JsonConvert.SerializeObject(bootstrapConfig));
+                        try
+                        {
+                            existing = JsonConvert.DeserializeObject<BootstrapConfigFile>(
+                                File.ReadAllText(bootstrapConfigPath));
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Warning(
+                                $"Existing bootstrap-config.json could not be parsed " +
+                                $"({ex.GetType().Name}: {ex.Message}) — overwriting fresh.");
+                        }
+                    }
+
+                    var merged = MergeBootstrapConfig(
+                        existing,
+                        bootstrapTokenArg, bootstrapTokenGiven,
+                        tenantIdArg, tenantIdGiven,
+                        tenantIdWaitSeconds, tenantIdWaitGiven);
+
+                    File.WriteAllText(bootstrapConfigPath, JsonConvert.SerializeObject(merged));
                     logger.Info(
                         $"Bootstrap config persisted for Scheduled Task " +
-                        $"(token={(string.IsNullOrEmpty(bootstrapTokenArg) ? "no" : "yes")}, " +
-                        $"tenantId={(string.IsNullOrEmpty(tenantIdArg) ? "no" : "yes")}, " +
-                        $"tenantIdWait={tenantIdWaitSeconds}s).");
+                        $"(token={(string.IsNullOrEmpty(merged.BootstrapToken) ? "no" : "yes")}" +
+                        $"{(bootstrapTokenGiven ? "*" : "")}, " +
+                        $"tenantId={(string.IsNullOrEmpty(merged.TenantId) ? "no" : "yes")}" +
+                        $"{(tenantIdGiven ? "*" : "")}, " +
+                        $"tenantIdWait={merged.TenantIdWaitSeconds}s" +
+                        $"{(tenantIdWaitGiven ? "*" : "")})." +
+                        " Star = explicitly set on this --install invocation, others were preserved from prior config.");
                 }
 
                 // Persist await-enrollment config if requested.
@@ -258,6 +289,30 @@ namespace AutopilotMonitor.Agent.V2
             }
 
             logger.Info($"Payload deployment completed: '{sourceDir}' -> '{targetDir}'");
+        }
+
+        /// <summary>
+        /// Pure-function merge for <c>bootstrap-config.json</c>. Each <c>...Given</c> flag tells
+        /// us whether the corresponding CLI arg was explicitly set on this <c>--install</c>
+        /// invocation. When given, the new value wins (including explicit zero / empty) — this
+        /// is what makes <c>--tenant-id-wait 0</c> a real opt-out. When not given, the prior
+        /// persisted value is preserved — this is what stops a redeploy that only carries
+        /// <c>--tenant-id-wait</c> from clobbering a previously-set BootstrapToken / TenantId.
+        /// </summary>
+        internal static BootstrapConfigFile MergeBootstrapConfig(
+            BootstrapConfigFile existing,
+            string bootstrapTokenArg, bool bootstrapTokenGiven,
+            string tenantIdArg, bool tenantIdGiven,
+            int tenantIdWaitSeconds, bool tenantIdWaitGiven)
+        {
+            return new BootstrapConfigFile
+            {
+                BootstrapToken = bootstrapTokenGiven ? bootstrapTokenArg : existing?.BootstrapToken,
+                TenantId = tenantIdGiven ? tenantIdArg : existing?.TenantId,
+                TenantIdWaitSeconds = tenantIdWaitGiven
+                    ? tenantIdWaitSeconds
+                    : (existing?.TenantIdWaitSeconds ?? 0),
+            };
         }
 
         private static void TryWriteDeploymentMarker(AgentLogger logger)

@@ -415,6 +415,13 @@ namespace AutopilotMonitor.Agent.V2
             Console.Out.WriteLine("  --await-enrollment                Wait for MDM certificate before starting monitoring");
             Console.Out.WriteLine("  --await-enrollment-timeout <MIN>  Timeout in minutes (default: 480)");
             Console.Out.WriteLine();
+            Console.Out.WriteLine("TenantId resolution:");
+            Console.Out.WriteLine("  --tenant-id-wait <SEC>            On miss, wait up to N seconds for the registry to");
+            Console.Out.WriteLine("                                    populate (RegistryWatcher on Enrollments + CloudDomainJoin).");
+            Console.Out.WriteLine("                                    0 = disabled (legacy fast-fail). At --install time the value");
+            Console.Out.WriteLine("                                    is persisted to bootstrap-config.json so the Scheduled Task");
+            Console.Out.WriteLine("                                    picks it up on each run.");
+            Console.Out.WriteLine();
             Console.Out.WriteLine("Overrides:");
             Console.Out.WriteLine("  --api-url <URL>                   Override backend API base URL (alias: --backend-api)");
             Console.Out.WriteLine("  --ime-log-path <PATH>             Override IME logs directory");
