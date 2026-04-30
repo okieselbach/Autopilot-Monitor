@@ -783,5 +783,137 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 Assert.True(traces[i] > traces[i - 1]);
             }
         }
+
+        // ============================================================ Codex Finding 2 —
+        // PendingSignalCount: posted-but-not-yet-fully-processed counter used by the
+        // termination-handler off-worker drain.
+
+        [Fact]
+        public void PendingSignalCount_is_zero_when_idle()
+        {
+            using var rig = new Rig();
+            var ing = rig.Build();
+            ing.Start();
+            try
+            {
+                Assert.Equal(0L, ing.PendingSignalCount);
+            }
+            finally { ing.Stop(); }
+        }
+
+        [Fact]
+        public void PendingSignalCount_returns_to_zero_after_post_is_processed()
+        {
+            using var rig = new Rig();
+            var ing = rig.Build();
+            ing.Start();
+            try
+            {
+                ing.Post(DecisionSignalKind.SessionStarted, At, "Collector", RawEvidence());
+
+                // The worker is async — give it room to fully process and decrement.
+                Assert.True(WaitFor(() => ing.PendingSignalCount == 0L),
+                    "PendingSignalCount did not return to 0 after post was processed.");
+            }
+            finally { ing.Stop(); }
+        }
+
+        [Fact]
+        public void PendingSignalCount_observes_in_flight_item()
+        {
+            using var rig = new Rig();
+            // Block ApplyStep on a gate so we can observe a non-zero pending count while
+            // the worker is mid-process.
+            var gate = new ManualResetEventSlim(false);
+            rig.Processor.BlockHandle = gate;
+
+            var ing = rig.Build();
+            ing.Start();
+            try
+            {
+                ing.Post(DecisionSignalKind.SessionStarted, At, "Collector", RawEvidence());
+                // The worker has either dequeued and is waiting on gate, or is about to —
+                // both states are observable as PendingSignalCount >= 1 because the Post
+                // increment happens before the channel.Add publishes the item.
+                Assert.True(WaitFor(() => ing.PendingSignalCount >= 1L),
+                    "PendingSignalCount stayed at 0 even though an item was in flight.");
+            }
+            finally
+            {
+                gate.Set();
+                ing.Stop();
+            }
+        }
+
+        [Fact]
+        public void PendingSignalCount_decremented_on_post_after_stop_failure()
+        {
+            using var rig = new Rig();
+            var ing = rig.Build();
+            ing.Start();
+            ing.Stop();
+
+            // Post after Stop throws — the increment in Post must NOT leak. Verify the
+            // counter is still at 0 after the throw.
+            Assert.Throws<InvalidOperationException>(() =>
+                ing.Post(DecisionSignalKind.SessionStarted, At, "Collector", RawEvidence()));
+            Assert.Equal(0L, ing.PendingSignalCount);
+        }
+
+        [Fact]
+        public void PendingSignalCount_does_not_leak_when_TryAdd_throws_after_completed_race()
+        {
+            // Codex follow-up (Low, 2026-04-30) — Post() has a narrow race window:
+            //   1. Top-of-Post check sees _stopRequested==0 && !IsAddingCompleted (live)
+            //   2. Stop runs concurrently: _stopRequested=1, then channel.CompleteAdding()
+            //   3. Post continues to Interlocked.Increment(_unprocessedCount)
+            //   4. Post calls _channel.TryAdd(item) → InvalidOperationException (channel
+            //      is now completed)
+            //
+            // Without the symmetric catch on TryAdd the just-incremented counter would
+            // leak. The window is too narrow to hit stochastically, so we reproduce it
+            // deterministically via the internal _testHookBetweenPostStopCheckAndAdd
+            // seam: the hook fires AFTER the post-stop check but BEFORE TryAdd, so we
+            // can call CompleteAdding on the private channel inside it — exactly the
+            // ordering the production race produces.
+            using var rig = new Rig();
+            var ing = rig.Build();
+            ing.Start();
+
+            // Grab the private _channel via reflection — we'll invoke CompleteAdding
+            // from inside the test hook to simulate Stop running in the race window.
+            var channelField = typeof(SignalIngress).GetField(
+                "_channel",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(channelField);
+            var channel = channelField!.GetValue(ing);
+            Assert.NotNull(channel);
+            var completeAdding = channel!.GetType().GetMethod("CompleteAdding");
+            Assert.NotNull(completeAdding);
+
+            // Wire the hook — fires once, between the post-stop check and TryAdd. By
+            // calling CompleteAdding inside it, the next TryAdd will throw exactly the
+            // production-race InvalidOperationException.
+            int hookFired = 0;
+            ing._testHookBetweenPostStopCheckAndAdd = () =>
+            {
+                if (Interlocked.Exchange(ref hookFired, 1) == 0)
+                {
+                    completeAdding!.Invoke(channel, Array.Empty<object>());
+                }
+            };
+
+            Assert.Throws<InvalidOperationException>(() =>
+                ing.Post(DecisionSignalKind.SessionStarted, At, "Collector", RawEvidence()));
+
+            // Hook ran exactly once and the catch reset the counter. Without the catch
+            // (regression), this assert would observe 1 — proving the test actually
+            // exercises the bug.
+            Assert.Equal(1, hookFired);
+            Assert.Equal(0L, ing.PendingSignalCount);
+
+            // Don't call Stop() — the channel is already completed; Stop's internal
+            // CompleteAdding would throw. Dispose handles cleanup via the Rig.
+        }
     }
 }

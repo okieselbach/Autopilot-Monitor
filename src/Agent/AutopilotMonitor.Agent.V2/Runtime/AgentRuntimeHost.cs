@@ -47,6 +47,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             RuntimeConfigBundle runtimeConfig,
             TelemetryClientResult telemetry,
             SessionRegistrationOutcomeResult registration,
+            string dataDirectory,
             string stateSubdir,
             string transportDir,
             string agentVersion,
@@ -252,7 +253,26 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                                 stopPeripheralCollectors: () => orchestrator.StopCollectorHosts(),
                                 // V1-parity ignoredCount for app_tracking_summary — lives on the
                                 // live AppPackageStateList only (phase snapshots don't carry it).
-                                ignoredCountAccessor: () => componentFactory.ImeIgnoredCount);
+                                ignoredCountAccessor: () => componentFactory.ImeIgnoredCount,
+                                // Option 1 (WG Part 1 graceful-exit hardening, 2026-04-30) —
+                                // active spool-empty polling so DrainSpool exits as soon as the
+                                // backend ack'd the last lifecycle event instead of waiting the
+                                // full 10s timeout. Critical when an admin reseal-reboot races
+                                // termination.
+                                pendingItemCountAccessor: () => orchestrator.PendingItemCount,
+                                // Option 2 (same hardening) — write clean-exit.marker before
+                                // _signalShutdown returns, instead of relying solely on
+                                // AppDomain.ProcessExit which Windows can pre-empt during a
+                                // shutdown.exe / reseal-triggered reboot.
+                                writeCleanExitMarker: () => Program.WriteCleanExitMarker(dataDirectory),
+                                // Codex Finding 2 (2026-04-30) — DrainSpool needs to wait
+                                // for the ingress to finish processing the lifecycle events
+                                // the handler just posted (agent_shutting_down,
+                                // whiteglove_part1_complete, analyzer events) BEFORE polling
+                                // spool-empty. Pair with off-worker dispatch in
+                                // EnrollmentOrchestrator.OnDecisionTerminalStage so the
+                                // wait can actually make progress.
+                                ingressPendingSignalCountAccessor: () => orchestrator.IngressPendingSignalCount);
 
                             // ServerActionDispatcher (plan §5.3) — constructed inside this
                             // hook so lifecyclePost + terminationHandler are guaranteed

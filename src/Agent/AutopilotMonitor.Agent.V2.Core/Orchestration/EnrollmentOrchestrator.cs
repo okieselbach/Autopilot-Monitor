@@ -256,6 +256,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         public TelemetryUploadOrchestrator Transport =>
             _transport ?? throw new InvalidOperationException("Orchestrator not started.");
 
+        /// <summary>
+        /// Number of telemetry items currently queued in the spool that have not yet been
+        /// acknowledged as uploaded. Returns <c>0</c> before <see cref="Start"/> has wired the
+        /// spool so callers can poll this safely from the termination path without guarding
+        /// the orchestrator lifecycle. Used by <c>EnrollmentTerminationHandler.DrainSpool</c>
+        /// to short-circuit the bounded wait once the spool is actually empty (Option 1 of
+        /// the WG Part 1 graceful-exit hardening, 2026-04-30).
+        /// </summary>
+        public int PendingItemCount => _spool?.PendingItemCount ?? 0;
+
+        /// <summary>
+        /// Number of signals accepted by <c>SignalIngress.Post</c> that have not yet
+        /// finished reduce + effect-run. Codex Finding 2 (2026-04-30): the termination
+        /// handler — now dispatched off the ingress worker — uses this to wait until the
+        /// lifecycle events it just posted (<c>agent_shutting_down</c>,
+        /// <c>whiteglove_part1_complete</c>, analyzer events) have actually been
+        /// processed by the worker (and therefore reached the spool) BEFORE polling
+        /// <see cref="PendingItemCount"/> for spool-empty. Returns <c>0</c> before
+        /// <see cref="Start"/> wires the ingress.
+        /// </summary>
+        public long IngressPendingSignalCount => _ingress?.PendingSignalCount ?? 0L;
+
         // ---------------------------------------------------------------- Lifecycle
 
         /// <summary>
@@ -852,6 +874,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// outcome derived from the stage (Completed/Part2→Succeeded, Failed→Failed,
         /// WhiteGloveSealed→Succeeded but with <see cref="SessionStageExtensions.IsPauseBeforePart2"/>
         /// signalled to callers via the stage name — callers decide whether to self-destruct).
+        /// <para>
+        /// <b>Codex Finding 2 (2026-04-30)</b> — the <see cref="Terminated"/> handler is
+        /// dispatched on a thread-pool task instead of synchronously, because this callback
+        /// fires on the SignalIngress worker thread. A synchronous handler that posts
+        /// lifecycle events back to the ingress (e.g. <c>agent_shutting_down</c>,
+        /// <c>whiteglove_part1_complete</c>) would enqueue items the worker can only
+        /// process AFTER the handler returns — making any in-handler "wait for ingress to
+        /// drain" impossible (deadlock) and any "wait for spool to drain" trivially
+        /// returning before the just-posted events are even reduced. Off-worker dispatch
+        /// frees the worker to keep processing while the handler waits.
+        /// </para>
         /// </summary>
         private void OnDecisionTerminalStage(DecisionState terminalState)
         {
@@ -870,7 +903,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             };
 
             _logger.Info(
-                $"EnrollmentOrchestrator: decision terminal stage reached (stage={terminalState.Stage}, outcome={outcome}) — firing Terminated(DecisionTerminalStage).");
+                $"EnrollmentOrchestrator: decision terminal stage reached (stage={terminalState.Stage}, outcome={outcome}) — dispatching Terminated(DecisionTerminalStage) off worker.");
 
             var terminatedArgs = new EnrollmentTerminatedEventArgs(
                 reason: EnrollmentTerminationReason.DecisionTerminalStage,
@@ -881,8 +914,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     ? "WhiteGlove Part 1 sealed — session will resume on Part 2 post-reboot; self-destruct suppressed."
                     : null);
 
-            try { Terminated?.Invoke(this, terminatedArgs); }
-            catch (Exception ex) { _logger.Error("EnrollmentOrchestrator: Terminated handler threw.", ex); }
+            // Codex Finding 2 — off-worker dispatch. Task.Run unblocks the ingress worker
+            // immediately; the worker keeps draining the channel (including events the
+            // termination handler is about to post). The handler's _signalShutdown still
+            // fires from its finally block on whatever exception path, so an unhandled
+            // throw inside the handler does NOT prevent the agent from shutting down.
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                try { Terminated?.Invoke(this, terminatedArgs); }
+                catch (Exception ex) { _logger.Error("EnrollmentOrchestrator: Terminated handler threw on background task.", ex); }
+            });
         }
 
         /// <summary>

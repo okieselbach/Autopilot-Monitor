@@ -60,17 +60,32 @@ namespace AutopilotMonitor.Agent.V2
         // ----------------------------------------------------------------- clean-exit marker
 
         /// <summary>
+        /// Writes the <c>clean-exit.marker</c> file directly. Called both from the
+        /// <see cref="AppDomain.ProcessExit"/> handler registered by
+        /// <see cref="RegisterCleanExitMarker"/> AND — explicitly, before
+        /// <c>EnrollmentTerminationHandler._signalShutdown</c> returns — from the V2 graceful
+        /// shutdown sequence so admin-triggered reseal-reboots can't pre-empt the marker.
+        /// Best-effort: I/O exceptions are swallowed (the marker is observability, not load-bearing).
+        /// </summary>
+        public static void WriteCleanExitMarker(string dataDirectory)
+        {
+            if (string.IsNullOrEmpty(dataDirectory)) return;
+            try
+            {
+                var markerPath = Path.Combine(dataDirectory, CleanExitMarkerFileName);
+                File.WriteAllText(markerPath, DateTime.UtcNow.ToString("O"));
+            }
+            catch { /* best-effort */ }
+        }
+
+        /// <summary>
         /// Registers a <see cref="AppDomain.ProcessExit"/> handler that writes <c>clean-exit.marker</c>
         /// as a last action so the next start can distinguish clean shutdown from hard kill.
         /// <para>Safe to call multiple times — duplicate handlers are filtered by delegate equality.</para>
         /// </summary>
         internal static EventHandler RegisterCleanExitMarker(string dataDirectory)
         {
-            var markerPath = Path.Combine(dataDirectory, CleanExitMarkerFileName);
-            EventHandler handler = (_, _) =>
-            {
-                try { File.WriteAllText(markerPath, DateTime.UtcNow.ToString("O")); } catch { }
-            };
+            EventHandler handler = (_, _) => WriteCleanExitMarker(dataDirectory);
             AppDomain.CurrentDomain.ProcessExit += handler;
             return handler;
         }

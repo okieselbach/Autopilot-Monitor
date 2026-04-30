@@ -50,6 +50,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
     {
         private static readonly TimeSpan DefaultLateEventGrace = TimeSpan.FromMilliseconds(2000);
         private static readonly TimeSpan DefaultSpoolDrain = TimeSpan.FromMilliseconds(10000); // V1 parity: up to 20 × 500ms drains before shutdown.exe
+        // Option 1 (WG Part 1 graceful-exit hardening, 2026-04-30): poll cadence for the
+        // active spool-empty drain. 50ms is short enough that we exit the bounded wait
+        // within ~one cadence after the last upload is acknowledged, but long enough that
+        // an empty spool only costs a single sleep call.
+        private static readonly TimeSpan SpoolDrainPollInterval = TimeSpan.FromMilliseconds(50);
 
         private readonly AgentConfiguration _configuration;
         private readonly AgentLogger _logger;
@@ -79,6 +84,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         private readonly TimeSpan _lateEventGracePeriod;
         private readonly TimeSpan _spoolDrainPeriod;
         private readonly string _agentVersion;
+        // Option 1 (WG Part 1 graceful-exit hardening, 2026-04-30): when wired, the
+        // termination handler polls this accessor every <see cref="SpoolDrainPollInterval"/>
+        // during <see cref="DrainSpool"/> and exits the wait as soon as it returns 0
+        // (spool fully acknowledged by the backend). Falls back to the bounded
+        // <see cref="_spoolDrainPeriod"/> timeout if the spool never drains. Null = legacy
+        // blind-delay behaviour (kept for tests + safety on the off-chance the orchestrator
+        // wiring fails to provide it).
+        private readonly Func<int> _pendingItemCountAccessor;
+        // Codex Finding 2 (2026-04-30): the termination handler is now dispatched off the
+        // ingress worker, so it can wait for the worker to actually process the lifecycle
+        // events the handler posts (agent_shutting_down, whiteglove_part1_complete,
+        // analyzer events) BEFORE polling the spool — without this the spool-empty check
+        // would trivially fire on already-uploaded items while the just-posted events are
+        // still in the ingress channel. Polled in <see cref="DrainSpool"/> as the first
+        // wait step. Null = legacy behaviour (no ingress-drain wait, just spool-drain).
+        private readonly Func<long> _ingressPendingSignalCountAccessor;
+        // Option 2 (same hardening): writes the <c>clean-exit.marker</c> file directly,
+        // before <see cref="_signalShutdown"/> hands control to the main thread. This wins
+        // the race against an admin-triggered reseal-reboot — without this hook the marker
+        // is only written by the AppDomain.ProcessExit handler, which Windows can pre-empt.
+        // Null = no early write (tests / parity with the original blind-exit path).
+        private readonly Action _writeCleanExitMarker;
 
         private int _handled;
 
@@ -102,7 +129,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             Func<IReadOnlyDictionary<string, AppInstallTiming>> appTimingsAccessor = null,
             string agentVersion = null,
             Action stopPeripheralCollectors = null,
-            Func<int> ignoredCountAccessor = null)
+            Func<int> ignoredCountAccessor = null,
+            Func<int> pendingItemCountAccessor = null,
+            Action writeCleanExitMarker = null,
+            Func<long> ingressPendingSignalCountAccessor = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -128,6 +158,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _lateEventGracePeriod = lateEventGracePeriod ?? DefaultLateEventGrace;
             _spoolDrainPeriod = spoolDrainPeriod ?? DefaultSpoolDrain;
             _agentVersion = agentVersion ?? string.Empty;
+            _pendingItemCountAccessor = pendingItemCountAccessor;
+            _writeCleanExitMarker = writeCleanExitMarker;
+            _ingressPendingSignalCountAccessor = ingressPendingSignalCountAccessor;
         }
 
         /// <summary>
@@ -197,6 +230,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     DrainSpool();
 
                     TrySaveWhiteGloveComplete();
+                    // Option 2 (WG Part 1 graceful-exit hardening, 2026-04-30): write the
+                    // clean-exit marker BEFORE _signalShutdown returns control to the main
+                    // thread. The AppDomain.ProcessExit handler still writes it as a second
+                    // line of defence, but admin-triggered reseal-reboots routinely pre-empt
+                    // ProcessExit and leave the next run mis-classifying its predecessor as
+                    // reboot_kill. The two writes are idempotent (overwrite-with-timestamp).
+                    TryWriteCleanExitMarker();
                     return;
                 }
 
@@ -213,6 +253,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 WriteEnrollmentCompleteMarker(args);
                 RunStandaloneRebootIfRequested();
                 RunSelfDestructIfAppropriate(args);
+                // Option 2 (same hardening) — covers the standard Completed / Failed terminal
+                // path too. Cleanup PowerShell does not touch this marker, so writing it before
+                // ExecuteSelfDestruct is harmless.
+                TryWriteCleanExitMarker();
             }
             catch (Exception ex)
             {
@@ -594,6 +638,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             catch (Exception ex) { _logger.Warning($"EnrollmentTerminationHandler: SaveWhiteGloveComplete threw: {ex.Message}"); }
         }
 
+        /// <summary>
+        /// Option 2 helper — writes the <c>clean-exit.marker</c> early via the host-supplied
+        /// hook so the next agent run classifies <c>previousExit=clean</c> instead of
+        /// <c>reboot_kill</c>, even when Windows kills the process between
+        /// <see cref="_signalShutdown"/> and the legacy <c>AppDomain.ProcessExit</c> handler
+        /// (typical race in admin-triggered reseal-reboots). No-op when the host did not
+        /// wire the accessor (legacy call sites + tests).
+        /// </summary>
+        private void TryWriteCleanExitMarker()
+        {
+            if (_writeCleanExitMarker == null) return;
+            try
+            {
+                _writeCleanExitMarker();
+                _logger.Debug("EnrollmentTerminationHandler: clean-exit marker written (early).");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: early clean-exit marker write threw: {ex.Message}");
+            }
+        }
+
         private void DelayLateEventGrace()
         {
             if (_lateEventGracePeriod <= TimeSpan.Zero) return;
@@ -617,12 +683,92 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
         private void DrainSpool()
         {
-            // V1 parity — block briefly so pending events can land before the next destructive
-            // step (shutdown.exe, self-destruct). A precise HasPending/PendingCount signal is
-            // internal to the orchestrator transport, so the V2 equivalent is a bounded wait.
+            // Block briefly so pending events can land before the next destructive step
+            // (shutdown.exe, self-destruct). Two phases share the same bounded budget:
+            //
+            //   Phase A — wait for the SignalIngress queue to fully process. The handler
+            //     itself just posted lifecycle events (agent_shutting_down,
+            //     whiteglove_part1_complete, analyzer events) that the worker only sees
+            //     after we yielded — without this wait the spool-poll would trivially see
+            //     "pending=0" because those events haven't even been reduced + spooled yet.
+            //
+            //   Phase B — wait for the spool to acknowledge upload to the backend (the
+            //     pre-Codex-Finding-2 behaviour, kept).
+            //
+            // When neither accessor is wired (tests / paranoid fallback), we keep V1
+            // parity and just sleep the bounded period.
             if (_spoolDrainPeriod <= TimeSpan.Zero) return;
-            try { Task.Delay(_spoolDrainPeriod).Wait(); }
-            catch { /* best-effort */ }
+
+            if (_ingressPendingSignalCountAccessor == null && _pendingItemCountAccessor == null)
+            {
+                try { Task.Delay(_spoolDrainPeriod).Wait(); }
+                catch { /* best-effort */ }
+                return;
+            }
+
+            var deadline = DateTime.UtcNow + _spoolDrainPeriod;
+
+            if (_ingressPendingSignalCountAccessor != null)
+            {
+                WaitFor(
+                    label: "ingress",
+                    pollAccessor: () => _ingressPendingSignalCountAccessor(),
+                    deadline: deadline);
+            }
+
+            if (_pendingItemCountAccessor != null)
+            {
+                WaitFor(
+                    label: "spool",
+                    pollAccessor: () => (long)_pendingItemCountAccessor(),
+                    deadline: deadline);
+            }
+        }
+
+        /// <summary>
+        /// Bounded polling helper used by <see cref="DrainSpool"/>. Returns when either
+        /// <paramref name="pollAccessor"/> reports zero or <paramref name="deadline"/>
+        /// has passed. Accessor exceptions degrade to a single bounded sleep — never throw
+        /// out of the termination path.
+        /// </summary>
+        private void WaitFor(string label, Func<long> pollAccessor, DateTime deadline)
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                long pending;
+                try { pending = pollAccessor(); }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"EnrollmentTerminationHandler: {label} accessor threw: {ex.Message}");
+                    var fallback = deadline - DateTime.UtcNow;
+                    if (fallback > TimeSpan.Zero)
+                    {
+                        try { Task.Delay(fallback).Wait(); }
+                        catch { /* best-effort */ }
+                    }
+                    return;
+                }
+
+                if (pending <= 0)
+                {
+                    _logger.Debug($"EnrollmentTerminationHandler: {label} drained (pending=0) — moving on.");
+                    return;
+                }
+
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero) break;
+                var sleep = remaining < SpoolDrainPollInterval ? remaining : SpoolDrainPollInterval;
+                try { Task.Delay(sleep).Wait(); }
+                catch { return; }
+            }
+
+            try
+            {
+                var pendingAtTimeout = pollAccessor();
+                _logger.Warning(
+                    $"EnrollmentTerminationHandler: {label} drain budget exhausted (pending={pendingAtTimeout}).");
+            }
+            catch { /* logging is best-effort */ }
         }
 
         private void EmitEventSafe(EnrollmentEvent evt)

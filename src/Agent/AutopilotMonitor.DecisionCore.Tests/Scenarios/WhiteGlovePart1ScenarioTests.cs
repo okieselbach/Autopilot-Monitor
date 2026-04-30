@@ -54,12 +54,16 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
             Assert.True(result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Score >= WhiteGloveSealingClassifier.HighThreshold);
 
-            // The tick fired between the two WG signals — snapshot unchanged at that point,
-            // so it was anti-loop-skipped. The SealingPattern run and the ShellCore run both
-            // produced fresh verdicts.
+            // Option 3 fast-path (WG Part 1 graceful-exit hardening, 2026-04-30): the
+            // ShellCoreSuccess handler now classifies inline and transitions to
+            // WhiteGloveSealed in a single reducer step, so it does NOT emit a RunClassifier
+            // effect. Only the initial SealingPattern arrival emits RunClassifier (1 run);
+            // the ClassifierTick that fires between the two WG signals re-evaluates the
+            // unchanged snapshot and is anti-loop-skipped (1 skip). The second classifier
+            // verdict is computed inline by the engine — invisible to the harness counters.
             var runs = harness.ClassifierRunStats.TryGetValue("whiteglove-sealing:run", out var r) ? r : 0;
             var skipped = harness.ClassifierRunStats.TryGetValue("whiteglove-sealing:skipped_by_antiloop", out var s) ? s : 0;
-            Assert.Equal(2, runs);
+            Assert.Equal(1, runs);
             Assert.Equal(1, skipped);
         }
 
@@ -101,6 +105,51 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             var skipped = harness.ClassifierRunStats.TryGetValue("whiteglove-sealing:skipped_by_antiloop", out var s) ? s : 0;
             Assert.Equal(1, runs);
             Assert.Equal(2, skipped);
+        }
+
+        // ============================================================ Option 3 — fast-path
+        // (WG Part 1 graceful-exit hardening, 2026-04-30). The strong WG signal
+        // (ShellCoreSuccess) now classifies inline and transitions to WhiteGloveSealed in a
+        // single reducer step; no RunClassifier effect is emitted on the fast path.
+
+        [Fact]
+        public void FastPath_shellCoreSuccess_emits_no_runClassifier_effect()
+        {
+            var harness = NewHarness();
+            var signals = LoadFixture("whiteglove-inline-v1.jsonl");
+            var result = harness.Replay("session-anon-0014-fp1", "tenant-anon-0014", signals);
+
+            Assert.Equal(SessionStage.WhiteGloveSealed, result.FinalState.Stage);
+            Assert.Equal(SessionOutcome.WhiteGlovePart1Sealed, result.FinalState.Outcome);
+
+            // The fast-path classifies inline — no RunClassifier effect should have been
+            // posted, so the harness's run/skip counters stay at zero. (Compare against
+            // the slow-path correlated test which records 1 run + 1 skip.)
+            var runs = harness.ClassifierRunStats.TryGetValue("whiteglove-sealing:run", out var r) ? r : 0;
+            var skipped = harness.ClassifierRunStats.TryGetValue("whiteglove-sealing:skipped_by_antiloop", out var s) ? s : 0;
+            Assert.Equal(0, runs);
+            Assert.Equal(0, skipped);
+
+            // Sanity — no ClassifierTick deadline left armed when the fast-path transitions
+            // straight to terminal.
+            Assert.Empty(result.FinalState.Deadlines);
+        }
+
+        [Fact]
+        public void FastPath_records_inline_classifier_outcome_on_state()
+        {
+            var harness = NewHarness();
+            var signals = LoadFixture("whiteglove-inline-v1.jsonl");
+            var result = harness.Replay("session-anon-0014-fp2", "tenant-anon-0014", signals);
+
+            // Inline-computed verdict must be persisted on ClassifierOutcomes — same shape
+            // as the slow-path verdict so Inspector + downstream consumers see no diff.
+            Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Level);
+            Assert.True(result.FinalState.ClassifierOutcomes.WhiteGloveSealing.Score
+                >= WhiteGloveSealingClassifier.HighThreshold);
+            // Verdict-input-hash must be set so any racing RunClassifier effect would be
+            // anti-loop-skipped against the inline result.
+            Assert.False(string.IsNullOrEmpty(result.FinalState.ClassifierOutcomes.WhiteGloveSealing.LastClassifierVerdictId));
         }
     }
 }

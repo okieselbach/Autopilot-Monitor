@@ -13,12 +13,36 @@ namespace AutopilotMonitor.DecisionCore.Engine
         // Plan §2.6 — ClassifierTick recurrence. 30 s is the legacy polling cadence.
         internal static readonly TimeSpan s_classifierTickInterval = TimeSpan.FromSeconds(30);
 
+        // Option 3 (WG Part 1 graceful-exit hardening, 2026-04-30): inline classifier
+        // instance, used only by the strong-signal fast-path in
+        // <see cref="HandleWhiteGloveShellCoreSuccessV1"/>. Stateless / pure — safe to share.
+        private static readonly WhiteGloveSealingClassifier s_whiteGloveSealingClassifier =
+            new WhiteGloveSealingClassifier();
+
         /// <summary>
         /// Handle <see cref="DecisionSignalKind.WhiteGloveShellCoreSuccess"/>. Records the
-        /// <see cref="DecisionState.ShellCoreWhiteGloveSuccessSeen"/> fact and emits a
-        /// <see cref="DecisionEffectKind.RunClassifier"/> effect for the WhiteGlove-sealing
-        /// classifier. Also arms the <see cref="DeadlineNames.ClassifierTick"/> deadline
-        /// if not already armed.
+        /// <see cref="DecisionState.ShellCoreWhiteGloveSuccessSeen"/> fact.
+        /// <para>
+        /// <b>Fast-path</b> (Option 3 of the WG Part 1 graceful-exit hardening, 2026-04-30):
+        /// the WG-sealing classifier is a pure function of the snapshot built from this state,
+        /// so we can run it inline. When ShellCoreSuccess arrives in a state that scores
+        /// <see cref="HypothesisLevel.Confirmed"/> on its own (the typical WG Part 1 case —
+        /// no AAD-with-user / desktop / hello observed yet), we transition straight to
+        /// <see cref="SessionStage.WhiteGloveSealed"/> + <see cref="SessionOutcome.WhiteGlovePart1Sealed"/>
+        /// in this single reducer step and emit <c>whiteglove_complete</c>. This collapses
+        /// the previous two-step round-trip (RunClassifier effect → ClassifierVerdictIssued
+        /// signal → reducer applies verdict) into one, eliminating the journal+snapshot
+        /// write between the two, which buys us tens to hundreds of milliseconds before the
+        /// admin-triggered reseal-reboot pre-empts the agent.
+        /// </para>
+        /// <para>
+        /// <b>Slow-path fallback</b>: when an excluding observation is already present (e.g.
+        /// <c>AadUserJoinWithUserObserved</c>) the inline classifier scores below
+        /// <see cref="WhiteGloveSealingClassifier.HighThreshold"/>, so we keep the legacy
+        /// behaviour — emit a <see cref="DecisionEffectKind.RunClassifier"/> effect + arm
+        /// the <see cref="DeadlineNames.ClassifierTick"/> deadline. The asymmetric-
+        /// conservative semantics still apply: only Confirmed transitions sealed.
+        /// </para>
         /// </summary>
         private DecisionStep HandleWhiteGloveShellCoreSuccessV1(DecisionState state, DecisionSignal signal)
         {
@@ -28,7 +52,83 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
             builder.ScenarioObservations = builder.ScenarioObservations.WithShellCoreWhiteGloveSuccessSeen(signal.SessionSignalOrdinal);
 
-            var (newState, effects) = AttachWhiteGloveClassifierEffects(builder.Build(), signal);
+            // Option 3 fast-path: inline classifier evaluation on the strong WG signal.
+            var afterObservation = builder.Build();
+            var inlineSnapshot = BuildWhiteGloveSealingSnapshot(afterObservation);
+            var inlineVerdict = s_whiteGloveSealingClassifier.Classify(inlineSnapshot);
+
+            if (inlineVerdict.Level == HypothesisLevel.Confirmed)
+            {
+                var sealedBuilder = afterObservation.ToBuilder();
+
+                // Mirror the WG decision in the profile: Mode=WhiteGlove @ High confidence —
+                // identical to the slow-path branch in HandleClassifierVerdictIssuedV1 so
+                // downstream consumers see the same ScenarioProfile regardless of which
+                // path produced the verdict.
+                sealedBuilder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyWhiteGloveSealingConfirmed(
+                    sealedBuilder.ScenarioProfile, signal);
+
+                // Record the inline verdict on the classifier outcome — same shape as the
+                // slow path. The verdict's InputHash also seeds the EffectRunner anti-loop
+                // table (via ClassifierVerdictLookup) so any RunClassifier effect that might
+                // still be in-flight (it shouldn't be, since we don't emit one here) would
+                // skip with snapshotHash unchanged.
+                var inlineSealing = afterObservation.ClassifierOutcomes.WhiteGloveSealing.With(
+                    level: HypothesisLevel.Confirmed,
+                    reason: inlineVerdict.Reason,
+                    score: inlineVerdict.Score,
+                    lastUpdatedUtc: signal.OccurredAtUtc,
+                    lastClassifierVerdictId: inlineVerdict.InputHash);
+                sealedBuilder.ClassifierOutcomes = afterObservation.ClassifierOutcomes.WithWhiteGloveSealing(inlineSealing);
+
+                sealedBuilder
+                    .WithStage(SessionStage.WhiteGloveSealed)
+                    .WithOutcome(SessionOutcome.WhiteGlovePart1Sealed)
+                    .ClearDeadlines();
+
+                var sealedState = sealedBuilder.Build();
+                var fastPathTrigger = $"{nameof(DecisionSignalKind.WhiteGloveShellCoreSuccess)}:FastPath:Confirmed";
+                var sealedTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: SessionStage.WhiteGloveSealed,
+                    nextStepIndex: nextStep,
+                    trigger: fastPathTrigger);
+
+                // Codex review follow-up (Finding 1, 2026-04-30) — the slow path attaches the
+                // full DecisionAuditTrailBuilder.Build(...) payload (decisionSource, trigger,
+                // sessionStage, signalsSeen, signalEvidence, scenario, classifier verdict,
+                // classifierInputs). Without this the new normal WG Part 1 path emits a
+                // degraded audit trail compared to the legacy two-step path. We replicate
+                // the exact same build here using the inline verdict so the timeline event
+                // (and any downstream forensics that rely on TypedPayload) are byte-stable
+                // across the fast/slow paths.
+                var inlineVerdictInfo = new ClassifierVerdictInfo(
+                    id: inlineVerdict.ClassifierId,
+                    level: inlineVerdict.Level.ToString(),
+                    score: inlineVerdict.Score,
+                    reason: inlineVerdict.Reason,
+                    inputHash: inlineVerdict.InputHash);
+
+                var sealedEffects = new[]
+                {
+                    new DecisionEffect(
+                        DecisionEffectKind.EmitEventTimelineEntry,
+                        parameters: new Dictionary<string, string> { ["eventType"] = "whiteglove_complete" },
+                        typedPayload: DecisionAuditTrailBuilder.Build(
+                            postState: sealedState,
+                            decidedStage: SessionStage.WhiteGloveSealed,
+                            trigger: fastPathTrigger,
+                            classifier: inlineVerdictInfo,
+                            classifierInputs: inlineSnapshot)),
+                };
+
+                return new DecisionStep(sealedState, sealedTransition, sealedEffects);
+            }
+
+            // Slow path — legacy behaviour, preserved as fallback when an excluding signal
+            // already lives in state and pulls the inline score below HighThreshold.
+            var (newState, effects) = AttachWhiteGloveClassifierEffects(afterObservation, signal);
 
             var transition = BuildTakenTransition(
                 before: state,

@@ -227,6 +227,7 @@ namespace AutopilotMonitor.Agent.V2
                 runtimeConfig: runtimeConfig,
                 telemetry: telemetry,
                 registration: registration,
+                dataDirectory: dataDirectory,
                 stateSubdir: stateSubdir,
                 transportDir: transportDir,
                 agentVersion: GetAgentVersion(),

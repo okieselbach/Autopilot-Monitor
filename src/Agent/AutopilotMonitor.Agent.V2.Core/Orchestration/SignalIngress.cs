@@ -55,6 +55,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly AgentLogger? _logger;
         private long _processedCount;
         private long _stopRequestedAtTicks;
+        // Codex review follow-up (Finding 2, 2026-04-30): items posted but not yet fully
+        // processed by the worker. Incremented in <see cref="Post"/> *before* the channel
+        // accepts the item (any add-failure path decrements again), decremented in the
+        // <see cref="ProcessItem"/> finally so every successful enqueue eventually
+        // accounts for itself. A foreign thread polling <see cref="PendingSignalCount"/>
+        // is guaranteed: a steady read of 0 means all items have finished both reduce and
+        // effect — there is no race window where a dequeued-but-not-yet-incremented item
+        // would be invisible. Used by the termination drain to wait for ingress idle
+        // before draining the spool.
+        private long _unprocessedCount;
+
+        // Codex follow-up (Low, 2026-04-30) — internal test seam, called between the
+        // post-stop check and channel.TryAdd inside <see cref="Post"/>. Lets a unit test
+        // deterministically reproduce the Stop-in-the-gap race that would otherwise
+        // require a stress run with non-trivial false-negative odds. Always null in
+        // production; only set from <c>SignalIngressTests</c>.
+        internal Action? _testHookBetweenPostStopCheckAndAdd;
 
         private readonly BlockingCollection<IngressItem> _channel;
         private readonly Dictionary<string, DateTime> _lastBackPressureEmittedUtc =
@@ -107,6 +124,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
         /// <summary>Aktuelle Queue-Länge. Nur für Observability/Tests — enthält Race-Fenster.</summary>
         public int ApproximateQueueLength => _channel.Count;
+
+        /// <summary>
+        /// Total signals accepted by <see cref="Post"/> that have not yet finished
+        /// <see cref="ProcessItem"/>. Used by the termination drain (which runs off the
+        /// worker thread) to wait for "ingress fully idle" before draining the telemetry
+        /// spool — otherwise events the termination handler itself just posted would
+        /// still be sitting in the channel when the spool-drain check fires and the
+        /// handler would exit early. Codex Finding 2 (2026-04-30).
+        /// </summary>
+        public long PendingSignalCount => Interlocked.Read(ref _unprocessedCount);
 
         /// <summary>
         /// Fires synchronously from <see cref="Post"/> after a signal has been accepted into
@@ -216,8 +243,37 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             var item = new IngressItem(kind, kindSchemaVersion, occurredAtUtc, sourceOrigin, evidence, payload, typedPayload);
 
-            // Fast path: non-blocking enqueue.
-            if (_channel.TryAdd(item))
+            // Codex Finding 2 (2026-04-30): bump the pending-counter BEFORE handing the item
+            // to the channel. Decrement in three places: (a) when TryAdd throws because
+            // CompleteAdding raced between the post-stop check and the enqueue, (b) when
+            // the slow-path Add throws for the same reason, and (c) at the end of
+            // ProcessItem's finally for items that successfully made it to the worker. The
+            // increment-before-Add ordering is what eliminates the otherwise-unavoidable
+            // race where a foreign poller reads PendingSignalCount==0 between
+            // channel.Take and the worker's "now in flight" bookkeeping.
+            Interlocked.Increment(ref _unprocessedCount);
+
+            // Test hook (Codex Low follow-up, 2026-04-30) — invoked between the post-stop
+            // check and the channel.TryAdd call so a deterministic test can simulate the
+            // production race where Stop runs in this exact gap. Always null in production.
+            _testHookBetweenPostStopCheckAndAdd?.Invoke();
+
+            // Fast path: non-blocking enqueue. Codex follow-up (Low, 2026-04-30) — TryAdd
+            // throws InvalidOperationException (NOT returns false) if CompleteAdding raced
+            // between our post-stop check above and the enqueue here. Without this catch
+            // the just-incremented counter would leak. Mirror the slow-path Add handler.
+            bool added;
+            try
+            {
+                added = _channel.TryAdd(item);
+            }
+            catch (InvalidOperationException)
+            {
+                Interlocked.Decrement(ref _unprocessedCount);
+                throw new InvalidOperationException("SignalIngress has been stopped.");
+            }
+
+            if (added)
             {
                 RaiseSignalPosted(kind, payload);
                 return;
@@ -233,6 +289,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             catch (InvalidOperationException)
             {
                 // CompleteAdding wurde zwischen TryAdd und Add gerufen.
+                Interlocked.Decrement(ref _unprocessedCount);
                 throw new InvalidOperationException("SignalIngress has been stopped.");
             }
 
@@ -310,6 +367,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         }
 
         private void ProcessItem(IngressItem item)
+        {
+            // Codex Finding 2 (2026-04-30): match the Interlocked.Increment that Post()
+            // performed against this same item. Multiple early-return paths below — using
+            // try/finally guarantees the counter always settles, even on
+            // DecisionSignal-ctor-rejection or SignalLog.Append-failure paths.
+            try
+            {
+                ProcessItemInner(item);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _unprocessedCount);
+            }
+        }
+
+        private void ProcessItemInner(IngressItem item)
         {
             // Single-writer: _nextSignalOrdinal wird ausschließlich hier verändert.
             long signalOrdinal = _nextSignalOrdinal;

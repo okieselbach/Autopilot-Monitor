@@ -195,12 +195,20 @@ namespace AutopilotMonitor.DecisionCore.Tests
         [Fact]
         public void WhiteGloveComplete_carries_audit_trail_with_classifier_verdict_and_inputs()
         {
+            // NOTE: this test exercises the slow-path verdict-applier (HandleClassifierVerdictIssuedV1).
+            // The newer fast-path (introduced 2026-04-30, see WhiteGloveCompleteFastPath_*
+            // test below) handles the typical WG Part 1 sequence and emits the
+            // whiteglove_complete event with its own audit-trail trigger
+            // ("WhiteGloveShellCoreSuccess:FastPath:Confirmed"). Both paths must produce a
+            // structurally identical TypedPayload; the fast-path test guards that contract.
             var engine = new DecisionEngine();
             var state = DecisionState.CreateInitial("sess-wg", "tenant-wg");
             // Drive through SessionStarted so the StepIndex / LastAppliedSignalOrdinal are real.
             state = engine.Reduce(state, MakeSignal(0, DecisionSignalKind.SessionStarted, T0)).NewState;
-            // Observe ShellCore success — the inline-WG fast path: a single high-confidence signal
-            // is enough for the classifier to seal at 80/100.
+            // Observe ShellCore success — fast-path inline-classifies and seals immediately.
+            // We then synthesize a ClassifierVerdictIssued signal so the slow-path verdict
+            // applier ALSO runs (idempotent on already-sealed state) and we can assert on
+            // its TypedPayload independently of the fast-path emission.
             var shellSignal = MakeSignal(1, DecisionSignalKind.WhiteGloveShellCoreSuccess, T0.AddMinutes(5));
             state = engine.Reduce(state, shellSignal).NewState;
 
@@ -235,6 +243,57 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Equal(80, classifier["score"]);
             Assert.Equal("deadbeef", classifier["inputHash"]);
 
+            var inputs = Assert.IsType<Dictionary<string, object>>(payload["classifierInputs"]);
+            Assert.Equal(true, inputs["shellCoreWhiteGloveSuccessSeen"]);
+            Assert.Equal(false, inputs["aadJoinedWithUser"]);
+
+            var scenario = Assert.IsType<Dictionary<string, object>>(payload["scenario"]);
+            Assert.Equal(EnrollmentMode.WhiteGlove.ToString(), scenario["mode"]);
+        }
+
+        [Fact]
+        public void WhiteGloveCompleteFastPath_attaches_full_audit_trail_with_inline_verdict()
+        {
+            // Codex review follow-up (2026-04-30): the fast-path in
+            // HandleWhiteGloveShellCoreSuccessV1 must produce a TypedPayload byte-stable to
+            // the slow-path emission. Earlier impl only set parameters[eventType] and left
+            // TypedPayload empty — this test pins the contract so a regression is caught at
+            // the engine boundary.
+            var engine = new DecisionEngine();
+            var state = DecisionState.CreateInitial("sess-wg-fp", "tenant-wg-fp");
+            state = engine.Reduce(state, MakeSignal(0, DecisionSignalKind.SessionStarted, T0)).NewState;
+
+            var shellSignal = MakeSignal(1, DecisionSignalKind.WhiteGloveShellCoreSuccess, T0.AddMinutes(5));
+            var step = engine.Reduce(state, shellSignal);
+
+            // Fast-path → terminal stage in this single reduce call.
+            Assert.Equal(SessionStage.WhiteGloveSealed, step.NewState.Stage);
+
+            var effect = SingleTimelineEffect(step, "whiteglove_complete");
+            var payload = Assert.IsType<Dictionary<string, object>>(effect.TypedPayload);
+
+            // Mandatory anchors — same set the slow-path emits, with the fast-path trigger.
+            Assert.Equal("DecisionEngine", payload["decisionSource"]);
+            Assert.Equal(
+                $"{nameof(DecisionSignalKind.WhiteGloveShellCoreSuccess)}:FastPath:Confirmed",
+                payload["trigger"]);
+            Assert.Equal(nameof(SessionStage.WhiteGloveSealed), payload["sessionStage"]);
+
+            // Census fields — at minimum the ShellCore signal that drove the decision.
+            var signalsSeen = Assert.IsType<List<string>>(payload["signalsSeen"]);
+            Assert.Contains("shellcore_whiteglove_success", signalsSeen);
+
+            // Classifier verdict reflects the inline-computed result — Score=80 (just
+            // ShellCore in a clean state), Confirmed, real (non-empty) input hash so the
+            // EffectRunner's anti-loop would skip a racing RunClassifier effect.
+            var classifier = Assert.IsType<Dictionary<string, object>>(payload["classifier"]);
+            Assert.Equal(WhiteGloveSealingClassifier.ClassifierId, classifier["id"]);
+            Assert.Equal("Confirmed", classifier["level"]);
+            Assert.Equal(80, classifier["score"]);
+            Assert.False(string.IsNullOrEmpty((string)classifier["inputHash"]));
+
+            // Classifier-input snapshot must be present (flattened) — this is the field a
+            // reviewer or backend forensics expects when triaging an unexpected WG sealing.
             var inputs = Assert.IsType<Dictionary<string, object>>(payload["classifierInputs"]);
             Assert.Equal(true, inputs["shellCoreWhiteGloveSuccessSeen"]);
             Assert.Equal(false, inputs["aadJoinedWithUser"]);
