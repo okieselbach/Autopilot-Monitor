@@ -148,5 +148,44 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 }
             }
         }
+
+        /// <summary>
+        /// Runs ONLY the <see cref="SoftwareInventoryAnalyzer"/> shutdown snapshot tagged with
+        /// <c>whiteGlovePart=1</c>. Triggered by <c>WhiteGloveInventoryTrigger</c> when the
+        /// agent observes the WhiteGlove pre-provisioning success event (Windows Event 62407)
+        /// — i.e. while the OOBE "Continue / Reseal" dialog is shown but BEFORE the admin
+        /// clicks Reseal and Sysprep reboots the box.
+        /// <para>
+        /// Deliberately does NOT run <see cref="LocalAdminAnalyzer"/> or
+        /// <see cref="IntegrityBypassAnalyzer"/>: those snapshots are meaningful at a real
+        /// final agent shutdown. At the WG-Part-1 hand-off the system is still in SYSTEM
+        /// context with no real user yet — those analyzers would either no-op or report
+        /// noise. They run normally at the eventual final shutdown via
+        /// <see cref="RunShutdown"/>.
+        /// </para>
+        /// </summary>
+        public void RunWhiteGlovePart1InventorySnapshot()
+        {
+            if (!_initialised) Initialize();
+            if (_analyzers.Count == 0) return;
+
+            foreach (var analyzer in _analyzers)
+            {
+                if (analyzer is not SoftwareInventoryAnalyzer softwareAnalyzer) continue;
+
+                try
+                {
+                    _logger.Info("WhiteGlove Part 1 inventory snapshot — running SoftwareInventoryAnalyzer.AnalyzeAtShutdown(whiteGlovePart: 1)");
+                    softwareAnalyzer.AnalyzeAtShutdown(whiteGlovePart: 1);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("SoftwareInventoryAnalyzer threw during WhiteGlove Part 1 snapshot", ex);
+                }
+                return; // SoftwareInventoryAnalyzer is registered at most once
+            }
+
+            _logger.Warning("WhiteGlove Part 1 inventory snapshot requested but SoftwareInventoryAnalyzer is not registered (disabled by remote config?)");
+        }
     }
 }

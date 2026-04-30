@@ -136,6 +136,15 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     EnrollmentTerminationHandler terminationHandler = null;
                     ServerActionDispatcher serverActionDispatcher = null;
 
+                    // WhiteGlove Part-1 inventory trigger (vulnerability-correlation pipeline,
+                    // companion of backend's vulnerability-correlate queue). Subscribes to the
+                    // Shell-Core WG-success event so the agent can stage a software_inventory_analysis
+                    // event with whiteglove_part=1 BEFORE Sysprep reboots the box on Reseal.
+                    // Constructed AFTER orchestrator.Start so EspAndHelloHost (created inside Start
+                    // at step 14) and analyzerManager (created in the onIngressReady hook at step 13b)
+                    // are both live. Disposed in the same finally block as the rest of the lifecycle.
+                    WhiteGloveInventoryTrigger whiteGloveInventoryTrigger = null;
+
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
                         e.Cancel = true;
@@ -272,6 +281,23 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             shutdownComplete,
                             logger);
 
+                        // Wire the WhiteGlove Part-1 inventory trigger. componentFactory.EspAndHelloHost
+                        // is set inside CreateCollectorHosts (orchestrator.Start step 14, runs after
+                        // the onIngressReady hook above), so by here both it and analyzerManager are
+                        // live. The Action closes over the local `analyzerManager` variable; null-safe
+                        // in case a race ever inverts the order.
+                        if (componentFactory.EspAndHelloHost != null)
+                        {
+                            whiteGloveInventoryTrigger = new WhiteGloveInventoryTrigger(
+                                host: componentFactory.EspAndHelloHost,
+                                onTrigger: () => analyzerManager?.RunWhiteGlovePart1InventorySnapshot(),
+                                logger: logger);
+                        }
+                        else
+                        {
+                            logger.Warning("WhiteGloveInventoryTrigger not wired — componentFactory.EspAndHelloHost is null after orchestrator.Start.");
+                        }
+
                         // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start already posts
                         // SessionRecovered, which triggers HandleWhiteGlovePart1To2Bridge —
                         // that reducer effect emits whiteglove_resumed on the timeline. We
@@ -369,6 +395,12 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     }
                     finally
                     {
+                        // Detach the WG-Part-1 inventory trigger before TerminationPipeline runs
+                        // so any stragglers fired during shutdown don't reach a half-torn-down
+                        // analyzerManager. Idempotent: Dispose unsubscribes via Interlocked guard.
+                        try { whiteGloveInventoryTrigger?.Dispose(); }
+                        catch (Exception ex) { logger.Warning($"WhiteGloveInventoryTrigger.Dispose threw: {ex.Message}"); }
+
                         TerminationPipeline.Run(
                             orchestrator: orchestrator,
                             authFailureTracker: auth.AuthFailureTracker,

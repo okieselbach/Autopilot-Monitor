@@ -263,7 +263,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 // WhiteGlove Part 1 exit passes whiteGlovePart=1 so SoftwareInventoryAnalyzer
                 // takes a baseline snapshot rather than computing a pre/post delta (the user
                 // sign-in phase has not run yet; the real delta computes on Part-2 completion).
-                int? wgPart = args.StageName == SessionStage.WhiteGloveSealed.ToString() ? 1 : (int?)null;
+                // WhiteGlove Part 2 exit passes whiteGlovePart=2 so the backend's vulnerability
+                // correlation pipeline can filter Part-2 inventory out of the Part-1 set when
+                // re-correlating, and tag findings with the correct enrollment phase.
+                // SoftwareInventoryAnalyzer's per-phase idempotency guards make a second
+                // Part-1 call (when WhiteGloveInventoryTrigger fired earlier) a no-op for the
+                // inventory analyzer while still running LocalAdmin / IntegrityBypass.
+                int? wgPart;
+                if (args.StageName == SessionStage.WhiteGloveSealed.ToString())
+                    wgPart = 1;
+                else if (args.StageName == SessionStage.WhiteGloveCompletedPart2.ToString())
+                    wgPart = 2;
+                else
+                    wgPart = null;
                 _analyzerManager.RunShutdown(wgPart);
             }
             catch (Exception ex)

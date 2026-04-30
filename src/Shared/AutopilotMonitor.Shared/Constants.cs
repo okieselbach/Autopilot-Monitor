@@ -463,6 +463,18 @@ namespace AutopilotMonitor.Shared
             /// rule results. Manual "Analyze Now" remains the user-side fallback.
             /// </summary>
             public const string AnalyzeOnEnrollmentEnd = "analyze-on-enrollment-end";
+
+            /// <summary>
+            /// Vulnerability correlation fan-out triggered by the shutdown <c>software_inventory_analysis</c>
+            /// event. Replaces the in-function fire-and-forget <c>Task.Run</c> in
+            /// <c>EventIngestProcessor</c> that could be killed by Functions scale-in, leaving the
+            /// session without a vulnerability report (manual "Analyze Now" was the only recovery).
+            /// Consumer runs <c>VulnerabilityCorrelationService.CorrelateAsync</c>, stores the report,
+            /// emits the synthetic <c>vulnerability_report</c> event, and enqueues a downstream
+            /// re-analyze on <see cref="AnalyzeOnEnrollmentEnd"/> with
+            /// <c>ReasonVulnerabilityCorrelated</c> so vulnerability-driven analyze rules can fire.
+            /// </summary>
+            public const string VulnerabilityCorrelate = "vulnerability-correlate";
         }
     }
 }

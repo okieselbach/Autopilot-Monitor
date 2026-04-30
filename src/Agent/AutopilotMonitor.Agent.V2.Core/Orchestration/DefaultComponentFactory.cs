@@ -68,7 +68,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly string _stateDirectory;
 
         private ImeLogHost? _imeLogHost;
+        private EspAndHelloHost? _espAndHelloHost;
         private Transport.Telemetry.ITelemetrySpool? _telemetrySpool;
+
+        /// <summary>
+        /// Exposes the WhiteGlove-success event surface from the ESP/Hello coordinator host so
+        /// downstream subscribers (e.g. <c>WhiteGloveInventoryTrigger</c>) can react to the
+        /// pre-provisioning success window without reaching into the host's internals. Returns
+        /// <c>null</c> before <see cref="CreateCollectorHosts"/> has been called.
+        /// <para>
+        /// <c>internal</c> because <see cref="EspAndHelloHost"/> itself is <c>internal sealed</c>.
+        /// AutopilotMonitor.Agent.V2 (the runtime entry-point project) sees it via the
+        /// <c>InternalsVisibleTo</c> declared on this project's csproj.
+        /// </para>
+        /// </summary>
+        internal EspAndHelloHost? EspAndHelloHost => _espAndHelloHost;
 
         /// <summary>
         /// Exposes the IME tracker's package-state list to peripheral consumers such as the
@@ -149,7 +163,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // ----- Kernel hosts (always-on; they produce decision signals) --------------------
 
-            hosts.Add(new EspAndHelloHost(
+            _espAndHelloHost = new EspAndHelloHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
                 logger: logger,
@@ -161,7 +175,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 modernDeploymentBackfillEnabled: collectors.ModernDeploymentBackfillEnabled,
                 modernDeploymentBackfillLookbackMinutes: collectors.ModernDeploymentBackfillLookbackMinutes,
                 modernDeploymentHarmlessEventIds: collectors.ModernDeploymentHarmlessEventIds,
-                stateDirectory: _stateDirectory));
+                stateDirectory: _stateDirectory);
+            hosts.Add(_espAndHelloHost);
 
             hosts.Add(new DesktopArrivalHost(logger, ingress, clock));
 

@@ -8,13 +8,25 @@ using AutopilotMonitor.DecisionCore.Engine;
 
 namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 {
-    internal sealed class EspAndHelloHost : ICollectorHost
+    internal sealed class EspAndHelloHost : ICollectorHost, IWhiteGloveCompletedSource
     {
         public string Name => "EspAndHelloTracker";
 
         private readonly EspAndHelloTracker _tracker;
         private readonly EspAndHelloTrackerAdapter _adapter;
         private int _disposed;
+
+        /// <summary>
+        /// Forwarded from the internal <see cref="EspAndHelloTracker.WhiteGloveCompleted"/>
+        /// event so external components (e.g. <c>WhiteGloveInventoryTrigger</c>) can react
+        /// to WhiteGlove pre-provisioning success without needing direct access to the
+        /// (private) tracker. Fires after the agent observes Windows Event 62407
+        /// ("BootstrapStatus: Exiting page due to White Glove success") — i.e. while the
+        /// "Continue / Reseal" dialog is shown but BEFORE the admin clicks Reseal and the
+        /// Sysprep reboot fires. This is the only window in which WhiteGlove Part 1 work
+        /// (e.g. inventory snapshot for vulnerability correlation) can run.
+        /// </summary>
+        public event EventHandler? WhiteGloveCompleted;
 
         public EspAndHelloHost(
             string sessionId,
@@ -46,15 +58,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 stateDirectory: stateDirectory,
                 modernDeploymentHarmlessEventIds: modernDeploymentHarmlessEventIds);
 
+            _tracker.WhiteGloveCompleted += OnTrackerWhiteGloveCompleted;
             _adapter = new EspAndHelloTrackerAdapter(_tracker, ingress, clock);
         }
 
         public void Start() => _tracker.Start();
         public void Stop() => _tracker.Stop();
 
+        private void OnTrackerWhiteGloveCompleted(object sender, EventArgs e)
+            => WhiteGloveCompleted?.Invoke(this, e);
+
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+            try { _tracker.WhiteGloveCompleted -= OnTrackerWhiteGloveCompleted; } catch { }
             try { _adapter.Dispose(); } catch { }
             try { _tracker.Dispose(); } catch { }
         }

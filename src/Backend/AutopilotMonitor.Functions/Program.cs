@@ -196,6 +196,21 @@ builder.Services.AddSingleton<
 builder.Services.AddHostedService<
     AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndQueueWorker>();
 
+// Vulnerability-correlate fan-out triggered by the shutdown software_inventory_analysis
+// event. Replaces the in-function fire-and-forget Task.Run inside EventIngestProcessor.
+// Same producer + worker pattern as the analyze queue. Inventory loader is DI-shared with
+// the manual rescan endpoint (GetVulnerabilityReportFunction ?rescan=true).
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Vulnerability.IVulnerabilityCorrelateProducer,
+    AutopilotMonitor.Functions.Services.Vulnerability.AzureQueueVulnerabilityCorrelateProducer>();
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Vulnerability.IVulnerabilityInventoryLoader,
+    AutopilotMonitor.Functions.Services.Vulnerability.VulnerabilityInventoryLoader>();
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Vulnerability.VulnerabilityCorrelateHandler>();
+builder.Services.AddHostedService<
+    AutopilotMonitor.Functions.Services.Vulnerability.VulnerabilityCorrelateQueueWorker>();
+
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
 

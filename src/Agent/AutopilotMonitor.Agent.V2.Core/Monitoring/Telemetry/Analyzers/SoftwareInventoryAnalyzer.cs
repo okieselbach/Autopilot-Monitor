@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared.Models;
@@ -28,6 +29,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
 
         // Captured at startup for delta detection at shutdown
         private List<SoftwareEntry> _startupInventory;
+
+        // Idempotency guard — the WhiteGlove-Part-1 shutdown snapshot is fired by TWO
+        // independent paths: WhiteGloveInventoryTrigger (preferred, fires on Windows
+        // Event 62407 immediately) and EnrollmentTerminationHandler.RunShutdown(wgPart=1)
+        // (fallback when the WG-success event never arrives). The two paths can race —
+        // both check the guard, both pass it, both emit duplicate snapshots. The fix is
+        // an atomic Interlocked.CompareExchange that wins-or-loses up-front, BEFORE the
+        // work starts. On unhandled work failure the flag is reset so the second path
+        // can still serve as the fallback (registry-read errors, transient I/O, etc.)
+        // — clean failure semantics: a successful emit locks the flag forever, a
+        // failed attempt frees it.
+        // Encoded as int (0/1) instead of bool because Interlocked.CompareExchange has
+        // no bool overload.
+        private int _part1ShutdownSnapshotEmitted;
+        private int _part2ShutdownSnapshotEmitted;
 
         public string Name => "SoftwareInventoryAnalyzer";
 
@@ -96,6 +112,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
         /// </summary>
         public void AnalyzeAtShutdown(int? whiteGlovePart)
         {
+            // Per-WG-phase atomic claim. Set the flag BEFORE the work via CompareExchange
+            // so two concurrent callers (e.g. WhiteGloveInventoryTrigger and
+            // EnrollmentTerminationHandler firing nearly simultaneously) cannot both pass
+            // the guard. The loser logs and returns. Non-WG shutdowns (whiteGlovePart=null)
+            // skip the claim because there is exactly one such call per agent lifetime by
+            // construction.
+            if (whiteGlovePart == 1)
+            {
+                if (Interlocked.CompareExchange(ref _part1ShutdownSnapshotEmitted, 1, 0) != 0)
+                {
+                    _logger.Info($"{Name}: AnalyzeAtShutdown(whiteGlovePart=1) skipped — Part-1 snapshot already emitted (likely by WhiteGloveInventoryTrigger)");
+                    return;
+                }
+            }
+            else if (whiteGlovePart == 2)
+            {
+                if (Interlocked.CompareExchange(ref _part2ShutdownSnapshotEmitted, 1, 0) != 0)
+                {
+                    _logger.Info($"{Name}: AnalyzeAtShutdown(whiteGlovePart=2) skipped — Part-2 snapshot already emitted");
+                    return;
+                }
+            }
+
             _logger.Info($"{Name}: Running shutdown analysis (delta detection, whiteGlovePart={whiteGlovePart?.ToString() ?? "none"})");
             try
             {
@@ -106,6 +145,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
             catch (Exception ex)
             {
                 _logger.Error($"{Name}: Shutdown analysis failed", ex);
+
+                // Reset the flag so the fallback path (e.g. EnrollmentTerminationHandler
+                // running after a Trigger-side failure) can still emit the snapshot.
+                // Successful emits keep the flag set forever — duplicate suppression wins.
+                if (whiteGlovePart == 1) Interlocked.Exchange(ref _part1ShutdownSnapshotEmitted, 0);
+                else if (whiteGlovePart == 2) Interlocked.Exchange(ref _part2ShutdownSnapshotEmitted, 0);
             }
         }
 

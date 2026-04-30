@@ -49,50 +49,44 @@ namespace AutopilotMonitor.Functions.Services
         private readonly ISessionRepository _sessionRepo;
         private readonly IMetricsRepository _metricsRepo;
         private readonly IRuleRepository _ruleRepo;
-        private readonly IVulnerabilityRepository _vulnRepo;
         private readonly TenantConfigurationService _configService;
         private readonly AnalyzeRuleService _analyzeRuleService;
         private readonly WebhookNotificationService _webhookNotificationService;
-        private readonly VulnerabilityCorrelationService _vulnerabilityCorrelation;
         private readonly AdminConfigurationService _adminConfigService;
-        private readonly SignalRNotificationService _signalRNotification;
         private readonly OpsEventService _opsEventService;
         private readonly SlaBreachEvaluationService _slaBreachService;
         private readonly TelemetryClient _telemetryClient;
         private readonly AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer _analyzeProducer;
+        private readonly IVulnerabilityCorrelateProducer _vulnProducer;
 
         public EventIngestProcessor(
             ILogger<EventIngestProcessor> logger,
             ISessionRepository sessionRepo,
             IMetricsRepository metricsRepo,
             IRuleRepository ruleRepo,
-            IVulnerabilityRepository vulnRepo,
             TenantConfigurationService configService,
             AnalyzeRuleService analyzeRuleService,
             WebhookNotificationService webhookNotificationService,
-            VulnerabilityCorrelationService vulnerabilityCorrelation,
             AdminConfigurationService adminConfigService,
-            SignalRNotificationService signalRNotification,
             OpsEventService opsEventService,
             SlaBreachEvaluationService slaBreachService,
             TelemetryClient telemetryClient,
-            AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer analyzeProducer)
+            AutopilotMonitor.Functions.Services.Analyze.IAnalyzeOnEnrollmentEndProducer analyzeProducer,
+            IVulnerabilityCorrelateProducer vulnProducer)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
             _metricsRepo = metricsRepo;
             _ruleRepo = ruleRepo;
-            _vulnRepo = vulnRepo;
             _configService = configService;
             _analyzeRuleService = analyzeRuleService;
             _webhookNotificationService = webhookNotificationService;
-            _vulnerabilityCorrelation = vulnerabilityCorrelation;
             _adminConfigService = adminConfigService;
-            _signalRNotification = signalRNotification;
             _opsEventService = opsEventService;
             _slaBreachService = slaBreachService;
             _telemetryClient = telemetryClient;
             _analyzeProducer = analyzeProducer;
+            _vulnProducer = vulnProducer;
         }
 
         /// <summary>
@@ -234,146 +228,40 @@ namespace AutopilotMonitor.Functions.Services
 
             if (shutdownInventoryDetected)
             {
-                var capturedSessionId = request.SessionId;
-                var capturedTenantId = request.TenantId;
-                var capturedPrefix = sessionPrefix;
-
-                var allInventoryItems = new List<Dictionary<string, object>>();
-                var inventoryChunks = storedEvents
+                // Find the first shutdown chunk to extract the optional WhiteGlove phase tag.
+                // The handler reloads the full inventory from the Events table itself — this
+                // is idempotent against queue re-deliveries and means we don't need to capture
+                // the items here.
+                var firstShutdownChunk = storedEvents
                     .Where(e => e.EventType == Shared.Constants.EventTypes.SoftwareInventoryAnalysis &&
                         e.Data != null &&
                         e.Data.ContainsKey("triggered_at") &&
-                        e.Data["triggered_at"]?.ToString() == "shutdown" &&
-                        e.Data.ContainsKey("inventory"))
+                        e.Data["triggered_at"]?.ToString() == "shutdown")
                     .OrderBy(e => Convert.ToInt32(e.Data!.GetValueOrDefault("chunk_index", 0)))
-                    .ToList();
-
-                foreach (var chunk in inventoryChunks)
-                {
-                    if (chunk.Data!["inventory"] is System.Collections.IEnumerable items)
-                    {
-                        foreach (var item in items)
-                        {
-                            if (item is Dictionary<string, object> dict)
-                                allInventoryItems.Add(dict);
-                        }
-                    }
-                }
+                    .FirstOrDefault();
 
                 int? whiteGlovePart = null;
-                var firstShutdownChunk = inventoryChunks.FirstOrDefault();
                 if (firstShutdownChunk?.Data != null &&
                     firstShutdownChunk.Data.TryGetValue("whiteglove_part", out var wgPartObj))
                 {
                     whiteGlovePart = Convert.ToInt32(wgPartObj);
                 }
 
-                if (allInventoryItems.Count > 0)
+                // Hand off to the vulnerability-correlate queue. Replaces the previous
+                // fire-and-forget Task.Run that could be killed mid-flight by Azure Functions
+                // scale-in (HTTP 200 returned → worker unloaded → vulnerability report never
+                // persisted). Producer is fail-soft — a missed enqueue degrades to "no report"
+                // and the user can manually rescan via the UI.
+                await _vulnProducer.EnqueueAsync(new VulnerabilityCorrelateEnvelope
                 {
-                    var capturedWhiteGlovePart = whiteGlovePart;
-
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var adminConfig = await _adminConfigService.GetConfigurationAsync();
-                            if (adminConfig?.VulnerabilityCorrelationEnabled != true)
-                                return;
-
-                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                            var reportData = await _vulnerabilityCorrelation.CorrelateAsync(
-                                capturedSessionId, capturedTenantId, allInventoryItems, cts.Token);
-
-                            if (reportData != null)
-                            {
-                                var phaseLabel = capturedWhiteGlovePart == 1 ? "device_setup"
-                                    : capturedWhiteGlovePart == 2 ? "user_enrollment"
-                                    : (string?)null;
-
-                                if (phaseLabel != null && reportData.ContainsKey("findings")
-                                    && reportData["findings"] is List<Dictionary<string, object>> tagFindings)
-                                {
-                                    foreach (var f in tagFindings)
-                                        f.TryAdd("phase", phaseLabel);
-                                }
-
-                                if (capturedWhiteGlovePart == 2)
-                                {
-                                    try
-                                    {
-                                        var existingReport = await _vulnRepo.GetVulnerabilityReportAsync(
-                                            capturedTenantId, capturedSessionId);
-                                        if (existingReport != null)
-                                        {
-                                            reportData = VulnerabilityCorrelationService.MergeReports(
-                                                existingReport, reportData,
-                                                existingPhaseLabel: "device_setup",
-                                                newPhaseLabel: "user_enrollment");
-                                            _logger.LogInformation(
-                                                "{Prefix} WhiteGlove Part 2: merged vulnerability report with Part 1 findings",
-                                                capturedPrefix);
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex,
-                                            "{Prefix} Failed to load Part 1 report for merge (storing Part 2 standalone)",
-                                            capturedPrefix);
-                                    }
-                                }
-
-                                await _vulnRepo.StoreVulnerabilityReportAsync(
-                                    capturedTenantId, capturedSessionId, reportData);
-                                _logger.LogInformation(
-                                    "{Prefix} Vulnerability correlation complete (async, whiteGlovePart={Part})",
-                                    capturedPrefix, capturedWhiteGlovePart?.ToString() ?? "none");
-
-                                // Synthetic `vulnerability_report` event so analyze rules can
-                                // match against `scan_summary.*` fields. The full report stays in
-                                // the VulnerabilityReports table — this event carries only the
-                                // summary slice that rule conditions need.
-                                await EmitVulnerabilityReportEventAsync(
-                                    capturedTenantId, capturedSessionId, capturedPrefix, reportData, phaseLabel);
-
-                                // Re-evaluate analyze rules now that the synth event is in the
-                                // table — vulnerability-driven rules (ANALYZE-ID-003) need this
-                                // synth event as evidence. Enqueued (not awaited) onto the same
-                                // analyze-on-enrollment-end queue as the primary trigger; the
-                                // worker runs RuleEngine with dedup so already-stored results
-                                // from the primary run are not duplicated.
-                                await _analyzeProducer.EnqueueAsync(new AutopilotMonitor.Shared.Models.AnalyzeOnEnrollmentEndEnvelope
-                                {
-                                    TenantId = capturedTenantId,
-                                    SessionId = capturedSessionId,
-                                    Reason = AutopilotMonitor.Functions.Services.Analyze.AnalyzeOnEnrollmentEndHandler.ReasonVulnerabilityCorrelated,
-                                    EnqueuedAt = DateTime.UtcNow,
-                                });
-
-                                var findings = reportData.ContainsKey("findings")
-                                    ? reportData["findings"] as List<Dictionary<string, object>>
-                                    : null;
-                                if (findings != null && findings.Count > 0)
-                                {
-                                    _ = _sessionRepo.UpsertCveIndexEntriesAsync(capturedTenantId, capturedSessionId, findings)
-                                        .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
-                                            "CveIndex update failed (non-fatal)"), TaskContinuationOptions.OnlyOnFaulted);
-                                }
-
-                                var overallRisk = reportData.ContainsKey("scan_summary")
-                                    && reportData["scan_summary"] is Dictionary<string, object> summary
-                                    && summary.ContainsKey("overall_risk")
-                                    ? summary["overall_risk"]?.ToString() ?? "unknown"
-                                    : "unknown";
-                                await _signalRNotification.NotifyVulnerabilityReportAvailableAsync(
-                                    capturedTenantId, capturedSessionId, overallRisk);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "{Prefix} Vulnerability correlation failed (async, non-fatal)", capturedPrefix);
-                        }
-                    });
-                }
+                    TenantId       = request.TenantId,
+                    SessionId      = request.SessionId,
+                    WhiteGlovePart = whiteGlovePart,
+                    Reason         = whiteGlovePart == 1
+                        ? VulnerabilityCorrelateHandler.ReasonWhiteGlovePart1Inventory
+                        : VulnerabilityCorrelateHandler.ReasonShutdownInventory,
+                    EnqueuedAt     = DateTime.UtcNow,
+                });
             }
 
             _ = _metricsRepo.IncrementPlatformStatAsync("TotalEventsProcessed", processedCount)
@@ -483,67 +371,6 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
-        /// <summary>
-        /// Stores a synthetic <c>vulnerability_report</c> event after a successful scan so analyze
-        /// rules can fire on the same event-stream surface as agent-emitted events. Carries only
-        /// <c>scan_summary</c> + <c>reportAvailable</c> + <c>phase</c>; the full per-CVE list lives
-        /// in the <c>VulnerabilityReports</c> table (read separately by the report API).
-        /// </summary>
-        private async Task EmitVulnerabilityReportEventAsync(
-            string tenantId,
-            string sessionId,
-            string sessionPrefix,
-            Dictionary<string, object> reportData,
-            string? phaseLabel)
-        {
-            try
-            {
-                var scanSummary = reportData.TryGetValue("scan_summary", out var summaryObj)
-                    && summaryObj is Dictionary<string, object> summaryDict
-                    ? summaryDict
-                    : new Dictionary<string, object>();
-
-                var overallRisk = scanSummary.TryGetValue("overall_risk", out var riskObj)
-                    ? riskObj?.ToString()
-                    : null;
-
-                var data = new Dictionary<string, object>(StringComparer.Ordinal)
-                {
-                    ["scan_summary"] = scanSummary,
-                    ["reportAvailable"] = true,
-                    ["phase"] = phaseLabel ?? "single",
-                };
-
-                var evt = new EnrollmentEvent
-                {
-                    TenantId = tenantId,
-                    SessionId = sessionId,
-                    EventType = "vulnerability_report",
-                    Severity = MapVulnerabilityRiskToSeverity(overallRisk),
-                    Source = "VulnerabilityCorrelationService",
-                    Phase = EnrollmentPhase.Unknown,
-                    Message = $"Vulnerability scan complete (risk={overallRisk ?? "unknown"}).",
-                    Timestamp = DateTime.UtcNow,
-                    Data = data,
-                };
-
-                await _sessionRepo.StoreEventsBatchAsync(new List<EnrollmentEvent> { evt });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "{Prefix} vulnerability_report synth-event emit failed (non-fatal)", sessionPrefix);
-            }
-        }
-
-        private static EventSeverity MapVulnerabilityRiskToSeverity(string? overallRisk) =>
-            (overallRisk ?? string.Empty).ToLowerInvariant() switch
-            {
-                "critical" => EventSeverity.Critical,
-                "high"     => EventSeverity.Error,
-                "medium"   => EventSeverity.Warning,
-                _          => EventSeverity.Info,
-            };
     }
 
     /// <summary>
