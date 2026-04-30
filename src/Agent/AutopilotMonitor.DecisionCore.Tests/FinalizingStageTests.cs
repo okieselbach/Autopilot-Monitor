@@ -153,8 +153,11 @@ namespace AutopilotMonitor.DecisionCore.Tests
                      && e.Parameters.TryGetValue("eventType", out var et) && et == "enrollment_complete");
 
             var payload = Assert.IsType<Dictionary<string, object>>(terminalEffect.TypedPayload);
-            Assert.Equal("DecisionEngine", payload["completionSource"]);
-            Assert.Equal($"DeadlineFired:{DeadlineNames.FinalizingGrace}", payload["completionTrigger"]);
+            // Field names come from the unified DecisionAuditTrailBuilder (decisionSource /
+            // trigger replace the legacy completionSource / completionTrigger; the rest of the
+            // shape is a strict superset of what enrollment_complete used to publish).
+            Assert.Equal("DecisionEngine", payload["decisionSource"]);
+            Assert.Equal($"DeadlineFired:{DeadlineNames.FinalizingGrace}", payload["trigger"]);
             Assert.Equal(nameof(SessionStage.Completed), payload["sessionStage"]);
 
             var signalsSeen = Assert.IsType<List<string>>(payload["signalsSeen"]);
@@ -168,6 +171,12 @@ namespace AutopilotMonitor.DecisionCore.Tests
 
             // HelloOutcome payload was supplied as "Success" by the InitialAwaitingDesktop fixture.
             Assert.Equal("Success", payload["helloOutcome"]);
+
+            // Evidence map carries ordinal + utc per fact for the Inspector's signal-jump.
+            var evidence = Assert.IsType<Dictionary<string, object>>(payload["signalEvidence"]);
+            var helloEvidence = Assert.IsType<Dictionary<string, object>>(evidence["helloResolved"]);
+            Assert.True(helloEvidence.ContainsKey("ordinal"));
+            Assert.True(helloEvidence.ContainsKey("utc"));
         }
 
         [Fact]

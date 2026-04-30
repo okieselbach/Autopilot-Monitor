@@ -153,7 +153,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 {
                     ["eventType"] = "enrollment_failed",
                     ["reason"] = reason,
-                });
+                },
+                typedPayload: DecisionAuditTrailBuilder.Build(
+                    postState: newState,
+                    decidedStage: SessionStage.Failed,
+                    trigger: nameof(DecisionSignalKind.EffectInfrastructureFailure),
+                    failureReason: reason));
 
             var transition = BuildTakenTransition(
                 before: state,

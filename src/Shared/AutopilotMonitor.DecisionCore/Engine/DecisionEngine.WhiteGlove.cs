@@ -132,11 +132,18 @@ namespace AutopilotMonitor.DecisionCore.Engine
                         nextStepIndex: nextStep,
                         trigger: $"ClassifierVerdictIssued:{classifier}:Confirmed");
 
+                    var verdictInfo = new ClassifierVerdictInfo(classifier, level.ToString(), score, reason, inputHash);
                     var sealedEffects = new[]
                     {
                         new DecisionEffect(
                             DecisionEffectKind.EmitEventTimelineEntry,
-                            parameters: new Dictionary<string, string> { ["eventType"] = "whiteglove_complete" }),
+                            parameters: new Dictionary<string, string> { ["eventType"] = "whiteglove_complete" },
+                            typedPayload: DecisionAuditTrailBuilder.Build(
+                                postState: sealedState,
+                                decidedStage: SessionStage.WhiteGloveSealed,
+                                trigger: $"ClassifierVerdictIssued:{classifier}:Confirmed",
+                                classifier: verdictInfo,
+                                classifierInputs: BuildWhiteGloveSealingSnapshot(sealedState))),
                     };
 
                     return new DecisionStep(sealedState, sealedTransition, sealedEffects);

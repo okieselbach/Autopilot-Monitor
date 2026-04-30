@@ -48,6 +48,17 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStep,
                 trigger: "SessionRecovered:WhiteGloveSealed->AwaitingUserSignIn");
 
+            var resumedTrigger = "SessionRecovered:WhiteGloveSealed->AwaitingUserSignIn";
+            var resumedAudit = DecisionAuditTrailBuilder.Build(
+                postState: newState,
+                decidedStage: SessionStage.WhiteGloveAwaitingUserSignIn,
+                trigger: resumedTrigger);
+            // Augment with bridge-specific scalars so the resumedAt timestamp + the recovering
+            // collector's source label are preserved on the wire (kept on Parameters too for
+            // tests / consumers that read scalar keys).
+            resumedAudit["resumedAtUtc"] = signal.OccurredAtUtc.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+            resumedAudit["sourceOrigin"] = signal.SourceOrigin ?? string.Empty;
+
             var effects = new[]
             {
                 new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: safety),
@@ -56,9 +67,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     parameters: new Dictionary<string, string>
                     {
                         ["eventType"] = "whiteglove_resumed",
-                        ["resumedAtUtc"] = signal.OccurredAtUtc.ToString("o"),
+                        ["resumedAtUtc"] = signal.OccurredAtUtc.ToString("o", System.Globalization.CultureInfo.InvariantCulture),
                         ["sourceOrigin"] = signal.SourceOrigin ?? string.Empty,
-                    }),
+                    },
+                    typedPayload: resumedAudit),
             };
 
             return new DecisionStep(newState, transition, effects);
@@ -140,7 +152,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     {
                         ["eventType"] = "enrollment_failed",
                         ["reason"] = "part2_user_absent",
-                    }),
+                    },
+                    typedPayload: DecisionAuditTrailBuilder.Build(
+                        postState: newState,
+                        decidedStage: SessionStage.Failed,
+                        trigger: $"DeadlineFired:{DeadlineNames.WhiteGlovePart2Safety}",
+                        failureReason: "part2_user_absent")),
             };
 
             return new DecisionStep(newState, transition, effects);
@@ -243,11 +260,19 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     nextStepIndex: nextStep,
                     trigger: $"ClassifierVerdictIssued:{WhiteGlovePart2CompletionClassifier.ClassifierId}:Confirmed");
 
+                var part2Verdict = new ClassifierVerdictInfo(
+                    WhiteGlovePart2CompletionClassifier.ClassifierId, level.ToString(), score, reason, inputHash);
                 var effects = new[]
                 {
                     new DecisionEffect(
                         DecisionEffectKind.EmitEventTimelineEntry,
-                        parameters: new Dictionary<string, string> { ["eventType"] = "whiteglove_part2_complete" }),
+                        parameters: new Dictionary<string, string> { ["eventType"] = "whiteglove_part2_complete" },
+                        typedPayload: DecisionAuditTrailBuilder.Build(
+                            postState: sealedState,
+                            decidedStage: SessionStage.WhiteGloveCompletedPart2,
+                            trigger: $"ClassifierVerdictIssued:{WhiteGlovePart2CompletionClassifier.ClassifierId}:Confirmed",
+                            classifier: part2Verdict,
+                            classifierInputs: BuildWhiteGlovePart2CompletionSnapshot(sealedState))),
                 };
 
                 return new DecisionStep(sealedState, sealedTransition, effects);
