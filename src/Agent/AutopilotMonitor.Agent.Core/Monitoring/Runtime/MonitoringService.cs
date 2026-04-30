@@ -101,9 +101,14 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
             _previousCrashException = previousCrashException;
             _lastBootTimeUtc = lastBootTimeUtc;
 
-            if (!_configuration.IsValid())
+            var missingFields = new List<string>();
+            if (string.IsNullOrEmpty(_configuration.ApiBaseUrl)) missingFields.Add(nameof(_configuration.ApiBaseUrl));
+            if (string.IsNullOrEmpty(_configuration.SessionId)) missingFields.Add(nameof(_configuration.SessionId));
+            if (string.IsNullOrEmpty(_configuration.TenantId)) missingFields.Add(nameof(_configuration.TenantId));
+            if (missingFields.Count > 0)
             {
-                throw new InvalidOperationException("Invalid agent configuration");
+                throw new InvalidOperationException(
+                    "Invalid agent configuration: missing " + string.Join(", ", missingFields));
             }
 
             _spool = new EventSpool(_configuration.SpoolDirectory);

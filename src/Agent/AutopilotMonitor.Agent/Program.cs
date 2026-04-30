@@ -255,6 +255,20 @@ namespace AutopilotMonitor.Agent
                     }
                 }
 
+                // Pre-flight: bail cleanly if TenantId is missing instead of crashing inside
+                // MonitoringService.IsValid(). Mirrors V2's AgentBootstrap guard. Common cause:
+                // agent scheduled before MDM enrollment populated HKLM\SOFTWARE\Microsoft\Enrollments
+                // and no bootstrap-config.json present. The Scheduled Task will retry on next trigger.
+                if (string.IsNullOrEmpty(config.TenantId))
+                {
+                    logger.Error("Agent cannot start: TenantId not available (registry empty + no bootstrap config). " +
+                                 "This usually means the agent was scheduled before MDM enrollment populated the registry. " +
+                                 "Will retry on next scheduled trigger.");
+                    if (consoleMode)
+                        Console.WriteLine("ERROR: TenantId not available. Agent will exit cleanly (will retry on next trigger).");
+                    return;
+                }
+
                 // Evaluate previous exit signals before starting the monitoring service.
                 // clean-exit.marker present  → previous run exited cleanly (OS shutdown, reboot, normal exit)
                 // crash_*.log present        → unhandled exception crash (with stack trace)
