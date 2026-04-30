@@ -259,6 +259,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
         public int AwaitEnrollmentTimeoutMinutes { get; set; } = 480;
 
         /// <summary>
+        /// Maximum time in seconds the agent waits for a TenantId to become resolvable
+        /// before bailing. When &gt; 0 and the initial registry probe finds no TenantId,
+        /// the agent registers a RegistryWatcher on the relevant Enrollments and
+        /// CloudDomainJoin keys and re-probes on every change until either resolution
+        /// or this timeout. 0 = no wait, fast-fail on miss (legacy behaviour).
+        /// <para>
+        /// Set via the install-time CLI flag <c>--tenant-id-wait &lt;sec&gt;</c>, persisted
+        /// to <c>bootstrap-config.json</c>. The PS1 bootstrap script owns the production
+        /// default; the agent itself never assumes one.
+        /// </para>
+        /// </summary>
+        public int TenantIdWaitSeconds { get; set; } = 0;
+
+        /// <summary>
         /// Validates the configuration
         /// </summary>
         public bool IsValid()

@@ -62,11 +62,22 @@ namespace AutopilotMonitor.Agent.V2
                     logger.Info("Agent already running from target install directory; payload copy not required.");
                 }
 
-                // Persist bootstrap config if --bootstrap-token was provided. The Scheduled Task
-                // command line has no args — the agent picks this up on the first post-install run.
+                // Persist bootstrap config if any of --bootstrap-token / --tenant-id /
+                // --tenant-id-wait was provided. The Scheduled Task command line has no args —
+                // the agent picks the persisted values up on the first post-install run.
                 var bootstrapTokenArg = GetArgValue(args, "--bootstrap-token");
                 var tenantIdArg = GetArgValue(args, "--tenant-id");
-                if (!string.IsNullOrEmpty(bootstrapTokenArg))
+                var tenantIdWaitArg = GetArgValue(args, "--tenant-id-wait");
+                int tenantIdWaitSeconds = 0;
+                if (!string.IsNullOrEmpty(tenantIdWaitArg) && !int.TryParse(tenantIdWaitArg, out tenantIdWaitSeconds))
+                {
+                    logger.Warning($"Install: --tenant-id-wait '{tenantIdWaitArg}' is not a valid integer — ignoring.");
+                    tenantIdWaitSeconds = 0;
+                }
+
+                if (!string.IsNullOrEmpty(bootstrapTokenArg) ||
+                    !string.IsNullOrEmpty(tenantIdArg) ||
+                    tenantIdWaitSeconds > 0)
                 {
                     var bootstrapConfigPath = Path.Combine(
                         Environment.ExpandEnvironmentVariables(Constants.AgentDataDirectory),
@@ -75,9 +86,14 @@ namespace AutopilotMonitor.Agent.V2
                     {
                         BootstrapToken = bootstrapTokenArg,
                         TenantId = tenantIdArg,
+                        TenantIdWaitSeconds = tenantIdWaitSeconds,
                     };
                     File.WriteAllText(bootstrapConfigPath, JsonConvert.SerializeObject(bootstrapConfig));
-                    logger.Info("Bootstrap config persisted for Scheduled Task.");
+                    logger.Info(
+                        $"Bootstrap config persisted for Scheduled Task " +
+                        $"(token={(string.IsNullOrEmpty(bootstrapTokenArg) ? "no" : "yes")}, " +
+                        $"tenantId={(string.IsNullOrEmpty(tenantIdArg) ? "no" : "yes")}, " +
+                        $"tenantIdWait={tenantIdWaitSeconds}s).");
                 }
 
                 // Persist await-enrollment config if requested.

@@ -278,6 +278,15 @@ namespace AutopilotMonitor.Agent.V2
             else if (awaitConfig != null)
                 awaitTimeoutMinutes = awaitConfig.TimeoutMinutes;
 
+            // TenantId wait — CLI wins over persisted bootstrap-config.json. Default 0
+            // (no wait, legacy fast-fail) — the PS1 bootstrap owns the production default.
+            var tenantIdWaitRaw = GetArgValue(args, "--tenant-id-wait");
+            int tenantIdWaitSeconds = 0;
+            if (!string.IsNullOrEmpty(tenantIdWaitRaw) && int.TryParse(tenantIdWaitRaw, out var parsedTenantIdWait))
+                tenantIdWaitSeconds = parsedTenantIdWait;
+            else if (bootstrapConfig != null)
+                tenantIdWaitSeconds = bootstrapConfig.TenantIdWaitSeconds;
+
             var useBootstrapTokenAuth = !string.IsNullOrEmpty(bootstrapToken);
 
             var cliLogLevel = GetArgValue(args, "--log-level");
@@ -300,6 +309,7 @@ namespace AutopilotMonitor.Agent.V2
                 UseBootstrapTokenAuth = useBootstrapTokenAuth,
                 AwaitEnrollment = awaitEnrollment,
                 AwaitEnrollmentTimeoutMinutes = awaitTimeoutMinutes,
+                TenantIdWaitSeconds = tenantIdWaitSeconds,
                 RebootOnComplete = rebootOnComplete,
                 EnableGeoLocation = !disableGeoLocation,
                 ImeLogPathOverride = imeLogPathOverride,

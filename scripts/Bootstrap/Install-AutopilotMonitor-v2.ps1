@@ -295,9 +295,18 @@ try {
         }
     }
 
+    # TenantId-wait timeout (seconds). When the registry probe finds no TenantId on
+    # first try, the agent registers a RegistryWatcher on the Enrollments + CloudDomainJoin
+    # keys and waits up to this long for AAD/MDM enrollment to populate before bailing.
+    # 0 = no wait (legacy fast-fail). Increase here (and re-deploy via Intune) for tenants
+    # where hybrid join + auto-MDM enrollment regularly needs longer than 10 min.
+    # Field evidence (GardnerMedia, hybrid-AAD-joined, 2026-04-30): the AAD device cert
+    # landed ~5 min after the agent fired, so 600 s is comfortably sufficient.
+    $tenantIdWaitSec = 600
+
     # Let the agent install/deploy itself and manage its own Scheduled Task
-    Write-Log "Calling agent install mode (--install)..."
-    & $agentExePath --install
+    Write-Log "Calling agent install mode (--install --tenant-id-wait $tenantIdWaitSec)..."
+    & $agentExePath --install --tenant-id-wait $tenantIdWaitSec
     $installExitCode = $LASTEXITCODE
     if ($installExitCode -ne 0) {
         throw "Agent install failed with exit code $installExitCode"

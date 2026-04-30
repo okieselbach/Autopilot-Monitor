@@ -12,5 +12,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
     {
         public string BootstrapToken { get; set; }
         public string TenantId { get; set; }
+
+        /// <summary>
+        /// TenantId-wait timeout in seconds, persisted from the <c>--tenant-id-wait</c>
+        /// install-time arg. Read by AgentBootstrap when the registry probe finds no
+        /// TenantId on first try. 0 / missing = no wait, legacy fast-fail.
+        /// </summary>
+        public int TenantIdWaitSeconds { get; set; }
     }
 }

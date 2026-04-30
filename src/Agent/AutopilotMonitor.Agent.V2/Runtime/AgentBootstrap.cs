@@ -120,6 +120,22 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 Program.DeleteAwaitEnrollmentConfig(dataDirectory, logger);
             }
 
+            // Event-driven TenantId wait — kicks in only when the user opted-in via
+            // --tenant-id-wait <sec> (CLI or persisted bootstrap-config.json). Bridges
+            // the OOBE / hybrid-AAD-join race where the agent fires before the registry
+            // catches up. No-op when TenantIdWaitSeconds == 0 (legacy fast-fail) or when
+            // the await-enrollment branch already resolved a TenantId.
+            if (string.IsNullOrEmpty(agentConfig.TenantId) && agentConfig.TenantIdWaitSeconds > 0)
+            {
+                using (var waitCts = new CancellationTokenSource())
+                {
+                    agentConfig.TenantId = TenantIdAwaiter.WaitForTenantId(
+                        timeoutSeconds: agentConfig.TenantIdWaitSeconds,
+                        logger: logger,
+                        ct: waitCts.Token);
+                }
+            }
+
             if (string.IsNullOrEmpty(agentConfig.TenantId))
             {
                 logger.Error("V2 agent cannot start: TenantId not available (registry empty + no bootstrap config).");
