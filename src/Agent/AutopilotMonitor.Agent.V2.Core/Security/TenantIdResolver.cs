@@ -7,7 +7,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
 {
     /// <summary>
     /// Resolves the device's AAD TenantId from one of several Windows registry signals.
-    /// Plan §4.x M4.5.b.
+    /// <para>
+    /// All registry reads go through the explicit <see cref="RegistryView.Registry64"/>
+    /// view, never <see cref="RegistryView.Default"/>. Reason: SDK-style net48 EXEs
+    /// may resolve AnyCPU to 32-bit at runtime depending on MSBuild defaults, in which
+    /// case <c>HKLM\SOFTWARE\Microsoft\Enrollments</c> silently redirects to the
+    /// <c>WOW6432Node</c> mirror, a different (and on most devices stale/empty) hive
+    /// that never carries the active MDM enrollment. Forcing Registry64 makes the
+    /// resolver bitness-independent regardless of how AnyCPU resolves at runtime.
+    /// </para>
     /// <para>
     /// Probe order, first non-empty hit wins:
     /// </para>
@@ -29,9 +37,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
     /// </list>
     /// <para>
     /// Returns <c>null</c> when no source carries a TenantId. Never throws. On miss the
-    /// resolver dumps a diagnostic summary of which keys/values it saw so the bootstrap
-    /// log carries enough evidence to classify "device truly not enrolled" vs. "agent
-    /// fired before enrollment finished writing".
+    /// resolver dumps a compact diagnostic summary so the agent log carries enough
+    /// evidence to classify "device truly not enrolled" vs. "agent fired before
+    /// enrollment finished writing".
     /// </para>
     /// </summary>
     public static class TenantIdResolver
@@ -79,11 +87,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             return null;
         }
 
+        private static RegistryKey OpenLocalMachine64() =>
+            RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+
         private static string TryEnrollmentsRegistry(ResolverDiagnostics diag)
         {
             try
             {
-                using (var enrollmentsKey = Registry.LocalMachine.OpenSubKey(EnrollmentsKeyPath))
+                using (var hklm64 = OpenLocalMachine64())
+                using (var enrollmentsKey = hklm64.OpenSubKey(EnrollmentsKeyPath))
                 {
                     if (enrollmentsKey == null)
                     {
@@ -91,9 +103,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                         return null;
                     }
 
-                    foreach (var enrollmentGuid in enrollmentsKey.GetSubKeyNames())
+                    foreach (var subKeyName in enrollmentsKey.GetSubKeyNames())
                     {
-                        using (var enrollmentKey = enrollmentsKey.OpenSubKey(enrollmentGuid))
+                        using (var enrollmentKey = enrollmentsKey.OpenSubKey(subKeyName))
                         {
                             if (enrollmentKey == null) continue;
 
@@ -105,19 +117,34 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                                 catch { /* unparseable — record as null */ }
                             }
 
-                            var aadTenantId = enrollmentKey.GetValue("AADTenantID")?.ToString();
-                            var enrollmentState = enrollmentKey.GetValue("EnrollmentState")?.ToString();
-
-                            diag.EnrollmentsSeen.Add(new EnrollmentSnapshot
+                            // Sub-keys without EnrollmentType are well-known structural folders
+                            // (Context, Ownership, Status, ValidNodePaths). Skip them silently —
+                            // they never carry AADTenantID and only add log noise on miss.
+                            if (typeValue == null)
                             {
-                                Guid = enrollmentGuid,
-                                EnrollmentType = typeValue,
-                                EnrollmentState = enrollmentState,
-                                HasAadTenantId = !string.IsNullOrEmpty(aadTenantId),
-                            });
+                                diag.EnrollmentsStructuralCount++;
+                                continue;
+                            }
 
-                            if (typeValue == IntuneMdmEnrollmentType && !string.IsNullOrEmpty(aadTenantId))
-                                return aadTenantId;
+                            var aadTenantId = enrollmentKey.GetValue("AADTenantID")?.ToString();
+
+                            if (typeValue == IntuneMdmEnrollmentType)
+                            {
+                                var enrollmentState = enrollmentKey.GetValue("EnrollmentState")?.ToString();
+                                diag.IntuneMdmEnrollments.Add(new IntuneMdmSnapshot
+                                {
+                                    Guid = subKeyName,
+                                    EnrollmentState = enrollmentState,
+                                    HasAadTenantId = !string.IsNullOrEmpty(aadTenantId),
+                                });
+
+                                if (!string.IsNullOrEmpty(aadTenantId))
+                                    return aadTenantId;
+                            }
+                            else
+                            {
+                                diag.OtherEnrollmentTypeCount++;
+                            }
                         }
                     }
                 }
@@ -134,7 +161,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         {
             try
             {
-                using (var tenantInfoKey = Registry.LocalMachine.OpenSubKey(CloudDomainJoinTenantInfoPath))
+                using (var hklm64 = OpenLocalMachine64())
+                using (var tenantInfoKey = hklm64.OpenSubKey(CloudDomainJoinTenantInfoPath))
                 {
                     if (tenantInfoKey == null)
                     {
@@ -164,7 +192,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         {
             try
             {
-                using (var joinInfoKey = Registry.LocalMachine.OpenSubKey(CloudDomainJoinJoinInfoPath))
+                using (var hklm64 = OpenLocalMachine64())
+                using (var joinInfoKey = hklm64.OpenSubKey(CloudDomainJoinJoinInfoPath))
                 {
                     if (joinInfoKey == null)
                     {
@@ -207,20 +236,33 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
 
             // Enrollments root.
             if (diag.EnrollmentsProbeError != null)
+            {
                 logger.Warning($"TenantIdResolver: Enrollments probe failed: {diag.EnrollmentsProbeError}");
+            }
             else if (diag.EnrollmentsRootMissing)
-                logger.Warning($"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} not found.");
-            else if (diag.EnrollmentsSeen.Count == 0)
-                logger.Warning($"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} present but empty.");
+            {
+                logger.Warning($"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} not found (Registry64 view).");
+            }
             else
             {
-                logger.Warning($"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} carries {diag.EnrollmentsSeen.Count} enrollment(s) but none was Intune MDM (Type=6) with AADTenantID:");
-                foreach (var e in diag.EnrollmentsSeen)
+                logger.Warning(
+                    $"TenantIdResolver: HKLM\\{EnrollmentsKeyPath} (Registry64) — " +
+                    $"Intune-MDM (Type=6): {diag.IntuneMdmEnrollments.Count}, " +
+                    $"other enrollment types: {diag.OtherEnrollmentTypeCount}, " +
+                    $"structural sub-keys: {diag.EnrollmentsStructuralCount}.");
+
+                if (diag.IntuneMdmEnrollments.Count == 0)
                 {
-                    logger.Warning(
-                        $"  - {e.Guid}: EnrollmentType={(e.EnrollmentType?.ToString() ?? "<missing>")}, " +
-                        $"EnrollmentState={e.EnrollmentState ?? "<missing>"}, " +
-                        $"AADTenantID={(e.HasAadTenantId ? "<present>" : "<missing>")}");
+                    logger.Warning("TenantIdResolver: no Type=6 enrollment present yet — MDM enrollment hasn't reached registry write phase.");
+                }
+                else
+                {
+                    foreach (var e in diag.IntuneMdmEnrollments)
+                    {
+                        logger.Warning(
+                            $"  - Type=6 {e.Guid}: EnrollmentState={e.EnrollmentState ?? "<missing>"}, " +
+                            $"AADTenantID={(e.HasAadTenantId ? "<present>" : "<missing>")}");
+                    }
                 }
             }
 
@@ -253,7 +295,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         {
             public bool EnrollmentsRootMissing;
             public string EnrollmentsProbeError;
-            public readonly List<EnrollmentSnapshot> EnrollmentsSeen = new List<EnrollmentSnapshot>();
+            public readonly List<IntuneMdmSnapshot> IntuneMdmEnrollments = new List<IntuneMdmSnapshot>();
+            public int OtherEnrollmentTypeCount;
+            public int EnrollmentsStructuralCount;
 
             public bool TenantInfoRootMissing;
             public string TenantInfoProbeError;
@@ -264,10 +308,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             public readonly List<JoinInfoSnapshot> JoinInfoEntries = new List<JoinInfoSnapshot>();
         }
 
-        private struct EnrollmentSnapshot
+        private struct IntuneMdmSnapshot
         {
             public string Guid;
-            public int? EnrollmentType;
             public string EnrollmentState;
             public bool HasAadTenantId;
         }
