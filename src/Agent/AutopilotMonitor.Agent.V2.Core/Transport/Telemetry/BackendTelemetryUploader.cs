@@ -95,9 +95,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             var body = SerializeBatch(items);
             var compressedBody = CompressWithGzip(body);
 
-            // Plan §5 Fix 5 — upload-cadence logging. First line users see when diagnosing
-            // "why didn't my event arrive" — records batch size + sent-bytes pre-response.
-            _logger?.Info(
+            // Upload-cadence is pipeline mechanics — keep on Debug so a default Info log
+            // is dominated by lifecycle events. Failures (TIMEOUT/NETWORK/TRANSIENT/PERMANENT)
+            // below stay on Warning/Error so "why didn't my event arrive" surfaces at Info.
+            _logger?.Debug(
                 $"BackendTelemetryUploader: flushing {items.Count} item(s) (bytes={compressedBody.Length}, firstId={items[0].TelemetryItemId}, lastId={items[items.Count - 1].TelemetryItemId}).");
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -142,7 +143,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
                     if (result.Success)
                     {
-                        _logger?.Info($"BackendTelemetryUploader: ingest OK (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}).");
+                        _logger?.Debug($"BackendTelemetryUploader: ingest OK (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}).");
                     }
                     else if (result.IsTransient)
                     {

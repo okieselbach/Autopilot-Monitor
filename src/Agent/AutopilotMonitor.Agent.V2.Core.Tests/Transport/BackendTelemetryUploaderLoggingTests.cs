@@ -12,10 +12,12 @@ using Xunit;
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
 {
     /// <summary>
-    /// Plan §5 Fix 5 — <see cref="BackendTelemetryUploader"/> emits upload-cadence log lines
-    /// (flushing / ingest OK / ingest TRANSIENT / ingest PERMANENT) so the agent log is no
-    /// longer silent during the transport path. We assert on log-file content because the
-    /// AgentLogger writes to disk; checking the file is the most faithful production proxy.
+    /// <see cref="BackendTelemetryUploader"/> emits upload-cadence log lines (flushing / ingest
+    /// OK / ingest TRANSIENT / ingest PERMANENT) so the transport path is observable. The
+    /// success-path lines (flushing, ingest OK) are pipeline mechanics and live on Debug;
+    /// failures (TRANSIENT/PERMANENT/TIMEOUT/NETWORK) live on Warning/Error and remain
+    /// visible at the default Info level. We assert on log-file content because AgentLogger
+    /// writes to disk; checking the file is the most faithful production proxy.
     /// </summary>
     public sealed class BackendTelemetryUploaderLoggingTests
     {
@@ -51,10 +53,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
         }
 
         [Fact]
-        public async Task UploadBatch_logs_flush_start_and_ingest_OK_on_success()
+        public async Task UploadBatch_logs_flush_start_and_ingest_OK_on_success_at_debug()
         {
             using var tmp = new TempDirectory();
-            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            // Success-path transport lines live on Debug; capture at that level to assert them.
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Debug);
 
             var handler = new RecordingHttpMessageHandler();
             handler.QueueStatus(HttpStatusCode.OK);
@@ -73,6 +76,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             var logContent = ReadLogs(tmp.Path);
             Assert.Contains("BackendTelemetryUploader: flushing 2 item(s)", logContent);
             Assert.Contains("BackendTelemetryUploader: ingest OK (items=2", logContent);
+        }
+
+        [Fact]
+        public async Task UploadBatch_success_is_silent_at_default_info_level()
+        {
+            // Guard rail for the cleanup: at the production-default Info level the transport
+            // success path must not emit "flushing" or "ingest OK" any more — only failures do.
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+
+            var handler = new RecordingHttpMessageHandler();
+            handler.QueueStatus(HttpStatusCode.OK);
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+
+            var sut = new BackendTelemetryUploader(
+                httpClient: http,
+                baseUrl: "https://backend.test",
+                tenantId: "T1",
+                logger: logger);
+
+            var result = await sut.UploadBatchAsync(new[] { NewEventItem(1) }, CancellationToken.None);
+            Assert.True(result.Success);
+
+            var logContent = ReadLogs(tmp.Path);
+            Assert.DoesNotContain("BackendTelemetryUploader: flushing", logContent);
+            Assert.DoesNotContain("BackendTelemetryUploader: ingest OK", logContent);
         }
 
         [Fact]

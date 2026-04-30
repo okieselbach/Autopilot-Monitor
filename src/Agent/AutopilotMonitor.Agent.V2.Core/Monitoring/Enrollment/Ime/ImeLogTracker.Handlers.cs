@@ -207,7 +207,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                     };
                 }
                 _lastPlatformScriptPolicyId = id;
-                _logger.Info($"ImeLogTracker: platform script started: {id} (source: {source ?? "ime"})");
+                // Started lines fire twice per script (agentexecutor + ime source) and carry no
+                // outcome — the matching `platform script completed` line below carries result+exit
+                // and stays on Info. Keep starts on Debug so Info reflects script outcomes only.
+                _logger.Debug($"ImeLogTracker: platform script started: {id} (source: {source ?? "ime"})");
             }
         }
 
@@ -388,7 +391,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             // We use both _packageStates (apps from policiesdiscovered) AND _seenAppIds (all IDs from
             // any pattern match) to ensure comprehensive coverage - apps seen via setcurrentapp,
             // esptrackstatus etc. that never entered _packageStates are also silenced.
-            if (!string.Equals(_lastEspPhaseDetected, espPhaseString, StringComparison.OrdinalIgnoreCase))
+            var isFirstOrChangedPhase = !string.Equals(_lastEspPhaseDetected, espPhaseString, StringComparison.OrdinalIgnoreCase);
+            if (isFirstOrChangedPhase)
             {
                 if (_lastEspPhaseDetected != null) // Not the first phase detection
                 {
@@ -431,7 +435,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 _currentPhaseOrder = phaseOrd;
             }
 
-            _logger.Info($"ImeLogTracker: ESP phase detected: {espPhaseString}");
+            // First detection of any phase OR a real transition into a new phase: surface on Info
+            // so phase boundaries are visible without enabling Debug. Re-matches of the same phase
+            // (IME re-emits the phase string periodically as it re-evaluates app sets) stay on
+            // Debug to avoid Info repetition.
+            if (isFirstOrChangedPhase)
+                _logger.Info($"ImeLogTracker: ESP phase detected: {espPhaseString}");
+            else
+                _logger.Debug($"ImeLogTracker: ESP phase detected: {espPhaseString}");
             ActivatePatterns(logPhaseIsCurrentPhase);
 
             OnEspPhaseChanged?.Invoke(espPhaseString);
