@@ -20,6 +20,10 @@ using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 {
+    // Snapshot/journal file IO + ThreadPool-driven persistence races make this class
+    // intermittently flaky under the parallel xUnit pool. Serialised against other
+    // threading-sensitive classes via the SerialThreading collection.
+    [Collection("SerialThreading")]
     public sealed class RecoveryPathTests
     {
         private static DateTime At => new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc);

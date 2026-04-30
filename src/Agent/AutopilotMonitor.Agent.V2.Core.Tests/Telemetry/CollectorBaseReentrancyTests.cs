@@ -28,7 +28,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Telemetry
     /// gate behaviour so a future "let's just remove the guard, it never fires" refactor
     /// has a hard signal.
     /// </para>
+    /// <para>
+    /// Threading-sensitive: the test exercises the <see cref="Interlocked"/> gate via
+    /// real Tasks + SpinUntil. Under the parallel xUnit pool the ThreadPool gets
+    /// contended by unrelated tests and the SpinUntil times out before the gate
+    /// closes. Serialised against the other threading-sensitive classes via
+    /// SerialThreading.
+    /// </para>
     /// </summary>
+    [Collection("SerialThreading")]
     public sealed class CollectorBaseReentrancyTests
     {
         private static AgentLogger NewLogger(TempDirectory tmp)

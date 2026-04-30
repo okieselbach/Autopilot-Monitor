@@ -18,6 +18,10 @@ using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
 {
+    // Persistence-IO + Task-coordination tests are timing-sensitive enough that the
+    // parallel xUnit pool starves the worker threads on a busy CI box. Serialised
+    // against the other threading-sensitive classes via SerialThreading.
+    [Collection("SerialThreading")]
     public sealed class EnrollmentOrchestratorTests
     {
         private static DateTime At => new DateTime(2026, 4, 20, 10, 0, 0, DateTimeKind.Utc);
