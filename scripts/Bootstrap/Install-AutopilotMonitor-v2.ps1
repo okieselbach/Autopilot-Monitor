@@ -303,6 +303,29 @@ try {
         throw "Agent install failed with exit code $installExitCode"
     }
     Write-Log "Agent install mode completed successfully"
+
+    # Verify the runtime process actually started after schtasks /Run.
+    # schtasks reports SUCCESS as soon as the run is queued, not once the process
+    # is alive. Silent launch failures (AV/EDR block, AppLocker/WDAC, scheduler
+    # defer during OOBE) would otherwise stay invisible until the next reboot
+    # triggers the task via /SC ONSTART.
+    $runtimeProcessName = 'AutopilotMonitor.Agent.V2'
+    $verifyTimeoutSec = 10
+    $verifyDeadline = (Get-Date).AddSeconds($verifyTimeoutSec)
+    $runtimeProc = $null
+    while ((Get-Date) -lt $verifyDeadline) {
+        $runtimeProc = Get-Process -Name $runtimeProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $runtimeProc) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    if ($null -ne $runtimeProc) {
+        $startedUtc = 'unavailable'
+        try { $startedUtc = $runtimeProc.StartTime.ToUniversalTime().ToString('o') } catch { }
+        Write-Log ("Runtime process verified: name={0}.exe pid={1} startedUtc={2}" -f $runtimeProcessName, $runtimeProc.Id, $startedUtc)
+    } else {
+        Write-Log ("WARNING: Runtime process verification FAILED. schtasks /Run was reported SUCCESS by --install, but no '{0}.exe' process appeared within {1}s. Likely silent block (AV/EDR, AppLocker/WDAC) or Task Scheduler defer. Agent may not start until next system boot ('/SC ONSTART'). Check Event Viewer > Microsoft > Windows > TaskScheduler/Operational and AV/EDR logs for '{0}.exe'." -f $runtimeProcessName, $verifyTimeoutSec)
+    }
+
     Write-Log "===== Bootstrap Completed Successfully ====="
 
     exit 0
