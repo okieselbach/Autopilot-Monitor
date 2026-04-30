@@ -84,7 +84,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
         // count as anomalies in the stall probe scan. The runtime-configurable list from the backend
         // is injected via the constructor (CollectorConfiguration.ModernDeploymentHarmlessEventIds);
         // this fallback is used only when no list is provided.
-        private static readonly int[] DefaultHarmlessModernDeploymentEventIds = new[] { 100, 1005 };
+        private static readonly int[] DefaultHarmlessModernDeploymentEventIds = new[] { 100, 1005, 1010 };
 
         // AppWorkload.log active-install markers (positive signals)
         private static readonly Regex ActiveInstallRegex = new Regex(

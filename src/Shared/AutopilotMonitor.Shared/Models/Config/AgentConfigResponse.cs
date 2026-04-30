@@ -356,10 +356,11 @@ namespace AutopilotMonitor.Shared.Models
         /// Matching Level 2 (Error) and Level 3 (Warning) events are downgraded to
         /// Debug severity and skipped by the stall-probe anomaly scan. Level 1
         /// (Critical) is never downgraded.
-        /// Default: [100, 1005] — two known noise EventIDs with no enrollment impact.
+        /// Default: [100, 1005, 1010] — known noise EventIDs with no enrollment impact
+        /// (1010 = Autopilot.dll WIL hardwareinfo.cpp HRESULT 0x80070002 / file-not-found probe).
         /// Configurable per Admin in the global settings.
         /// </summary>
-        public int[] ModernDeploymentHarmlessEventIds { get; set; } = new[] { 100, 1005 };
+        public int[] ModernDeploymentHarmlessEventIds { get; set; } = new[] { 100, 1005, 1010 };
 
         /// <summary>
         /// Lookback window in minutes for the ModernDeployment backfill scan.

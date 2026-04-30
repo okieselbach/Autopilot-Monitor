@@ -111,7 +111,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [maintenanceBlockDurationHours, setMaintenanceBlockDurationHours] = useState(12);
   const [opsEventRetentionDays, setOpsEventRetentionDays] = useState(90);
   const [allowAgentDowngrade, setAllowAgentDowngrade] = useState(false);
-  const [modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds] = useState("100, 1005");
+  const [modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds] = useState("100, 1005, 1010");
   const [enableIndexDualWrite, setEnableIndexDualWrite] = useState(false);
 
   // Diagnostics Log Paths state

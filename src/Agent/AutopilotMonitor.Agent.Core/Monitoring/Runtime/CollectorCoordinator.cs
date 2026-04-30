@@ -255,7 +255,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
                         "provisioning_registry", "diagnostics_registry", "eventlog", "appworkload_log"
                     };
                     var stalledAfterIndex = collectors?.SessionStalledAfterProbeIndex ?? 4;
-                    var harmlessMdmIds = collectors?.ModernDeploymentHarmlessEventIds ?? new[] { 100, 1005 };
+                    var harmlessMdmIds = collectors?.ModernDeploymentHarmlessEventIds ?? new[] { 100, 1005, 1010 };
                     _stallProbeCollector = new StallProbeCollector(
                         _configuration.SessionId,
                         _configuration.TenantId,

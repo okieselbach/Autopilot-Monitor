@@ -73,7 +73,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
             _stateDirectory = stateDirectory != null ? Environment.ExpandEnvironmentVariables(stateDirectory) : null;
             _harmlessEventIds = harmlessEventIds != null && harmlessEventIds.Length > 0
                 ? new HashSet<int>(harmlessEventIds)
-                : new HashSet<int> { 100, 1005 };
+                : new HashSet<int> { 100, 1005, 1010 };
         }
 
         /// <summary>
@@ -261,8 +261,9 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.SystemSignals
             // (Error) and Level 3 (Warning) are considered. The list is delivered by the
             // backend via CollectorConfiguration.ModernDeploymentHarmlessEventIds and
             // pre-seeded with known-harmless IDs (e.g. 100 "Autopilot policy not found",
-            // 1005 — no real enrollment impact). Events stay visible in the timeline
-            // (Debug severity) for troubleshooting.
+            // 1005, 1010 "Autopilot.dll WIL hardwareinfo.cpp HRESULT 0x80070002" — no real
+            // enrollment impact). Events stay visible in the timeline (Debug severity) for
+            // troubleshooting.
             if ((effectiveLevel == 2 || effectiveLevel == 3) && _harmlessEventIds.Contains(eventId))
             {
                 eventType = Constants.EventTypes.ModernDeploymentLog;

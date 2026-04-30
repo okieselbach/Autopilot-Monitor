@@ -309,18 +309,18 @@ namespace AutopilotMonitor.Shared.Models
         /// to Debug severity by the agent — they stay visible for troubleshooting but
         /// do not surface as Error/Warning in the session timeline and are ignored by
         /// the stall-probe anomaly scan. Level 1 Critical is never downgraded.
-        /// Example: "[100, 1005]"
+        /// Example: "[100, 1005, 1010]"
         /// </summary>
         public string ModernDeploymentHarmlessEventIdsJson { get; set; } = default!;
 
         /// <summary>
         /// Returns the deserialized list of harmless ModernDeployment EventIDs.
-        /// Falls back to the built-in defaults [100, 1005] when the JSON is
+        /// Falls back to the built-in defaults [100, 1005, 1010] when the JSON is
         /// null/empty/invalid so new agents always receive a sensible baseline.
         /// </summary>
         public List<int> GetModernDeploymentHarmlessEventIds()
         {
-            var defaults = new List<int> { 100, 1005 };
+            var defaults = new List<int> { 100, 1005, 1010 };
             if (string.IsNullOrWhiteSpace(ModernDeploymentHarmlessEventIdsJson))
                 return defaults;
             try

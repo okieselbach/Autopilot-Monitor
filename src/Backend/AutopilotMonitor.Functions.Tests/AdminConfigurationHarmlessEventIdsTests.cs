@@ -17,7 +17,7 @@ namespace AutopilotMonitor.Functions.Tests
 
             var ids = cfg.GetModernDeploymentHarmlessEventIds();
 
-            Assert.Equal(new[] { 100, 1005 }, ids);
+            Assert.Equal(new[] { 100, 1005, 1010 }, ids);
         }
 
         [Fact]
@@ -27,7 +27,7 @@ namespace AutopilotMonitor.Functions.Tests
 
             var ids = cfg.GetModernDeploymentHarmlessEventIds();
 
-            Assert.Equal(new[] { 100, 1005 }, ids);
+            Assert.Equal(new[] { 100, 1005, 1010 }, ids);
         }
 
         [Fact]
@@ -37,7 +37,7 @@ namespace AutopilotMonitor.Functions.Tests
 
             var ids = cfg.GetModernDeploymentHarmlessEventIds();
 
-            Assert.Equal(new[] { 100, 1005 }, ids);
+            Assert.Equal(new[] { 100, 1005, 1010 }, ids);
         }
 
         [Fact]

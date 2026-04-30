@@ -1,4 +1,4 @@
-const DEFAULT_HARMLESS_EVENT_IDS = "100, 1005";
+const DEFAULT_HARMLESS_EVENT_IDS = "100, 1005, 1010";
 
 /** Convert stored JSON array (e.g. "[100,1005]") to the display/edit form "100, 1005". */
 export function parseHarmlessEventIdsJson(json: string | null | undefined): string {
