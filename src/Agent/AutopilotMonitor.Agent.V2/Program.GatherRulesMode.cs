@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Agent.V2
 
             try
             {
-                var tenantId = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
+                var tenantId = TenantIdResolver.Resolve(logger);
                 if (string.IsNullOrEmpty(tenantId))
                 {
                     logger.Error("--run-gather-rules: TenantId could not be resolved — device is not MDM-enrolled.");

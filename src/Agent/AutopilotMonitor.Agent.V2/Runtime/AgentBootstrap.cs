@@ -42,7 +42,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             var bootstrapConfig = Program.TryReadBootstrapConfig(dataDirectory, logger);
             var awaitConfig = Program.TryReadAwaitEnrollmentConfig(dataDirectory, logger);
 
-            var tenantIdFromRegistry = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
+            var tenantIdFromRegistry = TenantIdResolver.Resolve(logger);
             var tenantId = !string.IsNullOrEmpty(tenantIdFromRegistry)
                 ? tenantIdFromRegistry
                 : bootstrapConfig?.TenantId;
@@ -111,7 +111,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 // Re-resolve TenantId — enrollment typically writes the registry key alongside the cert.
                 if (string.IsNullOrEmpty(agentConfig.TenantId))
                 {
-                    agentConfig.TenantId = TenantIdResolver.ResolveFromEnrollmentRegistry(logger);
+                    agentConfig.TenantId = TenantIdResolver.Resolve(logger);
                     if (!string.IsNullOrEmpty(agentConfig.TenantId))
                         logger.Info($"Await-enrollment: TenantId discovered from registry: {agentConfig.TenantId}");
                 }
