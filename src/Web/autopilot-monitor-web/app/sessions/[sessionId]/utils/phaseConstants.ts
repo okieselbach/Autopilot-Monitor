@@ -10,16 +10,11 @@ export const V1_PHASES = [
   { id: 7, name: "Complete",            shortName: "Complete" },
 ];
 
-// V1 with SkipUserStatusPage=true: no Account Setup, Finalizing comes before Apps (User)
-export const V1_SKIP_USER_PHASES = [
-  { id: 0, name: "Start",               shortName: "Start" },
-  { id: 1, name: "Device Preparation",  shortName: "Device Preparation" },
-  { id: 2, name: "Device Setup",        shortName: "Device Setup" },
-  { id: 3, name: "Apps (Device)",       shortName: "Apps (Device)" },
-  { id: 6, name: "Finalizing Setup",    shortName: "Finalizing" },
-  { id: 5, name: "Apps (User)",         shortName: "Apps (User)" },
-  { id: 7, name: "Complete",            shortName: "Complete" },
-];
+// V1 with SkipUserStatusPage=true: AccountSetup (4) and AppsUser (5) are visualized as
+// skipped — the ESP policy explicitly disables the user status page. Background events
+// for those phases (e.g. esp_phase_changed → AccountSetup) still appear in the timeline,
+// but the progress bar reflects the policy intent.
+export const V1_SKIP_USER_PHASE_IDS: ReadonlySet<number> = new Set([4, 5]);
 
 export const V2_PHASES = [
   { id: 0, name: "Start",               shortName: "Start" },
@@ -35,20 +30,21 @@ export const V2_PHASE_ORDER = ["Start", "Device Preparation", "App Installation"
 export type PhaseDescriptor = { id: number; name: string; shortName: string };
 
 // WhiteGlove (IsPreProvisioned=true) runs the full user enrollment in Part 2 even when the
-// admin set SkipUserStatusPage=true — the collapsed layout only applies to pure device-only
+// admin set SkipUserStatusPage=true — skip-marking only applies to pure device-only
 // deployments. V2 always uses its simplified phase set.
 export function resolvePhaseLayout(params: {
   enrollmentType?: string;
   isSkipUserStatusPage?: boolean;
   isPreProvisioned?: boolean;
-}): { phases: PhaseDescriptor[]; useSkipLayout: boolean } {
+}): { phases: PhaseDescriptor[]; useSkipLayout: boolean; skippedPhaseIds: ReadonlySet<number> } {
   if (params.enrollmentType === "v2") {
-    return { phases: V2_PHASES, useSkipLayout: false };
+    return { phases: V2_PHASES, useSkipLayout: false, skippedPhaseIds: new Set<number>() };
   }
   const useSkipLayout = !!params.isSkipUserStatusPage && !params.isPreProvisioned;
   return {
-    phases: useSkipLayout ? V1_SKIP_USER_PHASES : V1_PHASES,
+    phases: V1_PHASES,
     useSkipLayout,
+    skippedPhaseIds: useSkipLayout ? V1_SKIP_USER_PHASE_IDS : new Set<number>(),
   };
 }
 

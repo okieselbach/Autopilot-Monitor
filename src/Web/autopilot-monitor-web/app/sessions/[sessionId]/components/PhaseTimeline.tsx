@@ -16,7 +16,7 @@ interface PhaseTimelineProps {
 }
 
 export default function PhaseTimeline({ currentPhase, completedPhases, events = [], sessionStatus, enrollmentType, isPreProvisioned, isSkipUserStatusPage, onPhaseClick }: PhaseTimelineProps) {
-  const { phases, useSkipLayout } = resolvePhaseLayout({ enrollmentType, isSkipUserStatusPage, isPreProvisioned });
+  const { phases, useSkipLayout, skippedPhaseIds } = resolvePhaseLayout({ enrollmentType, isSkipUserStatusPage, isPreProvisioned });
 
   // Derive current activity for the active phase from events
   const getCurrentActivity = (phaseId: number): string | null => {
@@ -148,8 +148,9 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     let end: number | null = null;
 
     if (useSkipLayout) {
-      // V1 SkipUser: Device Setup(2) → FinalizingSetup(6) → AppsUser(5) → Complete(7)
-      // No AccountSetup(4). AppsUser is a top-level phase (not sub-phase).
+      // V1 SkipUser: Device Setup(2) → Apps Device(3) → [AccountSetup(4) skipped] →
+      // [AppsUser(5) skipped] → Finalizing(6) → Complete(7).
+      // AccountSetup/AppsUser render as 'skipped' so no duration is shown for them.
       switch (phaseId) {
         case 2: // Device Setup → ends when Finalizing Setup starts
           end = getFirstEventTime(6) ?? getLastEventTime(3) ?? getLastEventTime(2);
@@ -157,11 +158,8 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
         case 3: // Apps (Device) — sub-phase, own event range
           end = getLastEventTime(3);
           break;
-        case 6: // Finalizing Setup → ends when Apps (User) or Complete starts
-          end = getFirstEventTime(5) ?? getFirstEventTime(7) ?? getLastEventTime(6);
-          break;
-        case 5: // Apps (User) — top-level, ends when Complete starts
-          end = getFirstEventTime(7) ?? getLastEventTime(5);
+        case 6: // Finalizing Setup → ends when Complete starts (AppsUser is skipped)
+          end = getFirstEventTime(7) ?? getLastEventTime(6);
           break;
         default:
           end = getLastEventTime(phaseId);
@@ -220,10 +218,13 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     return idx >= 0 ? idx : -1;
   };
 
-  // Derive the furthest-reached phase seen in events using display-order index
+  // Derive the furthest-reached phase seen in events using display-order index.
+  // Skipped phases (e.g. AccountSetup/AppsUser when SkipUserStatusPage=true) are excluded:
+  // background events with their phase tag (e.g. esp_phase_changed → AccountSetup) must
+  // not pull the active marker into a phase the policy says is skipped.
   const maxEventPhase = (() => {
     const realPhases = events
-      .filter(e => e.phase >= 0 && e.phase <= 7)
+      .filter(e => e.phase >= 0 && e.phase <= 7 && !skippedPhaseIds.has(e.phase))
       .map(e => e.phase);
 
     let maxPhase = -1;
@@ -270,10 +271,19 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
       return maxEventPhase >= 0 ? maxEventPhase : currentPhase;
     }
     if (maxEventPhase < 0) return currentPhase;
+    // If backend currentPhase is itself skipped (e.g. an esp_phase_changed → AccountSetup
+    // event nudged Sessions.CurrentPhase=4 but SkipUserStatusPage marks it as skipped),
+    // trust the highest non-skipped event phase instead so the active marker stays where
+    // real activity is happening.
+    if (skippedPhaseIds.has(currentPhase)) return maxEventPhase;
     return phaseIndex(maxEventPhase) >= phaseIndex(currentPhase) ? maxEventPhase : currentPhase;
   })();
 
   const getPhaseStatus = (phaseId: number) => {
+    // Skipped wins over everything: ESP policy explicitly disables the phase, so it can
+    // never be "current" or "completed" regardless of stray phase-tagged events.
+    if (skippedPhaseIds.has(phaseId)) return 'skipped';
+
     // Agent starts at MDM phase (3) - Pre-Flight(0)/Network(1)/Identity(2) are inferred as completed
     // since the machine reached MDM enrollment
     if (phaseId >= 0 && phaseId <= 2) return 'completed'; // Pre-Flight(0), Network(1), Identity(2)
@@ -310,6 +320,7 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
       case 'completed': return 'bg-green-500 text-white border-green-500';
       case 'current': return 'bg-blue-500 text-white border-blue-500 ring-4 ring-blue-200';
       case 'failed': return 'bg-red-500 text-white border-red-500 ring-4 ring-red-200';
+      case 'skipped': return 'bg-gray-100 text-gray-400 border-gray-300 border-dashed';
       case 'pending': return 'bg-gray-200 text-gray-500 border-gray-300';
       default: return 'bg-gray-200 text-gray-500 border-gray-300';
     }
@@ -334,7 +345,9 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
     const status = getPhaseStatus(phase.id);
     const prevStatus = index > 0 ? getPhaseStatus(phases[index - 1].id) : null;
     const connColor = index > 0 ? getConnectorColor(phases[index - 1].id) : '';
-    const showArrow = prevStatus === 'current' || prevStatus === 'failed';
+    // Suppress the directional arrow when pointing into a skipped phase — the user is not
+    // actually moving toward it; the run will visually jump past skipped phases.
+    const showArrow = (prevStatus === 'current' || prevStatus === 'failed') && status !== 'skipped';
     const isSplitBoundary = isWhiteGloveV1 && index === splitIndex;
 
     return (
@@ -369,14 +382,15 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
         )}
         {/* Circle + Labels — clickable to scroll to phase in timeline */}
         <div
-          className={onPhaseClick ? 'cursor-pointer' : ''}
-          onClick={onPhaseClick ? () => onPhaseClick(phase.name) : undefined}
+          className={onPhaseClick && status !== 'skipped' ? 'cursor-pointer' : ''}
+          onClick={onPhaseClick && status !== 'skipped' ? () => onPhaseClick(phase.name) : undefined}
+          title={status === 'skipped' ? 'Skipped — SkipUserStatusPage policy is enabled' : undefined}
         >
           <div className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all font-semibold mx-auto ${getPhaseColor(status)}`}>
-            {status === 'completed' ? '✓' : status === 'failed' ? '✕' : phase.id + 1}
+            {status === 'completed' ? '✓' : status === 'failed' ? '✕' : status === 'skipped' ? '⊘' : phase.id + 1}
           </div>
           <div className="mt-3 text-center">
-            <div className="text-xs font-medium text-gray-700 whitespace-nowrap">
+            <div className={`text-xs font-medium whitespace-nowrap ${status === 'skipped' ? 'text-gray-400' : 'text-gray-700'}`}>
               {phase.shortName}
             </div>
           {(status === 'completed' || status === 'failed') && getPhaseDuration(phase.id) && (
@@ -389,6 +403,9 @@ export default function PhaseTimeline({ currentPhase, completedPhases, events = 
           )}
           {status === 'failed' && (
             <div className="mt-0.5 text-[10px] text-red-500 font-semibold">Failed</div>
+          )}
+          {status === 'skipped' && (
+            <div className="mt-0.5 text-[10px] text-gray-400 italic">Skipped</div>
           )}
           {status === 'current' && getCurrentActivity(phase.id) && (
             <div className="mt-1 max-w-[140px]">
