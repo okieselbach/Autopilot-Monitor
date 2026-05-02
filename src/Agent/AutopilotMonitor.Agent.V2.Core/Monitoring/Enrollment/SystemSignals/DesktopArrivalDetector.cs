@@ -67,6 +67,38 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             _pollingTimer = null;
         }
 
+        /// <summary>
+        /// Resets desktop-arrival tracking after a placeholder→real-user transition (Hybrid
+        /// User-Driven completion-gap fix, 2026-05-01). Used by the composition root when
+        /// <see cref="AadJoinWatcher.AadUserJoined"/> fires for a real user — the previous
+        /// fooUser desktop the detector observed is invalidated, and polling restarts so the
+        /// AD-user desktop after the Hybrid reboot is detected as the actual real desktop.
+        /// <para>
+        /// Idempotent: safe to call multiple times. No-op if the detector already fired
+        /// after the reset (a subsequent real-user join after a real-user desktop is also
+        /// idempotent because the polling timer is restarted regardless and the next match
+        /// against IsExcludedUser will short-circuit on the still-valid desktop).
+        /// </para>
+        /// </summary>
+        public void ResetForRealUserSwitch()
+        {
+            _logger.Info("DesktopArrivalDetector: reset for real-user switch (placeholder→real user transition)");
+
+            // Drop any prior arrival state — subsequent polls must re-evaluate the current
+            // explorer.exe owner against IsExcludedUser anew.
+            _desktopArrived = false;
+            _excludedUserTraced = false;
+
+            // Restart polling. Dispose any existing timer first to avoid leaking ticks
+            // from an already-running schedule.
+            _pollingTimer?.Dispose();
+            _pollingTimer = new Timer(
+                PollForDesktop,
+                null,
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(PollingIntervalSeconds));
+        }
+
         private void PollForDesktop(object state)
         {
             if (_desktopArrived)
@@ -179,12 +211,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         /// <summary>
         /// Returns true if the user name matches any excluded system/service account.
-        /// Handles both "User" and "DOMAIN\User" formats.
-        /// Also matches the pattern DefaultUser* (case-insensitive).
+        /// Handles "User", "DOMAIN\User", and UPN ("user@domain") formats.
+        /// Also matches the patterns DefaultUser* and the Autopilot provisioning placeholders
+        /// foouser@* / autopilot@* (case-insensitive). The placeholder match prevents the
+        /// fooUser OOBE shell on Hybrid User-Driven enrollments from being treated as a
+        /// real user desktop.
         /// </summary>
         internal static bool IsExcludedUser(string fullUserName)
         {
             if (string.IsNullOrEmpty(fullUserName))
+                return true;
+
+            // UPN form (user@domain) — delegate to the same placeholder oracle the
+            // AadJoinWatcher uses, so the foouser@/autopilot@ list stays in one place.
+            if (fullUserName.IndexOf('@') >= 0
+                && AadJoinInfo.IsPlaceholderUserEmail(fullUserName))
                 return true;
 
             // Extract just the username part (after backslash if present)
@@ -202,6 +243,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
             // Check DefaultUser* pattern
             if (userName.StartsWith("DefaultUser", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // DOMAIN\foouser / DOMAIN\autopilot — the WMI GetOwner call sometimes returns a
+            // synthetic local-machine domain instead of the UPN. EXACT match the bare
+            // username here (not prefix), so legitimate real accounts like
+            // CONTOSO\autopilotadmin or DOMAIN\foouserservice stay through the gate.
+            // Codex review 2026-05-01 (Finding 3): the previous prefix match was too broad
+            // and reused via UserProfileResolver, which would have resolved to the wrong
+            // user profile for any account starting with "autopilot" or "foouser".
+            // The UPN form (foouser@*, autopilot@*) is still handled above by
+            // AadJoinInfo.IsPlaceholderUserEmail — that path is what covers the
+            // real-world Autopilot placeholders (foouser@<tenant>.onmicrosoft.com).
+            if (string.Equals(userName, "foouser", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(userName, "autopilot", StringComparison.OrdinalIgnoreCase))
                 return true;
 
             return false;

@@ -249,7 +249,8 @@ namespace AutopilotMonitor.Functions.Services
                 GeoLoc = entity.GetString("GeoLoc") ?? string.Empty,
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
-                ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false
+                ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
+                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty
             };
         }
 
@@ -963,7 +964,7 @@ namespace AutopilotMonitor.Functions.Services
         /// back to the session's LastEventAt and only to UtcNow as a last resort, so DurationSeconds
         /// reflects when the session went silent rather than when the operator clicked the button.
         /// </param>
-        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false, string? failureSource = null, string? adminMarkedAction = null)
+        public async Task<bool> UpdateSessionStatusAsync(string tenantId, string sessionId, SessionStatus status, EnrollmentPhase? currentPhase = null, string? failureReason = null, DateTime? completedAt = null, DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null, bool? isUserDriven = null, DateTime? resumedAt = null, DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false, string? failureSource = null, string? adminMarkedAction = null, string? failureSnapshotJson = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -1107,6 +1108,16 @@ namespace AutopilotMonitor.Functions.Services
                     if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureReason))
                     {
                         update["FailureReason"] = failureReason;
+                    }
+
+                    // Persist the failure-state snapshot when provided. Only the maintenance
+                    // 5h-timeout path supplies this today (Hybrid User-Driven completion-gap
+                    // fix, 2026-05-01); other terminal paths leave the field untouched, which
+                    // is fine — null/empty means "no snapshot available" and the UI falls back
+                    // to the existing FailureReason rendering.
+                    if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureSnapshotJson))
+                    {
+                        update["FailureSnapshotJson"] = failureSnapshotJson;
                     }
 
                     // Record the origin of a Failed status (agent / rule:<id> / manual). When the caller
@@ -1306,6 +1317,11 @@ namespace AutopilotMonitor.Functions.Services
 
                             if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureReason))
                                 forceUpdate["FailureReason"] = failureReason;
+
+                            // Mirror the FailureSnapshotJson from the regular path so the
+                            // force-merge fallback never silently drops the snapshot.
+                            if (status == SessionStatus.Failed && !string.IsNullOrEmpty(failureSnapshotJson))
+                                forceUpdate["FailureSnapshotJson"] = failureSnapshotJson;
 
                             if (isPreProvisioned.HasValue)
                                 forceUpdate["IsPreProvisioned"] = isPreProvisioned.Value;
@@ -1862,7 +1878,8 @@ namespace AutopilotMonitor.Functions.Services
                 GeoLoc = entity.GetString("GeoLoc") ?? string.Empty,
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
-                ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false
+                ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
+                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty
             };
         }
 

@@ -298,6 +298,18 @@ namespace AutopilotMonitor.Shared.Models
         /// on long-dead sessions.
         /// </summary>
         public DateTime? PendingActionsQueuedAt { get; set; }
+
+        /// <summary>
+        /// Compact JSON snapshot of "last known session state" written by the maintenance
+        /// 5h-timeout sweep when a session graduates to terminal Failed (Hybrid User-Driven
+        /// completion-gap fix, 2026-05-01). Captures the canonical lifecycle anchors —
+        /// last ESP phase, desktop arrival, Hello policy, AAD-join state, missing signals —
+        /// so operators don't have to scroll through hundreds of events to reconstruct
+        /// where a stuck session was when the watchdog fired. Empty / null on
+        /// healthy-completion paths and on sessions that predate the field. Built by
+        /// <see cref="AutopilotMonitor.Functions.Services.FailureSnapshotBuilder"/>.
+        /// </summary>
+        public string FailureSnapshotJson { get; set; } = string.Empty;
     }
 
     /// <summary>

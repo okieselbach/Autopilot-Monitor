@@ -274,11 +274,31 @@ namespace AutopilotMonitor.Functions.Services
 
                         foreach (var session in stalledSessions)
                         {
+                            // Hybrid User-Driven completion-gap fix (2026-05-01): before
+                            // graduating the session to terminal Failed, build a compact
+                            // snapshot of "what we last knew" so operators don't have to
+                            // scroll through hundreds of events to reconstruct where the
+                            // session was stuck. Best-effort — a snapshot read failure
+                            // must never block the timeout transition itself.
+                            string? snapshotJson = null;
+                            try
+                            {
+                                var sessionEvents = await _sessionRepo.GetSessionEventsAsync(
+                                    session.TenantId, session.SessionId, maxResults: 1000);
+                                snapshotJson = FailureSnapshotBuilder.Build(sessionEvents, now);
+                            }
+                            catch (Exception snapEx)
+                            {
+                                _logger.LogWarning(snapEx,
+                                    $"Failed to build failure snapshot for session {session.SessionId}; proceeding with timeout transition without snapshot");
+                            }
+
                             await _sessionRepo.UpdateSessionStatusAsync(
                                 session.TenantId,
                                 session.SessionId,
                                 SessionStatus.Failed,
-                                failureReason: $"Session timed out after {timeoutHours} hours (started at {session.StartedAt:yyyy-MM-dd HH:mm:ss} UTC)"
+                                failureReason: $"Session timed out after {timeoutHours} hours (started at {session.StartedAt:yyyy-MM-dd HH:mm:ss} UTC)",
+                                failureSnapshotJson: snapshotJson
                             );
                             sessionCount++;
                         }

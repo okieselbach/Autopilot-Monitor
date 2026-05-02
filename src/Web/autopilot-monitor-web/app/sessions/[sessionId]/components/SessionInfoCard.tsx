@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Session } from "@/types";
+import FailureSnapshotBlock from "./FailureSnapshotBlock";
 
 interface SessionInfoCardProps {
   session: Session;
@@ -81,6 +82,7 @@ export default function SessionInfoCard({ session, enrollmentDuration, displaySt
           </span>
         </div>
       )}
+      <FailureSnapshotBlock failureSnapshotJson={session.failureSnapshotJson} />
     </div>
   );
 }

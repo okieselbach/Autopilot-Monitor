@@ -231,6 +231,19 @@ namespace AutopilotMonitor.Shared
 
             // TEMPORARY: shadow SM rollout verification — remove when CompletionStateMachine is promoted to primary
             public const string ShadowDiscrepancy         = "shadow_discrepancy";
+
+            // Hybrid User-Driven enrollment observability (V2 — Hybrid completion gaps, 2026-05-01).
+            // Pure observability — never consumed by the DecisionEngine, no DecisionSignalKind wired up.
+            public const string AadPlaceholderUserDetected = "aad_placeholder_user_detected"; // foouser@/autopilot@ first appearance in JoinInfo
+            public const string HybridLoginPending         = "hybrid_login_pending";          // Hybrid: 10 min after reboot still placeholder, real AD login overdue
+
+            // Real-user join — companion to AadPlaceholderUserDetected. The DecisionEngine consumes
+            // these as DecisionSignalKind only (HandleAadUserJoinedLateV1 is observation-only and
+            // emits no timeline effect), so the AadJoinWatcherAdapter dual-emits them as
+            // informational events too. Without this the FailureSnapshotBuilder cannot tell that
+            // the real AAD user was ever observed (Codex review 2026-05-01).
+            public const string AadUserJoinedLate          = "aad_user_joined_late";         // Real user replaces placeholder mid-session (Part 1 path)
+            public const string UserAadSignInComplete      = "user_aad_signin_complete";     // Real user signs in post-reboot (Part 2 path)
         }
 
         // -----------------------------------------------------------------------

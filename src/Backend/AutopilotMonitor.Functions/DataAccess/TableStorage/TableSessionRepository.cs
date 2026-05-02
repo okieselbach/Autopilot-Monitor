@@ -49,11 +49,13 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             DateTime? latestEventTimestamp = null, bool? isPreProvisioned = null,
             bool? isUserDriven = null, DateTime? resumedAt = null,
             DateTime? stalledAt = null, bool clearStalledAt = false, bool clearFailureReason = false,
-            string? failureSource = null, string? adminMarkedAction = null)
+            string? failureSource = null, string? adminMarkedAction = null,
+            string? failureSnapshotJson = null)
             => _storage.UpdateSessionStatusAsync(tenantId, sessionId, status,
                 currentPhase, failureReason, completedAt, earliestEventTimestamp,
                 latestEventTimestamp, isPreProvisioned, isUserDriven, resumedAt,
-                stalledAt, clearStalledAt, clearFailureReason, failureSource, adminMarkedAction);
+                stalledAt, clearStalledAt, clearFailureReason, failureSource, adminMarkedAction,
+                failureSnapshotJson);
 
         public Task<bool> QueueServerActionAsync(string tenantId, string sessionId, ServerAction action)
             => _storage.QueueServerActionAsync(tenantId, sessionId, action);

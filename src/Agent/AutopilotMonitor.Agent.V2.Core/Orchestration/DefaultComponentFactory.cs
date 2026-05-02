@@ -69,6 +69,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
         private ImeLogHost? _imeLogHost;
         private EspAndHelloHost? _espAndHelloHost;
+        private AadJoinHost? _aadJoinHost;
         private Transport.Telemetry.ITelemetrySpool? _telemetrySpool;
 
         /// <summary>
@@ -83,6 +84,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// </para>
         /// </summary>
         internal EspAndHelloHost? EspAndHelloHost => _espAndHelloHost;
+
+        /// <summary>
+        /// Exposes the <see cref="AadJoinHost"/> so the runtime host can arm the Hybrid
+        /// User-Driven login-pending detector after observing a reboot-kill on a Hybrid-AAD
+        /// device (2026-05-01 completion-gap fix). Returns <c>null</c> before
+        /// <see cref="CreateCollectorHosts"/> has been called.
+        /// </summary>
+        internal AadJoinHost? AadJoinHost => _aadJoinHost;
 
         /// <summary>
         /// Exposes the IME tracker's package-state list to peripheral consumers such as the
@@ -178,9 +187,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 stateDirectory: _stateDirectory);
             hosts.Add(_espAndHelloHost);
 
-            hosts.Add(new DesktopArrivalHost(logger, ingress, clock));
+            // Hybrid User-Driven completion-gap fix (2026-05-01): the AadJoinHost notifies
+            // the DesktopArrivalHost when a real AAD user replaces the foouser/autopilot
+            // placeholder, so the detector resets and re-evaluates after the Hybrid reboot
+            // instead of staying latched on the foo desktop. Order matters — DesktopArrivalHost
+            // must exist before AadJoinHost so the callback target is available.
+            var desktopArrivalHost = new DesktopArrivalHost(logger, ingress, clock);
+            hosts.Add(desktopArrivalHost);
 
-            hosts.Add(new AadJoinHost(logger, ingress, clock));
+            _aadJoinHost = new AadJoinHost(
+                logger, ingress, clock,
+                onRealUserJoined: desktopArrivalHost.RequestResetForRealUserSwitch);
+            hosts.Add(_aadJoinHost);
 
             // Single-rail refactor (plan §5.8) — DeviceInfoCollector existed in V2.Core but had
             // no host so the Device-Details UI block was empty in V2 sessions (V1-Parity Issue #2).

@@ -5,7 +5,9 @@ using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
 using AutopilotMonitor.Agent.V2.Core.SignalAdapters;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
 using AutopilotMonitor.Agent.V2.Core.Tests.Orchestration;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
+using SharedEventTypes = AutopilotMonitor.Shared.Constants.EventTypes;
 using Xunit;
 
 namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
@@ -43,15 +45,42 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
 
             adapter.TriggerFromTest("alice@contoso.com", "abcd1234");
 
-            var posted = Assert.Single(f.Ingress.Posted);
-            Assert.Equal(DecisionSignalKind.AadUserJoinedLate, posted.Kind);
-            Assert.Equal("AadJoinWatcher", posted.SourceOrigin);
-            Assert.Equal(EvidenceKind.Derived, posted.Evidence.Kind);
-            Assert.Equal("contoso.com", posted.Payload!["userDomain"]);
-            Assert.Equal("true", posted.Payload["hasThumbprint"]);
+            // Codex review 2026-05-01: dual-emission — decision signal + informational event.
+            var decisionSignal = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.AadUserJoinedLate);
+            Assert.Equal("AadJoinWatcher", decisionSignal.SourceOrigin);
+            Assert.Equal(EvidenceKind.Derived, decisionSignal.Evidence.Kind);
+            Assert.Equal("contoso.com", decisionSignal.Payload!["userDomain"]);
+            Assert.Equal("true", decisionSignal.Payload["hasThumbprint"]);
 
-            // PII guard: full email MUST NOT appear in payload.
-            Assert.DoesNotContain("alice@", string.Concat(posted.Payload.Values));
+            // PII guard: full email MUST NOT appear in either rail's payload.
+            Assert.DoesNotContain("alice@", string.Concat(decisionSignal.Payload.Values));
+        }
+
+        [Fact]
+        public void TriggerFromTest_also_emits_aad_user_joined_late_informational_event()
+        {
+            using var f = new Fixture();
+            using var adapter = new AadJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerFromTest("alice@contoso.com", "abcd1234");
+
+            // FailureSnapshotBuilder reads the Events table — without this rail it cannot
+            // see that the real AAD user was ever observed (HandleAadUserJoinedLateV1 is
+            // observation-only, no timeline effect). Snapshot would always say
+            // aadJoinState=placeholder/unknown.
+            var info = f.Ingress.Posted.Single(p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == SharedEventTypes.AadUserJoinedLate);
+            Assert.Equal("AadJoinWatcher", info.Payload![SignalPayloadKeys.Source]);
+            Assert.Equal("true", info.Payload[SignalPayloadKeys.ImmediateUpload]);
+            Assert.Equal("Info", info.Payload[SignalPayloadKeys.Severity]);
+            Assert.Equal("contoso.com", info.Payload["userDomain"]);
+            Assert.Equal("true", info.Payload["hasThumbprint"]);
+
+            // PII guard: the message must not glue local-part to domain.
+            Assert.DoesNotContain("alice@", info.Payload[SignalPayloadKeys.Message]);
         }
 
         [Fact]
@@ -62,9 +91,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
 
             adapter.TriggerFromTest("bob@tailspin.com", "x");
 
-            var posted = f.Ingress.Posted.Single();
-            Assert.Equal(DecisionSignalKind.UserAadSignInComplete, posted.Kind);
-            Assert.Contains("Post-reboot", posted.Evidence.Summary);
+            var decisionSignal = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.UserAadSignInComplete);
+            Assert.Contains("Post-reboot", decisionSignal.Evidence.Summary);
+
+            // Part 2 mode also dual-emits the corresponding info event.
+            var info = f.Ingress.Posted.Single(p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == SharedEventTypes.UserAadSignInComplete);
+            Assert.Equal("tailspin.com", info.Payload!["userDomain"]);
         }
 
         [Fact]
@@ -75,7 +111,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
 
             adapter.TriggerFromTest("user@example.org", "");
 
-            Assert.Equal("false", f.Ingress.Posted[0].Payload!["hasThumbprint"]);
+            var decision = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.AadUserJoinedLate);
+            Assert.Equal("false", decision.Payload!["hasThumbprint"]);
         }
 
         [Fact]
@@ -86,11 +123,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
 
             adapter.TriggerFromTest("no-at-sign", "x");
 
-            Assert.Equal("unknown", f.Ingress.Posted[0].Payload!["userDomain"]);
+            var decision = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.AadUserJoinedLate);
+            Assert.Equal("unknown", decision.Payload!["userDomain"]);
         }
 
         [Fact]
-        public void Duplicate_trigger_is_deduplicated()
+        public void Duplicate_trigger_is_deduplicated_on_both_rails()
         {
             using var f = new Fixture();
             using var adapter = new AadJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
@@ -98,7 +136,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             adapter.TriggerFromTest("alice@contoso.com", "x");
             adapter.TriggerFromTest("alice@contoso.com", "x");
 
-            Assert.Single(f.Ingress.Posted);
+            // Exactly one decision signal + one informational event for the real-user
+            // path (fire-once semantics on _fired).
+            Assert.Single(f.Ingress.Posted, p => p.Kind == DecisionSignalKind.AadUserJoinedLate);
+            Assert.Single(
+                f.Ingress.Posted,
+                p => p.Kind == DecisionSignalKind.InformationalEvent
+                    && p.Payload != null
+                    && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                    && et == SharedEventTypes.AadUserJoinedLate);
+            Assert.Equal(2, f.Ingress.Posted.Count);
         }
 
         [Fact]
@@ -108,6 +155,131 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Throws<ArgumentNullException>(() => new AadJoinWatcherAdapter(null!, f.Ingress, f.Clock));
             Assert.Throws<ArgumentNullException>(() => new AadJoinWatcherAdapter(f.Watcher, null!, f.Clock));
             Assert.Throws<ArgumentNullException>(() => new AadJoinWatcherAdapter(f.Watcher, f.Ingress, null!));
+        }
+
+        // ============================================================================
+        // Placeholder path (Hybrid completion-gap fix, 2026-05-01)
+        // ============================================================================
+
+        [Fact]
+        public void TriggerPlaceholderFromTest_emits_aad_placeholder_user_detected_informational_event()
+        {
+            using var f = new Fixture();
+            using var adapter = new AadJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerPlaceholderFromTest("foouser@fabrikam.onmicrosoft.com");
+
+            var info = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.InformationalEvent);
+            Assert.Equal(SharedEventTypes.AadPlaceholderUserDetected, info.Payload![SignalPayloadKeys.EventType]);
+            Assert.Equal("AadJoinWatcher", info.Payload[SignalPayloadKeys.Source]);
+            Assert.Equal("true", info.Payload[SignalPayloadKeys.ImmediateUpload]);
+            Assert.Equal("foouser", info.Payload["placeholderType"]);
+            Assert.Equal("fabrikam.onmicrosoft.com", info.Payload["userDomain"]);
+            Assert.Contains("registryKey", info.Payload.Keys);
+
+            // PII guard: the local part of the email must not appear (only domain).
+            Assert.DoesNotContain("foouser@", info.Payload[SignalPayloadKeys.Message]);
+        }
+
+        [Fact]
+        public void TriggerPlaceholderFromTest_classifies_autopilot_placeholder()
+        {
+            using var f = new Fixture();
+            using var adapter = new AadJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerPlaceholderFromTest("autopilot@contoso.com");
+
+            var info = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.InformationalEvent);
+            Assert.Equal("autopilot", info.Payload!["placeholderType"]);
+            Assert.Equal("contoso.com", info.Payload["userDomain"]);
+        }
+
+        [Fact]
+        public void Duplicate_placeholder_trigger_is_deduplicated()
+        {
+            using var f = new Fixture();
+            using var adapter = new AadJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerPlaceholderFromTest("foouser@example.com");
+            adapter.TriggerPlaceholderFromTest("foouser@example.com");
+            adapter.TriggerPlaceholderFromTest("foouser@example.com");
+
+            Assert.Single(f.Ingress.Posted, p => p.Kind == DecisionSignalKind.InformationalEvent);
+        }
+
+        [Fact]
+        public void Placeholder_and_real_user_emit_separate_signals_independently()
+        {
+            using var f = new Fixture();
+            using var adapter = new AadJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerPlaceholderFromTest("foouser@fabrikam.com");
+            adapter.TriggerFromTest("alice@fabrikam.com", "abcd");
+
+            // 3 posts total after Codex review 2026-05-01 dual-emission:
+            //   - placeholder informational event
+            //   - real-user decision signal (AadUserJoinedLate)
+            //   - real-user informational event (aad_user_joined_late)
+            Assert.Equal(3, f.Ingress.Posted.Count);
+            Assert.Single(f.Ingress.Posted, p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et1)
+                && et1 == SharedEventTypes.AadPlaceholderUserDetected);
+            Assert.Single(f.Ingress.Posted, p => p.Kind == DecisionSignalKind.AadUserJoinedLate);
+            Assert.Single(f.Ingress.Posted, p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et2)
+                && et2 == SharedEventTypes.AadUserJoinedLate);
+        }
+
+        // ============================================================================
+        // onRealUserJoined callback (Pkt 5 — DesktopArrivalDetector reset wiring)
+        // ============================================================================
+
+        [Fact]
+        public void Real_user_join_invokes_onRealUserJoined_callback_exactly_once()
+        {
+            using var f = new Fixture();
+            int invocations = 0;
+            using var adapter = new AadJoinWatcherAdapter(
+                f.Watcher, f.Ingress, f.Clock,
+                onRealUserJoined: () => invocations++);
+
+            adapter.TriggerFromTest("alice@contoso.com", "x");
+            adapter.TriggerFromTest("alice@contoso.com", "x"); // dedup — callback must not fire twice
+
+            Assert.Equal(1, invocations);
+        }
+
+        [Fact]
+        public void Placeholder_does_not_invoke_onRealUserJoined_callback()
+        {
+            using var f = new Fixture();
+            int invocations = 0;
+            using var adapter = new AadJoinWatcherAdapter(
+                f.Watcher, f.Ingress, f.Clock,
+                onRealUserJoined: () => invocations++);
+
+            adapter.TriggerPlaceholderFromTest("foouser@example.com");
+
+            Assert.Equal(0, invocations);
+        }
+
+        [Fact]
+        public void Throwing_onRealUserJoined_callback_does_not_break_signal_post()
+        {
+            using var f = new Fixture();
+            using var adapter = new AadJoinWatcherAdapter(
+                f.Watcher, f.Ingress, f.Clock,
+                onRealUserJoined: () => throw new InvalidOperationException("boom"));
+
+            // The signal post completes BEFORE the callback fires — even if the callback
+            // throws, the decision signal must already be on the bus.
+            adapter.TriggerFromTest("alice@contoso.com", "x");
+
+            Assert.Single(f.Ingress.Posted, p => p.Kind == DecisionSignalKind.AadUserJoinedLate);
         }
     }
 }

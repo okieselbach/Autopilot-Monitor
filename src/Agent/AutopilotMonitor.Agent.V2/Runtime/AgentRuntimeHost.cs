@@ -6,6 +6,7 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Runtime;
+using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
@@ -333,6 +334,22 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         if (string.Equals(previousExit?.ExitType, "reboot_kill", StringComparison.OrdinalIgnoreCase))
                         {
                             LifecycleEmitters.PostSystemRebootObserved(orchestrator.IngressSink, previousExit, logger);
+
+                            // Hybrid User-Driven completion-gap fix (2026-05-01): the reboot is the
+                            // expected switch from foouser/autopilot OOBE to the real AD account.
+                            // If the user never logs in we go silent until the 5-h backend watchdog;
+                            // arm a single-shot 10-min detector that emits hybrid_login_pending
+                            // once if the AAD user join is overdue. Cancelled when AadJoinWatcher
+                            // sees the real user. Only armed for actual Hybrid devices — non-Hybrid
+                            // reboots don't have the placeholder→real-user flow that motivates this.
+                            if (!isWhiteGloveResume && EnrollmentRegistryDetector.DetectHybridJoin())
+                            {
+                                try { componentFactory.AadJoinHost?.ArmHybridLoginPendingDetector(); }
+                                catch (Exception ex)
+                                {
+                                    logger.Warning($"ArmHybridLoginPendingDetector threw: {ex.Message}");
+                                }
+                            }
                         }
 
                         // V2 race-fix follow-up (10c8e0bf review, 2026-04-27) —

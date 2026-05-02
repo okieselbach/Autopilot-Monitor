@@ -33,4 +33,12 @@ export interface Session {
   geoCountry?: string;
   geoRegion?: string;
   geoCity?: string;
+  /**
+   * Compact JSON snapshot of "last known session state" written by the maintenance
+   * 5h-timeout sweep when a session graduates to terminal Failed (Hybrid User-Driven
+   * completion-gap fix, 2026-05-01). Empty for healthy completions and sessions that
+   * predate the field. The detail page renders a collapsible "Failure Snapshot" block
+   * when populated.
+   */
+  failureSnapshotJson?: string;
 }
