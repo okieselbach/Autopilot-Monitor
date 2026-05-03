@@ -1,15 +1,18 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Agent.V2.Core.Persistence;
 using AutopilotMonitor.Agent.V2.Core.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.Agent.V2.Core.Termination;
 using AutopilotMonitor.DecisionCore.Classifiers;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.State;
 
 namespace AutopilotMonitor.Agent.V2.Runtime
 {
@@ -198,6 +201,42 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         logger: logger);
                     auth.AuthFailureTracker.ThresholdExceeded += authThresholdHandler;
 
+                    // Death-Rattle (Plan §B, 2026-05-03): if the previous run died unclean
+                    // AND its persisted snapshot is still readable, capture it as an
+                    // in-memory draft BEFORE orchestrator.Start runs. Start triggers the
+                    // recovery pipeline which may quarantine the snapshot or have the first
+                    // reducer save overwrite it; reading "what the dead run last knew"
+                    // through the orchestrator-owned SnapshotPersistence after Start would
+                    // either return the post-Start state (wrong) or null. The static
+                    // TryReadRaw is quarantine-free and shares the parse path with Load(),
+                    // so failure modes match. Skip on WhiteGlove Part-2 resume — the
+                    // "dying" run there is the Part-1 sealing run, which is a planned
+                    // exit, not a death.
+                    DecisionState priorStateForDeathRattle = null;
+                    if (!isWhiteGloveResume && IsUncleanExit(previousExit?.ExitType))
+                    {
+                        try
+                        {
+                            var snapshotPath = Path.Combine(stateSubdir, "snapshot.json");
+                            priorStateForDeathRattle = SnapshotPersistence.TryReadRaw(snapshotPath);
+                            if (priorStateForDeathRattle != null)
+                            {
+                                logger.Info(
+                                    $"Death-rattle: prior snapshot loaded (Stage={priorStateForDeathRattle.Stage}, " +
+                                    $"StepIndex={priorStateForDeathRattle.StepIndex}, exitType={previousExit?.ExitType}).");
+                            }
+                            else
+                            {
+                                logger.Debug(
+                                    $"Death-rattle: no prior snapshot to attest (path missing or unreadable, exitType={previousExit?.ExitType}).");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Warning($"Death-rattle: prior snapshot read failed: {ex.Message}");
+                        }
+                    }
+
                     try
                     {
                         // Pre-collector hook emits the lifecycle events (agent_started first
@@ -211,6 +250,18 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             LifecycleEmitters.EmitAgentStarted(lifecyclePost, agentConfig, previousExit, agentVersion, logger);
                             LifecycleEmitters.EmitVersionCheckIfAny(lifecyclePost, agentConfig, logger);
                             LifecycleEmitters.EmitUnrestrictedModeAuditIfChanged(lifecyclePost, agentConfig, configMergeResult, logger);
+
+                            // Death-Rattle (Plan §B): emit prior_run_died_with_state right
+                            // after the lifecycle anchors and before any collector-generated
+                            // signal. The event itself is on the LifecycleAnchorEventTypes
+                            // allowlist, so EventTimelineEmitter (Plan §A) automatically
+                            // attaches data["decisionState"] for the FRESH run alongside the
+                            // priorState we set here — both views in one wire payload.
+                            if (priorStateForDeathRattle != null)
+                            {
+                                LifecycleEmitters.PostPriorRunDiedWithState(
+                                    lifecyclePost, agentConfig, previousExit, priorStateForDeathRattle, logger);
+                            }
 
                             // Single-rail refactor (plan §5.7) — AgentAnalyzerManager emits
                             // through the same InformationalEventPost. RunStartup fires
@@ -472,6 +523,22 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             if (requested < MinUploadBatchSize) return MinUploadBatchSize;
             if (requested > MaxUploadBatchSize) return MaxUploadBatchSize;
             return requested;
+        }
+
+        /// <summary>
+        /// Death-Rattle gate (Plan §B, 2026-05-03). The classifications produced by
+        /// <see cref="Program.DetectPreviousExit"/> are: <c>first_run</c> / <c>clean</c>
+        /// (planned exits — no death-rattle), <c>exception_crash</c> / <c>hard_kill</c>
+        /// / <c>reboot_kill</c> (unclean — the prior run probably had un-reported state
+        /// worth attesting). Case-insensitive on principle to be robust against any
+        /// future capitalization drift in the producer.
+        /// </summary>
+        private static bool IsUncleanExit(string exitType)
+        {
+            return exitType != null
+                && (StringComparer.OrdinalIgnoreCase.Equals(exitType, "reboot_kill")
+                    || StringComparer.OrdinalIgnoreCase.Equals(exitType, "hard_kill")
+                    || StringComparer.OrdinalIgnoreCase.Equals(exitType, "exception_crash"));
         }
     }
 }

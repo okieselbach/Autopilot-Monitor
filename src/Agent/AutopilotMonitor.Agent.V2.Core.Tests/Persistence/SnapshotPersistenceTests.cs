@@ -130,6 +130,117 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Persistence
             Assert.Equal("S2", loaded!.SessionId);
         }
 
+        // ============================================================================
+        // TryReadRaw — Death-Rattle path (Plan §B, 2026-05-03). Quarantine-free static
+        // reader; behaviour-equivalent failure modes to Load() via the shared
+        // TryReadInternal parse path.
+        // ============================================================================
+
+        [Fact]
+        public void TryReadRaw_returns_state_for_valid_envelope()
+        {
+            using var tmp = new TempDirectory();
+            var path = tmp.File("snapshot.json");
+            new SnapshotPersistence(path).Save(BuildState());
+
+            var loaded = SnapshotPersistence.TryReadRaw(path);
+
+            Assert.NotNull(loaded);
+            Assert.Equal("S1", loaded!.SessionId);
+            Assert.Equal(SessionStage.AwaitingHello, loaded.Stage);
+            Assert.Equal(7, loaded.StepIndex);
+        }
+
+        [Fact]
+        public void TryReadRaw_returns_null_when_file_missing()
+        {
+            using var tmp = new TempDirectory();
+            Assert.Null(SnapshotPersistence.TryReadRaw(tmp.File("nope.json")));
+        }
+
+        [Fact]
+        public void TryReadRaw_returns_null_when_checksum_does_not_match()
+        {
+            using var tmp = new TempDirectory();
+            var path = tmp.File("snapshot.json");
+            new SnapshotPersistence(path).Save(BuildState());
+
+            var content = File.ReadAllText(path, Encoding.UTF8);
+            File.WriteAllText(path, content.Replace("tenant-1", "tenant-X"), Encoding.UTF8);
+
+            Assert.Null(SnapshotPersistence.TryReadRaw(path));
+        }
+
+        [Fact]
+        public void TryReadRaw_returns_null_when_envelope_malformed()
+        {
+            using var tmp = new TempDirectory();
+            var path = tmp.File("snapshot.json");
+            File.WriteAllText(path, "<not json>", Encoding.UTF8);
+
+            Assert.Null(SnapshotPersistence.TryReadRaw(path));
+        }
+
+        [Fact]
+        public void TryReadRaw_returns_null_for_null_path()
+        {
+            Assert.Null(SnapshotPersistence.TryReadRaw(null!));
+        }
+
+        [Fact]
+        public void TryReadRaw_returns_null_for_empty_path()
+        {
+            Assert.Null(SnapshotPersistence.TryReadRaw(string.Empty));
+        }
+
+        [Fact]
+        public void TryReadRaw_does_NOT_quarantine_the_file_on_corruption()
+        {
+            // Critical contract for Death-Rattle: TryReadRaw must NEVER move/delete the
+            // snapshot. The orchestrator's Start() owns the quarantine decision; if
+            // TryReadRaw quarantined on a checksum miss, Start() would then see no file
+            // and start a fresh-recovery branch instead of its own quarantine path.
+            using var tmp = new TempDirectory();
+            var path = tmp.File("snapshot.json");
+            new SnapshotPersistence(path).Save(BuildState());
+
+            var content = File.ReadAllText(path, Encoding.UTF8);
+            File.WriteAllText(path, content.Replace("tenant-1", "tenant-X"), Encoding.UTF8);
+
+            var result = SnapshotPersistence.TryReadRaw(path);
+
+            Assert.Null(result);
+            Assert.True(File.Exists(path), "TryReadRaw must leave a corrupt snapshot file in place — quarantine is the orchestrator's job.");
+            Assert.False(Directory.Exists(Path.Combine(tmp.Path, ".quarantine")),
+                "TryReadRaw must not create a .quarantine directory — it's a read-only static API.");
+        }
+
+        [Fact]
+        public void TryReadRaw_yields_same_result_as_Load_for_valid_snapshot()
+        {
+            // Reader-parity test: TryReadRaw and Load share TryReadInternal, so observable
+            // results must match for any well-formed snapshot. Pins the contract that
+            // future refactors of the static reader cannot drift from the instance reader.
+            using var tmp = new TempDirectory();
+            var path = tmp.File("snapshot.json");
+            var instance = new SnapshotPersistence(path);
+            instance.Save(BuildState(stepIndex: 42));
+
+            var viaLoad = instance.Load();
+            var viaStatic = SnapshotPersistence.TryReadRaw(path);
+
+            Assert.NotNull(viaLoad);
+            Assert.NotNull(viaStatic);
+            Assert.Equal(viaLoad!.SessionId, viaStatic!.SessionId);
+            Assert.Equal(viaLoad.TenantId, viaStatic.TenantId);
+            Assert.Equal(viaLoad.Stage, viaStatic.Stage);
+            Assert.Equal(viaLoad.StepIndex, viaStatic.StepIndex);
+            Assert.Equal(viaLoad.LastAppliedSignalOrdinal, viaStatic.LastAppliedSignalOrdinal);
+            Assert.Equal(
+                viaLoad.HelloResolvedUtc?.SourceSignalOrdinal,
+                viaStatic.HelloResolvedUtc?.SourceSignalOrdinal);
+        }
+
         [Fact]
         public void Roundtrip_preserves_active_deadlines_list()
         {

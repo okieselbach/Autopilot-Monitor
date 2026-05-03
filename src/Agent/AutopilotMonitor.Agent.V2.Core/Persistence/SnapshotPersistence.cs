@@ -96,39 +96,68 @@ namespace AutopilotMonitor.Agent.V2.Core.Persistence
         {
             lock (_lock)
             {
-                if (!File.Exists(_path)) return null;
+                return TryReadInternal(_path);
+            }
+        }
 
-                string envelopeJson;
-                try
-                {
-                    envelopeJson = File.ReadAllText(_path, Encoding.UTF8);
-                }
-                catch
-                {
-                    return null;
-                }
+        /// <summary>
+        /// Quarantine-free, lock-free static reader for the snapshot envelope at
+        /// <paramref name="path"/>. Returns <c>null</c> on FileNotFound, IO errors,
+        /// envelope-parse errors, checksum mismatch, or deserialization failures —
+        /// same failure modes as <see cref="Load"/>, exposed without an instance.
+        /// <para>
+        /// Death-Rattle path (Plan §B, 2026-05-03): the agent must read the prior run's
+        /// last persisted snapshot BEFORE <c>EnrollmentOrchestrator.Start()</c> runs,
+        /// because Start triggers the recovery pipeline which may quarantine the
+        /// snapshot or overwrite it on the first reducer save. Once Start has run,
+        /// reading "what the previous run last knew" through <see cref="Load"/> would
+        /// either return the post-Start state (wrong) or null (snapshot already moved
+        /// to .quarantine/). This static reader preserves the original on-disk file —
+        /// it never mutates, never quarantines, and shares the parse path with
+        /// <see cref="Load"/> via <c>TryReadInternal</c> so failure modes stay
+        /// behaviour-equivalent.
+        /// </para>
+        /// </summary>
+        public static DecisionState? TryReadRaw(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            return TryReadInternal(path);
+        }
 
-                if (!TryParseEnvelope(envelopeJson, out var declaredChecksum, out var stateJson))
-                {
-                    return null;
-                }
+        private static DecisionState? TryReadInternal(string path)
+        {
+            if (!File.Exists(path)) return null;
 
-                var actualChecksum = ComputeSha256Hex(stateJson);
-                if (!string.Equals(declaredChecksum, actualChecksum, StringComparison.OrdinalIgnoreCase))
-                {
-                    // §2.7 Sonderfall 2: Checksum-Mismatch → null zurück. Caller entscheidet
-                    // ob Quarantine + Replay.
-                    return null;
-                }
+            string envelopeJson;
+            try
+            {
+                envelopeJson = File.ReadAllText(path, Encoding.UTF8);
+            }
+            catch
+            {
+                return null;
+            }
 
-                try
-                {
-                    return StateSerializer.Deserialize(stateJson);
-                }
-                catch
-                {
-                    return null;
-                }
+            if (!TryParseEnvelope(envelopeJson, out var declaredChecksum, out var stateJson))
+            {
+                return null;
+            }
+
+            var actualChecksum = ComputeSha256Hex(stateJson);
+            if (!string.Equals(declaredChecksum, actualChecksum, StringComparison.OrdinalIgnoreCase))
+            {
+                // §2.7 Sonderfall 2: Checksum-Mismatch → null zurück. Caller entscheidet
+                // ob Quarantine + Replay.
+                return null;
+            }
+
+            try
+            {
+                return StateSerializer.Deserialize(stateJson);
+            }
+            catch
+            {
+                return null;
             }
         }
 

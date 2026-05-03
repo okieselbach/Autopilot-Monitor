@@ -5,7 +5,9 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Security;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
+using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared.Models;
 using SharedConstants = AutopilotMonitor.Shared.Constants;
 
@@ -331,6 +333,69 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             catch (Exception ex)
             {
                 logger.Warning($"SystemRebootObserved post failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Death-Rattle (Plan §B — Edge-Triggered State Snapshots, 2026-05-03). Emits a
+        /// single <c>prior_run_died_with_state</c> event on the next agent run when the
+        /// previous run exited uncleanly (<c>reboot_kill</c> / <c>hard_kill</c> /
+        /// <c>exception_crash</c>) AND its last persisted snapshot is readable. The event
+        /// carries the dying run's snapshot under <c>data["priorState"]</c> so post-mortem
+        /// diagnosis can see what the agent last knew before death — without relying on
+        /// client-side log uploads. Plan §A's anchor enrichment additionally attaches the
+        /// FRESH run's <c>data["decisionState"]</c> automatically (this event type is on
+        /// the lifecycle-anchor allowlist), giving operators both views side-by-side: the
+        /// persisted-at-death snapshot vs. the post-recovery reconstructed engine state.
+        /// </summary>
+        public static void PostPriorRunDiedWithState(
+            InformationalEventPost post,
+            AgentConfiguration agentConfig,
+            Program.PreviousExitSummary previousExit,
+            DecisionState priorState,
+            AgentLogger logger)
+        {
+            try
+            {
+                // Defensive fallback: PreviousExitSummary.ExitType is settable but not
+                // initialised on the property itself. The caller's IsUncleanExit gate
+                // already rules out null in practice, but we don't want a null on the
+                // wire payload if a future refactor changes the gate.
+                var exitType = previousExit?.ExitType ?? "unknown";
+
+                // Dictionary<string, object> is fine here because all three values are
+                // non-null through our gates: exitType is non-null via the fallback above,
+                // LastBootUtc?.ToString() ?? string.Empty always yields a string, and
+                // DecisionStateSnapshotBuilder.Build always returns a non-null dict (its
+                // VALUES may be null, but the dict itself is not). If a future addition
+                // places a directly-nullable scalar into Data, switch the type to
+                // Dictionary<string, object?> to silence nullable warnings.
+                var data = new Dictionary<string, object>(StringComparer.Ordinal)
+                {
+                    ["previousExitType"] = exitType,
+                    ["lastBootUtc"] = previousExit?.LastBootUtc?.ToString("o") ?? string.Empty,
+                    ["priorState"] = DecisionStateSnapshotBuilder.Build(priorState),
+                };
+
+                if (!string.IsNullOrEmpty(previousExit?.CrashExceptionType))
+                    data["previousCrashException"] = previousExit.CrashExceptionType;
+
+                post.Emit(new EnrollmentEvent
+                {
+                    SessionId = agentConfig.SessionId,
+                    TenantId = agentConfig.TenantId,
+                    EventType = SharedConstants.EventTypes.PriorRunDiedWithState,
+                    Severity = EventSeverity.Warning,
+                    Source = "Program.DetectPreviousExit",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Prior agent run died (exitType={exitType}); attached last-known DecisionState (Stage={priorState.Stage}, StepIndex={priorState.StepIndex})",
+                    Data = data,
+                    ImmediateUpload = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"prior_run_died_with_state emission failed: {ex.Message}");
             }
         }
 
