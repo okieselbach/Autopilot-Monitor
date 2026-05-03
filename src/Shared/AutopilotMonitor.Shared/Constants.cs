@@ -209,7 +209,12 @@ namespace AutopilotMonitor.Shared
             public const string SoftwareInventoryAnalysis = "software_inventory_analysis";
             public const string VulnerabilityReport       = "vulnerability_report";
             public const string AgentVersionCheck         = "agent_version_check";
+            public const string AgentStarted              = "agent_started";        // Lifecycle anchor — fired Seq=1 at agent boot. PR1: replaces hardcoded string-literals at emit sites.
             public const string AgentShuttingDown         = "agent_shutting_down";  // V2 single-rail plan §6.2 — terminate-hygiene acknowledgement emitted before CleanupService tears down
+            public const string SystemRebootDetected      = "system_reboot_detected"; // Lifecycle anchor — fired when previousExitType=reboot_kill. PR1.
+            public const string PerformanceCollectorStopped     = "performance_collector_stopped";    // Idle-stop anchor — fired after 15 min idle by PerformanceCollector. PR1.
+            public const string AgentMetricsCollectorStopped    = "agent_metrics_collector_stopped";  // Idle-stop anchor — fired after 15 min idle by AgentMetricsCollector. PR1.
+            public const string PriorRunDiedWithState           = "prior_run_died_with_state";        // Death-Rattle (Plan §B) — emitted on next run if previous exit was unclean. PR1.
 
             // IME log tracker — app / device / script telemetry (V2 single-rail plan §5.9)
             public const string EspPhaseChanged           = "esp_phase_changed";

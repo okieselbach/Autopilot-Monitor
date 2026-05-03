@@ -9,6 +9,7 @@ using AutopilotMonitor.Agent.V2.Core.Transport.Telemetry;
 using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
+using SharedConstants = AutopilotMonitor.Shared.Constants;
 
 namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 {
@@ -42,11 +43,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         {
             "performance_snapshot",
             "agent_metrics_snapshot",
-            "performance_collector_stopped",
-            "agent_metrics_collector_stopped",
-            "stall_probe_check",
-            "stall_probe_result",
-            "session_stalled",
+            SharedConstants.EventTypes.PerformanceCollectorStopped,
+            SharedConstants.EventTypes.AgentMetricsCollectorStopped,
+            SharedConstants.EventTypes.StallProbeCheck,
+            SharedConstants.EventTypes.StallProbeResult,
+            SharedConstants.EventTypes.SessionStalled,
         };
 
         private readonly string _sessionId;
@@ -256,9 +257,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     _idleStopped = true;
 
                     if (hadPerformance)
-                        EmitIdleStopped("performance_collector_stopped", idleMinutes);
+                        EmitIdleStopped(SharedConstants.EventTypes.PerformanceCollectorStopped, idleMinutes);
                     if (hadSelfMetrics)
-                        EmitIdleStopped("agent_metrics_collector_stopped", idleMinutes);
+                        EmitIdleStopped(SharedConstants.EventTypes.AgentMetricsCollectorStopped, idleMinutes);
                 }
             }
             catch (Exception ex)

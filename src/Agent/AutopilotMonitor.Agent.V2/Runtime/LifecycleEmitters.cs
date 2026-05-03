@@ -7,6 +7,7 @@ using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Security;
 using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
+using SharedConstants = AutopilotMonitor.Shared.Constants;
 
 namespace AutopilotMonitor.Agent.V2.Runtime
 {
@@ -65,7 +66,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 {
                     SessionId = agentConfig.SessionId,
                     TenantId = agentConfig.TenantId,
-                    EventType = "agent_started",
+                    EventType = SharedConstants.EventTypes.AgentStarted,
                     Severity = EventSeverity.Info,
                     Source = "Agent",
                     Phase = EnrollmentPhase.Unknown,

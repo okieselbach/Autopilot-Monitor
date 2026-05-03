@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.DecisionCore.State;
+using SharedConstants = AutopilotMonitor.Shared.Constants;
 
 namespace AutopilotMonitor.DecisionCore.Engine
 {
@@ -117,7 +118,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
             var timelineParams = new Dictionary<string, string>
             {
-                ["eventType"] = "system_reboot_detected",
+                ["eventType"] = SharedConstants.EventTypes.SystemRebootDetected,
                 ["reason"] = "prior agent process was terminated by the reboot",
             };
             if (signal.Payload != null)
