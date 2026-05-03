@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared.Models;
 
@@ -101,6 +102,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
                     nameof(parameters));
             }
 
+            var data = ResolveData(parameters, typedPayload);
+
+            // Plan A — Edge-Triggered State Snapshots (2026-05-03): for events on the
+            // lifecycle-anchor allowlist, attach the current DecisionState snapshot under
+            // data["decisionState"] for post-mortem diagnosis without client-side logs.
+            // Mutation is safe: ResolveData always returns a fresh Dictionary instance
+            // (both the typedPayload-as-dict copy path and the parameter-rebuild path
+            // construct new dicts). The defensive ContainsKey-check prevents clobbering
+            // a snapshot already in the typedPayload — should never occur in practice
+            // but documents the merge contract.
+            if (LifecycleAnchorEventTypes.Contains(eventType) && !data.ContainsKey("decisionState"))
+            {
+                data["decisionState"] = DecisionStateSnapshotBuilder.Build(currentState);
+            }
+
             var evt = new EnrollmentEvent
             {
                 SessionId = currentState.SessionId,
@@ -112,7 +128,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
                 Message = BuildMessage(eventType, parameters),
                 Timestamp = DateTime.SpecifyKind(occurredAtUtc, DateTimeKind.Utc),
                 ImmediateUpload = ParseImmediateUpload(parameters),
-                Data = ResolveData(parameters, typedPayload),
+                Data = data,
 
                 // Codex follow-up #3 forward-link: every EmitEventTimelineEntry effect runs
                 // as part of a reducer step, so currentState.StepIndex == the emitting
