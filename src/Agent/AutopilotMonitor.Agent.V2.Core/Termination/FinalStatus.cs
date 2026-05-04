@@ -61,6 +61,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         [JsonProperty("signalTimestamps", NullValueHandling = NullValueHandling.Ignore)]
         public Dictionary<string, string> SignalTimestamps { get; set; }
 
+        /// <summary>
+        /// V2 schema 2 — IME pattern that drove the engine's terminal classification, if any.
+        /// Surfaced as a top-level field (rather than encoded into <see cref="SignalsSeen"/>)
+        /// so the on-disk JSON matches the on-the-wire <c>imePatternMatchedPatternId</c> field
+        /// in the audit trail. Absent when no IME pattern was matched.
+        /// </summary>
+        [JsonProperty("imeMatchedPatternId", NullValueHandling = NullValueHandling.Ignore)]
+        public string ImeMatchedPatternId { get; set; }
+
         [JsonProperty("appSummary")]
         public FinalStatusAppSummary AppSummary { get; set; } = new FinalStatusAppSummary();
 

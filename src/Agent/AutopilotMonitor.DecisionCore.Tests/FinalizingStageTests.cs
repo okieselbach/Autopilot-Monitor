@@ -164,7 +164,10 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Contains("hello_resolved", signalsSeen);
             Assert.Contains("desktop_arrived", signalsSeen);
 
-            var timestamps = Assert.IsType<Dictionary<string, object>>(payload["signalTimestamps"]);
+            // Schema-Drift Sync (2026-05-04): signalTimestamps is now Dictionary<string, string>
+            // (all values are ISO-8601 strings — the engine no longer carries raw DateTime objects
+            // through this slot). Shared with FinalStatusBuilder via DecisionStateSignalCensus.
+            var timestamps = Assert.IsType<Dictionary<string, string>>(payload["signalTimestamps"]);
             // Hello resolved at T0+4min, Desktop arrived at T0+5min — both ISO-8601 round-trip strings.
             Assert.Equal(T0.AddMinutes(4).ToString("o", System.Globalization.CultureInfo.InvariantCulture), timestamps["helloResolved"]);
             Assert.Equal(T0.AddMinutes(5).ToString("o", System.Globalization.CultureInfo.InvariantCulture), timestamps["desktopArrived"]);

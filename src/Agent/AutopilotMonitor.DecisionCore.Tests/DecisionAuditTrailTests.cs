@@ -70,7 +70,10 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Equal(42L, data["signalOrdinal"]);
             Assert.IsType<List<string>>(data["signalsSeen"]);
             Assert.IsType<Dictionary<string, object>>(data["signalEvidence"]);
-            Assert.IsType<Dictionary<string, object>>(data["signalTimestamps"]);
+            // Schema-Drift Sync (2026-05-04): signalTimestamps is now Dictionary<string, string>
+            // — values are pure ISO-8601 strings, sourced from DecisionStateSignalCensus shared
+            // with the V2 agent's FinalStatusBuilder.
+            Assert.IsType<Dictionary<string, string>>(data["signalTimestamps"]);
             Assert.IsType<Dictionary<string, object>>(data["scenario"]);
             Assert.False(data.ContainsKey("classifier"));
             Assert.False(data.ContainsKey("classifierInputs"));

@@ -92,6 +92,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
         [Fact]
         public void Build_signalsSeen_from_decision_state_facts()
         {
+            // Schema-Drift Sync (2026-05-04): final-status.json signal-name strings now go
+            // through DecisionStateSignalCensus so they match the on-the-wire audit trail
+            // verbatim. AAD-with-user → "aad_user_joined_with_user" (the device-only counterpart
+            // would emit "aad_user_joined_device_only"); IME pattern → "ime_pattern_matched"
+            // (with the actual id surfaced via the new top-level ImeMatchedPatternId field).
             var initial = DecisionState.CreateInitial("S1", "T1");
             var state = new DecisionStateBuilder(initial)
             {
@@ -108,8 +113,52 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             Assert.Contains("hello_resolved", status.SignalsSeen);
             Assert.Contains("desktop_arrived", status.SignalsSeen);
-            Assert.Contains("aad_user_joined", status.SignalsSeen);
-            Assert.Contains("ime_pattern:esp_done", status.SignalsSeen);
+            Assert.Contains("aad_user_joined_with_user", status.SignalsSeen);
+            Assert.Contains("ime_pattern_matched", status.SignalsSeen);
+            Assert.Equal("esp_done", status.ImeMatchedPatternId);
+        }
+
+        [Fact]
+        public void Build_signalsSeen_distinguishes_device_only_aad_join()
+        {
+            // Schema-Drift Sync (2026-05-04): the V2 builder previously dropped the
+            // device-only AAD-join observation entirely (only emitted when withUser=true).
+            // Census now emits "aad_user_joined_device_only" so post-mortems can distinguish
+            // a stuck Hybrid login (user-late) from a self-deploying device.
+            var initial = DecisionState.CreateInitial("S1", "T1");
+            var state = new DecisionStateBuilder(initial)
+            {
+                Stage = SessionStage.Completed,
+                ScenarioObservations = EnrollmentScenarioObservations.Empty.WithAadUserJoinWithUserObserved(value: false, sourceSignalOrdinal: 1),
+            }.Build();
+
+            var status = FinalStatusBuilder.Build(state,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+
+            Assert.Contains("aad_user_joined_device_only", status.SignalsSeen);
+            Assert.DoesNotContain("aad_user_joined_with_user", status.SignalsSeen);
+        }
+
+        [Fact]
+        public void Build_signalsSeen_includes_account_setup_entered_when_observed()
+        {
+            // Schema-Drift Sync (2026-05-04): account_setup_entered is in the engine's
+            // audit-trail census; the on-disk JSON now reports it too.
+            var initial = DecisionState.CreateInitial("S1", "T1");
+            var state = new DecisionStateBuilder(initial)
+            {
+                Stage = SessionStage.Completed,
+                AccountSetupEnteredUtc = new SignalFact<DateTime>(StartUtc.AddMinutes(20), 1),
+            }.Build();
+
+            var status = FinalStatusBuilder.Build(state,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed),
+                packageStates: null, agentStartTimeUtc: StartUtc);
+
+            Assert.Contains("account_setup_entered", status.SignalsSeen);
+            Assert.NotNull(status.SignalTimestamps);
+            Assert.Equal(StartUtc.AddMinutes(20).ToString("o"), status.SignalTimestamps!["accountSetupEntered"]);
         }
 
         [Fact]

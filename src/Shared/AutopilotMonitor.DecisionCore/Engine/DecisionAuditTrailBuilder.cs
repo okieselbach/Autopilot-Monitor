@@ -84,13 +84,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
             // Signal census — both a flat list (cheap rendering / KQL `has` filter) and a
             // structured evidence map (ordinal + UTC for the Inspector's "jump to signal").
-            var (signalsSeen, signalEvidence, signalTimestamps) = BuildSignalCensus(postState);
-            data["signalsSeen"] = signalsSeen;
-            data["signalEvidence"] = signalEvidence;
+            // Shared with the V2 agent's FinalStatusBuilder via DecisionStateSignalCensus so
+            // the on-disk final-status.json and the on-the-wire audit trail use identical
+            // signal-naming rules.
+            var census = DecisionStateSignalCensus.Build(postState);
+            data["signalsSeen"] = census.SignalsSeen;
+            data["signalEvidence"] = census.SignalEvidence;
             // signalTimestamps mirrors the legacy V2-parity field name (FinalizingStageTests
             // pre-existing assertion) — kept verbatim so audit-trail is a strict superset of
             // what enrollment_complete already published.
-            data["signalTimestamps"] = signalTimestamps;
+            data["signalTimestamps"] = census.SignalTimestamps;
 
             // Scenario block — single source of truth for "what kind of enrollment was this".
             data["scenario"] = BuildScenarioBlock(postState);
@@ -154,75 +157,6 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         // --- helpers ------------------------------------------------------------------------
 
-        private static (List<string> SignalsSeen, Dictionary<string, object> SignalEvidence, Dictionary<string, object> SignalTimestamps) BuildSignalCensus(DecisionState s)
-        {
-            var seen = new List<string>(8);
-            var evidence = new Dictionary<string, object>(StringComparer.Ordinal);
-            var timestamps = new Dictionary<string, object>(StringComparer.Ordinal);
-
-            // Flow signals (Classic / SelfDeploying paths).
-            if (s.HelloResolvedUtc != null)
-            {
-                seen.Add("hello_resolved");
-                timestamps["helloResolved"] = FormatUtc(s.HelloResolvedUtc.Value);
-                evidence["helloResolved"] = TimestampedEvidence(s.HelloResolvedUtc);
-            }
-            if (s.DesktopArrivedUtc != null)
-            {
-                seen.Add("desktop_arrived");
-                timestamps["desktopArrived"] = FormatUtc(s.DesktopArrivedUtc.Value);
-                evidence["desktopArrived"] = TimestampedEvidence(s.DesktopArrivedUtc);
-            }
-            if (s.EspFinalExitUtc != null)
-            {
-                seen.Add("esp_final_exit");
-                timestamps["espFinalExit"] = FormatUtc(s.EspFinalExitUtc.Value);
-                evidence["espFinalExit"] = TimestampedEvidence(s.EspFinalExitUtc);
-            }
-            if (s.ImeMatchedPatternId != null)
-            {
-                seen.Add("ime_pattern_matched");
-                evidence["imePatternMatched"] = OrdinalEvidence(s.ImeMatchedPatternId.SourceSignalOrdinal);
-            }
-            if (s.SystemRebootUtc != null)
-            {
-                seen.Add("system_reboot");
-                timestamps["systemReboot"] = FormatUtc(s.SystemRebootUtc.Value);
-                evidence["systemReboot"] = TimestampedEvidence(s.SystemRebootUtc);
-            }
-            if (s.AccountSetupEnteredUtc != null)
-            {
-                seen.Add("account_setup_entered");
-                timestamps["accountSetupEntered"] = FormatUtc(s.AccountSetupEnteredUtc.Value);
-                evidence["accountSetupEntered"] = TimestampedEvidence(s.AccountSetupEnteredUtc);
-            }
-
-            // WhiteGlove Part-1 sealing signals (engine-internal observations, no UTC fact).
-            if (s.ScenarioObservations.ShellCoreWhiteGloveSuccessSeen?.Value == true)
-            {
-                seen.Add("shellcore_whiteglove_success");
-                evidence["shellcoreWhiteGloveSuccess"] = OrdinalEvidence(s.ScenarioObservations.ShellCoreWhiteGloveSuccessSeen.SourceSignalOrdinal);
-            }
-            if (s.ScenarioObservations.WhiteGloveSealingPatternSeen?.Value == true)
-            {
-                seen.Add("whiteglove_sealing_pattern");
-                evidence["whiteGloveSealingPattern"] = OrdinalEvidence(s.ScenarioObservations.WhiteGloveSealingPatternSeen.SourceSignalOrdinal);
-            }
-            if (s.ScenarioObservations.AadUserJoinWithUserObserved != null)
-            {
-                seen.Add(s.ScenarioObservations.AadUserJoinWithUserObserved.Value
-                    ? "aad_user_joined_with_user"
-                    : "aad_user_joined_device_only");
-                evidence["aadUserJoinObserved"] = new Dictionary<string, object>(StringComparer.Ordinal)
-                {
-                    ["ordinal"] = s.ScenarioObservations.AadUserJoinWithUserObserved.SourceSignalOrdinal,
-                    ["withUser"] = s.ScenarioObservations.AadUserJoinWithUserObserved.Value,
-                };
-            }
-
-            return (seen, evidence, timestamps);
-        }
-
         private static Dictionary<string, object> BuildScenarioBlock(DecisionState s)
         {
             var block = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -273,31 +207,6 @@ namespace AutopilotMonitor.DecisionCore.Engine
             }
             return result;
         }
-
-        private static Dictionary<string, object> TimestampedEvidence<T>(SignalFact<T>? fact)
-        {
-            // Caller guards null; this overload exists for the symmetric SignalFact<DateTime>
-            // case so we capture both the ordinal and the canonicalized UTC stamp in one go.
-            var dict = new Dictionary<string, object>(StringComparer.Ordinal)
-            {
-                ["ordinal"] = fact!.SourceSignalOrdinal,
-            };
-            if (fact.Value is DateTime dt)
-            {
-                dict["utc"] = FormatUtc(dt);
-            }
-            else if (fact.Value != null)
-            {
-                dict["value"] = fact.Value!;
-            }
-            return dict;
-        }
-
-        private static Dictionary<string, object> OrdinalEvidence(long ordinal) =>
-            new Dictionary<string, object>(StringComparer.Ordinal)
-            {
-                ["ordinal"] = ordinal,
-            };
 
         private static string FormatUtc(DateTime utc) =>
             DateTime.SpecifyKind(utc, DateTimeKind.Utc)

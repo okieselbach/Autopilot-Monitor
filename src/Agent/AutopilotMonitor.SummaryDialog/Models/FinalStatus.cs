@@ -48,6 +48,14 @@ namespace AutopilotMonitor.SummaryDialog.Models
         [JsonProperty("signalTimestamps", NullValueHandling = NullValueHandling.Ignore)]
         public Dictionary<string, string> SignalTimestamps { get; set; }
 
+        /// <summary>
+        /// Schema 2 — IME pattern id that the engine's terminal classification matched on,
+        /// if any. Mirrors the on-the-wire <c>imePatternMatchedPatternId</c> audit-trail
+        /// field so client and backend post-mortems use the same identifier.
+        /// </summary>
+        [JsonProperty("imeMatchedPatternId", NullValueHandling = NullValueHandling.Ignore)]
+        public string ImeMatchedPatternId { get; set; }
+
         [JsonProperty("appSummary")]
         public AppSummary AppSummary { get; set; }
 

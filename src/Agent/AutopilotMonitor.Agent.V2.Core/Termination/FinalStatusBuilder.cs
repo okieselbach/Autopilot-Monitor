@@ -1,9 +1,9 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.DecisionCore.Engine;
 using AutopilotMonitor.DecisionCore.State;
 
 namespace AutopilotMonitor.Agent.V2.Core.Termination
@@ -37,6 +37,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             var uptimeSeconds = Math.Max(0, (terminated.TerminatedAtUtc - agentStartTimeUtc).TotalSeconds);
             var timings = appTimings ?? new Dictionary<string, AppInstallTiming>();
 
+            // Reuse the engine's signal-census logic so on-disk final-status.json and
+            // on-the-wire enrollment_complete audit trail use identical naming for the
+            // observed signals. Adding a new milestone signal in DecisionStateSignalCensus
+            // automatically lights it up in both surfaces.
+            var census = DecisionStateSignalCensus.Build(state);
+
             var status = new FinalStatus
             {
                 SchemaVersion = 2,
@@ -46,9 +52,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 HelloOutcome = state.HelloOutcome?.Value ?? "unknown",
                 EnrollmentType = DescribeEnrollmentType(state.ScenarioProfile),
                 AgentUptimeSeconds = uptimeSeconds,
-                SignalsSeen = BuildSignalsSeen(state),
+                SignalsSeen = census.SignalsSeen,
                 FailureReason = BuildFailureReason(terminated, state),
-                SignalTimestamps = BuildSignalTimestamps(state),
+                SignalTimestamps = census.SignalTimestamps.Count == 0 ? null : census.SignalTimestamps,
+                ImeMatchedPatternId = state.ImeMatchedPatternId?.Value,
                 AppSummary = BuildAppSummary(packageStates),
                 PackageStatesByPhase = BuildPackageStatesByPhase(packageStates, timings),
             };
@@ -95,27 +102,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             return "Enrollment did not complete successfully. Check the diagnostics bundle for details.";
         }
 
-        /// <summary>
-        /// Schema 2 — milestone signal timestamps (ISO-8601). Mirrors what the V1 agent wrote
-        /// to <c>signalTimestamps</c>; V2 lost this in the rewrite. The dialog does not render
-        /// it, but field engineers reading <c>final-status.json</c> post-mortem rely on it.
-        /// </summary>
-        private static Dictionary<string, string>? BuildSignalTimestamps(DecisionState state)
-        {
-            var ts = new Dictionary<string, string>(StringComparer.Ordinal);
-            void Add(string key, SignalFact<DateTime>? fact)
-            {
-                if (fact != null) ts[key] = fact.Value.ToString("o");
-            }
-
-            Add("espFinalExit", state.EspFinalExitUtc);
-            Add("helloResolved", state.HelloResolvedUtc);
-            Add("desktopArrived", state.DesktopArrivedUtc);
-            Add("systemReboot", state.SystemRebootUtc);
-
-            return ts.Count == 0 ? null : ts;
-        }
-
         private static string MapOutcome(EnrollmentTerminationOutcome outcome, SessionStage stage)
         {
             if (stage == SessionStage.WhiteGloveSealed) return "whiteglove_part1";
@@ -126,23 +112,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 case EnrollmentTerminationOutcome.TimedOut: return "timed_out";
                 default: return "unknown";
             }
-        }
-
-        private static List<string> BuildSignalsSeen(DecisionState state)
-        {
-            var signals = new List<string>();
-            if (state.EspFinalExitUtc != null) signals.Add("esp_final_exit");
-            if (state.HelloResolvedUtc != null) signals.Add("hello_resolved");
-            if (state.DesktopArrivedUtc != null) signals.Add("desktop_arrived");
-            if (state.SystemRebootUtc != null) signals.Add("system_reboot");
-            var obs = state.ScenarioObservations;
-            if (obs.AadUserJoinWithUserObserved != null && obs.AadUserJoinWithUserObserved.Value) signals.Add("aad_user_joined");
-            if (obs.ShellCoreWhiteGloveSuccessSeen != null && obs.ShellCoreWhiteGloveSuccessSeen.Value)
-                signals.Add("whiteglove_shellcore_success");
-            if (obs.WhiteGloveSealingPatternSeen != null && obs.WhiteGloveSealingPatternSeen.Value)
-                signals.Add("whiteglove_sealing_pattern");
-            if (state.ImeMatchedPatternId != null) signals.Add($"ime_pattern:{state.ImeMatchedPatternId.Value}");
-            return signals;
         }
 
         private static FinalStatusAppSummary BuildAppSummary(IReadOnlyList<AppPackageState>? packageStates)
