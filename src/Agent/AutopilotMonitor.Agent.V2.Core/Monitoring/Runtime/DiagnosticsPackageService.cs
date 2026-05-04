@@ -328,7 +328,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 
                     // 4. Agent state: snapshot, journal, signal-log, ime-tracker-state,
                     //    enrollment-complete.marker, final-status.json, whiteglove-backfill-state.json.
-                    //    Recursive to include `.quarantine` subfolders if present.
+                    //    Recursive to include `.quarantine` subfolders AND `.part1-<utc>/` buckets
+                    //    that StateArchiver creates on WG Part-2 boot — both ride along under
+                    //    AgentState/ via the same recursive walk.
                     foreach (var pattern in StateFilePatterns)
                         AddLogFiles(archive, _agentStateFolder, "AgentState", pattern, tracker, includeSubfolders: true);
 

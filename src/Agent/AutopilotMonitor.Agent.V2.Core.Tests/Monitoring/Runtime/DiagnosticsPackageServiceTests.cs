@@ -162,6 +162,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
         }
 
         [Fact]
+        public void BuildArchiveBytes_includes_whiteglove_part1_archive_subfolder()
+        {
+            // Lock-test for the WG Part-2 forensic flow: when StateArchiver has moved
+            // Part-1 reducer state into a `.part1-<utc>/` bucket on Part-2 boot, the
+            // diagnostics package must carry that bucket along (snapshot/signal-log/
+            // journal/reason). Relies on the AgentState section running with
+            // includeSubfolders:true and StateFilePatterns covering *.json/*.jsonl/*.txt.
+            using var rig = new Rig();
+            var bucket = Path.Combine(rig.StateFolder, ".part1-20260504T120000000Z");
+            Directory.CreateDirectory(bucket);
+            File.WriteAllText(Path.Combine(bucket, "snapshot.json"), "{\"stage\":\"WhiteGloveSealed\"}");
+            File.WriteAllText(Path.Combine(bucket, "signal-log.jsonl"), "{\"sig\":1}\n");
+            File.WriteAllText(Path.Combine(bucket, "journal.jsonl"), "{\"jrn\":1}\n");
+            File.WriteAllText(Path.Combine(bucket, "reason.txt"), "wg_part1_resume_archive");
+
+            var bytes = rig.Build().BuildArchiveBytes(enrollmentSucceeded: true);
+
+            var entries = ZipEntryNames(bytes);
+            Assert.Contains("AgentState/.part1-20260504T120000000Z/snapshot.json", entries);
+            Assert.Contains("AgentState/.part1-20260504T120000000Z/signal-log.jsonl", entries);
+            Assert.Contains("AgentState/.part1-20260504T120000000Z/journal.jsonl", entries);
+            Assert.Contains("AgentState/.part1-20260504T120000000Z/reason.txt", entries);
+        }
+
+        [Fact]
         public void BuildArchiveBytes_excludes_spool_subfolders()
         {
             // Spool may grow auxiliary subfolders later — current archive policy is to keep
