@@ -191,13 +191,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 // also ends the running agent process.
                 EmitAgentShuttingDown(args);
 
-                if (state == null)
+                // PR-X1 (bdb3cf9d follow-up, 2026-05-04) — WhiteGlove Part 1 sealing has
+                // no end-user session and no completed app installs. Launching the summary
+                // dialog there either lands invisibly in the SYSTEM context (about to be
+                // reseal-rebooted) or fails outright; either way the enrollment_summary_shown
+                // event is semantically wrong and pollutes the timeline. Skip the dialog
+                // build + launch + final-status.json write entirely on Part 1; the regular
+                // Completed / Failed / WhiteGloveCompletedPart2 paths still run unchanged.
+                if (!isWhiteGlovePart1)
                 {
-                    _logger.Warning("EnrollmentTerminationHandler: current state unavailable — skipping FinalStatus + SummaryDialog.");
-                }
-                else
-                {
-                    RunBuildAndLaunchDialog(state, args);
+                    if (state == null)
+                    {
+                        _logger.Warning("EnrollmentTerminationHandler: current state unavailable — skipping FinalStatus + SummaryDialog.");
+                    }
+                    else
+                    {
+                        RunBuildAndLaunchDialog(state, args);
+                    }
                 }
 
                 // Plan §5 Fix 4b — emit app_tracking_summary terminal event before the

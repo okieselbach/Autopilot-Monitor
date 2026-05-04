@@ -424,6 +424,57 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             Assert.Contains("enrollment_summary_shown", rig.EmittedEventTypes);
         }
 
+        // ============================================================= PR-X1 (bdb3cf9d, 2026-05-04)
+        // WhiteGlove Part 1 must NOT launch the summary dialog or emit
+        // enrollment_summary_shown — the device is about to be reseal-rebooted, the user
+        // session does not exist yet, and apps have not installed. The other terminal
+        // stages (Completed / Failed / WhiteGloveCompletedPart2) still launch the dialog.
+
+        [Fact]
+        public void Handle_skips_summary_dialog_on_whiteglove_part1_even_with_dialog_enabled()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.WhiteGloveSealed }.Build();
+            // Self-destruct stays off so we don't tear down between assertions, dialog is
+            // explicitly enabled to prove the Part-1 stage gate beats the config flag.
+            var cfg = rig.BuildConfig(showDialog: true, selfDestruct: false);
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.WhiteGloveSealed));
+
+            Assert.DoesNotContain("enrollment_summary_shown", rig.EmittedEventTypes);
+            Assert.False(File.Exists(Path.Combine(rig.StateDir, SummaryDialogLauncher.FinalStatusFileName)),
+                "final-status.json must not be written on WG Part 1 — the dialog launch is skipped.");
+        }
+
+        [Fact]
+        public void Handle_emits_enrollment_summary_shown_on_whiteglove_part2_completion()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.WhiteGloveCompletedPart2 }.Build();
+            var cfg = rig.BuildConfig(showDialog: true, selfDestruct: false);
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.WhiteGloveCompletedPart2));
+
+            Assert.Contains("enrollment_summary_shown", rig.EmittedEventTypes);
+            Assert.True(File.Exists(Path.Combine(rig.StateDir, SummaryDialogLauncher.FinalStatusFileName)));
+        }
+
+        [Fact]
+        public void Handle_emits_enrollment_summary_shown_on_failed_termination()
+        {
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Failed }.Build();
+            var cfg = rig.BuildConfig(showDialog: true, selfDestruct: false);
+
+            rig.Build(cfg).Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.Contains("enrollment_summary_shown", rig.EmittedEventTypes);
+            Assert.True(File.Exists(Path.Combine(rig.StateDir, SummaryDialogLauncher.FinalStatusFileName)));
+        }
+
         // ============================================================= Plan §6.2 agent_shutting_down
 
         [Fact]
