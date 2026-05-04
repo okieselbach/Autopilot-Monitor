@@ -82,6 +82,13 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 // for audit trail; full email lives only in local agent logs if at all.
                 ["userDomain"] = ExtractDomain(userEmail),
                 ["hasThumbprint"] = string.IsNullOrEmpty(thumbprint) ? "false" : "true",
+                // The AadJoinWatcher fires AadUserJoined ONLY when isPlaceholderUser==false
+                // (placeholder accounts go via the separate PlaceholderUserDetected event).
+                // So when this signal posts, by definition the join carries a real user.
+                // Without this key, HandleAadUserJoinedLateV1 reads withUser=false and the
+                // enrollment_complete audit trail records aad_user_joined_device_only — which
+                // also flips WhiteGloveSealingClassifier weights the wrong way.
+                [SignalPayloadKeys.AadJoinedWithUser] = "true",
             };
 
             _ingress.Post(
@@ -93,7 +100,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                     identifier: "aad-join-watcher-v1",
                     summary: _part2Mode
                         ? "Post-reboot AAD user sign-in detected (JoinInfo registry key)"
-                        : "Late AAD user join detected (JoinInfo registry key)",
+                        : "AAD user join observed (JoinInfo registry key)",
                     derivationInputs: new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["registryKey"] = @"HKLM\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo",
@@ -108,10 +115,10 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             // aadJoinState=real_user. Same PII-safe payload shape as the decision signal.
             var infoEventType = _part2Mode
                 ? SharedConstants.EventTypes.UserAadSignInComplete
-                : SharedConstants.EventTypes.AadUserJoinedLate;
+                : SharedConstants.EventTypes.AadUserJoinedObserved;
             var infoMessage = _part2Mode
                 ? $"Post-reboot AAD user sign-in detected (domain={payload["userDomain"]})"
-                : $"Late AAD user join detected (domain={payload["userDomain"]})";
+                : $"AAD user join observed (domain={payload["userDomain"]})";
             _post.Emit(
                 eventType: infoEventType,
                 source: SourceLabel,

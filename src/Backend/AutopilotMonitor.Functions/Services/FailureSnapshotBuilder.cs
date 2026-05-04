@@ -30,8 +30,9 @@ namespace AutopilotMonitor.Functions.Services
         // Missing entries are surfaced in the snapshot under "missingSignals". Some entries
         // are conceptual slots that admit multiple concrete event types (see special-case
         // branches in Build): "hello_terminal" is satisfied by any Hello terminal event,
-        // and "aad_user_join" by either the Part 1 (aad_user_joined_late) or Part 2
-        // (user_aad_signin_complete) real-user event.
+        // and "aad_user_join" by either the Part 1 (aad_user_joined_observed — was
+        // aad_user_joined_late before the 2026-05-04 rename, still emitted by V1 agents and
+        // present in historical data) or Part 2 (user_aad_signin_complete) real-user event.
         private static readonly string[] CanonicalCompletionSignals =
         {
             "esp_phase_changed",
@@ -39,7 +40,7 @@ namespace AutopilotMonitor.Functions.Services
             "desktop_arrived",
             "hello_policy_detected",
             "hello_provisioning_completed", // OR _failed / _blocked / _skipped — emitted as "hello_terminal" slot
-            "aad_user_joined_late",         // OR user_aad_signin_complete — emitted as "aad_user_join" slot
+            "aad_user_joined_observed",     // OR aad_user_joined_late (legacy) / user_aad_signin_complete — "aad_user_join" slot
             "enrollment_complete",
         };
 
@@ -93,7 +94,8 @@ namespace AutopilotMonitor.Functions.Services
             // ---- AAD join state — placeholder vs real user vs unknown ------------------
             // Sources (newest wins):
             //   - aad_placeholder_user_detected → placeholder
-            //   - aad_user_joined_late          → real_user (Part 1 path)
+            //   - aad_user_joined_observed      → real_user (Part 1 path, V2 since 2026-05-04)
+            //   - aad_user_joined_late          → real_user (Part 1 path, V1 + historical data)
             //   - user_aad_signin_complete      → real_user (Part 2 path; future)
             //   - aad_join_status               → fallback heuristic via isFooUser flag
             string aadJoinState = "unknown";
@@ -106,7 +108,8 @@ namespace AutopilotMonitor.Functions.Services
                     aadJoinState = "placeholder";
                     aadJoinStateAt = evt.Timestamp;
                 }
-                else if (string.Equals(et, "aad_user_joined_late", StringComparison.OrdinalIgnoreCase)
+                else if (string.Equals(et, "aad_user_joined_observed", StringComparison.OrdinalIgnoreCase)
+                         || string.Equals(et, "aad_user_joined_late", StringComparison.OrdinalIgnoreCase)
                          || string.Equals(et, "user_aad_signin_complete", StringComparison.OrdinalIgnoreCase))
                 {
                     aadJoinState = "real_user";
@@ -179,15 +182,17 @@ namespace AutopilotMonitor.Functions.Services
                         missing.Add("hello_terminal");
                     }
                 }
-                else if (sig == "aad_user_joined_late")
+                else if (sig == "aad_user_joined_observed")
                 {
                     // Codex review 2026-05-01: Part 1 (Classic / WhiteGlove) emits
-                    // aad_user_joined_late; Part 2 (post-reboot user sign-in) emits
-                    // user_aad_signin_complete. Both satisfy the same conceptual slot.
-                    // Without this branch, every healthy Part-2 session would falsely
-                    // list aad_user_joined_late as missing even though aadJoinState
-                    // is correctly classified as real_user above.
-                    if (!seenTypes.Contains("aad_user_joined_late")
+                    // aad_user_joined_observed (V2 since 2026-05-04, was aad_user_joined_late
+                    // in V1 + historical data); Part 2 (post-reboot user sign-in) emits
+                    // user_aad_signin_complete. Any of the three satisfies the same conceptual
+                    // slot — without this branch, every healthy Part-2 session would falsely
+                    // list aad_user_joined_observed as missing even though aadJoinState is
+                    // correctly classified as real_user above.
+                    if (!seenTypes.Contains("aad_user_joined_observed")
+                        && !seenTypes.Contains("aad_user_joined_late")
                         && !seenTypes.Contains("user_aad_signin_complete"))
                     {
                         missing.Add("aad_user_join");

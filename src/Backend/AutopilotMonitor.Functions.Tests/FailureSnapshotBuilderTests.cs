@@ -112,36 +112,43 @@ public class FailureSnapshotBuilderTests
         Assert.Equal("placeholder", (string?)obj["aadJoinState"]);
     }
 
-    [Fact]
-    public void Build_classifies_real_user_state_from_aad_user_joined_late()
+    [Theory]
+    // V2 since 2026-05-04 emits the renamed event...
+    [InlineData("aad_user_joined_observed")]
+    // ...but historical data + V1 agents still emit the legacy name. Snapshot must classify both.
+    [InlineData("aad_user_joined_late")]
+    public void Build_classifies_real_user_state_from_real_user_join_event(string eventType)
     {
         var json = FailureSnapshotBuilder.Build(new[]
         {
-            Event("aad_user_joined_late", Now.AddHours(-3)),
+            Event(eventType, Now.AddHours(-3)),
         }, Now);
 
         var obj = JObject.Parse(json!);
         Assert.Equal("real_user", (string?)obj["aadJoinState"]);
     }
 
-    [Fact]
-    public void Build_aad_user_join_slot_is_satisfied_by_part_1_event()
+    [Theory]
+    [InlineData("aad_user_joined_observed")]  // V2 canonical since 2026-05-04
+    [InlineData("aad_user_joined_late")]      // V1 + historical data
+    public void Build_aad_user_join_slot_is_satisfied_by_part_1_event(string eventType)
     {
         // Codex review 2026-05-01 (Finding 1): the dual-emitted informational event
         // is what makes this work. Before the fix, AadJoinWatcherAdapter only posted
         // a DecisionSignal — HandleAadUserJoinedLateV1 emits no timeline effect, so
-        // the Events table never held an aad_user_joined_late row. The snapshot then
-        // always marked it missing AND classified aadJoinState as placeholder/unknown
-        // even on healthy real-user joins.
+        // the Events table never held a real-user-join row. The snapshot then always
+        // marked it missing AND classified aadJoinState as placeholder/unknown even
+        // on healthy real-user joins. Both legacy and renamed wire strings must work.
         var json = FailureSnapshotBuilder.Build(new[]
         {
-            Event("aad_user_joined_late", Now.AddHours(-3)),
+            Event(eventType, Now.AddHours(-3)),
         }, Now);
 
         var obj = JObject.Parse(json!);
         var missing = obj["missingSignals"]!.ToObject<List<string>>()!;
-        Assert.DoesNotContain("aad_user_join", missing);          // slot satisfied
-        Assert.DoesNotContain("aad_user_joined_late", missing);   // literal must never appear
+        Assert.DoesNotContain("aad_user_join", missing);              // slot satisfied
+        Assert.DoesNotContain("aad_user_joined_observed", missing);   // literal must never appear
+        Assert.DoesNotContain("aad_user_joined_late", missing);       // legacy literal either
     }
 
     [Fact]
@@ -162,7 +169,8 @@ public class FailureSnapshotBuilderTests
 
         var missing = obj["missingSignals"]!.ToObject<List<string>>()!;
         Assert.DoesNotContain("aad_user_join", missing);              // slot satisfied
-        Assert.DoesNotContain("aad_user_joined_late", missing);       // literal must never appear
+        Assert.DoesNotContain("aad_user_joined_observed", missing);   // literal must never appear
+        Assert.DoesNotContain("aad_user_joined_late", missing);       // legacy literal either
         Assert.DoesNotContain("user_aad_signin_complete", missing);   // ditto
     }
 
@@ -276,6 +284,7 @@ public class FailureSnapshotBuilderTests
 
         // Slot label is the conceptual name; the literal Part 1 / Part 2 event-type
         // names must NOT appear directly in missingSignals (that would double-count).
+        Assert.DoesNotContain("aad_user_joined_observed", missing);
         Assert.DoesNotContain("aad_user_joined_late", missing);
         Assert.DoesNotContain("user_aad_signin_complete", missing);
 

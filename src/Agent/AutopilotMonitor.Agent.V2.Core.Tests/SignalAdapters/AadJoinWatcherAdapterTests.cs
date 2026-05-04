@@ -51,13 +51,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Equal(EvidenceKind.Derived, decisionSignal.Evidence.Kind);
             Assert.Equal("contoso.com", decisionSignal.Payload!["userDomain"]);
             Assert.Equal("true", decisionSignal.Payload["hasThumbprint"]);
+            // Session 67963703 debrief 2026-05-04: AadJoinWatcher only fires AadUserJoined
+            // for non-placeholder accounts (placeholder goes via PlaceholderUserDetected).
+            // The withUser flag must therefore always be true here, so HandleAadUserJoinedLateV1
+            // records aad_user_joined_with_user (not _device_only) in the audit trail.
+            Assert.Equal("true", decisionSignal.Payload[SignalPayloadKeys.AadJoinedWithUser]);
 
             // PII guard: full email MUST NOT appear in either rail's payload.
             Assert.DoesNotContain("alice@", string.Concat(decisionSignal.Payload.Values));
         }
 
         [Fact]
-        public void TriggerFromTest_also_emits_aad_user_joined_late_informational_event()
+        public void TriggerFromTest_also_emits_aad_user_joined_observed_informational_event()
         {
             using var f = new Fixture();
             using var adapter = new AadJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
@@ -72,7 +77,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
                 p.Kind == DecisionSignalKind.InformationalEvent
                 && p.Payload != null
                 && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
-                && et == SharedEventTypes.AadUserJoinedLate);
+                && et == SharedEventTypes.AadUserJoinedObserved);
             Assert.Equal("AadJoinWatcher", info.Payload![SignalPayloadKeys.Source]);
             Assert.Equal("true", info.Payload[SignalPayloadKeys.ImmediateUpload]);
             Assert.Equal("Info", info.Payload[SignalPayloadKeys.Severity]);
@@ -144,7 +149,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
                 p => p.Kind == DecisionSignalKind.InformationalEvent
                     && p.Payload != null
                     && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
-                    && et == SharedEventTypes.AadUserJoinedLate);
+                    && et == SharedEventTypes.AadUserJoinedObserved);
             Assert.Equal(2, f.Ingress.Posted.Count);
         }
 
@@ -219,7 +224,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             // 3 posts total after Codex review 2026-05-01 dual-emission:
             //   - placeholder informational event
             //   - real-user decision signal (AadUserJoinedLate)
-            //   - real-user informational event (aad_user_joined_late)
+            //   - real-user informational event (aad_user_joined_observed)
             Assert.Equal(3, f.Ingress.Posted.Count);
             Assert.Single(f.Ingress.Posted, p =>
                 p.Kind == DecisionSignalKind.InformationalEvent
@@ -231,7 +236,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
                 p.Kind == DecisionSignalKind.InformationalEvent
                 && p.Payload != null
                 && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et2)
-                && et2 == SharedEventTypes.AadUserJoinedLate);
+                && et2 == SharedEventTypes.AadUserJoinedObserved);
         }
 
         // ============================================================================

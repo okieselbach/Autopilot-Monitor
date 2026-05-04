@@ -20,7 +20,7 @@ namespace AutopilotMonitor.DecisionCore.Tests
         [InlineData(nameof(SharedConstants.EventTypes.NetworkStateChange))]
         [InlineData(nameof(SharedConstants.EventTypes.DesktopArrived))]
         [InlineData(nameof(SharedConstants.EventTypes.AadPlaceholderUserDetected))]
-        [InlineData(nameof(SharedConstants.EventTypes.AadUserJoinedLate))]
+        [InlineData(nameof(SharedConstants.EventTypes.AadUserJoinedObserved))]
         [InlineData(nameof(SharedConstants.EventTypes.UserAadSignInComplete))]
         [InlineData(nameof(SharedConstants.EventTypes.HybridLoginPending))]
         [InlineData(nameof(SharedConstants.EventTypes.AgentShuttingDown))]

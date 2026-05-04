@@ -32,7 +32,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
             SharedConstants.EventTypes.NetworkStateChange,            // network_state_change
             SharedConstants.EventTypes.DesktopArrived,                // desktop_arrived
             SharedConstants.EventTypes.AadPlaceholderUserDetected,    // aad_placeholder_user_detected
-            SharedConstants.EventTypes.AadUserJoinedLate,             // aad_user_joined_late
+            SharedConstants.EventTypes.AadUserJoinedObserved,         // aad_user_joined_observed
             SharedConstants.EventTypes.UserAadSignInComplete,         // user_aad_signin_complete
             SharedConstants.EventTypes.HybridLoginPending,            // hybrid_login_pending
             SharedConstants.EventTypes.AgentShuttingDown,             // agent_shutting_down
