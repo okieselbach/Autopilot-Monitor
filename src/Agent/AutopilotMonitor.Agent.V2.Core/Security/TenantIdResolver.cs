@@ -42,6 +42,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
     /// value <c>TenantId</c>. Same AAD-join phase as TenantInfo, used as a secondary
     /// reading because some flows populate one but not the other.
     /// </description></item>
+    /// <item><description>
+    /// <c>MS-Organization-Access</c> device cert in <c>LocalMachine\My</c>, OID
+    /// <c>1.2.840.113556.1.5.284.5</c>. Last-resort synchronous probe — the cert can
+    /// land before the CloudDomainJoin registry writes complete, so this lets the agent
+    /// boot without falling through to the registry-watcher awaiter and burning the
+    /// 600s wait window. See <see cref="EntraDeviceCertHelper"/>.
+    /// </description></item>
     /// </list>
     /// <para>
     /// Returns <c>null</c> when no source carries a TenantId. Never throws. On miss the
@@ -61,6 +68,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         public const string SourceEnrollmentsRegistryFallback = "enrollments_registry_fallback";
         public const string SourceCloudDomainJoinTenantInfo = "cloud_domain_join_tenant_info";
         public const string SourceCloudDomainJoinJoinInfo = "cloud_domain_join_join_info";
+        public const string SourceMsOrganizationAccessCert = "ms_organization_access_cert";
 
         /// <summary>
         /// Tries each probe in order and returns the first non-empty TenantId.
@@ -98,6 +106,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                 logger?.Info($"TenantIdResolver: resolved TenantId={fromJoinInfo} from {SourceCloudDomainJoinJoinInfo} (Enrollments registry + CloudDomainJoin\\TenantInfo had no hit).");
                 return fromJoinInfo;
             }
+
+            // Last synchronous probe: parse the MS-Organization-Access device cert.
+            // EntraDeviceCertHelper logs its own miss-reason warnings, so just record the attempt
+            // here and let a non-null result short-circuit the awaiter wait window.
+            diagnostics.MsOrgAccessCertProbed = true;
+            var fromCert = EntraDeviceCertHelper.TryGetTenantIdFromCert(logger);
+            if (fromCert != null)
+            {
+                var tenantIdString = fromCert.Value.ToString("D");
+                logger?.Info($"TenantIdResolver: resolved TenantId={tenantIdString} from {SourceMsOrganizationAccessCert} (no registry source carried it yet).");
+                return tenantIdString;
+            }
+            diagnostics.MsOrgAccessCertMissed = true;
 
             LogResolutionMiss(logger, diagnostics);
             return null;
@@ -367,6 +388,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                 foreach (var j in diag.JoinInfoEntries)
                     logger.Warning($"  - thumbprint={j.Thumbprint}, TenantId={(j.HasTenantId ? "<present>" : "<missing>")}");
             }
+
+            // MS-Organization-Access cert probe (EntraDeviceCertHelper logs its own miss reason — this
+            // is just a breadcrumb that the resolver did try the cert path before giving up).
+            if (diag.MsOrgAccessCertProbed && diag.MsOrgAccessCertMissed)
+                logger.Warning($"TenantIdResolver: {SourceMsOrganizationAccessCert} probe also missed (see EntraDeviceCertHelper warning above for the specific reason).");
         }
 
         /// <summary>
@@ -438,6 +464,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             public bool JoinInfoRootMissing;
             public string JoinInfoProbeError;
             public readonly List<JoinInfoSnapshot> JoinInfoEntries = new List<JoinInfoSnapshot>();
+
+            public bool MsOrgAccessCertProbed;
+            public bool MsOrgAccessCertMissed;
         }
 
         private struct IntuneMdmSnapshot
