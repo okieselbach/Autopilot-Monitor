@@ -56,21 +56,28 @@ public class TenantNotificationService
         }
     }
 
-    public async Task<List<GlobalNotificationDto>> GetActiveNotificationsAsync(string tenantId)
+    /// <summary>
+    /// Returns active (non-dismissed) tenant notifications visible to a caller of the given audience tier.
+    /// A notification is included iff <c>TenantNotificationAudienceCatalog.Resolve(type) &lt;= callerAudience</c>:
+    /// Admin callers see Member + Admin notifications, Member callers see only Member notifications.
+    /// </summary>
+    public async Task<List<GlobalNotificationDto>> GetActiveNotificationsAsync(string tenantId, NotificationAudience callerAudience)
     {
         try
         {
             var notifications = await _repo.GetNotificationsAsync(tenantId);
 
-            return notifications.Select(n => new GlobalNotificationDto
-            {
-                Id = n.NotificationId,
-                Type = n.Type,
-                Title = n.Title,
-                Message = n.Message,
-                Href = n.Href,
-                CreatedAt = n.CreatedAt
-            }).ToList();
+            return notifications
+                .Where(n => TenantNotificationAudienceCatalog.Resolve(n.Type) <= callerAudience)
+                .Select(n => new GlobalNotificationDto
+                {
+                    Id = n.NotificationId,
+                    Type = n.Type,
+                    Title = n.Title,
+                    Message = n.Message,
+                    Href = n.Href,
+                    CreatedAt = n.CreatedAt
+                }).ToList();
         }
         catch (Exception ex)
         {

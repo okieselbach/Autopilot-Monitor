@@ -98,6 +98,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        // TODO(per-user-dismiss): Dismissal is currently tenant-shared — flipping `Dismissed` on the
+        // single row hides the notification for every member of the tenant. When notification volume
+        // grows enough that this matters, model dismissal as a separate per-user fact:
+        //   PartitionKey = $"{tenantId}|{userObjectId}", RowKey = notificationId.
+        // The GET path then left-anti-joins the dismissed-by-this-user set against the tenant rows;
+        // the dismiss endpoints can drop to MemberRead because each user only writes their own row.
         public async Task<bool> DismissNotificationAsync(string tenantId, string notificationId, string dismissedBy)
         {
             if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(notificationId))

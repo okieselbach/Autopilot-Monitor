@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
+import { canFetchTenantNotifications } from './tenantNotificationsGate';
 import { api } from '@/lib/api';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
 
@@ -33,10 +34,14 @@ export function TenantNotificationProvider({ children }: { children: React.React
   const fetchingRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const isAuthenticated = user != null;
+  // Only tenant members (Admin/Operator/Viewer) and Global Admins are entitled to the bell.
+  // The backend filters per-notification visibility by audience tier, so it is safe to fetch
+  // for every member role — but unauthenticated users and users without a tenant role would
+  // just produce 401/403 noise, so we skip them entirely.
+  const canFetchNotifications = canFetchTenantNotifications(user);
 
   const fetchNotifications = useCallback(async () => {
-    if (!isAuthenticated || fetchingRef.current) return;
+    if (!canFetchNotifications || fetchingRef.current) return;
     fetchingRef.current = true;
 
     try {
@@ -47,19 +52,16 @@ export function TenantNotificationProvider({ children }: { children: React.React
       if (response.ok) {
         const data = await response.json();
         setTenantNotifications(data.notifications ?? []);
-      } else if (response.status === 403) {
-        // Backend gates this on TenantAdminOrGA today; non-admins get 403 — treat as empty.
-        setTenantNotifications([]);
       }
     } catch {
       // Silently ignore — notifications are best-effort
     } finally {
       fetchingRef.current = false;
     }
-  }, [isAuthenticated, getAccessToken]);
+  }, [canFetchNotifications, getAccessToken]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!canFetchNotifications) {
       setTenantNotifications([]);
       return;
     }
@@ -72,7 +74,7 @@ export function TenantNotificationProvider({ children }: { children: React.React
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isAuthenticated, fetchNotifications]);
+  }, [canFetchNotifications, fetchNotifications]);
 
   const dismissTenantNotification = useCallback(async (id: string) => {
     setTenantNotifications(prev => prev.filter(n => n.id !== id));

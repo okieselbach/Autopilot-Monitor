@@ -288,8 +288,12 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "global/notifications/dismiss-all",                EndpointPolicy.GlobalAdminOnly),
         new("POST",   "global/notifications/{notificationId}/dismiss",   EndpointPolicy.GlobalAdminOnly),
         // Tenant-scoped persistent notifications (bell). TenantId comes from JWT — middleware enforces.
-        // TODO: when EndpointPolicy.TenantAdminOrOperator lands, switch these from TenantAdminOrGA so Operators see the bell too.
-        new("GET",    "notifications",                                   EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
+        // GET is MemberRead (Admin/Operator/Viewer) — per-type visibility is filtered server-side
+        // via TenantNotificationAudienceCatalog, so Member-tier callers transparently see only the
+        // notifications they are entitled to.
+        // Dismiss endpoints stay TenantAdminOrGA: dismissal is currently tenant-shared (clearing for
+        // one user clears for all). When per-user dismiss lands, dismiss can drop to MemberRead too.
+        new("GET",    "notifications",                                   EndpointPolicy.MemberRead, TenantScoping.Jwt),
         new("POST",   "notifications/dismiss-all",                       EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
         new("POST",   "notifications/{notificationId}/dismiss",          EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
         new("GET",    "global/ops-events",                              EndpointPolicy.GlobalAdminOnly),

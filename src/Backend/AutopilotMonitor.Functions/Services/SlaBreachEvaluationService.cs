@@ -25,7 +25,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IMaintenanceRepository _maintenanceRepo;
         private readonly ISessionRepository _sessionRepo;
         private readonly WebhookNotificationService _webhookService;
-        private readonly GlobalNotificationService _globalNotificationService;
+        private readonly TenantNotificationService _tenantNotificationService;
         private readonly SlaNotificationThrottleService _throttle;
         private readonly OpsEventService _opsEventService;
         private readonly TelemetryClient _telemetryClient;
@@ -37,7 +37,7 @@ namespace AutopilotMonitor.Functions.Services
             IMaintenanceRepository maintenanceRepo,
             ISessionRepository sessionRepo,
             WebhookNotificationService webhookService,
-            GlobalNotificationService globalNotificationService,
+            TenantNotificationService tenantNotificationService,
             SlaNotificationThrottleService throttle,
             OpsEventService opsEventService,
             TelemetryClient telemetryClient,
@@ -48,7 +48,7 @@ namespace AutopilotMonitor.Functions.Services
             _maintenanceRepo = maintenanceRepo;
             _sessionRepo = sessionRepo;
             _webhookService = webhookService;
-            _globalNotificationService = globalNotificationService;
+            _tenantNotificationService = tenantNotificationService;
             _throttle = throttle;
             _opsEventService = opsEventService;
             _telemetryClient = telemetryClient;
@@ -200,8 +200,9 @@ namespace AutopilotMonitor.Functions.Services
                 await _webhookService.SendNotificationAsync(webhookUrl, (Shared.Models.Notifications.WebhookProviderType)providerType, alert);
             }
 
-            // In-app global notification
-            _ = _globalNotificationService.CreateNotificationAsync(
+            // In-app tenant notification — visible to all tenant members (Member audience)
+            await _tenantNotificationService.CreateNotificationAsync(
+                config.TenantId,
                 "sla_breach",
                 alert.Title,
                 alert.Summary ?? "",
@@ -277,8 +278,9 @@ namespace AutopilotMonitor.Functions.Services
                     await _webhookService.SendNotificationAsync(webhookUrl, (Shared.Models.Notifications.WebhookProviderType)providerType, alert);
                 }
 
-                // In-app global notification
-                _ = _globalNotificationService.CreateNotificationAsync(
+                // In-app tenant notification — visible to all tenant members (Member audience)
+                await _tenantNotificationService.CreateNotificationAsync(
+                    tenantId,
                     "sla_consecutive_failures",
                     alert.Title,
                     alert.Summary ?? "",

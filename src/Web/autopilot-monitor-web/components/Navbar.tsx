@@ -145,6 +145,10 @@ export default function Navbar() {
   const isTenantAdmin = user?.isTenantAdmin ?? false;
   const isOperator = user?.role === 'Operator';
   const isAdminOrOperator = isTenantAdmin || isOperator;
+  // Tenant notification dismiss is currently tenant-shared (clearing for one user clears for
+  // all). Only Admins / Global Admins are permitted to dismiss; Operators and Viewers see the
+  // bell as read-only. See TenantNotificationContext + EndpointAccessPolicyCatalog.
+  const canDismissTenant = isTenantAdmin || (user?.isGlobalAdmin ?? false);
 
   // Regular users (non-Admin, non-Operator): show minimal navbar with only Progress Portal
   if (!isAdminOrOperator && !user?.isGlobalAdmin) {
@@ -293,7 +297,7 @@ export default function Navbar() {
                             Mark all read
                           </button>
                         )}
-                        <button onClick={() => { clearAll(); if (showGlobal) dismissAllGlobal(); if (tenantNotifications.length > 0) dismissAllTenant(); }} className="text-xs text-gray-500 hover:text-gray-700">
+                        <button onClick={() => { clearAll(); if (showGlobal) dismissAllGlobal(); if (canDismissTenant && tenantNotifications.length > 0) dismissAllTenant(); }} className="text-xs text-gray-500 hover:text-gray-700">
                           Clear all
                         </button>
                       </div>
@@ -332,11 +336,13 @@ export default function Navbar() {
                                   </div>
                                 </div>
                               </div>
-                              <button onClick={(e) => { e.stopPropagation(); dismissTenantNotification(tn.id); }} className="ml-2 text-gray-300 hover:text-gray-500" title="Dismiss">
-                                <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                              </button>
+                              {canDismissTenant && (
+                                <button onClick={(e) => { e.stopPropagation(); dismissTenantNotification(tn.id); }} className="ml-2 text-gray-300 hover:text-gray-500" title="Dismiss">
+                                  <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path d="M6 18L18 6M6 6l12 12"></path>
+                                  </svg>
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -671,9 +677,11 @@ export default function Navbar() {
                                     <p className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">{n.title}</p>
                                     <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2">{n.message}</p>
                                   </div>
-                                  <button onClick={() => dismissTenantNotification(n.id)} className="shrink-0 text-gray-300 hover:text-gray-500">
-                                    <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor"><path d="M6 18L18 6M6 6l12 12"></path></svg>
-                                  </button>
+                                  {canDismissTenant && (
+                                    <button onClick={() => dismissTenantNotification(n.id)} className="shrink-0 text-gray-300 hover:text-gray-500">
+                                      <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                  )}
                                 </div>
                               ))}
                               {/* Global admin notifications */}

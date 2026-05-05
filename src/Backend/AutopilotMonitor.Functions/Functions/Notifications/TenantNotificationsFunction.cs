@@ -28,14 +28,22 @@ public class TenantNotificationsFunction
 
     /// <summary>
     /// GET /api/notifications
-    /// Returns all active (non-dismissed) notifications for the caller's tenant, newest first.
+    /// Returns all active (non-dismissed) notifications visible to the caller, newest first.
+    /// Visibility tier is derived from the resolved request context: Tenant Admins and Global
+    /// Admins see <see cref="NotificationAudience.Admin"/>-tier notifications too;
+    /// Operators and Viewers see only <see cref="NotificationAudience.Member"/>-tier notifications.
     /// </summary>
     [Function("GetTenantNotifications")]
     public async Task<HttpResponseData> GetNotifications(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "notifications")] HttpRequestData req)
     {
+        var ctx = req.GetRequestContext();
         var tenantId = TenantHelper.GetTenantId(req);
-        var notifications = await _notificationService.GetActiveNotificationsAsync(tenantId);
+        var callerAudience = (ctx.IsTenantAdmin || ctx.IsGlobalAdmin)
+            ? NotificationAudience.Admin
+            : NotificationAudience.Member;
+
+        var notifications = await _notificationService.GetActiveNotificationsAsync(tenantId, callerAudience);
 
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(new { success = true, notifications });
@@ -45,6 +53,9 @@ public class TenantNotificationsFunction
     /// <summary>
     /// POST /api/notifications/{notificationId}/dismiss
     /// Dismisses a single notification within the caller's tenant scope.
+    /// Currently restricted to Tenant Admins / Global Admins because dismissal is tenant-shared
+    /// (see TODO in <see cref="DataAccess.TableStorage.TableTenantNotificationRepository.DismissNotificationAsync"/>).
+    /// When per-user dismiss lands, this can drop to MemberRead.
     /// </summary>
     [Function("DismissTenantNotification")]
     public async Task<HttpResponseData> DismissNotification(
