@@ -25,7 +25,7 @@ export function registerAdminTools(server: McpServer): void {
         let data: unknown;
         const params: Record<string, string | undefined> = { tenantId: args.tenantId, dateFrom: args.dateFrom, dateTo: args.dateTo };
         if (args.userId) {
-          data = await apiFetch(`/api/metrics/mcp-usage/${encodeURIComponent(args.userId)}${buildQuery(params)}`);
+          data = await apiFetch(`/api/metrics/mcp-usage/user/${encodeURIComponent(args.userId)}${buildQuery(params)}`);
         } else if (args.daily) {
           data = await apiFetch(`/api/global/metrics/mcp-usage/daily${buildQuery(params)}`);
         } else {
@@ -43,10 +43,12 @@ export function registerAdminTools(server: McpServer): void {
     'get_geographic_metrics',
     'Get geographic distribution of enrollments — where devices are enrolling from, with performance comparisons. ' +
     'Shows per-location: session counts, success rates, avg/median/p95 duration, throughput, and outlier detection. ' +
-    'Omit tenantId for cross-tenant view (Global Admin). Use get_geographic_sessions to drill into a specific location.',
+    'Omit tenantId for cross-tenant view (Global Admin). Use get_geographic_sessions to drill into a specific location. ' +
+    'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
-      days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
+      days: z.coerce.number().int().min(1).max(365).optional().default(30)
+        .describe('Time range in days (1-365). Defaults to 30.'),
       groupBy: z.enum(['country', 'region', 'city']).optional().default('city')
         .describe('Geographic grouping level (default: "city")'),
     },
@@ -77,7 +79,8 @@ export function registerAdminTools(server: McpServer): void {
       region: z.string().optional().describe('Region/state filter (e.g. "Saxony", "North Carolina"). Used with country.'),
       city: z.string().optional().describe('City filter (e.g. "Falkenstein"). Used with country.'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
-      days: z.coerce.number().optional().default(30).describe('Time range in days (default: 30)'),
+      days: z.coerce.number().int().min(1).max(365).optional().default(30)
+        .describe('Time range in days (1-365). Defaults to 30.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_geographic_sessions', async () => {

@@ -52,7 +52,7 @@ public class SearchSessionsByEventFunction
                 return badReq;
             }
 
-            var limit = int.TryParse(query["limit"], out var lim) ? Math.Min(lim, 100) : 50;
+            var limit = int.TryParse(query["limit"], out var lim) ? Math.Clamp(lim, 1, 100) : 50;
 
             var sessions = await _sessionRepo.SearchSessionsByEventAsync(tenantId, eventType, null, null, null, limit);
 

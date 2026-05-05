@@ -28,12 +28,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var tenantId = TenantHelper.GetTenantId(req);
                 _logger.LogInformation($"Fetching app metrics for tenant {tenantId}");
 
-                // Optional time filter: ?days=7 (default: 30)
+                // Optional time filter: ?days=7 (default: 30, clamped to [1, 365] for consistency
+                // with metrics/summary, metrics/usage, and metrics/platform).
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var daysParam = query["days"];
                 int days = 30;
                 if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
                     days = parsedDays;
+                if (days < 1) days = 1;
+                if (days > 365) days = 365;
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
 

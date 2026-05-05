@@ -46,6 +46,8 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 int days = 30;
                 if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
                     days = parsedDays;
+                if (days < 1) days = 1;
+                if (days > 365) days = 365;
 
                 var groupBy = query["groupBy"] ?? "city";
 

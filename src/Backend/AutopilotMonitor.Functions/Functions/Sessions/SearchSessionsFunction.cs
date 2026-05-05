@@ -58,7 +58,7 @@ public class SearchSessionsFunction
                 GeoCountry = query["geoCountry"],
                 AgentVersion = query["agentVersion"],
                 ImeAgentVersion = query["imeAgentVersion"],
-                Limit = int.TryParse(query["limit"], out var lim) ? Math.Min(lim, 100) : 50,
+                Limit = int.TryParse(query["limit"], out var lim) ? Math.Clamp(lim, 1, 100) : 50,
             };
 
             if (bool.TryParse(query["isPreProvisioned"], out var ipp)) filter.IsPreProvisioned = ipp;

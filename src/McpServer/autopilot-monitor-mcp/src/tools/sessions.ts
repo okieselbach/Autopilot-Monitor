@@ -378,9 +378,10 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'list_blocked_devices',
     'List devices currently blocked from enrolling. Blocked devices have their enrollment sessions rejected by the backend. ' +
-    'Omit tenantId to list blocked devices across ALL tenants (requires Global Admin).',
+    'Global Admin only — both the tenant-scoped (?tenantId=) and cross-tenant variants of this endpoint require Global Admin. ' +
+    'Tenant Admins and Operators receive 403 (the backend manages the device block list as a platform-wide concern).',
     {
-      tenantId: z.string().optional().describe('Tenant ID to scope results. Omit for cross-tenant listing (Global Admin only).'),
+      tenantId: z.string().optional().describe('Tenant ID to scope results. Optional — both forms require Global Admin.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('list_blocked_devices', async () => {

@@ -54,7 +54,7 @@ public class SearchSessionsByCveFunction
 
             double? minCvssScore = double.TryParse(query["minCvssScore"], out var mcs) ? mcs : null;
             var overallRisk = query["overallRisk"];
-            var limit = int.TryParse(query["limit"], out var lim) ? Math.Min(lim, 100) : 50;
+            var limit = int.TryParse(query["limit"], out var lim) ? Math.Clamp(lim, 1, 100) : 50;
 
             var sessions = await _sessionRepo.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
 
