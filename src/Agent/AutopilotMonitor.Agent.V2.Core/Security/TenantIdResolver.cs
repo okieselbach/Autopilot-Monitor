@@ -25,6 +25,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
     /// (Intune MDM) and <c>AADTenantID</c>. Authoritative once MDM enrollment finished.
     /// </description></item>
     /// <item><description>
+    /// Same root, any other <c>EnrollmentType</c> with a non-empty <c>AADTenantID</c>
+    /// (e.g. Type=26 AAD-Join entry stamped during Autopilot pre-provisioning with the
+    /// <c>fooUser@…onmicrosoft.com</c> placeholder). Picks up the TenantID before the
+    /// Type=6 sub-key has been fully populated — observed in hybrid/pre-provisioning
+    /// flows where Type=6 sits at <c>EnrollmentState=1</c> (Discovered) with
+    /// <c>AADTenantID</c> still missing.
+    /// </description></item>
+    /// <item><description>
     /// <c>HKLM\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\TenantInfo\{TenantId}</c>
     /// — the sub-key name itself is the TenantId GUID. Written by AAD join, which in
     /// Autopilot/OOBE happens before MDM enrollment.
@@ -50,6 +58,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         private const int IntuneMdmEnrollmentType = 6;
 
         public const string SourceEnrollmentsRegistry = "enrollments_registry";
+        public const string SourceEnrollmentsRegistryFallback = "enrollments_registry_fallback";
         public const string SourceCloudDomainJoinTenantInfo = "cloud_domain_join_tenant_info";
         public const string SourceCloudDomainJoinJoinInfo = "cloud_domain_join_join_info";
 
@@ -67,6 +76,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             {
                 logger?.Info($"TenantIdResolver: resolved TenantId={fromEnrollments} from {SourceEnrollmentsRegistry}.");
                 return fromEnrollments;
+            }
+
+            var fromEnrollmentsFallback = TryEnrollmentsRegistryFallback(diagnostics, out var fallbackType, out var fallbackUpn);
+            if (!string.IsNullOrEmpty(fromEnrollmentsFallback))
+            {
+                logger?.Info($"TenantIdResolver: resolved TenantId={fromEnrollmentsFallback} from {SourceEnrollmentsRegistryFallback} (Type={fallbackType}; UPN={FormatUpnForLog(fallbackUpn)}; no Type=6 sub-key carried AADTenantID yet — typical Autopilot pre-provisioning / hybrid window).");
+                return fromEnrollmentsFallback;
             }
 
             var fromTenantInfo = TryCloudDomainJoinTenantInfo(diagnostics);
@@ -92,6 +108,49 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
 
         private static string TryEnrollmentsRegistry(ResolverDiagnostics diag)
         {
+            CollectEnrollmentSnapshots(diag);
+
+            foreach (var e in diag.IntuneMdmEnrollments)
+            {
+                if (!string.IsNullOrEmpty(e.AadTenantId))
+                    return e.AadTenantId;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Pass 2: walks the same Enrollments snapshot collected by pass 1 and returns the
+        /// first non-Type=6 sub-key carrying a non-empty <c>AADTenantID</c>. Targets the
+        /// Autopilot pre-provisioning / hybrid window where Type=6 sits at
+        /// <c>EnrollmentState=1</c> with <c>AADTenantID</c> still missing while a Type=26
+        /// AAD-Join entry already carries the TenantID.
+        /// </summary>
+        private static string TryEnrollmentsRegistryFallback(ResolverDiagnostics diag, out int? winningType, out string winningUpn)
+        {
+            winningType = null;
+            winningUpn = null;
+
+            // CollectEnrollmentSnapshots already ran in pass 1 and populated diag.OtherEnrollmentsWithTenantId.
+            // No second registry walk needed.
+            foreach (var e in diag.OtherEnrollmentsWithTenantId)
+            {
+                if (!string.IsNullOrEmpty(e.AadTenantId))
+                {
+                    winningType = e.EnrollmentType;
+                    winningUpn = e.Upn;
+                    return e.AadTenantId;
+                }
+            }
+
+            return null;
+        }
+
+        private static void CollectEnrollmentSnapshots(ResolverDiagnostics diag)
+        {
+            if (diag.EnrollmentsCollected) return;
+            diag.EnrollmentsCollected = true;
+
             try
             {
                 using (var hklm64 = OpenLocalMachine64())
@@ -100,7 +159,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                     if (enrollmentsKey == null)
                     {
                         diag.EnrollmentsRootMissing = true;
-                        return null;
+                        return;
                     }
 
                     foreach (var subKeyName in enrollmentsKey.GetSubKeyNames())
@@ -127,6 +186,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                             }
 
                             var aadTenantId = enrollmentKey.GetValue("AADTenantID")?.ToString();
+                            var upn = enrollmentKey.GetValue("UPN")?.ToString();
 
                             if (typeValue == IntuneMdmEnrollmentType)
                             {
@@ -135,15 +195,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                                 {
                                     Guid = subKeyName,
                                     EnrollmentState = enrollmentState,
-                                    HasAadTenantId = !string.IsNullOrEmpty(aadTenantId),
+                                    AadTenantId = aadTenantId,
+                                    Upn = upn,
                                 });
-
-                                if (!string.IsNullOrEmpty(aadTenantId))
-                                    return aadTenantId;
                             }
                             else
                             {
                                 diag.OtherEnrollmentTypeCount++;
+                                if (!string.IsNullOrEmpty(aadTenantId))
+                                {
+                                    diag.OtherEnrollmentsWithTenantId.Add(new OtherEnrollmentSnapshot
+                                    {
+                                        Guid = subKeyName,
+                                        EnrollmentType = typeValue.Value,
+                                        AadTenantId = aadTenantId,
+                                        Upn = upn,
+                                    });
+                                }
                             }
                         }
                     }
@@ -153,8 +221,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             {
                 diag.EnrollmentsProbeError = ex.GetType().Name + ": " + ex.Message;
             }
-
-            return null;
         }
 
         private static string TryCloudDomainJoinTenantInfo(ResolverDiagnostics diag)
@@ -261,7 +327,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
                     {
                         logger.Warning(
                             $"  - Type=6 {e.Guid}: EnrollmentState={e.EnrollmentState ?? "<missing>"}, " +
-                            $"AADTenantID={(e.HasAadTenantId ? "<present>" : "<missing>")}");
+                            $"AADTenantID={(string.IsNullOrEmpty(e.AadTenantId) ? "<missing>" : "<present>")}, " +
+                            $"UPN={FormatUpnForLog(e.Upn)}");
+                    }
+                }
+
+                if (diag.OtherEnrollmentsWithTenantId.Count > 0)
+                {
+                    logger.Warning(
+                        $"TenantIdResolver: {diag.OtherEnrollmentsWithTenantId.Count} non-Type-6 enrollment(s) carried a non-empty AADTenantID but pass-2 still returned null (should not happen — investigate):");
+                    foreach (var o in diag.OtherEnrollmentsWithTenantId)
+                    {
+                        logger.Warning(
+                            $"  - Type={o.EnrollmentType} {o.Guid}: AADTenantID=<present>, UPN={FormatUpnForLog(o.Upn)}");
                     }
                 }
             }
@@ -291,11 +369,65 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
             }
         }
 
+        /// <summary>
+        /// The two well-known placeholder accounts written into enrollment registry sub-keys
+        /// during Autopilot pre-provisioning. Both are generated by Windows from the
+        /// <c>MakeFakeUserEmail</c> code path and are NOT real users — surfacing them in the
+        /// log is safe and useful for diagnostics. Real user UPNs are PII and must NOT be
+        /// logged.
+        /// </summary>
+        public enum PlaceholderUpnKind
+        {
+            /// <summary>Not a known placeholder — could be a real user UPN.</summary>
+            None = 0,
+            /// <summary><c>fooUser@&lt;tenant&gt;.onmicrosoft.com</c> — used for the Intune-side
+            /// (MDM) enrollment leg during Autopilot pre-provisioning.</summary>
+            FooUser = 1,
+            /// <summary><c>autopilot@&lt;tenant&gt;.onmicrosoft.com</c> — used for the Entra
+            /// (AAD-Join) leg during Autopilot pre-provisioning.</summary>
+            Autopilot = 2,
+        }
+
+        /// <summary>
+        /// Classifies a UPN read from an enrollment registry sub-key as either a known
+        /// Autopilot pre-provisioning placeholder or "could be a real user". Match is
+        /// prefix-based and case-insensitive (Microsoft documents both <c>fooUser@</c> and
+        /// <c>foouser@</c> casings).
+        /// </summary>
+        public static PlaceholderUpnKind ClassifyPlaceholderUpn(string upn)
+        {
+            if (string.IsNullOrEmpty(upn)) return PlaceholderUpnKind.None;
+            if (upn.StartsWith("fooUser@", StringComparison.OrdinalIgnoreCase)) return PlaceholderUpnKind.FooUser;
+            if (upn.StartsWith("autopilot@", StringComparison.OrdinalIgnoreCase)) return PlaceholderUpnKind.Autopilot;
+            return PlaceholderUpnKind.None;
+        }
+
+        /// <summary>
+        /// Renders a UPN for the agent log. Known placeholders are logged in full plus an
+        /// annotation. Anything else is treated as a real user UPN and redacted to
+        /// <c>&lt;redacted_real_user_upn&gt;</c> — even partial UPN exposure is PII.
+        /// </summary>
+        private static string FormatUpnForLog(string upn)
+        {
+            if (string.IsNullOrEmpty(upn)) return "<missing>";
+            switch (ClassifyPlaceholderUpn(upn))
+            {
+                case PlaceholderUpnKind.FooUser:
+                    return upn + " <autopilot_pre_provisioning_placeholder:fooUser_intune_mdm_leg>";
+                case PlaceholderUpnKind.Autopilot:
+                    return upn + " <autopilot_pre_provisioning_placeholder:autopilot_entra_join_leg>";
+                default:
+                    return "<redacted_real_user_upn>";
+            }
+        }
+
         private sealed class ResolverDiagnostics
         {
+            public bool EnrollmentsCollected;
             public bool EnrollmentsRootMissing;
             public string EnrollmentsProbeError;
             public readonly List<IntuneMdmSnapshot> IntuneMdmEnrollments = new List<IntuneMdmSnapshot>();
+            public readonly List<OtherEnrollmentSnapshot> OtherEnrollmentsWithTenantId = new List<OtherEnrollmentSnapshot>();
             public int OtherEnrollmentTypeCount;
             public int EnrollmentsStructuralCount;
 
@@ -312,7 +444,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Security
         {
             public string Guid;
             public string EnrollmentState;
-            public bool HasAadTenantId;
+            public string AadTenantId;
+            public string Upn;
+        }
+
+        private struct OtherEnrollmentSnapshot
+        {
+            public string Guid;
+            public int EnrollmentType;
+            public string AadTenantId;
+            public string Upn;
         }
 
         private struct JoinInfoSnapshot
