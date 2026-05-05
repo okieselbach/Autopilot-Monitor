@@ -1024,15 +1024,19 @@ namespace AutopilotMonitor.Functions.Services
                     }
 
                     // Materialize the terminal phase regardless of the phase carried by the
-                    // triggering event. The V2 DecisionEngine emits enrollment_complete with
-                    // Phase=Unknown (feedback_phase_strategy forbids non-phase events from
-                    // declaring a phase), which would otherwise leave CurrentPhase at -1
-                    // (or its previous in-flight value) on succeeded sessions and break the
-                    // Web UI PhaseTimeline. Backend is the right place to materialize the
-                    // "terminal => Complete" invariant.
+                    // triggering event. The V2 DecisionEngine emits enrollment_complete /
+                    // enrollment_failed with Phase=Unknown (feedback_phase_strategy forbids
+                    // non-phase events from declaring a phase), which would otherwise leave
+                    // CurrentPhase at -1 (or its previous in-flight value) on terminal sessions
+                    // and break the Web UI PhaseTimeline. Backend is the right place to
+                    // materialize the "terminal => Complete/Failed" invariant.
                     if (status == SessionStatus.Succeeded)
                     {
                         update["CurrentPhase"] = (int)EnrollmentPhase.Complete;
+                    }
+                    else if (status == SessionStatus.Failed)
+                    {
+                        update["CurrentPhase"] = (int)EnrollmentPhase.Failed;
                     }
 
                     // Align StartedAt with the earliest event timestamp provided by the caller
@@ -1250,14 +1254,18 @@ namespace AutopilotMonitor.Functions.Services
 
                             // Codex follow-up (882fef64 PR3-PR5 review): mirror the
                             // terminal-phase override from the normal path (line ~1019). V2
-                            // emits enrollment_complete with Phase=Unknown (per
-                            // feedback_phase_strategy), so currentPhase.HasValue is false
+                            // emits enrollment_complete / enrollment_failed with Phase=Unknown
+                            // (per feedback_phase_strategy), so currentPhase.HasValue is false
                             // here. Without this override the force-update path leaves
                             // CurrentPhase at its prior (in-flight or -1) value forever
-                            // when ETag retries are exhausted exactly at completion.
+                            // when ETag retries are exhausted exactly at terminal transition.
                             if (status == SessionStatus.Succeeded)
                             {
                                 forceUpdate["CurrentPhase"] = (int)EnrollmentPhase.Complete;
+                            }
+                            else if (status == SessionStatus.Failed)
+                            {
+                                forceUpdate["CurrentPhase"] = (int)EnrollmentPhase.Failed;
                             }
 
                             var freshStartedAt = freshSession.GetDateTimeOffset("StartedAt")?.UtcDateTime ?? DateTime.MaxValue;
