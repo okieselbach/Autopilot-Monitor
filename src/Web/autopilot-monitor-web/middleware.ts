@@ -83,8 +83,11 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip Next internals and the static favicon. Everything else — including
-    // route handlers under /api/* and /go/[code] — runs through middleware.
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+    // Skip Next internals plus anything with a file extension — that catches
+    // public/ assets at the root (BingSiteAuth.xml, IndexNow.txt, images,
+    // maintenance.html) and well-known verification files like
+    // /.well-known/microsoft-identity-association.json. Route handlers and
+    // app routes have no extension, so they keep flowing through middleware.
+    "/((?!_next/static|_next/image|.*\\..*).*)",
   ],
 };
