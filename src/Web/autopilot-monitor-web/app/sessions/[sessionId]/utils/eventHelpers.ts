@@ -7,10 +7,14 @@ import { EnrollmentEvent } from "@/types";
 // (Part 1 still in progress, or session is not WhiteGlove at all).
 //
 // Resolution order — mirrors the agent-side V1-symmetric resume mechanic (PR-A):
-//   1. `whiteglove_resumed` is the definitive Part 2 marker (emitted by the orchestrator
-//      after Archive-and-Reset detects WhiteGloveSealed snapshot). Returns its sequence - 1.
-//   2. Fallback for older agents that never emit `whiteglove_resumed`: the first
-//      `agent_started` AFTER `whiteglove_complete` is the Part 2 boot. Returns its sequence - 1.
+//   1. `whiteglove_resumed` indicates a Part-2 resume happened. The boundary the user
+//      perceives is the Part-2 boot itself, not the resumed marker that follows it
+//      ~0–2s later. Look for the `agent_started` that sits between whiteglove_complete
+//      and whiteglove_resumed and split THERE; this keeps the post-reseal boot
+//      (agent_started + its agent_version_check) inside the User Enrollment block.
+//      Falls back to `resumed.sequence - 1` if no agent_started is found in between.
+//   2. Older agents that never emit `whiteglove_resumed`: the first `agent_started`
+//      AFTER `whiteglove_complete` is the Part 2 boot. Returns its sequence - 1.
 //   3. Pre-provisioning only (no Part 2 yet): the last cleanup event after `whiteglove_complete`
 //      (`agent_shutdown`) ends Part 1; otherwise the `whiteglove_complete` sequence itself.
 //   4. Nothing: -1.
@@ -19,6 +23,21 @@ export function computeWhiteGloveSplitSequence(events: EnrollmentEvent[]): numbe
   const resumedEvent = events.find(e => e.eventType === "whiteglove_resumed");
 
   if (resumedEvent) {
+    // Lower bound = whiteglove_complete iff it precedes resumed; in the race case
+    // (Windows writes whiteglove_complete AFTER the Part-2 reboot) we drop the bound to 0.
+    const lowerBound = (wgEvent && wgEvent.sequence < resumedEvent.sequence)
+      ? wgEvent.sequence
+      : 0;
+    // The most recent agent_started before whiteglove_resumed is the post-reseal Part-2 boot.
+    // Sort candidates desc so we don't depend on the input being pre-sorted by sequence.
+    const part2Boot = events
+      .filter(e =>
+        e.eventType === "agent_started" &&
+        e.sequence > lowerBound &&
+        e.sequence < resumedEvent.sequence
+      )
+      .sort((a, b) => b.sequence - a.sequence)[0];
+    if (part2Boot) return part2Boot.sequence - 1;
     return resumedEvent.sequence - 1;
   }
 
