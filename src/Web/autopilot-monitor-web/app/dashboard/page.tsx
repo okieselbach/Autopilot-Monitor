@@ -68,6 +68,7 @@ export default function Home() {
     tenantIdFilter,
     hasMore,
     loadingMore,
+    loadMore,
   });
 
   // Redirect regular users (non-admin, non-operator) to progress portal – they must never see the session list

@@ -15,6 +15,7 @@ interface UseDashboardFiltersParams {
   tenantIdFilter: string;
   hasMore: boolean;
   loadingMore: boolean;
+  loadMore: () => void;
 }
 
 interface DashboardStats {
@@ -61,6 +62,7 @@ export function useDashboardFilters({
   tenantIdFilter,
   hasMore,
   loadingMore,
+  loadMore,
 }: UseDashboardFiltersParams): UseDashboardFiltersReturn {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -217,20 +219,28 @@ export function useDashboardFilters({
   }, [sortedSessions, currentPage, sessionsPerPage]);
 
   const handlePreviousPage = () => setCurrentPage((prev) => Math.max(1, prev - 1));
-  // Allow advancing past totalPages when the server has more pages; the auto-load
-  // effect in page.tsx will fetch the next batch and totalPages catches up. Without
-  // this overshoot the user could never trigger a load while staying inside a single
-  // Prev/Next control — they would have to click a separate "Load more" button.
-  const handleNextPage = () => setCurrentPage((prev) => {
-    if (prev < totalPages) return prev + 1;
-    if (hasMore && !loadingMore) return prev + 1;
-    return prev;
-  });
+  // When advancing past locally-loaded pages, fire loadMore() in the SAME event
+  // handler so React batches setLoadingMore(true) with setCurrentPage(prev+1).
+  // If we relied on a follow-up effect to trigger the fetch, the snap-back effect
+  // below would race ahead (loadingMore still false at that point) and reset
+  // currentPage to totalPages — leaving the user on the previous page even though
+  // a load was in flight, forcing a second click to actually advance.
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage((prev) => prev + 1);
+      return;
+    }
+    if (hasMore && !loadingMore) {
+      loadMore();
+      setCurrentPage((prev) => prev + 1);
+    }
+  };
 
   // Snap currentPage back to the last valid page once a load finishes that did NOT
   // grow totalPages (e.g. an active filter narrowed the new batch to zero matches).
   // Without this the user would be stuck on an empty paginated slice with no way
-  // to recover except clicking Prev.
+  // to recover except clicking Prev. Gated on !loadingMore so it never fires
+  // mid-fetch and reverts a legitimate overshoot.
   useEffect(() => {
     if (loadingMore) return;
     if (totalPages > 0 && currentPage > totalPages) setCurrentPage(totalPages);
