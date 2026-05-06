@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { extractContinuation } from "@/lib/paginationLink";
 import { asGuidOrUndefined } from "@/utils/inputValidation";
 import type { NotificationType } from "@/contexts/NotificationContext";
 import type { Session } from "../types";
+
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 1000;
 
 type AddNotification = (
   type: NotificationType,
@@ -81,7 +85,7 @@ export function useDashboardSessions({
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [continuation, setContinuation] = useState<string | null>(null);
 
   // Refs for SignalR handlers to access current filter state without restarting subscriptions
   const tenantIdFilterRef = useRef(tenantIdFilter);
@@ -95,8 +99,8 @@ export function useDashboardSessions({
   // always see current filter values without forcing dependency-driven recreation)
   const adminModeRef = useRef(adminMode);
   adminModeRef.current = adminMode;
-  const cursorRef = useRef(cursor);
-  cursorRef.current = cursor;
+  const continuationRef = useRef(continuation);
+  continuationRef.current = continuation;
   const loadingMoreRef = useRef(loadingMore);
   loadingMoreRef.current = loadingMore;
 
@@ -157,41 +161,44 @@ export function useDashboardSessions({
     }
   }, [getAccessToken, addNotification, setBlockedDevicesSet]);
 
-  const getInitialLimit = (): number | undefined => {
-    if (typeof window === "undefined") return undefined;
+  const getInitialPageSize = (): number => {
+    // Pattern B2 default first-paint pageSize is 10; localStorage may override
+    // (legacy "sessionsPerPage" key). Cap to backend MAX_PAGE_SIZE.
+    if (typeof window === "undefined") return DEFAULT_PAGE_SIZE;
     const stored = window.localStorage.getItem("sessionsPerPage");
     const parsed = stored ? parseInt(stored, 10) : NaN;
-    const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
-    return Math.min(value, 100);
+    const value = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PAGE_SIZE;
+    return Math.min(value, MAX_PAGE_SIZE);
   };
 
   // Internal batch fetcher — returns data without touching state so callers can
-  // decide how to apply it (single append vs. progressive loop).
+  // decide how to apply it (single append vs. progressive loop). For first-page
+  // calls we use getInitialPageSize() (Pattern B2: typically 10). For load-more
+  // we keep the same pageSize so the user-visible cadence is uniform.
   const fetchSessionsBatch = useCallback(async (
-    loadMoreCursor?: string,
+    loadMoreContinuation?: string,
     globalTenantIdOverride?: string,
-  ): Promise<{ sessions: Session[]; hasMore: boolean; cursor: string | null } | null> => {
+  ): Promise<{ sessions: Session[]; hasMore: boolean; nextContinuation: string | null } | null> => {
     try {
       const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilterRef.current.trim();
       const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
-      const initialLimit = loadMoreCursor ? undefined : getInitialLimit();
-      let endpoint = globalAdminModeRef.current
-        ? api.globalSessions.list(effectiveTenantFilter, undefined, initialLimit)
-        : api.sessions.list(tenantIdRef.current ?? undefined, undefined, initialLimit);
-
-      if (loadMoreCursor) {
-        endpoint += endpoint.includes("?") ? "&" : "?";
-        endpoint += `cursor=${encodeURIComponent(loadMoreCursor)}`;
-      }
+      const pageSize = getInitialPageSize();
+      const opts = loadMoreContinuation
+        ? { pageSize, continuation: loadMoreContinuation }
+        : { pageSize };
+      const endpoint = globalAdminModeRef.current
+        ? api.globalSessions.list(effectiveTenantFilter, undefined, opts)
+        : api.sessions.list(tenantIdRef.current ?? undefined, undefined, opts);
 
       const response = await authenticatedFetch(endpoint, getAccessToken);
 
       if (response.ok) {
         const data = await response.json();
+        const nextContinuation = extractContinuation(data.nextLink);
         return {
           sessions: data.sessions || [],
-          hasMore: data.hasMore || false,
-          cursor: data.cursor || null,
+          hasMore: !!nextContinuation,
+          nextContinuation,
         };
       } else {
         addNotification("error", "Backend Error", `Failed to fetch sessions: ${response.statusText}`, "backend-error");
@@ -214,18 +221,18 @@ export function useDashboardSessions({
   }, [getAccessToken, addNotification]);
 
   // High-level fetch that applies result to state (initial load + single load-more).
-  const fetchSessions = useCallback(async (loadMoreCursor?: string, globalTenantIdOverride?: string) => {
-    const result = await fetchSessionsBatch(loadMoreCursor, globalTenantIdOverride);
+  const fetchSessions = useCallback(async (loadMoreContinuation?: string, globalTenantIdOverride?: string) => {
+    const result = await fetchSessionsBatch(loadMoreContinuation, globalTenantIdOverride);
 
     if (result) {
-      if (loadMoreCursor) {
+      if (loadMoreContinuation) {
         setSessions((prev) => [...prev, ...result.sessions]);
       } else {
         setSessions(result.sessions);
         fetchBlockedDevices(result.sessions);
       }
       setHasMore(result.hasMore);
-      setCursor(result.cursor);
+      setContinuation(result.nextContinuation);
     }
 
     setLoading(false);
@@ -245,10 +252,10 @@ export function useDashboardSessions({
   }, [fetchSessions]);
 
   const loadMore = useCallback(() => {
-    if (!cursorRef.current || fetchLockRef.current) return;
+    if (!continuationRef.current || fetchLockRef.current) return;
     fetchLockRef.current = true;
     setLoadingMore(true);
-    fetchSessions(cursorRef.current).finally(() => {
+    fetchSessions(continuationRef.current).finally(() => {
       fetchLockRef.current = false;
     });
   }, [fetchSessions]);
@@ -256,20 +263,20 @@ export function useDashboardSessions({
   // Progressive loader — fetches ALL remaining sessions batch by batch.
   // Used when search is active and local results are insufficient.
   const loadAll = useCallback(async () => {
-    if (!cursorRef.current || fetchLockRef.current) return;
+    if (!continuationRef.current || fetchLockRef.current) return;
     fetchLockRef.current = true;
     const myToken = ++loadAllTokenRef.current;
     setLoadingMore(true);
     try {
-      let currentCursor: string | null = cursorRef.current;
-      while (currentCursor && loadAllTokenRef.current === myToken) {
-        const result = await fetchSessionsBatch(currentCursor);
+      let currentContinuation: string | null = continuationRef.current;
+      while (currentContinuation && loadAllTokenRef.current === myToken) {
+        const result = await fetchSessionsBatch(currentContinuation);
         if (!result || loadAllTokenRef.current !== myToken) break;
 
         setSessions((prev) => [...prev, ...result.sessions]);
-        setCursor(result.cursor);
+        setContinuation(result.nextContinuation);
         setHasMore(result.hasMore);
-        currentCursor = result.hasMore ? result.cursor : null;
+        currentContinuation = result.hasMore ? result.nextContinuation : null;
       }
     } finally {
       fetchLockRef.current = false;
@@ -421,7 +428,7 @@ export function useDashboardSessions({
     }
 
     setSessions([]);
-    setCursor(null);
+    setContinuation(null);
     setLoading(true);
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps

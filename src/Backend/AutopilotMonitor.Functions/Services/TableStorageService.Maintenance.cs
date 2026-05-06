@@ -1,9 +1,11 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -14,7 +16,30 @@ namespace AutopilotMonitor.Functions.Services
         // ===== AUDIT LOG METHODS =====
 
         /// <summary>
-        /// Logs an audit entry
+        /// RowKey prefix marking entries written under the new reverse-tick scheme.
+        /// '!' (0x21) sorts before all hex digits ('0'-'9','a'-'f'), so new rows always
+        /// land in front of legacy bare-GUID rows during the migration window — letting
+        /// us drop in-memory re-sorts on paged reads while keeping legacy entries
+        /// reachable at the tail until they age out.
+        /// </summary>
+        internal const string AuditLogRowKeyPrefix = "!";
+
+        /// <summary>
+        /// Builds the RowKey for a new audit entry: prefix + zero-padded reverse-tick
+        /// + GUID suffix (same-tick collision protection). Exposed for unit testing
+        /// of the ordering invariants.
+        /// </summary>
+        internal static string BuildAuditLogRowKey(DateTime timestampUtc, Guid collisionSuffix)
+        {
+            var revTick = DateTime.MaxValue.Ticks - timestampUtc.Ticks;
+            return $"{AuditLogRowKeyPrefix}{revTick:D19}_{collisionSuffix:N}";
+        }
+
+        /// <summary>
+        /// Logs an audit entry. RowKey uses a fixed prefix + reverse-tick (newest-first
+        /// natural ordering) + GUID suffix (same-tick collision protection). Paged reads
+        /// then need no in-memory re-sorting because Azure Tables returns rows in
+        /// (PK asc, RK asc) order, which here is (tenant, newest-first).
         /// </summary>
         public async Task<bool> LogAuditEntryAsync(string tenantId, string action, string entityType, string entityId, string performedBy, Dictionary<string, string>? details = null)
         {
@@ -22,8 +47,9 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
                 var timestamp = DateTime.UtcNow;
+                var rowKey = BuildAuditLogRowKey(timestamp, Guid.NewGuid());
 
-                var entity = new TableEntity(tenantId, Guid.NewGuid().ToString())
+                var entity = new TableEntity(tenantId, rowKey)
                 {
                     { "Action", action },
                     { "EntityType", entityType },
@@ -45,37 +71,26 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets audit log entries for a tenant
+        /// Gets audit log entries for a tenant within an optional UTC date window.
+        /// No row cap — returns the full filtered set, sorted newest-first.
         /// </summary>
-        public async Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, int maxResults = 100)
+        public async Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, DateTime? dateFrom = null, DateTime? dateTo = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
-                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
+                var filter = BuildAuditLogFilter(tenantId, dateFrom, dateTo);
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
 
                 var logs = new List<AuditLogEntry>();
                 await foreach (var entity in query)
                 {
-                    logs.Add(new AuditLogEntry
-                    {
-                        Id = entity.RowKey,
-                        TenantId = entity.PartitionKey,
-                        Action = entity.GetString("Action") ?? string.Empty,
-                        EntityType = entity.GetString("EntityType") ?? string.Empty,
-                        EntityId = entity.GetString("EntityId") ?? string.Empty,
-                        PerformedBy = entity.GetString("PerformedBy") ?? string.Empty,
-                        Timestamp = entity.GetDateTimeOffset("Timestamp")?.UtcDateTime ?? DateTime.UtcNow,
-                        Details = entity.GetString("Details") ?? string.Empty
-                    });
-
-                    if (logs.Count >= maxResults) break;
+                    logs.Add(MapToAuditLogEntry(entity));
                 }
-
-                // Sort by timestamp descending (most recent first)
-                return logs.OrderByDescending(l => l.Timestamp).Take(maxResults).ToList();
+                logs.Sort((a, b) => b.Timestamp.CompareTo(a.Timestamp));
+                return logs;
             }
             catch (Exception ex)
             {
@@ -85,35 +100,25 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets audit log entries across all tenants (Global Admin Mode)
+        /// Gets audit log entries across all tenants (Global Admin Mode), optional UTC window.
         /// </summary>
-        public async Task<List<AuditLogEntry>> GetAllAuditLogsAsync(int maxResults = 100)
+        public async Task<List<AuditLogEntry>> GetAllAuditLogsAsync(DateTime? dateFrom = null, DateTime? dateTo = null)
         {
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
-                var query = tableClient.QueryAsync<TableEntity>();
+                var filter = BuildAuditLogFilter(tenantId: null, dateFrom, dateTo);
+                var query = string.IsNullOrEmpty(filter)
+                    ? tableClient.QueryAsync<TableEntity>()
+                    : tableClient.QueryAsync<TableEntity>(filter: filter);
 
                 var logs = new List<AuditLogEntry>();
                 await foreach (var entity in query)
                 {
-                    logs.Add(new AuditLogEntry
-                    {
-                        Id = entity.RowKey,
-                        TenantId = entity.PartitionKey,
-                        Action = entity.GetString("Action") ?? string.Empty,
-                        EntityType = entity.GetString("EntityType") ?? string.Empty,
-                        EntityId = entity.GetString("EntityId") ?? string.Empty,
-                        PerformedBy = entity.GetString("PerformedBy") ?? string.Empty,
-                        Timestamp = entity.GetDateTimeOffset("Timestamp")?.UtcDateTime ?? DateTime.UtcNow,
-                        Details = entity.GetString("Details") ?? string.Empty
-                    });
-
-                    if (logs.Count >= maxResults) break;
+                    logs.Add(MapToAuditLogEntry(entity));
                 }
-
-                // Sort by timestamp descending (most recent first)
-                return logs.OrderByDescending(l => l.Timestamp).Take(maxResults).ToList();
+                logs.Sort((a, b) => b.Timestamp.CompareTo(a.Timestamp));
+                return logs;
             }
             catch (Exception ex)
             {
@@ -121,6 +126,174 @@ namespace AutopilotMonitor.Functions.Services
                 return new List<AuditLogEntry>();
             }
         }
+
+        public Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            return FetchAuditLogPageInternalAsync(BuildAuditLogFilter(tenantId, dateFrom, dateTo), pageSize, continuation);
+        }
+
+        public Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+        {
+            // Cross-tenant: per-tenant fan-out + merge by RowKey. Without this
+            // fan-out Azure pages by (PK asc, RK asc) cross-partition, surfacing
+            // tenants alphabetically rather than newest-first globally.
+            return FetchAllAuditLogsPageAsync(dateFrom, dateTo, pageSize, continuation);
+        }
+
+        private async Task<RawPage<AuditLogEntry>> FetchAuditLogPageInternalAsync(
+            string? filter, int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
+                var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                    client: tableClient,
+                    filter: filter,
+                    pageSize: pageSize,
+                    continuation: continuation);
+
+                // RowKey scheme is `!{revtick}_{guid}` so Azure-native (PK asc, RK asc)
+                // already yields newest-first within the partition. No re-sort needed.
+                // Legacy entries (bare GUID RowKey) sort *after* all new entries because
+                // '!' (0x21) precedes hex digits — they appear at the tail of the result
+                // in undefined order until they age out of the date window.
+                var logs = new List<AuditLogEntry>(entities.Count);
+                foreach (var entity in entities) logs.Add(MapToAuditLogEntry(entity));
+                return new RawPage<AuditLogEntry>(logs, nextRawToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get audit logs page");
+                return RawPage<AuditLogEntry>.Empty;
+            }
+        }
+
+        private async Task<RawPage<AuditLogEntry>> FetchAllAuditLogsPageAsync(
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+            try
+            {
+                var continuations = AutopilotMonitor.Functions.DataAccess.TableStorage.PerPartitionFanOutMerge
+                    .DecodeMultiContinuation(continuation);
+
+                // Tenants come from TenantConfiguration (1 row per tenant — cheap).
+                // PLUS the synthetic global-tenant partition (Constants.AuditGlobalTenantId)
+                // where platform-action audits are written from TenantOffboardFunction,
+                // VersionBlockFunction, UpdateAdminConfigurationFunction, … TenantConfiguration
+                // has no row for it because it's a virtual partition, so it'd be
+                // silently skipped without this explicit add.
+                var configTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.TenantConfiguration);
+                var tenantIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    Constants.AuditGlobalTenantId,
+                };
+                await foreach (var entity in configTableClient.QueryAsync<TableEntity>(
+                    select: new[] { "PartitionKey" }, maxPerPage: 1000))
+                {
+                    tenantIds.Add(entity.PartitionKey);
+                }
+
+                var activeTenantIds = tenantIds
+                    .Where(t => !(continuations.TryGetValue(t, out var c) && c.Exhausted))
+                    .ToList();
+                if (activeTenantIds.Count == 0)
+                    return new RawPage<AuditLogEntry>(new List<AuditLogEntry>(), null);
+
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
+
+                // Per-tenant fetch in parallel: filter `PartitionKey eq tenantId` plus
+                // `RowKey gt LastRowKey` (revtick scheme → strictly older than what
+                // we already returned for this tenant), plus the optional date window.
+                var fetchTasks = activeTenantIds.Select(async tid =>
+                {
+                    continuations.TryGetValue(tid, out var prior);
+                    var tenantFilter = BuildAuditLogFilterWithRowKeyBound(tid, dateFrom, dateTo, prior?.LastRowKey);
+                    var fetched = new List<(string RowKey, AuditLogEntry Item)>();
+                    await foreach (var e in tableClient.QueryAsync<TableEntity>(filter: tenantFilter, maxPerPage: pageSize))
+                    {
+                        fetched.Add((e.RowKey, MapToAuditLogEntry(e)));
+                        if (fetched.Count >= pageSize) break;
+                    }
+                    return new AutopilotMonitor.Functions.DataAccess.TableStorage.PerPartitionFanOutMerge
+                        .PartitionFetchResult<AuditLogEntry>(tid, fetched);
+                }).ToList();
+
+                var results = await Task.WhenAll(fetchTasks);
+
+                var (items, nextContinuations) = AutopilotMonitor.Functions.DataAccess.TableStorage.PerPartitionFanOutMerge
+                    .MergeAndAdvance(results, continuations, pageSize, e => e.Timestamp);
+
+                bool anyActive = nextContinuations.Any(kv => !kv.Value.Exhausted);
+                string? nextRawToken = anyActive
+                    ? AutopilotMonitor.Functions.DataAccess.TableStorage.PerPartitionFanOutMerge
+                        .EncodeMultiContinuation(nextContinuations)
+                    : null;
+                return new RawPage<AuditLogEntry>(items, nextRawToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get all audit logs page");
+                return RawPage<AuditLogEntry>.Empty;
+            }
+        }
+
+        private static string BuildAuditLogFilterWithRowKeyBound(
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, string? lastRowKey)
+        {
+            var clauses = new List<string>
+            {
+                $"PartitionKey eq '{tenantId}'",
+            };
+            if (!string.IsNullOrEmpty(lastRowKey))
+                clauses.Add($"RowKey gt '{lastRowKey!.Replace("'", "''")}'");
+            if (dateFrom.HasValue)
+                clauses.Add($"Timestamp ge datetime'{ToUtc(dateFrom.Value):o}'");
+            if (dateTo.HasValue)
+                clauses.Add($"Timestamp le datetime'{ToUtc(dateTo.Value):o}'");
+            return string.Join(" and ", clauses);
+        }
+
+        private static AuditLogEntry MapToAuditLogEntry(TableEntity entity) => new AuditLogEntry
+        {
+            Id = entity.RowKey,
+            TenantId = entity.PartitionKey,
+            Action = entity.GetString("Action") ?? string.Empty,
+            EntityType = entity.GetString("EntityType") ?? string.Empty,
+            EntityId = entity.GetString("EntityId") ?? string.Empty,
+            PerformedBy = entity.GetString("PerformedBy") ?? string.Empty,
+            Timestamp = entity.GetDateTimeOffset("Timestamp")?.UtcDateTime ?? DateTime.UtcNow,
+            Details = entity.GetString("Details") ?? string.Empty,
+        };
+
+        // The system Timestamp is auto-managed by Azure on insert and reliably
+        // sortable; the user-defined "Timestamp" property is set by LogAuditEntry
+        // for parity with the model. We filter on the system Timestamp since it
+        // is always indexed.
+        private static string? BuildAuditLogFilter(string? tenantId, DateTime? dateFrom, DateTime? dateTo)
+        {
+            var clauses = new List<string>();
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                clauses.Add($"PartitionKey eq '{tenantId}'");
+            }
+            if (dateFrom.HasValue)
+            {
+                clauses.Add($"Timestamp ge datetime'{ToUtc(dateFrom.Value):o}'");
+            }
+            if (dateTo.HasValue)
+            {
+                clauses.Add($"Timestamp le datetime'{ToUtc(dateTo.Value):o}'");
+            }
+            return clauses.Count == 0 ? null : string.Join(" and ", clauses);
+        }
+
+        private static DateTime ToUtc(DateTime dt)
+            => dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
 
         // ===== DATA RETENTION METHODS =====
 

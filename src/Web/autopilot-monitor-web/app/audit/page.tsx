@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -8,6 +8,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { api } from '@/lib/api';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { extractContinuation } from "@/lib/paginationLink";
 import { useAdminMode } from "@/hooks/useAdminMode";
 
 
@@ -25,12 +26,42 @@ interface AuditLogEntry {
 type ActionFilter = 'ALL' | 'DELETE' | 'UPDATE' | 'CREATE';
 type EntityTypeFilter = string;
 
+const PAGE_SIZE = 50;
+
+function defaultIsoDateFrom(): string {
+  // 30 days ago, ISO 8601 UTC, midnight — matches the backend's default
+  // window so first paint without a manual filter shows the same data set.
+  const d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function defaultIsoDateTo(): string {
+  return new Date().toISOString();
+}
+
+function isoToDateInputValue(iso: string): string {
+  // <input type="date"> wants yyyy-MM-dd — we display the date portion of UTC.
+  return iso.slice(0, 10);
+}
+
+function dateInputToIsoStart(value: string): string {
+  // Treat the picker as a UTC midnight on that calendar date.
+  return value ? `${value}T00:00:00.000Z` : '';
+}
+
+function dateInputToIsoEnd(value: string): string {
+  // Inclusive upper bound: end of that calendar day in UTC.
+  return value ? `${value}T23:59:59.999Z` : '';
+}
+
 export default function AuditPage() {
   const router = useRouter();
 
   const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
+
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -38,35 +69,45 @@ export default function AuditPage() {
   const [actionFilter, setActionFilter] = useState<ActionFilter>('ALL');
   const [entityTypeFilter, setEntityTypeFilter] = useState<EntityTypeFilter>('ALL');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const logsPerPage = 12;
+
+  // Date window — both default to the last 30 days (matches backend default).
+  const [dateFromIso, setDateFromIso] = useState<string>(defaultIsoDateFrom());
+  const [dateToIso, setDateToIso] = useState<string>(defaultIsoDateTo());
+
+  // Pattern B1 click-next replace state
+  const [continuation, setContinuation] = useState<string | null>(null);
+  const [nextLink, setNextLink] = useState<string | null>(null);
+  const [continuationStack, setContinuationStack] = useState<Array<string | null>>([]);
+  const [pageNumber, setPageNumber] = useState(1);
 
   const { globalAdminMode } = useAdminMode();
 
-  const fetchAuditLogs = async (showRefreshing = false) => {
+  const fetchPage = useCallback(async (
+    nextContinuation: string | null,
+    isInitial: boolean,
+  ) => {
     try {
-      if (showRefreshing) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
+      if (isInitial) setLoading(true); else setRefreshing(true);
 
-      const endpoint = globalAdminMode
-        ? api.audit.globalLogs()
-        : api.audit.logs();
+      const opts = {
+        dateFrom: dateFromIso,
+        dateTo: dateToIso,
+        pageSize: PAGE_SIZE,
+        continuation: nextContinuation ?? undefined,
+      };
+      const endpoint = globalAdminMode ? api.audit.globalLogs(opts) : api.audit.logs(opts);
       const response = await authenticatedFetch(endpoint, getAccessToken);
-
       if (!response.ok) {
         addNotification('error', 'Backend Error', `Failed to load audit logs: ${response.statusText}`, 'audit-fetch-error');
         return;
       }
-
       const data = await response.json();
-      if (data.success) {
-        setLogs(data.logs || []);
-      } else {
+      if (!data.success) {
         addNotification('error', 'Backend Error', data.message || 'Failed to load audit logs', 'audit-fetch-error');
+        return;
       }
+      setLogs(data.logs || []);
+      setNextLink(data.nextLink ?? null);
     } catch (err) {
       if (err instanceof TokenExpiredError) {
         addNotification('error', 'Session Expired', err.message, 'session-expired-error');
@@ -78,15 +119,42 @@ export default function AuditPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [addNotification, dateFromIso, dateToIso, getAccessToken, globalAdminMode]);
 
+  // Initial / window-change fetch resets pagination state.
   useEffect(() => {
     if (!globalAdminMode && !tenantId) return;
-    fetchAuditLogs();
-  }, [tenantId]);
+    setContinuation(null);
+    setContinuationStack([]);
+    setPageNumber(1);
+    fetchPage(null, true);
+  }, [tenantId, globalAdminMode, dateFromIso, dateToIso, fetchPage]);
 
+  const handleRefresh = () => {
+    fetchPage(continuation, false);
+  };
+
+  const handleNextPage = () => {
+    const nextCont = extractContinuation(nextLink);
+    if (!nextCont) return;
+    setContinuationStack(stack => [...stack, continuation]);
+    setContinuation(nextCont);
+    setPageNumber(n => n + 1);
+    fetchPage(nextCont, false);
+  };
+
+  const handlePrevPage = () => {
+    if (continuationStack.length === 0) return;
+    const prev = continuationStack[continuationStack.length - 1];
+    setContinuationStack(stack => stack.slice(0, -1));
+    setContinuation(prev ?? null);
+    setPageNumber(n => Math.max(1, n - 1));
+    fetchPage(prev ?? null, false);
+  };
+
+  // Client-side filters operate on the current page only — Pattern B1 shows one
+  // backend page at a time, so global counts are intentionally not surfaced.
   const entityTypes = ['ALL', ...Array.from(new Set(logs.map(l => l.entityType).filter(Boolean)))];
-
   const filteredLogs = logs.filter(log => {
     if (actionFilter !== 'ALL' && log.action !== actionFilter) return false;
     if (entityTypeFilter !== 'ALL' && log.entityType !== entityTypeFilter) return false;
@@ -102,23 +170,6 @@ export default function AuditPage() {
     }
     return true;
   });
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, actionFilter, entityTypeFilter]);
-
-  const totalPages = Math.ceil(filteredLogs.length / logsPerPage);
-  const startIndex = (currentPage - 1) * logsPerPage;
-  const paginatedLogs = filteredLogs.slice(startIndex, startIndex + logsPerPage);
-
-  const handlePreviousPage = () => {
-    setCurrentPage(prev => Math.max(1, prev - 1));
-  };
-
-  const handleNextPage = () => {
-    setCurrentPage(prev => Math.min(totalPages, prev + 1));
-  };
 
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -177,13 +228,13 @@ export default function AuditPage() {
                 <div>
                   <h1 className="text-2xl font-normal text-gray-900">Audit Log</h1>
                   <p className="text-sm text-gray-600 mt-1">
-                    {filteredLogs.length} {filteredLogs.length === 1 ? 'entry' : 'entries'}
-                    {filteredLogs.length !== logs.length && ` (of ${logs.length} total)`}
+                    {filteredLogs.length} {filteredLogs.length === 1 ? 'entry' : 'entries'} on this page
+                    {filteredLogs.length !== logs.length && ` (filtered from ${logs.length})`}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => fetchAuditLogs(true)}
+                onClick={handleRefresh}
                 disabled={refreshing}
                 className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
               >
@@ -197,8 +248,26 @@ export default function AuditPage() {
         </header>
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
 
-          {/* Filters */}
+          {/* Date window + filters */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
+            {/* Date pickers */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600 dark:text-gray-400">From:</label>
+              <input
+                type="date"
+                value={isoToDateInputValue(dateFromIso)}
+                onChange={(e) => setDateFromIso(dateInputToIsoStart(e.target.value))}
+                className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <label className="text-sm text-gray-600 dark:text-gray-400">To:</label>
+              <input
+                type="date"
+                value={isoToDateInputValue(dateToIso)}
+                onChange={(e) => setDateToIso(dateInputToIsoEnd(e.target.value))}
+                className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
             {/* Search */}
             <div className="relative flex-1 min-w-[200px]">
               <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -206,7 +275,7 @@ export default function AuditPage() {
               </svg>
               <input
                 type="text"
-                placeholder="Search by user, entity, action or details..."
+                placeholder="Search by user, entity, action or details (this page only)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -241,7 +310,7 @@ export default function AuditPage() {
 
           {/* Audit Table */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-            {paginatedLogs.length === 0 ? (
+            {filteredLogs.length === 0 ? (
               <div className="p-12 text-center">
                 <svg className="h-16 w-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -277,7 +346,7 @@ export default function AuditPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {paginatedLogs.map((log) => {
+                    {filteredLogs.map((log) => {
                       const details = parseDetails(log.details);
                       const isExpanded = expandedRow === log.id;
 
@@ -343,30 +412,29 @@ export default function AuditPage() {
             )}
           </div>
 
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-between">
-              <div className="text-sm text-gray-700">
-                Page {currentPage} of {totalPages} ({filteredLogs.length} total entries)
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handlePreviousPage}
-                  disabled={currentPage === 1}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  &larr; Previous
-                </button>
-                <button
-                  onClick={handleNextPage}
-                  disabled={currentPage === totalPages}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next &rarr;
-                </button>
-              </div>
+          {/* Pagination Controls (Pattern B1) */}
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-sm text-gray-700">
+              Page {pageNumber}
+              {nextLink ? '' : ' (last)'}
             </div>
-          )}
+            <div className="flex gap-2">
+              <button
+                onClick={handlePrevPage}
+                disabled={continuationStack.length === 0 || refreshing}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                &larr; Previous
+              </button>
+              <button
+                onClick={handleNextPage}
+                disabled={!nextLink || refreshing}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next &rarr;
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </ProtectedRoute>

@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { extractContinuation, MAX_EAGER_PAGES } from "@/lib/paginationLink";
 import { isGuid } from "@/utils/inputValidation";
 import { EnrollmentEvent, Session } from "@/types";
 import type { NotificationType } from "@/contexts/NotificationContext";
+
+const TIMELINE_PAGE_SIZE = 200;
 
 type AddNotification = (
   type: NotificationType,
@@ -33,6 +36,12 @@ export interface UseSessionEventsReturn {
   setEvents: React.Dispatch<React.SetStateAction<EnrollmentEvent[]>>;
   fetchEvents: () => Promise<void>;
   scheduleFetchEvents: (delayMs?: number) => void;
+  /**
+   * True while a Pattern-A eager-fetch is still streaming pages after the first
+   * batch has rendered. Surfaces a "loading more events…" indicator on the
+   * timeline page without delaying first paint.
+   */
+  isStreamingMore: boolean;
 }
 
 /**
@@ -58,6 +67,7 @@ export function useSessionEvents({
   addNotification,
 }: UseSessionEventsParams): UseSessionEventsReturn {
   const [events, setEvents] = useState<EnrollmentEvent[]>([]);
+  const [isStreamingMore, setIsStreamingMore] = useState(false);
 
   // Debounce real-time event refreshes to avoid burst reads in Table Storage.
   const eventRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -79,47 +89,96 @@ export function useSessionEvents({
     fetchEventsInFlight.current = true;
     fetchEventsQueued.current = false;
 
+    // Pattern A — progressive eager fetch:
+    // 1. Fetch the first page (pageSize=200), render immediately so the user sees
+    //    the timeline populate within milliseconds even on huge sessions.
+    // 2. If a nextLink is returned, keep fetching pages in the background and
+    //    append to the rendered list. Surface isStreamingMore so the page can
+    //    show a small "loading more events…" indicator while batches stream.
+    // 3. The merged list is sorted by Sequence at render time (eventsByPhase
+    //    useMemo) — cross-page Azure-Tables row-key order is therefore irrelevant.
+    let aborted = false;
     try {
-      const response = await authenticatedFetch(
-        api.sessions.events(sessionId, effectiveTenantId),
-        getAccessToken
-      );
-      if (response.ok) {
-        const data = await response.json();
-        // Replace entire event list with fresh data from Table Storage (canonical truth).
-        // No merge needed — fetchEvents() is the single source; SignalR only signals.
-        // phaseName is computed at render time in eventsByPhase useMemo (no race condition).
-        const fetchedEvents = Array.isArray(data.events) ? data.events : [];
-        setEvents(prevEvents => {
-          // Keep the last known-good snapshot if backend transiently returns an empty list.
-          if (fetchedEvents.length === 0 && prevEvents.length > 0) {
-            console.warn(
-              `[SessionDetail] Ignoring empty event refresh for session ${sessionIdRef.current} (tenant ${effectiveTenantId}); keeping ${prevEvents.length} cached events`
-            );
-            return prevEvents;
-          }
-          return fetchedEvents;
-        });
+      const firstPageUrl = api.sessions.events(sessionId, effectiveTenantId, {
+        pageSize: TIMELINE_PAGE_SIZE,
+      });
+      const firstResponse = await authenticatedFetch(firstPageUrl, getAccessToken);
+      if (!firstResponse.ok) {
+        addNotification('error', 'Backend Error', `Failed to load session events: ${firstResponse.statusText}`, 'session-events-fetch-error');
+        return;
+      }
+      const firstData = await firstResponse.json();
+      const firstBatch: EnrollmentEvent[] = Array.isArray(firstData.events) ? firstData.events : [];
 
-        // Surgical status-stale detection: if events contain a terminal event but session
-        // status is still InProgress, the SignalR status delta was likely lost. Refetch
-        // session details from the DB (single read, only when truly needed).
-        const currentStatus = sessionRef.current?.status;
-        if (currentStatus && currentStatus !== "Succeeded" && currentStatus !== "Failed") {
-          const hasTerminalEvent = fetchedEvents.some(
-            (e: EnrollmentEvent) => e.eventType === "enrollment_complete" || e.eventType === "enrollment_failed"
+      setEvents(prevEvents => {
+        // Keep the last known-good snapshot if backend transiently returns an empty list
+        // AND there is no nextLink to follow (avoids wiping a populated timeline).
+        if (firstBatch.length === 0 && prevEvents.length > 0 && !firstData.nextLink) {
+          console.warn(
+            `[SessionDetail] Ignoring empty event refresh for session ${sessionIdRef.current} (tenant ${effectiveTenantId}); keeping ${prevEvents.length} cached events`
           );
-          if (hasTerminalEvent) {
-            console.info(
-              `[SessionDetail] Terminal event detected but session status is '${currentStatus}' — refetching session details`
-            );
-            fetchSessionDetails();
-          }
+          return prevEvents;
         }
-      } else {
-        addNotification('error', 'Backend Error', `Failed to load session events: ${response.statusText}`, 'session-events-fetch-error');
+        return firstBatch;
+      });
+
+      // Trigger an early loading=false now: first paint is unblocked.
+      setLoading(false);
+
+      // Surgical status-stale detection: if any event in the merged stream is
+      // terminal but the session is still InProgress, the SignalR status delta
+      // was likely lost — refetch session details. We check incrementally
+      // across every page (not only firstBatch) because for sessions with
+      // >TIMELINE_PAGE_SIZE events the terminal event lives on page 2+, and a
+      // first-batch-only check would miss it entirely.
+      const isTerminalEvent = (e: EnrollmentEvent) =>
+        e.eventType === "enrollment_complete" || e.eventType === "enrollment_failed";
+      let foundTerminalEvent = firstBatch.some(isTerminalEvent);
+
+      let continuation = extractContinuation(firstData.nextLink);
+      if (continuation) {
+        setIsStreamingMore(true);
+        let pagesFetched = 1;
+        while (continuation && pagesFetched < MAX_EAGER_PAGES) {
+          const url = api.sessions.events(sessionId, effectiveTenantId, {
+            pageSize: TIMELINE_PAGE_SIZE,
+            continuation,
+          });
+          const resp = await authenticatedFetch(url, getAccessToken);
+          if (!resp.ok) {
+            console.warn(
+              `[SessionDetail] eager-fetch stopped at page ${pagesFetched + 1} (status=${resp.status})`,
+            );
+            break;
+          }
+          const pageData = await resp.json();
+          const batch: EnrollmentEvent[] = Array.isArray(pageData.events) ? pageData.events : [];
+          if (batch.length > 0) {
+            setEvents(prev => prev.concat(batch));
+            if (!foundTerminalEvent && batch.some(isTerminalEvent)) {
+              foundTerminalEvent = true;
+            }
+          }
+          continuation = extractContinuation(pageData.nextLink);
+          pagesFetched++;
+        }
+        if (pagesFetched >= MAX_EAGER_PAGES) {
+          console.warn(
+            `[SessionDetail] eager-fetch hit MAX_EAGER_PAGES=${MAX_EAGER_PAGES}; remaining events not loaded`,
+          );
+        }
+        setIsStreamingMore(false);
+      }
+
+      const currentStatus = sessionRef.current?.status;
+      if (foundTerminalEvent && currentStatus && currentStatus !== "Succeeded" && currentStatus !== "Failed") {
+        console.info(
+          `[SessionDetail] Terminal event detected but session status is '${currentStatus}' — refetching session details`
+        );
+        fetchSessionDetails();
       }
     } catch (error) {
+      aborted = true;
       if (error instanceof TokenExpiredError) {
         addNotification('error', 'Session Expired', error.message, 'session-expired-error');
       } else {
@@ -128,6 +187,7 @@ export function useSessionEvents({
       }
     } finally {
       setLoading(false);
+      if (aborted) setIsStreamingMore(false);
       fetchEventsInFlight.current = false;
 
       // If another fetch was requested while we were in flight, run it now
@@ -175,5 +235,5 @@ export function useSessionEvents({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, sessionTenantId, isConnected]);
 
-  return { events, setEvents, fetchEvents, scheduleFetchEvents };
+  return { events, setEvents, fetchEvents, scheduleFetchEvents, isStreamingMore };
 }

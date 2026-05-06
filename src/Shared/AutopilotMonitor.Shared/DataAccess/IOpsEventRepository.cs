@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AutopilotMonitor.Shared.Pagination;
 
 namespace AutopilotMonitor.Shared.DataAccess
 {
@@ -11,8 +12,25 @@ namespace AutopilotMonitor.Shared.DataAccess
     public interface IOpsEventRepository
     {
         Task SaveOpsEventAsync(OpsEventEntry entry);
-        Task<List<OpsEventEntry>> GetOpsEventsAsync(int maxResults = 200);
-        Task<List<OpsEventEntry>> GetOpsEventsByCategoryAsync(string category, int maxResults = 100);
+
+        /// <summary>
+        /// Returns all matching ops events in the given UTC window. <paramref name="category"/>
+        /// is optional — when provided, scopes to a single PartitionKey for an
+        /// indexed lookup. Sorted newest-first. No row cap; for unbounded
+        /// windows on busy installations, prefer <see cref="GetOpsEventsPageAsync"/>.
+        /// </summary>
+        Task<List<OpsEventEntry>> GetOpsEventsAsync(
+            string? category = null, DateTime? dateFrom = null, DateTime? dateTo = null);
+
+        /// <summary>
+        /// Reads a single page of ops events. The returned <see cref="RawPage{T}"/>
+        /// carries the underlying store's opaque continuation token; <c>null</c>
+        /// when this page was the last. Items in each page are sorted
+        /// newest-first.
+        /// </summary>
+        Task<RawPage<OpsEventEntry>> GetOpsEventsPageAsync(
+            string? category, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation);
+
         Task<int> DeleteOpsEventsOlderThanAsync(DateTime cutoff);
     }
 

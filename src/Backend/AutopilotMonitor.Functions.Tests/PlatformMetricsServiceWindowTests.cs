@@ -16,8 +16,8 @@ public class PlatformMetricsServiceWindowTests
     {
         var sessionRepo = new Mock<ISessionRepository>();
         sessionRepo
-            .Setup(r => r.GetAllSessionsAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>()))
-            .ReturnsAsync(new SessionPage { Sessions = new List<SessionSummary>(), HasMore = false });
+            .Setup(r => r.GetAllSessionsAsync(It.IsAny<string?>(), It.IsAny<int?>()))
+            .ReturnsAsync(new List<SessionSummary>());
         sessionRepo
             .Setup(r => r.GetSessionEventsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
             .ReturnsAsync(new List<EnrollmentEvent>());
@@ -37,9 +37,9 @@ public class PlatformMetricsServiceWindowTests
 
         int? capturedDays = null;
         repo
-            .Setup(r => r.GetAllSessionsAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>()))
-            .Callback<int, string?, int?>((_, _, d) => capturedDays = d)
-            .ReturnsAsync(new SessionPage { Sessions = new List<SessionSummary>(), HasMore = false });
+            .Setup(r => r.GetAllSessionsAsync(It.IsAny<string?>(), It.IsAny<int?>()))
+            .Callback<string?, int?>((_, d) => capturedDays = d)
+            .ReturnsAsync(new List<SessionSummary>());
 
         var result = await service.ComputePlatformMetricsAsync(days);
 
@@ -54,9 +54,9 @@ public class PlatformMetricsServiceWindowTests
 
         int? capturedDays = null;
         repo
-            .Setup(r => r.GetAllSessionsAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<int?>()))
-            .Callback<int, string?, int?>((_, _, d) => capturedDays = d)
-            .ReturnsAsync(new SessionPage { Sessions = new List<SessionSummary>(), HasMore = false });
+            .Setup(r => r.GetAllSessionsAsync(It.IsAny<string?>(), It.IsAny<int?>()))
+            .Callback<string?, int?>((_, d) => capturedDays = d)
+            .ReturnsAsync(new List<SessionSummary>());
 
         var result = await service.ComputePlatformMetricsAsync(0);
 

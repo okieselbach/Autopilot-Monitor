@@ -1,6 +1,7 @@
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using AutopilotMonitor.Functions.Services;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Logging;
@@ -26,11 +27,19 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             string entityId, string performedBy, Dictionary<string, string>? details = null)
             => _storage.LogAuditEntryAsync(tenantId, action, entityType, entityId, performedBy, details);
 
-        public Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, int maxResults = 100)
-            => _storage.GetAuditLogsAsync(tenantId, maxResults);
+        public Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, DateTime? dateFrom = null, DateTime? dateTo = null)
+            => _storage.GetAuditLogsAsync(tenantId, dateFrom, dateTo);
 
-        public Task<List<AuditLogEntry>> GetAllAuditLogsAsync(int maxResults = 100)
-            => _storage.GetAllAuditLogsAsync(maxResults);
+        public Task<List<AuditLogEntry>> GetAllAuditLogsAsync(DateTime? dateFrom = null, DateTime? dateTo = null)
+            => _storage.GetAllAuditLogsAsync(dateFrom, dateTo);
+
+        public Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+            => _storage.GetAuditLogsPageAsync(tenantId, dateFrom, dateTo, pageSize, continuation);
+
+        public Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+            => _storage.GetAllAuditLogsPageAsync(dateFrom, dateTo, pageSize, continuation);
 
         public Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate)
             => _storage.GetSessionsOlderThanAsync(tenantId, cutoffDate);

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 
 namespace AutopilotMonitor.Shared.DataAccess
 {
@@ -15,8 +16,37 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> StoreSessionAsync(SessionRegistration registration);
         Task<SessionSummary?> GetSessionAsync(string tenantId, string sessionId);
         Task<string?> FindSessionTenantIdAsync(string sessionId);
-        Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null, int? days = null);
-        Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null, int? days = null);
+        /// <summary>
+        /// Returns all sessions for <paramref name="tenantId"/> newest-first.
+        /// Optional <paramref name="days"/> scopes to the last N days. No row cap —
+        /// drains the underlying paged scan; for large tenants prefer
+        /// <see cref="GetSessionsPageAsync"/>.
+        /// </summary>
+        Task<List<SessionSummary>> GetSessionsAsync(string tenantId, int? days = null);
+
+        /// <summary>
+        /// Cross-tenant variant of <see cref="GetSessionsAsync"/> (Global Admin).
+        /// <paramref name="tenantIdFilter"/> optionally restricts to a single tenant.
+        /// </summary>
+        Task<List<SessionSummary>> GetAllSessionsAsync(string? tenantIdFilter = null, int? days = null);
+
+        /// <summary>
+        /// Reads a single page of sessions for <paramref name="tenantId"/>, newest-first
+        /// (SessionsIndex inverted-tick RowKey order). The opaque <c>NextRawToken</c>
+        /// on the returned <see cref="RawPage{T}"/> is the Azure-Tables continuation
+        /// the function layer wraps with the wire envelope. Optional <paramref name="days"/>
+        /// scopes to the last N days via RowKey range; <c>null</c> means all time.
+        /// </summary>
+        Task<RawPage<SessionSummary>> GetSessionsPageAsync(
+            string tenantId, int? days, int pageSize, string? continuation);
+
+        /// <summary>
+        /// Cross-tenant variant of <see cref="GetSessionsPageAsync"/> (Global Admin).
+        /// <paramref name="tenantIdFilter"/> optionally restricts to a single tenant.
+        /// </summary>
+        Task<RawPage<SessionSummary>> GetAllSessionsPageAsync(
+            string? tenantIdFilter, int? days, int pageSize, string? continuation);
+
         Task<bool> DeleteSessionAsync(string tenantId, string sessionId);
 
         // --- Session Updates ---
@@ -77,12 +107,44 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<List<EnrollmentEvent>> GetSessionEventsAsync(string tenantId, string sessionId, int maxResults = 1000);
         Task<List<EnrollmentEvent>> GetSessionEventsByTypeAsync(string tenantId, string sessionId, string eventType, int maxResults = 200);
 
+        /// <summary>
+        /// Reads a single page of session events. The returned <see cref="RawPage{T}"/>
+        /// carries the underlying store's opaque continuation token for the next page,
+        /// or <c>null</c> when the page just read was the last. Items in each page are
+        /// sorted by <c>Sequence</c> ascending; cross-page ordering follows the table's
+        /// RowKey iteration (Timestamp+Sequence) and may diverge from strict Sequence
+        /// order across clock-jump windows — consumers stitching multiple pages should
+        /// re-sort by <c>Sequence</c> after merging.
+        /// </summary>
+        Task<RawPage<EnrollmentEvent>> GetSessionEventsPageAsync(
+            string tenantId, string sessionId, int pageSize, string? continuation);
+
         // --- Search ---
         Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string? tenantId, string query, int limit = 10);
         Task<List<SessionSummary>> SearchSessionsAsync(string? tenantId, SessionSearchFilter filter);
+
+        /// <summary>
+        /// Paged variant of <see cref="SearchSessionsAsync"/>. Used by the
+        /// <c>/api/search/sessions</c> + <c>/api/global/search/sessions</c> endpoints.
+        /// The <see cref="SessionSearchFilter.Limit"/> field is ignored — pagination
+        /// is driven by <paramref name="pageSize"/> + <paramref name="continuation"/>.
+        /// </summary>
+        Task<RawPage<SessionSummary>> SearchSessionsPageAsync(
+            string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation);
         Task<List<SessionSummary>> SearchSessionsByEventAsync(
             string? tenantId, string eventType, string? source, string? severity,
             string? phase, int limit = 50);
+
+        /// <summary>
+        /// Paged variant of <see cref="SearchSessionsByEventAsync"/>. Walks the
+        /// <c>EventTypeIndex</c> table page-by-page so callers can drain large
+        /// result sets via <c>nextLink</c>. Replaces the legacy hard-coded
+        /// <c>limit:20</c> session-index lookup that silently dropped recall on
+        /// large tenants (mcp-pagination-rollout PR-6, audit finding D4).
+        /// </summary>
+        Task<RawPage<SessionSummary>> SearchSessionsByEventPageAsync(
+            string? tenantId, string eventType, string? source, string? severity, string? phase,
+            int pageSize, string? continuation);
         Task<List<EnrollmentEvent>> SearchEventsByTypesAsync(
             string? tenantId, IEnumerable<string> eventTypes, string? source, string? severity,
             int sessionLimit = 10, int eventLimit = 50);

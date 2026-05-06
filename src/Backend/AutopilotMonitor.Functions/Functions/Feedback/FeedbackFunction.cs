@@ -72,9 +72,9 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                     (DateTime.UtcNow - tenantConfig.OnboardedAt.Value).TotalDays < adminConfig.FeedbackMinTenantAgeDays)
                     return await WriteJson(req, new { eligible = false });
 
-                // 5. Sessions check — at least 1 session exists
-                var sessionPage = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 1);
-                if (sessionPage.Sessions.Count == 0)
+                // 5. Sessions check — at least 1 session exists.
+                var sessionPage = await _sessionRepo.GetSessionsPageAsync(tenantId, days: null, pageSize: 1, continuation: null);
+                if (sessionPage.Items.Count == 0)
                     return await WriteJson(req, new { eligible = false });
 
                 // 6. Cooldown check

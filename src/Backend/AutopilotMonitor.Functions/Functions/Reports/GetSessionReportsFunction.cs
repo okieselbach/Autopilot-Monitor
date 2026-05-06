@@ -1,5 +1,9 @@
 using System.Net;
+using System.Web;
+using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -28,16 +32,60 @@ namespace AutopilotMonitor.Functions.Functions.Reports
             try
             {
                 // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
+                var callerTenantId = TenantHelper.GetTenantId(req);
 
-                var reports = await _sessionReportService.GetAllReportsAsync();
+                var query = HttpUtility.ParseQueryString(req.Url.Query ?? string.Empty);
+                var parsed = SessionReportsPagination.ParseQuery(query);
+                if (parsed.Error != null)
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new { success = false, message = parsed.Error });
+                    return bad;
+                }
 
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new
+                if (parsed.PageSize == null)
+                {
+                    var reports = await _sessionReportService.GetAllReportsAsync(parsed.FilterTenantId);
+                    return await req.OkAsync(new { success = true, count = reports.Count, reports });
+                }
+
+                string? azureToken = null;
+                if (parsed.Continuation != null)
+                {
+                    if (!SessionReportsPagination.TryAcceptContinuation(
+                            parsed.Continuation, callerTenantId, parsed.FilterTenantId,
+                            out azureToken, out var rejectReason))
+                    {
+                        _logger.LogWarning("GetSessionReports: continuation rejected ({Reason})", rejectReason);
+                        var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await bad.WriteAsJsonAsync(new
+                        {
+                            success = false,
+                            message = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                        });
+                        return bad;
+                    }
+                }
+
+                var page = await _sessionReportService.GetReportsPageAsync(
+                    parsed.FilterTenantId, parsed.PageSize.Value, azureToken);
+
+                string? nextLink = null;
+                if (!string.IsNullOrEmpty(page.NextRawToken))
+                {
+                    var fp = SessionReportsPagination.Fingerprint(callerTenantId, parsed.FilterTenantId);
+                    var wireToken = ContinuationToken.Encode(page.NextRawToken!, callerTenantId, fp);
+                    nextLink = SessionReportsPagination.BuildNextLink(
+                        parsed.PageSize.Value, wireToken, parsed.FilterTenantId);
+                }
+
+                return await req.OkAsync(new
                 {
                     success = true,
-                    reports
+                    count = page.Items.Count,
+                    reports = page.Items,
+                    nextLink,
                 });
-                return response;
             }
             catch (Exception ex)
             {

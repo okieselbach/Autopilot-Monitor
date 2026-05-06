@@ -1,7 +1,9 @@
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Azure;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Logging;
@@ -178,25 +180,15 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
-        public async Task<List<SessionReportMetadata>> GetSessionReportsAsync(string? tenantId = null, int maxResults = 50)
+        public async Task<List<SessionReportMetadata>> GetSessionReportsAsync(string? tenantId = null)
         {
             var results = new List<SessionReportMetadata>();
-
+            var filter = BuildSessionReportFilter(tenantId);
             try
             {
-                var count = 0;
-                await foreach (var entity in _reportsTableClient.QueryAsync<TableEntity>(
-                    filter: $"PartitionKey eq 'reports'"))
+                await foreach (var entity in _reportsTableClient.QueryAsync<TableEntity>(filter: filter))
                 {
-                    var report = MapToSessionReportMetadata(entity);
-
-                    // Filter by tenantId if specified
-                    if (tenantId != null && report.TenantId != tenantId)
-                        continue;
-
-                    results.Add(report);
-                    count++;
-                    if (count >= maxResults) break;
+                    results.Add(MapToSessionReportMetadata(entity));
                 }
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
@@ -205,6 +197,48 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
 
             return results;
+        }
+
+        public async Task<RawPage<SessionReportMetadata>> GetSessionReportsPageAsync(
+            string? tenantId, int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+            try
+            {
+                var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                    client: _reportsTableClient,
+                    filter: BuildSessionReportFilter(tenantId),
+                    pageSize: pageSize,
+                    continuation: continuation);
+
+                var page = new List<SessionReportMetadata>(entities.Count);
+                foreach (var entity in entities) page.Add(MapToSessionReportMetadata(entity));
+                // RowKey is inverted-tick of SubmittedAt — entities arrive newest-first
+                // already; no client-side resort needed.
+                return new RawPage<SessionReportMetadata>(page, nextRawToken);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogDebug("SessionReports table does not exist yet, returning empty page");
+                return RawPage<SessionReportMetadata>.Empty;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get session reports page");
+                return RawPage<SessionReportMetadata>.Empty;
+            }
+        }
+
+        private static string BuildSessionReportFilter(string? tenantId)
+        {
+            // All reports live in the single "reports" partition; tenantId is a
+            // property the SDK can filter server-side.
+            var filter = "PartitionKey eq 'reports'";
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                filter += $" and TenantId eq '{tenantId!.Replace("'", "''")}'";
+            }
+            return filter;
         }
 
         public async Task<SessionReportMetadata?> GetSessionReportAsync(string reportId)

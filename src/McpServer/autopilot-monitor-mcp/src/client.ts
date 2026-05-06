@@ -101,4 +101,28 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   return s ? `?${s}` : '';
 }
 
-export { apiFetch, buildQuery };
+/**
+ * If `continuationOrNextLink` is a full server-emitted nextLink (path starts with
+ * `/api/`), returns it verbatim — every query param the backend chose to echo
+ * (continuation, tenantId, days, filterTenantId, …) is preserved unchanged.
+ * Otherwise rebuilds the URL from `basePath` + `extraParams` + opaque
+ * `continuation` token, the legacy form.
+ *
+ * Why: paginated endpoints sometimes need to round-trip more than just the
+ * opaque continuation across pages — e.g. GA cross-tenant `/api/sessions/{id}/events`
+ * binds the resolved tenantId into the token's fingerprint, so page 2 must
+ * re-send `?tenantId=` to validate. Tools that strip everything except
+ * `continuation` would silently fail token validation on follow-up calls.
+ */
+function followNextLink(
+  basePath: string,
+  extraParams: Record<string, string | number | boolean | undefined | null>,
+  continuationOrNextLink?: string,
+): string {
+  if (continuationOrNextLink && continuationOrNextLink.startsWith('/api/')) {
+    return continuationOrNextLink;
+  }
+  return `${basePath}${buildQuery({ ...extraParams, continuation: continuationOrNextLink })}`;
+}
+
+export { apiFetch, buildQuery, followNextLink };

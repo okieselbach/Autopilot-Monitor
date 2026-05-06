@@ -249,13 +249,13 @@ namespace AutopilotMonitor.Functions.Services
                 var threshold = config.SlaConsecutiveFailureThreshold;
                 if (threshold < 2) threshold = 5;
 
-                // Query the most recent N sessions for this tenant
-                var page = await _sessionRepo.GetSessionsAsync(tenantId, threshold);
-                if (page?.Sessions == null || page.Sessions.Count < threshold)
+                // Query the most recent N sessions for this tenant — single page is enough.
+                var page = await _sessionRepo.GetSessionsPageAsync(tenantId, days: null, pageSize: threshold, continuation: null);
+                if (page.Items.Count < threshold)
                     return;
 
                 // Check if all N are failed
-                var allFailed = page.Sessions
+                var allFailed = page.Items
                     .Take(threshold)
                     .All(s => s.Status == SessionStatus.Failed);
 

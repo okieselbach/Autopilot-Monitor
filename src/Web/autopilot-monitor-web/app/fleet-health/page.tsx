@@ -9,9 +9,12 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { extractContinuation, MAX_EAGER_PAGES } from "@/lib/paginationLink";
 import FleetStatCard from "./components/FleetStatCard";
 import { Session } from "@/types";
 import { useAdminMode } from "@/hooks/useAdminMode";
+
+const FLEET_PAGE_SIZE = 200;
 
 interface AppMetric {
   appName: string;
@@ -174,15 +177,41 @@ export default function FleetHealthPage() {
   const fetchSessions = async (range: "7d" | "30d" | "90d" = timeRange) => {
     try {
       const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-      const endpoint = isGlobalAdmin
-        ? api.globalSessions.list(selectedTenantId || undefined, days)
-        : api.sessions.list(tenantId, days);
-      const response = await authenticatedFetch(endpoint, getAccessToken);
-      if (response.ok) {
-        const data = await response.json();
-        setSessions(data.sessions || []);
-      } else {
-        addNotification('error', 'Backend Error', `Failed to load sessions: ${response.statusText}`, 'fleet-health-sessions-error');
+      // Pattern A — progressive eager fetch: render the first batch quickly, then
+      // drain remaining pages in the background so fleet stats reflect the full
+      // window even when the tenant has thousands of sessions. The previous
+      // single-call (default 100) silently truncated busy installations.
+      const opts = (continuation?: string) => ({ pageSize: FLEET_PAGE_SIZE, continuation });
+      const buildUrl = (continuation?: string) => isGlobalAdmin
+        ? api.globalSessions.list(selectedTenantId || undefined, days, opts(continuation))
+        : api.sessions.list(tenantId, days, opts(continuation));
+
+      const firstResponse = await authenticatedFetch(buildUrl(), getAccessToken);
+      if (!firstResponse.ok) {
+        addNotification('error', 'Backend Error', `Failed to load sessions: ${firstResponse.statusText}`, 'fleet-health-sessions-error');
+        return;
+      }
+      const firstData = await firstResponse.json();
+      const firstBatch: Session[] = firstData.sessions || [];
+      setSessions(firstBatch);
+      setLoading(false);
+
+      let nextContinuation = extractContinuation(firstData.nextLink);
+      let pages = 1;
+      while (nextContinuation && pages < MAX_EAGER_PAGES) {
+        const resp = await authenticatedFetch(buildUrl(nextContinuation), getAccessToken);
+        if (!resp.ok) {
+          console.warn(`[FleetHealth] eager-fetch stopped at page ${pages + 1} (status=${resp.status})`);
+          break;
+        }
+        const pageData = await resp.json();
+        const batch: Session[] = pageData.sessions || [];
+        if (batch.length > 0) setSessions(prev => prev.concat(batch));
+        nextContinuation = extractContinuation(pageData.nextLink);
+        pages++;
+      }
+      if (pages >= MAX_EAGER_PAGES) {
+        console.warn(`[FleetHealth] eager-fetch hit MAX_EAGER_PAGES=${MAX_EAGER_PAGES}; remaining sessions not loaded`);
       }
     } catch (error) {
       if (error instanceof TokenExpiredError) {

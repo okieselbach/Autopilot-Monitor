@@ -1,6 +1,9 @@
 using System.Net;
+using System.Web;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Shared.DataAccess;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -28,29 +31,61 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             {
                 // Authentication + MemberRead authorization enforced by PolicyEnforcementMiddleware
                 var tenantId = TenantHelper.GetTenantId(req);
-                var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                var cursor = query["cursor"];
-                var daysParam = query["days"];
-                int? days = null;
-                if (!string.IsNullOrEmpty(daysParam) && int.TryParse(daysParam, out var parsedDays) && parsedDays > 0)
-                    days = parsedDays;
+                var query = HttpUtility.ParseQueryString(req.Url.Query ?? string.Empty);
 
-                var limitParam = query["limit"];
-                int limit = 100;
-                if (!string.IsNullOrEmpty(limitParam) && int.TryParse(limitParam, out var parsedLimit))
-                    limit = Math.Clamp(parsedLimit, 1, 100);
+                var parsed = SessionListPagination.ParseQuery(query, acceptFilterTenantId: false);
+                if (parsed.Error != null)
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new { success = false, message = parsed.Error });
+                    return bad;
+                }
 
-                _logger.LogInformation("Fetching sessions for tenant {TenantId} (cursor: {Cursor}, days: {Days}, limit: {Limit})", tenantId, cursor ?? "none", days?.ToString() ?? "all", limit);
+                _logger.LogInformation(
+                    "Fetching sessions (tenant={TenantId}, days={Days}, pageSize={PageSize}, hasContinuation={HasContinuation})",
+                    tenantId, parsed.Days, parsed.PageSize, parsed.Continuation != null);
 
-                var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: limit, cursor: cursor, days: days);
+                string? azureToken = null;
+                if (parsed.Continuation != null)
+                {
+                    if (!SessionListPagination.TryAcceptContinuation(
+                            parsed.Continuation, scope: "sessions:tenant",
+                            callerTenantId: tenantId, days: parsed.Days, filterTenantId: null,
+                            out azureToken, out var rejectReason))
+                    {
+                        _logger.LogWarning("GetSessions: continuation rejected ({Reason})", rejectReason);
+                        var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await bad.WriteAsJsonAsync(new
+                        {
+                            success = false,
+                            message = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                        });
+                        return bad;
+                    }
+                }
+
+                var page = await _sessionRepo.GetSessionsPageAsync(tenantId, parsed.Days, parsed.PageSize, azureToken);
+
+                string? nextLink = null;
+                if (!string.IsNullOrEmpty(page.NextRawToken))
+                {
+                    var fp = SessionListPagination.Fingerprint(
+                        scope: "sessions:tenant", callerTenantId: tenantId, days: parsed.Days);
+                    var wireToken = ContinuationToken.Encode(page.NextRawToken!, tenantId, fp);
+                    nextLink = SessionListPagination.BuildNextLink(
+                        basePath: "/api/sessions",
+                        pageSize: parsed.PageSize,
+                        wireContinuation: wireToken,
+                        days: parsed.Days,
+                        filterTenantId: null);
+                }
 
                 return await req.OkAsync(new
                 {
                     success = true,
-                    count = page.Sessions.Count,
-                    hasMore = page.HasMore,
-                    cursor = page.Cursor,
-                    sessions = page.Sessions
+                    count = page.Items.Count,
+                    sessions = page.Items,
+                    nextLink,
                 });
             }
             catch (Exception ex)
@@ -63,7 +98,6 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     success = false,
                     message = "Internal server error",
                     count = 0,
-                    hasMore = false,
                     sessions = Array.Empty<object>()
                 });
 

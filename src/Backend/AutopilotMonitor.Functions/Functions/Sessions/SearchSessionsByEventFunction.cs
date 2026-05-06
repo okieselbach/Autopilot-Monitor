@@ -1,6 +1,9 @@
 using System.Net;
+using System.Web;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Shared.DataAccess;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -32,16 +35,27 @@ public class SearchSessionsByEventFunction
     {
         try
         {
-            var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            var query = HttpUtility.ParseQueryString(req.Url.Query ?? string.Empty);
 
             string? tenantId;
+            string? filterTenantId;
+            string scope;
+            string basePath;
+            var callerTenantId = TenantHelper.GetTenantId(req);
+
             if (isTenantScoped)
             {
-                tenantId = TenantHelper.GetTenantId(req);
+                tenantId = callerTenantId;
+                filterTenantId = null;
+                scope = "search-by-event:tenant";
+                basePath = "/api/search/sessions-by-event";
             }
             else
             {
-                tenantId = query["tenantId"];
+                filterTenantId = query["tenantId"];
+                tenantId = string.IsNullOrEmpty(filterTenantId) ? null : filterTenantId;
+                scope = "search-by-event:global";
+                basePath = "/api/global/search/sessions-by-event";
             }
 
             var eventType = query["eventType"];
@@ -52,15 +66,50 @@ public class SearchSessionsByEventFunction
                 return badReq;
             }
 
-            var limit = int.TryParse(query["limit"], out var lim) ? Math.Clamp(lim, 1, 100) : 50;
+            var pagination = SearchSessionsByEventPagination.ParsePagination(query);
+            if (pagination.Error != null)
+            {
+                var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                await bad.WriteAsJsonAsync(new { success = false, message = pagination.Error });
+                return bad;
+            }
 
-            var sessions = await _sessionRepo.SearchSessionsByEventAsync(tenantId, eventType, null, null, null, limit);
+            string? azureToken = null;
+            if (pagination.Continuation != null)
+            {
+                if (!SearchSessionsByEventPagination.TryAcceptContinuation(
+                        pagination.Continuation, scope, callerTenantId, filterTenantId, eventType,
+                        out azureToken, out var rejectReason))
+                {
+                    _logger.LogWarning("SearchSessionsByEvent: continuation rejected ({Reason})", rejectReason);
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                    });
+                    return bad;
+                }
+            }
+
+            var page = await _sessionRepo.SearchSessionsByEventPageAsync(
+                tenantId, eventType, source: null, severity: null, phase: null,
+                pageSize: pagination.PageSize, continuation: azureToken);
+
+            string? nextLink = null;
+            if (!string.IsNullOrEmpty(page.NextRawToken))
+            {
+                var fp = SearchSessionsByEventPagination.Fingerprint(scope, callerTenantId, filterTenantId, eventType);
+                var wireToken = ContinuationToken.Encode(page.NextRawToken!, callerTenantId, fp);
+                nextLink = SearchSessionsByEventPagination.BuildNextLink(basePath, pagination.PageSize, wireToken, query);
+            }
 
             return await req.OkAsync(new
             {
                 success = true,
-                count = sessions.Count,
-                sessions
+                count = page.Items.Count,
+                sessions = page.Items,
+                nextLink,
             });
         }
         catch (Exception ex)

@@ -21,12 +21,29 @@ export const api = {
 
   // ── Sessions ──────────────────────────────────────────────────────────────
   sessions: {
-    list: (tenantId?: string, days?: number, limit?: number) =>
-      `${API_BASE_URL}/api/sessions${qs({ tenantId, days: days?.toString(), limit: limit?.toString() })}`,
+    list: (
+      tenantId?: string,
+      days?: number,
+      opts?: { pageSize?: number; continuation?: string },
+    ) =>
+      `${API_BASE_URL}/api/sessions${qs({
+        tenantId,
+        days: days?.toString(),
+        pageSize: opts?.pageSize?.toString(),
+        continuation: opts?.continuation,
+      })}`,
     get: (sessionId: string, tenantId?: string) =>
       `${API_BASE_URL}/api/sessions/${sessionId}${qs({ tenantId })}`,
-    events: (sessionId: string, tenantId?: string) =>
-      `${API_BASE_URL}/api/sessions/${sessionId}/events${qs({ tenantId })}`,
+    events: (
+      sessionId: string,
+      tenantId?: string,
+      opts?: { pageSize?: number; continuation?: string },
+    ) =>
+      `${API_BASE_URL}/api/sessions/${sessionId}/events${qs({
+        tenantId,
+        pageSize: opts?.pageSize?.toString(),
+        continuation: opts?.continuation,
+      })}`,
     delete: (sessionId: string, tenantId: string) =>
       `${API_BASE_URL}/api/sessions/${sessionId}${qs({ tenantId })}`,
     analysis: (sessionId: string, tenantId?: string, reanalyze?: boolean) =>
@@ -55,8 +72,17 @@ export const api = {
 
   // ── Global Sessions (global admin) ────────────────────────────────────────
   globalSessions: {
-    list: (tenantId?: string, days?: number, limit?: number) =>
-      `${API_BASE_URL}/api/global/sessions${qs({ tenantId, days: days?.toString(), limit: limit?.toString() })}`,
+    list: (
+      tenantId?: string,
+      days?: number,
+      opts?: { pageSize?: number; continuation?: string },
+    ) =>
+      `${API_BASE_URL}/api/global/sessions${qs({
+        tenantId,
+        days: days?.toString(),
+        pageSize: opts?.pageSize?.toString(),
+        continuation: opts?.continuation,
+      })}`,
   },
 
   // ── Config ────────────────────────────────────────────────────────────────
@@ -243,7 +269,12 @@ export const api = {
 
   // ── Reports ───────────────────────────────────────────────────────────────
   reports: {
-    list: () => `${API_BASE_URL}/api/global/session-reports`,
+    list: (opts?: { tenantId?: string; pageSize?: number; continuation?: string }) =>
+      `${API_BASE_URL}/api/global/session-reports${qs({
+        tenantId: opts?.tenantId,
+        pageSize: opts?.pageSize?.toString(),
+        continuation: opts?.continuation,
+      })}`,
     downloadUrl: (blobName: string) =>
       `${API_BASE_URL}/api/global/session-reports/download-url${qs({ blobName })}`,
     note: (reportId: string) =>
@@ -262,8 +293,17 @@ export const api = {
 
   // ── Ops Events ───────────────────────────────────────────────────────────
   opsEvents: {
-    list: (category?: string, maxResults?: number) =>
-      `${API_BASE_URL}/api/global/ops-events${qs({ category, maxResults: maxResults?.toString() })}`,
+    list: (
+      category?: string,
+      opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string },
+    ) =>
+      `${API_BASE_URL}/api/global/ops-events${qs({
+        category,
+        dateFrom: opts?.dateFrom,
+        dateTo: opts?.dateTo,
+        pageSize: opts?.pageSize?.toString(),
+        continuation: opts?.continuation,
+      })}`,
   },
 
   // ── Notifications ─────────────────────────────────────────────────────────
@@ -279,8 +319,20 @@ export const api = {
 
   // ── Audit ─────────────────────────────────────────────────────────────────
   audit: {
-    logs: () => `${API_BASE_URL}/api/audit/logs`,
-    globalLogs: () => `${API_BASE_URL}/api/global/audit/logs`,
+    logs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string }) =>
+      `${API_BASE_URL}/api/audit/logs${qs({
+        dateFrom: opts?.dateFrom,
+        dateTo: opts?.dateTo,
+        pageSize: opts?.pageSize?.toString(),
+        continuation: opts?.continuation,
+      })}`,
+    globalLogs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string }) =>
+      `${API_BASE_URL}/api/global/audit/logs${qs({
+        dateFrom: opts?.dateFrom,
+        dateTo: opts?.dateTo,
+        pageSize: opts?.pageSize?.toString(),
+        continuation: opts?.continuation,
+      })}`,
   },
 
   // ── Feedback ──────────────────────────────────────────────────────────────

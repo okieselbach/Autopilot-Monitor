@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery } from '../client.js';
+import { apiFetch, buildQuery, followNextLink } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY, READ_ONLY_OPEN } from './shared.js';
 import { toolError } from './error-handler.js';
@@ -211,18 +211,32 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'get_audit_logs',
     'Get audit trail of administrative actions: config changes, device blocks, user management, report submissions. ' +
-    'Omit tenantId for cross-tenant audit log (Global Admin). Returns up to 100 most recent entries.',
+    'Omit tenantId for cross-tenant audit log (Global Admin). ' +
+    'Forensics: dateFrom / dateTo (ISO 8601 UTC) bound the search window exactly; without either, the backend defaults to the last 30 days. ' +
+    'Pagination: when "nextLink" is present in the response, more entries are available — call this tool again and pass the ' +
+    'whole nextLink string (e.g. "/api/global/audit/logs?pageSize=...&continuation=...&dateFrom=...&dateTo=...") as ' +
+    '"continuation". The tool follows it verbatim so the backend-defaulted date window round-trips correctly (otherwise ' +
+    'a follow-up call would compute a fresh "now" and the token fingerprint would mismatch). Stop when nextLink is absent.',
     {
       tenantId: z.string().optional().describe('Tenant ID for tenant-scoped audit log. Omit for cross-tenant view (Global Admin only).'),
+      dateFrom: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive lower bound of the audit window.'),
+      dateTo: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive upper bound of the audit window.'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many entries per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params (incl. resolved dateFrom/dateTo) round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_audit_logs', async () => {
       try {
-        const { tenantId } = args;
-        const endpoint = tenantId
-          ? `/api/audit/logs${buildQuery({ tenantId })}`
-          : '/api/global/audit/logs';
-        const data = await apiFetch(endpoint);
+        const { tenantId, dateFrom, dateTo, pageSize, continuation } = args;
+        const basePath = tenantId ? '/api/audit/logs' : '/api/global/audit/logs';
+        const path = followNextLink(
+          basePath,
+          { tenantId, dateFrom, dateTo, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('get_audit_logs', args, error);
@@ -235,18 +249,31 @@ export function registerAdminTools(server: McpServer): void {
     'get_ops_events',
     'Get operational events for platform monitoring. Shows consent flow results, maintenance runs, security blocks, ' +
     'tenant offboards, agent timeouts, and blob storage health. Global Admin only. ' +
-    'Use category filter to narrow results (Consent, Maintenance, Security, Tenant, Agent).',
+    'Use category to narrow results (Consent, Maintenance, Security, Tenant, Agent, SLA). ' +
+    'Forensics: dateFrom / dateTo (ISO 8601 UTC) bound the search window exactly; without either, the backend defaults to the last 30 days. ' +
+    'Pagination: when "nextLink" is present in the response, more events are available — call this tool again and pass the ' +
+    'whole nextLink string (e.g. "/api/global/ops-events?pageSize=...&continuation=...&dateFrom=...&dateTo=...") as ' +
+    '"continuation". The tool follows it verbatim so the backend-defaulted date window round-trips correctly (otherwise ' +
+    'a follow-up call would compute a fresh "now" and the token fingerprint would mismatch). Stop when nextLink is absent.',
     {
-      category: z.string().optional().describe('Filter by category: Consent, Maintenance, Security, Tenant, Agent'),
-      maxResults: z.coerce.number().min(1).max(500).optional().default(200).describe('Max events to return (default: 200)'),
+      category: z.string().optional().describe('Filter by category: Consent, Maintenance, Security, Tenant, Agent, SLA'),
+      dateFrom: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive lower bound of the window.'),
+      dateTo: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive upper bound of the window.'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many events per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params (incl. resolved dateFrom/dateTo) round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_ops_events', async () => {
       try {
-        const params: Record<string, string | number | undefined> = {};
-        if (args.category) params.category = args.category;
-        if (args.maxResults) params.maxResults = args.maxResults;
-        const data = await apiFetch(`/api/global/ops-events${buildQuery(params)}`);
+        const { category, dateFrom, dateTo, pageSize, continuation } = args;
+        const path = followNextLink(
+          '/api/global/ops-events',
+          { category, dateFrom, dateTo, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('get_ops_events', args, error);
@@ -258,12 +285,24 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'list_session_reports',
     'List session reports submitted by tenant admins. Reports contain user comments, screenshots, and agent logs for troubleshooting. ' +
-    'Global Admin only — returns reports across all tenants.',
-    {},
+    'Global Admin only — returns reports across all tenants by default; pass tenantId to filter to one tenant. ' +
+    'Pagination: when "nextLink" is present in the response, more reports are available — call this tool again with "continuation" set to the value embedded in nextLink. Stop when nextLink is absent.',
+    {
+      tenantId: z.string().optional().describe('Optional — filter to a single tenant. Omit for cross-tenant view.'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many reports per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
+    },
     READ_ONLY,
     async (args) => withToolTelemetry('list_session_reports', async () => {
       try {
-        const data = await apiFetch('/api/global/session-reports');
+        const { tenantId, pageSize, continuation } = args;
+        const data = await apiFetch(`/api/global/session-reports${buildQuery({
+          tenantId,
+          pageSize,
+          continuation,
+        })}`);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('list_session_reports', args, error);
@@ -280,7 +319,11 @@ export function registerAdminTools(server: McpServer): void {
     'Query raw enrollment events with flexible filters across sessions. ' +
     'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' +
     'Use this when search_events_semantic does not cover the time range or session scope you need, ' +
-    'or when you need exact event-type filtering across many sessions. Returns raw event data.',
+    'or when you need exact event-type filtering across many sessions. Returns raw event data. ' +
+    'Pagination: cross-session queries walk the EventTypeIndex page-by-page. When the response includes ' +
+    '"nextLink", more sessions are available — call this tool again with "continuation" set to the value ' +
+    'embedded in nextLink. Stop when nextLink is absent. Note: pageSize controls the index-scan cadence; ' +
+    'a single indexed session can contribute multiple events, so total events per page may exceed pageSize.',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       sessionId: z.string().optional().describe('Filter to a specific session'),
@@ -289,7 +332,10 @@ export function registerAdminTools(server: McpServer): void {
       source: z.string().optional().describe('Filter by event source/app name (substring match)'),
       startedAfter: z.string().optional().describe('ISO 8601 datetime — only events after this'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime — only events before this'),
-      limit: z.coerce.number().min(1).max(500).optional().default(100),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Controls index-scan depth per call; follow nextLink for more.'),
+      continuation: z.string().optional()
+        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('query_raw_events', async () => {

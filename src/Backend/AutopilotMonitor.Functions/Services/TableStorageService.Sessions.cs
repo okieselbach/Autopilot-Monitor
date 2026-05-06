@@ -1,8 +1,10 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -639,12 +641,12 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets sessions for a tenant, ordered newest-first, with cursor-based pagination.
-        /// Queries the SessionsIndex table where RowKey = inverted-tick + sessionId,
-        /// so Azure Table Storage returns results in descending time order natively.
-        /// Falls back to the Sessions table if SessionsIndex is empty (pre-migration).
+        /// Internal SessionsIndex scan with custom RowKey-based cursor. Used by both
+        /// <see cref="GetSessionsAsync(string, int?)"/> (drain loop) and
+        /// <see cref="GetSessionsPageAsync(string, int?, int, string?)"/> (single page).
         /// </summary>
-        public async Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null, int? days = null)
+        private async Task<(List<SessionSummary> Sessions, bool HasMore, string? NextCursor)> FetchSessionsPageInternalAsync(
+            string tenantId, int maxResults, string? cursor, int? days)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -668,42 +670,35 @@ namespace AutopilotMonitor.Functions.Services
                     filter += $" and RowKey lt '{cutoffRowKeyPrefix}'";
                 }
 
-                // When days is set, return all matching sessions (no pagination); otherwise paginate.
-                var safetyCap = days.HasValue ? 10000 : maxResults + 1;
+                // Sentinel: fetch one extra row to detect HasMore in a single query.
+                // The `days` cutoff is applied as a RowKey filter above — pagination
+                // mechanics are independent of the date window so a tenant with more
+                // than `maxResults` matching sessions remains fully reachable across
+                // multiple calls (was: silently capped at 10k pre-fix).
                 var query = indexTableClient.QueryAsync<TableEntity>(
                     filter: filter,
-                    maxPerPage: Math.Min(safetyCap, 1000)
+                    maxPerPage: Math.Min(maxResults + 1, 1000)
                 );
 
                 var sessions = new List<SessionSummary>();
                 await foreach (var entity in query)
                 {
                     sessions.Add(MapIndexEntityToSessionSummary(entity));
-                    if (sessions.Count >= safetyCap) break;
+                    if (sessions.Count > maxResults) break;
                 }
 
-                // If SessionsIndex is empty and no cursor, fall back to Sessions table (pre-migration)
+                // If SessionsIndex is empty and no cursor, fall back to Sessions table (pre-migration).
                 if (sessions.Count == 0 && string.IsNullOrEmpty(cursor))
                 {
-                    return await GetSessionsFromPrimaryTableAsync(tenantId, maxResults, days);
-                }
-
-                if (days.HasValue)
-                {
-                    // Date-bounded query: all matching sessions returned, no pagination
-                    return new SessionPage
-                    {
-                        Sessions = sessions,
-                        HasMore = false,
-                        Cursor = null
-                    };
+                    var fallback = await FetchSessionsFromPrimaryTableInternalAsync(tenantId, maxResults, days);
+                    return (fallback.Sessions, fallback.HasMore, NextCursor: null);
                 }
 
                 var hasMore = sessions.Count > maxResults;
                 if (hasMore)
                     sessions.RemoveAt(sessions.Count - 1);
 
-                // Cursor = RowKey of the last returned item (opaque to frontend)
+                // Cursor = RowKey of the last returned item (opaque to caller).
                 string? nextCursor = null;
                 if (hasMore && sessions.Count > 0)
                 {
@@ -711,25 +706,98 @@ namespace AutopilotMonitor.Functions.Services
                     nextCursor = ComputeIndexRowKey(lastSession.StartedAt, lastSession.SessionId);
                 }
 
-                return new SessionPage
-                {
-                    Sessions = sessions,
-                    HasMore = hasMore,
-                    Cursor = nextCursor
-                };
+                return (sessions, hasMore, nextCursor);
             }
             catch (Exception ex)
             {
                 _logger.LogError("Failed to get sessions for tenant {TenantId}: {ExType}: {ExMessage}\n{StackTrace}",
                     tenantId, ex.GetType().Name, ex.Message, ex.StackTrace);
-                return new SessionPage();
+                return (new List<SessionSummary>(), false, null);
             }
+        }
+
+        /// <summary>
+        /// Drains all sessions for a tenant — newest-first, no row cap. Internally
+        /// loops <see cref="GetSessionsPageAsync"/> until the next-token is null.
+        /// </summary>
+        public async Task<List<SessionSummary>> GetSessionsAsync(string tenantId, int? days = null)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+
+            var all = new List<SessionSummary>();
+            string? token = null;
+            do
+            {
+                var page = await GetSessionsPageAsync(tenantId, days, pageSize: 1000, continuation: token);
+                all.AddRange(page.Items);
+                token = page.NextRawToken;
+            } while (!string.IsNullOrEmpty(token));
+            return all;
+        }
+
+        /// <summary>
+        /// Reads a single page of sessions. Builds on the internal RowKey-cursor
+        /// scan so callers don't see the cursor mechanics — only the
+        /// <see cref="RawPage{T}"/> envelope with the opaque <c>NextRawToken</c>.
+        /// </summary>
+        public async Task<RawPage<SessionSummary>> GetSessionsPageAsync(
+            string tenantId, int? days, int pageSize, string? continuation)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            var page = await FetchSessionsPageInternalAsync(tenantId, pageSize, continuation, days);
+            return new RawPage<SessionSummary>(page.Sessions, page.HasMore ? page.NextCursor : null);
+        }
+
+        /// <summary>
+        /// Cross-tenant paged variant of <see cref="GetAllSessionsAsync"/>.
+        /// <paramref name="tenantIdFilter"/> optionally restricts to one tenant.
+        /// </summary>
+        public async Task<RawPage<SessionSummary>> GetAllSessionsPageAsync(
+            string? tenantIdFilter, int? days, int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            // When tenantIdFilter is set and is a valid tenantId, route through
+            // the per-tenant SessionsIndex scan — natively-ordered, cheaper.
+            if (!string.IsNullOrEmpty(tenantIdFilter))
+            {
+                return await GetSessionsPageAsync(tenantIdFilter!, days, pageSize, continuation);
+            }
+
+            var page = await FetchAllSessionsPageInternalAsync(maxResults: pageSize, cursor: continuation, days: days);
+            return new RawPage<SessionSummary>(page.Sessions, page.HasMore ? page.NextCursor : null);
+        }
+
+        /// <summary>
+        /// Drains all sessions across all tenants — newest-first, no row cap.
+        /// <paramref name="tenantIdFilter"/> optionally restricts to a single tenant
+        /// (routed through the per-tenant index for efficiency).
+        /// </summary>
+        public async Task<List<SessionSummary>> GetAllSessionsAsync(string? tenantIdFilter = null, int? days = null)
+        {
+            if (!string.IsNullOrEmpty(tenantIdFilter))
+            {
+                return await GetSessionsAsync(tenantIdFilter!, days);
+            }
+
+            var all = new List<SessionSummary>();
+            string? token = null;
+            do
+            {
+                var page = await GetAllSessionsPageAsync(tenantIdFilter: null, days, pageSize: 1000, continuation: token);
+                all.AddRange(page.Items);
+                token = page.NextRawToken;
+            } while (!string.IsNullOrEmpty(token));
+            return all;
         }
 
         /// <summary>
         /// Fallback: queries the Sessions table directly (pre-migration, before SessionsIndex is populated).
         /// </summary>
-        private async Task<SessionPage> GetSessionsFromPrimaryTableAsync(string tenantId, int maxResults, int? days = null)
+        private async Task<(List<SessionSummary> Sessions, bool HasMore)> FetchSessionsFromPrimaryTableInternalAsync(
+            string tenantId, int maxResults, int? days)
         {
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
             var filter = $"PartitionKey eq '{tenantId}'";
@@ -749,22 +817,23 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
                 sessions = sessions.Where(s => s.StartedAt >= cutoffDate).ToList();
-                return new SessionPage { Sessions = sessions, HasMore = false };
+                return (sessions, false);
             }
 
             var hasMore = sessions.Count > maxResults;
             if (hasMore)
                 sessions.RemoveAt(sessions.Count - 1);
 
-            return new SessionPage { Sessions = sessions, HasMore = hasMore };
+            return (sessions, hasMore);
         }
 
         /// <summary>
-        /// Gets all sessions across all tenants (global admin mode), ordered newest-first,
-        /// with cursor-based pagination. Uses per-tenant fan-out to leverage the
-        /// inverted-tick RowKey ordering within each partition, then merge-sorts.
+        /// Internal cross-tenant scan with custom merge-cursor. Used by both
+        /// <see cref="GetAllSessionsAsync(string?, int?)"/> (drain) and
+        /// <see cref="GetAllSessionsPageAsync"/> (single page).
         /// </summary>
-        public async Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null, int? days = null)
+        private async Task<(List<SessionSummary> Sessions, bool HasMore, string? NextCursor)> FetchAllSessionsPageInternalAsync(
+            int maxResults, string? cursor, int? days)
         {
             try
             {
@@ -780,7 +849,10 @@ namespace AutopilotMonitor.Functions.Services
                 }
 
                 if (tenantIds.Count == 0 && string.IsNullOrEmpty(cursor))
-                    return await GetAllSessionsFromPrimaryTableAsync(maxResults, days);
+                {
+                    var fallback = await FetchAllSessionsFromPrimaryTableInternalAsync(maxResults, days);
+                    return (fallback.Sessions, fallback.HasMore, NextCursor: null);
+                }
 
                 // Step 2: Per-tenant fan-out using RowKey ordering (inverted ticks → newest first).
                 // Parse cursor into invertedTicks prefix for cross-tenant RowKey filtering.
@@ -796,8 +868,13 @@ namespace AutopilotMonitor.Functions.Services
                     }
                 }
 
-                // When days is set, fetch all matching sessions per tenant (with safety cap); otherwise paginate.
-                var fetchPerTenant = days.HasValue ? 5000 : maxResults + 1;
+                // Per-tenant fetch budget: maxResults+1 is sufficient because the
+                // outer merge-sort only ever surfaces top `maxResults` across all
+                // tenants per page. The `days` cutoff is enforced via the RowKey
+                // upper-bound filter below — pagination mechanics stay identical
+                // whether or not a date window is present (was: 5k per tenant
+                // hard cap when days set, silently truncating high-volume tenants).
+                var fetchPerTenant = maxResults + 1;
 
                 // Compute RowKey upper bound for date filtering
                 string? cutoffRowKeyPrefix = days.HasValue
@@ -837,17 +914,6 @@ namespace AutopilotMonitor.Functions.Services
                         allSessions = allSessions.Skip(cursorIdx + 1).ToList();
                 }
 
-                if (days.HasValue)
-                {
-                    // Date-bounded query: all matching sessions returned, no pagination
-                    return new SessionPage
-                    {
-                        Sessions = allSessions,
-                        HasMore = false,
-                        Cursor = null
-                    };
-                }
-
                 var hasMore = allSessions.Count > maxResults;
                 allSessions = allSessions.Take(maxResults).ToList();
 
@@ -858,24 +924,20 @@ namespace AutopilotMonitor.Functions.Services
                     nextCursor = ComputeIndexRowKey(lastSession.StartedAt, lastSession.SessionId);
                 }
 
-                return new SessionPage
-                {
-                    Sessions = allSessions,
-                    HasMore = hasMore,
-                    Cursor = nextCursor
-                };
+                return (allSessions, hasMore, nextCursor);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to get all sessions");
-                return new SessionPage();
+                return (new List<SessionSummary>(), false, null);
             }
         }
 
         /// <summary>
         /// Fallback: queries the Sessions table directly for global admin (pre-migration).
         /// </summary>
-        private async Task<SessionPage> GetAllSessionsFromPrimaryTableAsync(int maxResults, int? days = null)
+        private async Task<(List<SessionSummary> Sessions, bool HasMore)> FetchAllSessionsFromPrimaryTableInternalAsync(
+            int maxResults, int? days)
         {
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
             var safetyCap = days.HasValue ? 10000 : maxResults + 1;
@@ -894,14 +956,14 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var cutoffDate = DateTime.UtcNow.AddDays(-days.Value);
                 sessions = sessions.Where(s => s.StartedAt >= cutoffDate).ToList();
-                return new SessionPage { Sessions = sessions, HasMore = false };
+                return (sessions, false);
             }
 
             var hasMore = sessions.Count > maxResults;
             if (hasMore)
                 sessions.RemoveAt(sessions.Count - 1);
 
-            return new SessionPage { Sessions = sessions, HasMore = hasMore };
+            return (sessions, hasMore);
         }
 
         /// <summary>
@@ -1552,6 +1614,46 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogError(ex, $"Failed to get events for session {sessionId}");
                 return new List<EnrollmentEvent>();
+            }
+        }
+
+        /// <summary>
+        /// Reads a single page of session events. Honours the supplied <paramref name="pageSize"/>
+        /// and resumes from <paramref name="continuation"/> when supplied. The returned page's
+        /// items are sorted by Sequence ascending; the next-page cursor is null when this was
+        /// the last page.
+        /// </summary>
+        public async Task<RawPage<EnrollmentEvent>> GetSessionEventsPageAsync(
+            string tenantId, string sessionId, int pageSize, string? continuation)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize), "pageSize must be >= 1");
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+                var partitionKey = $"{tenantId}_{sessionId}";
+
+                var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                    client: tableClient,
+                    filter: $"PartitionKey eq '{partitionKey}'",
+                    pageSize: pageSize,
+                    continuation: continuation);
+
+                var events = new List<EnrollmentEvent>(entities.Count);
+                foreach (var entity in entities)
+                {
+                    events.Add(MapToEnrollmentEvent(entity));
+                }
+                events.Sort((a, b) => a.Sequence.CompareTo(b.Sequence));
+
+                return new RawPage<EnrollmentEvent>(events, nextRawToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get events page for session {SessionId}", sessionId);
+                return RawPage<EnrollmentEvent>.Empty;
             }
         }
 

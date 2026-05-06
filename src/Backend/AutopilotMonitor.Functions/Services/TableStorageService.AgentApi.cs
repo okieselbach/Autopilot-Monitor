@@ -1,8 +1,10 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Extensions.Logging;
 
 namespace AutopilotMonitor.Functions.Services
@@ -442,6 +444,128 @@ namespace AutopilotMonitor.Functions.Services
                 return await SearchSessionsByScanAsync(tenantId, filter);
         }
 
+        /// <summary>
+        /// Paged variant of <see cref="SearchSessionsAsync"/> backing
+        /// <c>/api/search/sessions</c> + <c>/api/global/search/sessions</c>.
+        /// The <c>filter.Limit</c> field is ignored — pagination uses
+        /// <paramref name="pageSize"/> + <paramref name="continuation"/>.
+        /// Both code paths (scan + device-snapshot) emit Azure-Tables raw
+        /// continuation tokens; the caller's filter fingerprint must include
+        /// the filter args so a token from one path can't be replayed into
+        /// the other.
+        /// </summary>
+        public async Task<RawPage<SessionSummary>> SearchSessionsPageAsync(
+            string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+            return filter.HasDeviceSnapshotFilters
+                ? await SearchSessionsByDeviceSnapshotPageAsync(tenantId, filter, pageSize, continuation)
+                : await SearchSessionsByScanPageAsync(tenantId, filter, pageSize, continuation);
+        }
+
+        private async Task<RawPage<SessionSummary>> SearchSessionsByScanPageAsync(
+            string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation)
+        {
+            var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+            var oDataFilter = BuildSearchScanFilter(tenantId, filter);
+
+            var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                client: indexTableClient,
+                filter: oDataFilter,
+                pageSize: pageSize,
+                continuation: continuation);
+
+            var sessions = new List<SessionSummary>(entities.Count);
+            foreach (var entity in entities)
+            {
+                var session = MapIndexEntityToSessionSummary(entity);
+                if (!MatchesScanClientFilters(session, filter)) continue;
+                sessions.Add(session);
+            }
+            // Note: a page may legitimately contain fewer than pageSize items after
+            // client-side filters; callers should follow nextLink until absent for
+            // forensics-grade exact-count semantics (Plan §"consume until absent").
+            return new RawPage<SessionSummary>(sessions, nextRawToken);
+        }
+
+        private async Task<RawPage<SessionSummary>> SearchSessionsByDeviceSnapshotPageAsync(
+            string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation)
+        {
+            var snapshotTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.DeviceSnapshot);
+            var oDataFilter = string.IsNullOrEmpty(tenantId) ? null : $"PartitionKey eq '{tenantId}'";
+
+            var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                client: snapshotTableClient,
+                filter: oDataFilter,
+                pageSize: pageSize,
+                continuation: continuation);
+
+            var sessionIds = new List<string>();
+            foreach (var entity in entities)
+            {
+                var properties = ReconstructDeviceProperties(entity);
+                if (properties == null || properties.Count == 0) continue;
+                if (!MatchesAllDeviceFilters(properties, filter.DeviceProperties!)) continue;
+                sessionIds.Add(entity.RowKey);
+            }
+
+            if (sessionIds.Count == 0)
+            {
+                return new RawPage<SessionSummary>(Array.Empty<SessionSummary>(), nextRawToken);
+            }
+
+            var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
+            sessions = ApplyBasicFilters(sessions, filter);
+            return new RawPage<SessionSummary>(sessions, nextRawToken);
+        }
+
+        private static string? BuildSearchScanFilter(string? tenantId, SessionSearchFilter filter)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(tenantId))
+                parts.Add($"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}'");
+            if (!string.IsNullOrEmpty(filter.Status))
+                parts.Add($"Status eq '{ODataSanitizer.EscapeValue(filter.Status)}'");
+            if (!string.IsNullOrEmpty(filter.Manufacturer))
+                parts.Add($"Manufacturer eq '{ODataSanitizer.EscapeValue(filter.Manufacturer)}'");
+            if (!string.IsNullOrEmpty(filter.Model))
+                parts.Add($"Model eq '{ODataSanitizer.EscapeValue(filter.Model)}'");
+            if (!string.IsNullOrEmpty(filter.EnrollmentType))
+                parts.Add($"EnrollmentType eq '{ODataSanitizer.EscapeValue(filter.EnrollmentType)}'");
+            if (!string.IsNullOrEmpty(filter.DeviceName))
+            {
+                var safeName = ODataSanitizer.EscapeValue(filter.DeviceName);
+                parts.Add($"DeviceName ge '{safeName}' and DeviceName lt '{safeName}~'");
+            }
+            if (!string.IsNullOrEmpty(filter.OsBuild))
+            {
+                var safeBuild = ODataSanitizer.EscapeValue(filter.OsBuild);
+                parts.Add($"OsBuild ge '{safeBuild}' and OsBuild lt '{safeBuild}~'");
+            }
+            return parts.Count == 0 ? null : string.Join(" and ", parts);
+        }
+
+        private static bool MatchesScanClientFilters(SessionSummary session, SessionSearchFilter filter)
+        {
+            if (!string.IsNullOrEmpty(filter.SerialNumber) &&
+                !string.Equals(session.SerialNumber, filter.SerialNumber, StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (filter.IsPreProvisioned.HasValue && session.IsPreProvisioned != filter.IsPreProvisioned.Value) return false;
+            if (filter.IsHybridJoin.HasValue && session.IsHybridJoin != filter.IsHybridJoin.Value) return false;
+            if (!string.IsNullOrEmpty(filter.GeoCountry) &&
+                !string.Equals(session.GeoCountry, filter.GeoCountry, StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (filter.StartedAfter.HasValue && session.StartedAt < filter.StartedAfter.Value) return false;
+            if (filter.StartedBefore.HasValue && session.StartedAt > filter.StartedBefore.Value) return false;
+            if (!string.IsNullOrEmpty(filter.AgentVersion) &&
+                !string.Equals(session.AgentVersion, filter.AgentVersion, StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (!string.IsNullOrEmpty(filter.ImeAgentVersion) &&
+                !string.Equals(session.ImeAgentVersion, filter.ImeAgentVersion, StringComparison.OrdinalIgnoreCase))
+                return false;
+            return true;
+        }
+
         private async Task<List<SessionSummary>> SearchSessionsByDeviceSnapshotAsync(string? tenantId, SessionSearchFilter filter)
         {
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.DeviceSnapshot);
@@ -736,6 +860,15 @@ namespace AutopilotMonitor.Functions.Services
                 minSeverity = (int)parsedSeverity;
             }
 
+            // Tenant-scoped: partition-targeted (cheap, exact-match on PK).
+            // Cross-tenant: server-side filter on the EventType column. The
+            // PartitionKey shape is `{tenantId}_{eventType}` and tenantIds may
+            // contain dashes but never underscores, while eventType itself may
+            // contain underscores (e.g. `app_install_failed`) — so a PK-suffix
+            // split is brittle. Filtering on the explicit EventType column
+            // avoids that ambiguity entirely (regression: previously used
+            // `LastIndexOf('_')` and silently dropped every multi-underscore
+            // event type).
             string? oDataFilter;
             if (!string.IsNullOrEmpty(tenantId))
             {
@@ -744,27 +877,15 @@ namespace AutopilotMonitor.Functions.Services
                     oDataFilter += $" and MaxSeverity ge {minSeverity.Value}";
             }
             else
-                oDataFilter = null;
+            {
+                oDataFilter = $"EventType eq '{ODataSanitizer.EscapeValue(eventType)}'";
+                if (minSeverity.HasValue)
+                    oDataFilter += $" and MaxSeverity ge {minSeverity.Value}";
+            }
 
             var sessionIds = new List<string>();
             await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
             {
-                // For cross-tenant search, filter by eventType in the PartitionKey
-                if (string.IsNullOrEmpty(tenantId))
-                {
-                    var pk = entity.PartitionKey;
-                    var underscoreIdx = pk.LastIndexOf('_');
-                    if (underscoreIdx < 0) continue;
-                    var pkEventType = pk.Substring(underscoreIdx + 1);
-                    if (!string.Equals(pkEventType, eventType, StringComparison.OrdinalIgnoreCase)) continue;
-
-                    // Cross-tenant severity filter (client-side since no PK filter)
-                    if (minSeverity.HasValue)
-                    {
-                        var entitySeverity = entity.GetInt32("MaxSeverity");
-                        if (entitySeverity == null || entitySeverity < minSeverity.Value) continue;
-                    }
-                }
 
                 // Client-side source filter on the Sources field
                 if (!string.IsNullOrEmpty(source))
@@ -784,6 +905,85 @@ namespace AutopilotMonitor.Functions.Services
 
             var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
             return sessions.Take(limit).ToList();
+        }
+
+        /// <summary>
+        /// Paged variant of <see cref="SearchSessionsByEventAsync"/> — drives
+        /// <c>QueryRawEventsFunction</c>'s cross-session walk. Returns up to
+        /// <paramref name="pageSize"/> distinct sessions plus the underlying
+        /// Azure-Tables continuation; caller follows the wire <c>nextLink</c>
+        /// to drain the full recall set.
+        /// </summary>
+        public async Task<RawPage<SessionSummary>> SearchSessionsByEventPageAsync(
+            string? tenantId, string eventType, string? source, string? severity, string? phase,
+            int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventTypeIndex);
+
+            // Build OData filter — same as legacy SearchSessionsByEventAsync but
+            // without the limit*2 over-fetch, since pagination handles depth.
+            int? minSeverity = null;
+            if (!string.IsNullOrEmpty(severity) &&
+                Enum.TryParse<AutopilotMonitor.Shared.Models.EventSeverity>(severity, ignoreCase: true, out var parsedSeverity))
+            {
+                minSeverity = (int)parsedSeverity;
+            }
+
+            // Tenant-scoped: partition-targeted query (PK exact match).
+            // Cross-tenant: server-side filter on the EventType column. The
+            // PartitionKey shape is `{tenantId}_{eventType}` and tenantIds may
+            // contain dashes but never underscores, while eventType itself may
+            // contain underscores (e.g. `app_install_failed`) — so the previous
+            // PK-suffix split via LastIndexOf('_') silently filtered out every
+            // multi-underscore event type. Filtering on the EventType column
+            // avoids that ambiguity entirely.
+            string? oDataFilter;
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                oDataFilter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{ODataSanitizer.EscapeValue(eventType)}'";
+                if (minSeverity.HasValue)
+                    oDataFilter += $" and MaxSeverity ge {minSeverity.Value}";
+            }
+            else
+            {
+                oDataFilter = $"EventType eq '{ODataSanitizer.EscapeValue(eventType)}'";
+                if (minSeverity.HasValue)
+                    oDataFilter += $" and MaxSeverity ge {minSeverity.Value}";
+            }
+
+            var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                client: tableClient,
+                filter: oDataFilter,
+                pageSize: pageSize,
+                continuation: continuation);
+
+            var sessionIds = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entity in entities)
+            {
+
+                if (!string.IsNullOrEmpty(source))
+                {
+                    var sources = entity.GetString("Sources") ?? string.Empty;
+                    if (!sources.Contains(source, StringComparison.OrdinalIgnoreCase)) continue;
+                }
+
+                var sessionId = entity.GetString("SessionId");
+                if (!string.IsNullOrEmpty(sessionId) && seen.Add(sessionId))
+                {
+                    sessionIds.Add(sessionId);
+                }
+            }
+
+            if (sessionIds.Count == 0)
+            {
+                return new RawPage<SessionSummary>(Array.Empty<SessionSummary>(), nextRawToken);
+            }
+
+            var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
+            return new RawPage<SessionSummary>(sessions, nextRawToken);
         }
 
         /// <summary>

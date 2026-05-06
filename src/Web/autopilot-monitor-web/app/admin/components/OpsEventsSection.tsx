@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { extractContinuation } from "@/lib/paginationLink";
 
 interface OpsEvent {
   id: string;
@@ -42,6 +43,30 @@ const CATEGORY_STYLES: Record<string, string> = {
 };
 
 const ALL_CATEGORIES = ["Consent", "Maintenance", "Security", "Tenant", "Agent"];
+
+const PAGE_SIZE = 50;
+
+function defaultIsoDateFrom(): string {
+  const d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function defaultIsoDateTo(): string {
+  return new Date().toISOString();
+}
+
+function isoToDateInputValue(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+function dateInputToIsoStart(value: string): string {
+  return value ? `${value}T00:00:00.000Z` : "";
+}
+
+function dateInputToIsoEnd(value: string): string {
+  return value ? `${value}T23:59:59.999Z` : "";
+}
 
 function SeverityBadge({ severity }: { severity: string }) {
   const style = SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.Info;
@@ -102,29 +127,37 @@ export function OpsEventsSection({
   const [selectedEvent, setSelectedEvent] = useState<OpsEvent | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 15;
 
-  useEffect(() => {
-    fetchEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryFilter]);
+  const [dateFromIso, setDateFromIso] = useState<string>(defaultIsoDateFrom());
+  const [dateToIso, setDateToIso] = useState<string>(defaultIsoDateTo());
 
-  const fetchEvents = async () => {
+  // Pattern B1 click-next replace state — backend pagination
+  const [continuation, setContinuation] = useState<string | null>(null);
+  const [nextLink, setNextLink] = useState<string | null>(null);
+  const [continuationStack, setContinuationStack] = useState<Array<string | null>>([]);
+  const [pageNumber, setPageNumber] = useState(1);
+
+  const fetchEvents = useCallback(async (cursor: string | null) => {
     try {
       setLoading(true);
       const res = await authenticatedFetch(
-        api.opsEvents.list(categoryFilter || undefined),
+        api.opsEvents.list(categoryFilter || undefined, {
+          dateFrom: dateFromIso,
+          dateTo: dateToIso,
+          pageSize: PAGE_SIZE,
+          continuation: cursor ?? undefined,
+        }),
         getAccessToken
       );
       if (res.status === 404) {
         setEvents([]);
+        setNextLink(null);
         return;
       }
       if (!res.ok) throw new Error(`Failed to load ops events: ${res.statusText}`);
       const data = await res.json();
       setEvents(data.events ?? []);
-      setCurrentPage(0);
+      setNextLink(data.nextLink ?? null);
     } catch (err) {
       if (err instanceof TokenExpiredError) {
         console.error("Session expired while loading ops events");
@@ -133,9 +166,38 @@ export function OpsEventsSection({
     } finally {
       setLoading(false);
     }
+  }, [categoryFilter, dateFromIso, dateToIso, getAccessToken, setError]);
+
+  // Reset pagination + refetch whenever the filter window or category changes.
+  useEffect(() => {
+    setContinuation(null);
+    setContinuationStack([]);
+    setPageNumber(1);
+    fetchEvents(null);
+  }, [categoryFilter, dateFromIso, dateToIso, fetchEvents]);
+
+  const handleNextPage = () => {
+    const nextCont = extractContinuation(nextLink);
+    if (!nextCont) return;
+    setContinuationStack(stack => [...stack, continuation]);
+    setContinuation(nextCont);
+    setPageNumber(n => n + 1);
+    fetchEvents(nextCont);
   };
 
-  // Search filter (client-side across key fields)
+  const handlePrevPage = () => {
+    if (continuationStack.length === 0) return;
+    const prev = continuationStack[continuationStack.length - 1];
+    setContinuationStack(stack => stack.slice(0, -1));
+    setContinuation(prev ?? null);
+    setPageNumber(n => Math.max(1, n - 1));
+    fetchEvents(prev ?? null);
+  };
+
+  const handleRefresh = () => fetchEvents(continuation);
+
+  // Search filter operates on the current backend page only — Pattern B1 shows
+  // one page at a time, so cross-page totals are intentionally not surfaced.
   const filteredEvents = searchQuery.trim()
     ? events.filter((e) => {
         const q = searchQuery.toLowerCase();
@@ -191,7 +253,7 @@ export function OpsEventsSection({
               Configure Alerts
             </Link>
             <button
-              onClick={fetchEvents}
+              onClick={handleRefresh}
               disabled={loading}
               className="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 transition-colors"
             >
@@ -256,6 +318,25 @@ export function OpsEventsSection({
         </div>
       </div>
 
+      {/* Date window */}
+      <div className="px-6 pt-4 pb-2 flex items-center gap-3 flex-wrap">
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Window:</span>
+        <label className="text-xs text-gray-600 dark:text-gray-400">From</label>
+        <input
+          type="date"
+          value={isoToDateInputValue(dateFromIso)}
+          onChange={(e) => setDateFromIso(dateInputToIsoStart(e.target.value))}
+          className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
+        />
+        <label className="text-xs text-gray-600 dark:text-gray-400">To</label>
+        <input
+          type="date"
+          value={isoToDateInputValue(dateToIso)}
+          onChange={(e) => setDateToIso(dateInputToIsoEnd(e.target.value))}
+          className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
+        />
+      </div>
+
       {/* Search & Category Filter */}
       <div className="px-6 pt-4 pb-2 flex items-center gap-2 flex-wrap">
         <div className="relative">
@@ -264,14 +345,14 @@ export function OpsEventsSection({
           </svg>
           <input
             type="text"
-            placeholder="Search events..."
+            placeholder="Search this page..."
             value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(0); }}
+            onChange={(e) => setSearchQuery(e.target.value)}
             className="w-52 pl-8 pr-7 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
           />
           {searchQuery && (
             <button
-              onClick={() => { setSearchQuery(""); setCurrentPage(0); }}
+              onClick={() => setSearchQuery("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -337,7 +418,7 @@ export function OpsEventsSection({
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {filteredEvents.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((evt, idx) => {
+                {filteredEvents.map((evt, idx) => {
                   const rowStyle = SEVERITY_STYLES[evt.severity]?.row ?? "";
                   return (
                     <tr
@@ -369,33 +450,28 @@ export function OpsEventsSection({
               </tbody>
             </table>
 
-            {/* Pagination */}
-            {filteredEvents.length > pageSize && (
-              <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-md">
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {currentPage * pageSize + 1}&ndash;{Math.min((currentPage + 1) * pageSize, filteredEvents.length)} of {filteredEvents.length}{searchQuery && ` (filtered)`}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage(p => p - 1)}
-                    disabled={currentPage === 0}
-                    className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {currentPage + 1} / {Math.ceil(filteredEvents.length / pageSize)}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(p => p + 1)}
-                    disabled={(currentPage + 1) * pageSize >= filteredEvents.length}
-                    className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Next
-                  </button>
-                </div>
+            {/* Pagination (Pattern B1 — backend-driven) */}
+            <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-md">
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {filteredEvents.length} on page {pageNumber}{searchQuery && ` (filtered)`}{nextLink ? "" : " (last)"}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrevPage}
+                  disabled={continuationStack.length === 0 || loading}
+                  className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={handleNextPage}
+                  disabled={!nextLink || loading}
+                  className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
               </div>
-            )}
+            </div>
           </div>
         )}
       </div>

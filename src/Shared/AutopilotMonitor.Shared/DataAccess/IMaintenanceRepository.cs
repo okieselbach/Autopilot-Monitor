@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 
 namespace AutopilotMonitor.Shared.DataAccess
 {
@@ -14,8 +15,31 @@ namespace AutopilotMonitor.Shared.DataAccess
         // --- Audit Logs ---
         Task<bool> LogAuditEntryAsync(string tenantId, string action, string entityType,
             string entityId, string performedBy, Dictionary<string, string>? details = null);
-        Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, int maxResults = 100);
-        Task<List<AuditLogEntry>> GetAllAuditLogsAsync(int maxResults = 100);
+
+        /// <summary>
+        /// Returns all audit log entries for <paramref name="tenantId"/> in the
+        /// given <paramref name="dateFrom"/>/<paramref name="dateTo"/> window
+        /// (UTC, inclusive). Either bound may be null. Sorted newest-first.
+        /// No row cap — callers passing very wide windows MUST consider
+        /// <see cref="GetAuditLogsPageAsync"/> to bound memory.
+        /// </summary>
+        Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, DateTime? dateFrom = null, DateTime? dateTo = null);
+
+        /// <summary>Cross-tenant variant of <see cref="GetAuditLogsAsync"/> (Global Admin only).</summary>
+        Task<List<AuditLogEntry>> GetAllAuditLogsAsync(DateTime? dateFrom = null, DateTime? dateTo = null);
+
+        /// <summary>
+        /// Reads a single page of audit log entries for <paramref name="tenantId"/>
+        /// in the given window. The returned <see cref="RawPage{T}"/> carries the
+        /// underlying store's opaque continuation token; <c>null</c> when this
+        /// page was the last. Items in each page are sorted newest-first.
+        /// </summary>
+        Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation);
+
+        /// <summary>Cross-tenant variant of <see cref="GetAuditLogsPageAsync"/> (Global Admin only).</summary>
+        Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation);
 
         // --- Data Retention Queries ---
         Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate);

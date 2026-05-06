@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery } from '../client.js';
+import { apiFetch, buildQuery, followNextLink } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY } from './shared.js';
 import { toolError } from './error-handler.js';
@@ -40,7 +40,8 @@ export function registerSessionTools(server: McpServer): void {
     'Use deviceProperties for ANY device hardware/config filter — keys use "eventType.propertyName" notation. ' +
     'Consult the device_properties resource for available keys. ' +
     'Examples: {"tpm_status.specVersion": "2.0"}, {"hardware_spec.ramTotalGB": ">=8"}, {"secureboot_status.uefiSecureBootEnabled": "True"}. ' +
-    'Array values are searched as substring match (e.g. disks containing "NVMe").',
+    'Array values are searched as substring match (e.g. disks containing "NVMe"). ' +
+    'Pagination: when "nextLink" is present in the response, more sessions are available — call this tool again with "continuation" set to the value embedded in nextLink. Stop when nextLink is absent.',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional().describe('Enrollment status filter'),
@@ -63,13 +64,20 @@ export function registerSessionTools(server: McpServer): void {
         'Values: exact match by default. Prefix with >=, <=, >, < for numeric ranges (e.g. ">=8"). ' +
         'Booleans: use "True" or "False". Arrays: substring match in any element.'
       ),
-      limit: z.coerce.number().min(1).max(100).optional().default(50).describe('Maximum number of results (1-100, default 50)'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(50)
+        .describe('Page size (1-1000, default 50). Returns this many sessions per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('search_sessions', async () => {
       try {
-        const { deviceProperties, tenantId, ...rest } = args;
-        const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest };
+        const { deviceProperties, tenantId, pageSize, continuation, ...rest } = args;
+        const queryParams: Record<string, string | number | boolean | undefined | null> = {
+          ...rest,
+          pageSize,
+          continuation,
+        };
         if (tenantId) queryParams.tenantId = tenantId;
         if (deviceProperties) {
           for (const [key, value] of Object.entries(deviceProperties)) {
@@ -91,11 +99,15 @@ export function registerSessionTools(server: McpServer): void {
     'Find sessions that contain a specific event type (e.g. app install failure, phase transitions, errors). ' +
     'Omit tenantId for cross-tenant search (Global Admin). ' +
     'Check the event_types resource for valid eventType values. ' +
-    'Use this to answer: which devices had a failed Teams install, which sessions had an error in DeviceSetup phase.',
+    'Use this to answer: which devices had a failed Teams install, which sessions had an error in DeviceSetup phase. ' +
+    'Pagination: when "nextLink" is present in the response, more sessions are available — call this tool again with "continuation" set to the value embedded in nextLink. Stop when nextLink is absent.',
     {
       eventType: z.string().describe('Event type string — see event_types resource for valid values (e.g. "app_install_failed", "enrollment_failed")'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
-      limit: z.coerce.number().min(1).max(100).optional().default(50),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(50)
+        .describe('Page size (1-1000, default 50). Returns this many sessions per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('search_sessions_by_event', async () => {
@@ -146,25 +158,39 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'get_session_events',
     'TIER 2 — RAW EVENT RETRIEVAL (fallback when semantic search misses). ' +
-    'Get the complete event timeline for a single session. Filter by eventType, severity, or source (app name). ' +
+    'Returns up to pageSize events from a single session. Filter by eventType, severity, or source (app name). ' +
     'Use this when search_events_semantic returns incomplete results and you need the full unfiltered event stream, ' +
     'or for root cause analysis when you need every event in chronological sequence. ' +
-    'If you omit tenantId, the backend auto-resolves it from the session (Global Admin can access any tenant).',
+    'If you omit tenantId, the backend auto-resolves it from the session (Global Admin can access any tenant). ' +
+    'Pagination: if the response includes "nextLink", more events are available — call this tool again and pass the ' +
+    'whole nextLink string (e.g. "/api/sessions/{id}/events?pageSize=...&continuation=...&tenantId=...") as ' +
+    '"continuation". The tool follows it verbatim so query params the backend echoes (tenantId on cross-tenant reads, ' +
+    'filters, etc.) round-trip correctly. Stop when the response no longer contains a nextLink. Sessions with ' +
+    'thousands of events are fully reachable across multiple calls.',
     {
       sessionId: z.string().describe('Session UUID'),
       tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session.'),
       eventType: z.string().optional().describe('Filter to only events of this type'),
       severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
       source: z.string().optional().describe('Filter by event source/app name (e.g. "MicrosoftTeams")'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). The endpoint returns this many events per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so query params the backend echoes round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_session_events', async () => {
       try {
-        const { sessionId, tenantId, ...filters } = args;
-        const q = buildQuery({ tenantId } as Record<string, string | undefined>);
-        const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as {
+        const { sessionId, tenantId, pageSize, continuation, ...filters } = args;
+        const path = followNextLink(
+          `/api/sessions/${sessionId}/events`,
+          { tenantId, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path) as {
           events?: Array<{ eventType?: string; severity?: string; source?: string }>;
           count?: number;
+          nextLink?: string;
         };
         if (data?.events && (filters.eventType || filters.severity || filters.source)) {
           data.events = data.events.filter((e) => {

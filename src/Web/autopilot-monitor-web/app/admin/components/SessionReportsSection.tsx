@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { extractContinuation } from "@/lib/paginationLink";
+import { isGuid } from "@/utils/inputValidation";
 import { trackEvent } from "@/lib/appInsights";
+
+const PAGE_SIZE = 50;
 
 interface SessionReport {
   reportId: string;
@@ -57,17 +61,18 @@ export function SessionReportsSection({
   const [reports, setReports] = useState<SessionReport[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<SessionReport | null>(null);
-  const [currentPage, setCurrentPage] = useState(0);
-  const pageSize = 5;
   const [downloadingBlob, setDownloadingBlob] = useState<string | null>(null);
   const [adminNoteValue, setAdminNoteValue] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [noteSaveResult, setNoteSaveResult] = useState<"saved" | string | null>(null);
 
-  useEffect(() => {
-    fetchReports();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Pattern B1 click-next replace state — backend pagination
+  const [tenantFilterInput, setTenantFilterInput] = useState("");
+  const [tenantFilterApplied, setTenantFilterApplied] = useState<string | undefined>(undefined);
+  const [continuation, setContinuation] = useState<string | null>(null);
+  const [nextLink, setNextLink] = useState<string | null>(null);
+  const [continuationStack, setContinuationStack] = useState<Array<string | null>>([]);
+  const [pageNumber, setPageNumber] = useState(1);
 
   useEffect(() => {
     if (selectedReport) {
@@ -135,20 +140,29 @@ export function SessionReportsSection({
     }
   };
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async (cursor: string | null, filterTenantId: string | undefined) => {
     try {
       setLoading(true);
 
-      const res = await authenticatedFetch(api.reports.list(), getAccessToken);
+      const res = await authenticatedFetch(
+        api.reports.list({
+          tenantId: filterTenantId,
+          pageSize: PAGE_SIZE,
+          continuation: cursor ?? undefined,
+        }),
+        getAccessToken,
+      );
 
       if (res.status === 404) {
         // Table/container doesn't exist yet — no reports submitted so far
         setReports([]);
+        setNextLink(null);
         return;
       }
       if (!res.ok) throw new Error(`Failed to load reports: ${res.statusText}`);
       const data = await res.json();
       setReports(data.reports ?? []);
+      setNextLink(data.nextLink ?? null);
     } catch (err) {
       if (err instanceof TokenExpiredError) {
         console.error("Session expired while loading reports");
@@ -157,7 +171,50 @@ export function SessionReportsSection({
     } finally {
       setLoading(false);
     }
+  }, [getAccessToken, setError]);
+
+  // Initial load + reload whenever the applied tenant filter changes.
+  useEffect(() => {
+    setContinuation(null);
+    setContinuationStack([]);
+    setPageNumber(1);
+    fetchReports(null, tenantFilterApplied);
+  }, [tenantFilterApplied, fetchReports]);
+
+  const handleApplyTenantFilter = () => {
+    const trimmed = tenantFilterInput.trim();
+    if (trimmed && !isGuid(trimmed)) {
+      setError("Tenant ID must be a valid GUID");
+      return;
+    }
+    setError(null);
+    setTenantFilterApplied(trimmed || undefined);
   };
+
+  const handleClearTenantFilter = () => {
+    setTenantFilterInput("");
+    setTenantFilterApplied(undefined);
+  };
+
+  const handleNextPage = () => {
+    const nextCont = extractContinuation(nextLink);
+    if (!nextCont) return;
+    setContinuationStack(stack => [...stack, continuation]);
+    setContinuation(nextCont);
+    setPageNumber(n => n + 1);
+    fetchReports(nextCont, tenantFilterApplied);
+  };
+
+  const handlePrevPage = () => {
+    if (continuationStack.length === 0) return;
+    const prev = continuationStack[continuationStack.length - 1];
+    setContinuationStack(stack => stack.slice(0, -1));
+    setContinuation(prev ?? null);
+    setPageNumber(n => Math.max(1, n - 1));
+    fetchReports(prev ?? null, tenantFilterApplied);
+  };
+
+  const handleRefresh = () => fetchReports(continuation, tenantFilterApplied);
 
   return (
     <div className="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-gray-800 dark:to-gray-800 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg shadow-lg">
@@ -178,8 +235,51 @@ export function SessionReportsSection({
         </div>
       </div>
 
+      {/* Tenant filter + refresh */}
+      <div className="px-6 pt-4 pb-2 flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Filter:</span>
+        <input
+          type="text"
+          placeholder="Tenant ID (GUID)"
+          value={tenantFilterInput}
+          onChange={(e) => setTenantFilterInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleApplyTenantFilter();
+          }}
+          className="w-72 px-2 py-1 text-xs font-mono border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        />
+        <button
+          onClick={handleApplyTenantFilter}
+          disabled={loading}
+          className="px-2.5 py-1 text-xs font-medium rounded-md border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 disabled:opacity-40 transition-colors"
+        >
+          Apply
+        </button>
+        {tenantFilterApplied && (
+          <button
+            onClick={handleClearTenantFilter}
+            disabled={loading}
+            className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 transition-colors"
+          >
+            Clear
+          </button>
+        )}
+        {tenantFilterApplied && (
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            scoped to <span className="font-mono">{tenantFilterApplied.slice(0, 8)}…</span>
+          </span>
+        )}
+        <button
+          onClick={handleRefresh}
+          disabled={loading}
+          className="ml-auto px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 transition-colors"
+        >
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+
       {/* Reports Table */}
-      <div className="p-6">
+      <div className="p-6 pt-2">
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
@@ -206,7 +306,7 @@ export function SessionReportsSection({
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {reports.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(r => (
+                {reports.map(r => (
                   <tr
                     key={r.reportId}
                     onClick={() => setSelectedReport(r)}
@@ -244,33 +344,28 @@ export function SessionReportsSection({
               </tbody>
             </table>
 
-            {/* Pagination */}
-            {reports.length > pageSize && (
-              <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-md">
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, reports.length)} of {reports.length}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage(p => p - 1)}
-                    disabled={currentPage === 0}
-                    className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {currentPage + 1} / {Math.ceil(reports.length / pageSize)}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(p => p + 1)}
-                    disabled={(currentPage + 1) * pageSize >= reports.length}
-                    className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Next
-                  </button>
-                </div>
+            {/* Pagination (Pattern B1 — backend-driven) */}
+            <div className="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-md">
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {reports.length} on page {pageNumber}{nextLink ? "" : " (last)"}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrevPage}
+                  disabled={continuationStack.length === 0 || loading}
+                  className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={handleNextPage}
+                  disabled={!nextLink || loading}
+                  className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Next
+                </button>
               </div>
-            )}
+            </div>
           </div>
         )}
       </div>

@@ -43,14 +43,15 @@ public class ProgressPortalFunction
 
             _logger.LogInformation("ProgressGetSessions: Fetching sessions for tenant {TenantId}", tenantId);
 
-            var page = await _sessionRepo.GetSessionsAsync(tenantId, maxResults: 100);
+            // Progress portal renders only the latest 100 sessions — single page is enough.
+            var page = await _sessionRepo.GetSessionsPageAsync(tenantId, days: null, pageSize: 100, continuation: null);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
             {
                 success = true,
-                count = page.Sessions.Count,
-                sessions = page.Sessions
+                count = page.Items.Count,
+                sessions = page.Items
             });
             return response;
         }

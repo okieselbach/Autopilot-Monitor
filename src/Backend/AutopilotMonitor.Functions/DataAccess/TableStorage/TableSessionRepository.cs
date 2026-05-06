@@ -1,5 +1,6 @@
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using AutopilotMonitor.Functions.Services;
 
 namespace AutopilotMonitor.Functions.DataAccess.TableStorage
@@ -33,11 +34,17 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<string?> FindSessionTenantIdAsync(string sessionId)
             => _storage.FindSessionTenantIdAsync(sessionId);
 
-        public Task<SessionPage> GetSessionsAsync(string tenantId, int maxResults = 100, string? cursor = null, int? days = null)
-            => _storage.GetSessionsAsync(tenantId, maxResults, cursor, days);
+        public Task<List<SessionSummary>> GetSessionsAsync(string tenantId, int? days = null)
+            => _storage.GetSessionsAsync(tenantId, days);
 
-        public Task<SessionPage> GetAllSessionsAsync(int maxResults = 100, string? cursor = null, int? days = null)
-            => _storage.GetAllSessionsAsync(maxResults, cursor, days);
+        public Task<List<SessionSummary>> GetAllSessionsAsync(string? tenantIdFilter = null, int? days = null)
+            => _storage.GetAllSessionsAsync(tenantIdFilter, days);
+
+        public Task<RawPage<SessionSummary>> GetSessionsPageAsync(string tenantId, int? days, int pageSize, string? continuation)
+            => _storage.GetSessionsPageAsync(tenantId, days, pageSize, continuation);
+
+        public Task<RawPage<SessionSummary>> GetAllSessionsPageAsync(string? tenantIdFilter, int? days, int pageSize, string? continuation)
+            => _storage.GetAllSessionsPageAsync(tenantIdFilter, days, pageSize, continuation);
 
         public Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
             => _storage.DeleteSessionAsync(tenantId, sessionId);
@@ -120,11 +127,22 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<List<EnrollmentEvent>> GetSessionEventsByTypeAsync(string tenantId, string sessionId, string eventType, int maxResults = 200)
             => _storage.GetSessionEventsByTypeAsync(tenantId, sessionId, eventType, maxResults);
 
+        public Task<RawPage<EnrollmentEvent>> GetSessionEventsPageAsync(string tenantId, string sessionId, int pageSize, string? continuation)
+            => _storage.GetSessionEventsPageAsync(tenantId, sessionId, pageSize, continuation);
+
         public Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string? tenantId, string query, int limit = 10)
             => _storage.QuickSearchSessionsAsync(tenantId, query, limit);
 
         public Task<List<SessionSummary>> SearchSessionsAsync(string? tenantId, SessionSearchFilter filter)
             => _storage.SearchSessionsAsync(tenantId, filter);
+
+        public Task<RawPage<SessionSummary>> SearchSessionsPageAsync(string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation)
+            => _storage.SearchSessionsPageAsync(tenantId, filter, pageSize, continuation);
+
+        public Task<RawPage<SessionSummary>> SearchSessionsByEventPageAsync(
+            string? tenantId, string eventType, string? source, string? severity, string? phase,
+            int pageSize, string? continuation)
+            => _storage.SearchSessionsByEventPageAsync(tenantId, eventType, source, severity, phase, pageSize, continuation);
 
         public Task<List<SessionSummary>> SearchSessionsByEventAsync(
             string? tenantId, string eventType, string? source, string? severity,

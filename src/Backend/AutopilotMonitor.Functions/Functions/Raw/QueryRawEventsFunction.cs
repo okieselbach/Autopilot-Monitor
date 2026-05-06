@@ -1,8 +1,11 @@
 using System.Net;
+using System.Web;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -30,7 +33,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             try
             {
                 var tenantId = TenantHelper.GetTenantId(req);
-                return await QueryEvents(req, tenantId);
+                return await QueryEvents(req, tenantId, scope: "raw-events:tenant", basePath: "/api/raw/events", filterTenantId: null);
             }
             catch (UnauthorizedAccessException)
             {
@@ -54,8 +57,10 @@ namespace AutopilotMonitor.Functions.Functions.Raw
         {
             try
             {
-                var tenantId = req.Query["tenantId"];
-                return await QueryEvents(req, string.IsNullOrEmpty(tenantId) ? null : tenantId);
+                var filterTenantId = req.Query["tenantId"];
+                var effectiveTenantId = string.IsNullOrEmpty(filterTenantId) ? null : filterTenantId;
+                return await QueryEvents(req, effectiveTenantId, scope: "raw-events:global",
+                    basePath: "/api/global/raw/events", filterTenantId: effectiveTenantId);
             }
             catch (Exception ex)
             {
@@ -63,19 +68,31 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
         }
 
-        private async Task<HttpResponseData> QueryEvents(HttpRequestData req, string? tenantId)
+        private async Task<HttpResponseData> QueryEvents(
+            HttpRequestData req, string? tenantId, string scope, string basePath, string? filterTenantId)
         {
-            var sessionId = req.Query["sessionId"];
-            var eventType = req.Query["eventType"];
-            var severity = req.Query["severity"];
-            var source = req.Query["source"];
-            var startedAfter = req.Query["startedAfter"];
-            var startedBefore = req.Query["startedBefore"];
-            var limitStr = req.Query["limit"];
-            var limit = int.TryParse(limitStr, out var l) ? Math.Clamp(l, 1, 500) : 100;
+            var query = HttpUtility.ParseQueryString(req.Url.Query ?? string.Empty);
+            var sessionId = query["sessionId"];
+            var eventType = query["eventType"];
+            var severity = query["severity"];
+            var source = query["source"];
+            var startedAfter = query["startedAfter"];
+            var startedBefore = query["startedBefore"];
 
-            List<EnrollmentEvent> events;
+            var pagination = QueryRawEventsPagination.ParsePagination(query);
+            if (pagination.Error != null)
+            {
+                var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                await bad.WriteAsJsonAsync(new { error = pagination.Error });
+                return bad;
+            }
 
+            var callerTenantId = TenantHelper.GetTenantId(req);
+
+            // Single-session path — paginated session-events walk so sessions
+            // with more events than pageSize remain fully reachable across
+            // multiple calls. Continuation token binds caller + sessionId so
+            // a cursor from session A cannot be replayed for session B.
             if (!string.IsNullOrEmpty(sessionId))
             {
                 if (string.IsNullOrEmpty(tenantId))
@@ -84,63 +101,137 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                     await bad.WriteAsJsonAsync(new { error = "tenantId is required when querying by sessionId" });
                     return bad;
                 }
-                // Single session query — use existing repo method
-                events = await _sessionRepo.GetSessionEventsAsync(tenantId, sessionId, limit);
-            }
-            else
-            {
-                // Cross-session: We need to search by event type via the EventTypeIndex
-                // then fetch events for matched sessions
-                if (string.IsNullOrEmpty(eventType))
+
+                string? singleAzureToken = null;
+                if (pagination.Continuation != null)
                 {
+                    if (!QueryRawEventsPagination.TryAcceptContinuation(
+                            pagination.Continuation, scope, callerTenantId, filterTenantId,
+                            sessionId, eventType, source, severity, startedAfter, startedBefore,
+                            out singleAzureToken, out var rejectReason))
+                    {
+                        _logger.LogWarning("QueryRawEvents: single-session continuation rejected ({Reason})", rejectReason);
+                        var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await bad.WriteAsJsonAsync(new
+                        {
+                            error = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                        });
+                        return bad;
+                    }
+                }
+
+                var sessionPage = await _sessionRepo.GetSessionEventsPageAsync(
+                    tenantId, sessionId, pagination.PageSize, singleAzureToken);
+
+                var filtered = ApplyClientFilters(
+                    sessionPage.Items.ToList(), eventType, severity, source, startedAfter, startedBefore);
+                filtered = filtered.OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
+
+                string? singleNextLink = null;
+                if (!string.IsNullOrEmpty(sessionPage.NextRawToken))
+                {
+                    var fp = QueryRawEventsPagination.Fingerprint(
+                        scope, callerTenantId, filterTenantId,
+                        sessionId, eventType, source, severity, startedAfter, startedBefore);
+                    var wireToken = ContinuationToken.Encode(sessionPage.NextRawToken!, callerTenantId, fp);
+                    singleNextLink = QueryRawEventsPagination.BuildNextLink(
+                        basePath, pagination.PageSize, wireToken, query);
+                }
+
+                return await req.OkAsync(new
+                {
+                    tenantId,
+                    count = filtered.Count,
+                    events = filtered,
+                    nextLink = singleNextLink,
+                });
+            }
+
+            if (string.IsNullOrEmpty(eventType))
+            {
+                var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                await bad.WriteAsJsonAsync(new { error = "Either sessionId or eventType is required for raw event queries" });
+                return bad;
+            }
+
+            // Cross-session path — paginated EventTypeIndex walk replaces the
+            // legacy hard-coded limit:20 (recall-loss bug from the audit).
+            string? azureToken = null;
+            if (pagination.Continuation != null)
+            {
+                if (!QueryRawEventsPagination.TryAcceptContinuation(
+                        pagination.Continuation, scope, callerTenantId, filterTenantId,
+                        sessionId: null, eventType, source, severity, startedAfter, startedBefore,
+                        out azureToken, out var rejectReason))
+                {
+                    _logger.LogWarning("QueryRawEvents: continuation rejected ({Reason})", rejectReason);
                     var bad = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await bad.WriteAsJsonAsync(new { error = "Either sessionId or eventType is required for raw event queries" });
+                    await bad.WriteAsJsonAsync(new
+                    {
+                        error = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                    });
                     return bad;
                 }
-
-                // Use EventTypeIndex (pre-filtered by severity/source) to find sessions,
-                // then fetch only matching event types per session via server-side OData filter
-                var sessions = await _sessionRepo.SearchSessionsByEventAsync(tenantId, eventType, source, severity, null, limit: 20);
-                events = new List<EnrollmentEvent>();
-                foreach (var session in sessions)
-                {
-                    var sessionEvents = await _sessionRepo.GetSessionEventsByTypeAsync(session.TenantId, session.SessionId, eventType, limit);
-                    events.AddRange(sessionEvents.Where(e =>
-                        (string.IsNullOrEmpty(severity) || e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)) &&
-                        (string.IsNullOrEmpty(source) || (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase))
-                    ));
-
-                    if (events.Count >= limit) break;
-                }
-                events = events.Take(limit).ToList();
             }
 
-            // Apply client-side filters for single-session queries
-            if (!string.IsNullOrEmpty(sessionId))
+            var sessionsPage = await _sessionRepo.SearchSessionsByEventPageAsync(
+                tenantId, eventType, source, severity, phase: null,
+                pageSize: pagination.PageSize, continuation: azureToken);
+
+            var events = new List<EnrollmentEvent>();
+            foreach (var session in sessionsPage.Items)
             {
-                if (!string.IsNullOrEmpty(eventType))
-                    events = events.Where(e => e.EventType == eventType).ToList();
-                if (!string.IsNullOrEmpty(severity))
-                    events = events.Where(e => e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)).ToList();
-                if (!string.IsNullOrEmpty(source))
-                    events = events.Where(e => (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase)).ToList();
+                var sessionEvents = await _sessionRepo.GetSessionEventsByTypeAsync(
+                    session.TenantId, session.SessionId, eventType, maxResults: 200);
+                events.AddRange(sessionEvents.Where(e =>
+                    (string.IsNullOrEmpty(severity) || e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)) &&
+                    (string.IsNullOrEmpty(source) || (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase))));
             }
 
+            events = ApplyDateFilters(events, startedAfter, startedBefore)
+                .OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
+
+            string? nextLink = null;
+            if (!string.IsNullOrEmpty(sessionsPage.NextRawToken))
+            {
+                var fp = QueryRawEventsPagination.Fingerprint(
+                    scope, callerTenantId, filterTenantId,
+                    sessionId: null, eventType, source, severity, startedAfter, startedBefore);
+                var wireToken = ContinuationToken.Encode(sessionsPage.NextRawToken!, callerTenantId, fp);
+                nextLink = QueryRawEventsPagination.BuildNextLink(
+                    basePath, pagination.PageSize, wireToken, query);
+            }
+
+            return await req.OkAsync(new
+            {
+                tenantId,
+                count = events.Count,
+                events,
+                nextLink,
+            });
+        }
+
+        private static List<EnrollmentEvent> ApplyClientFilters(
+            List<EnrollmentEvent> events, string? eventType, string? severity, string? source,
+            string? startedAfter, string? startedBefore)
+        {
+            if (!string.IsNullOrEmpty(eventType))
+                events = events.Where(e => e.EventType == eventType).ToList();
+            if (!string.IsNullOrEmpty(severity))
+                events = events.Where(e => e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (!string.IsNullOrEmpty(source))
+                events = events.Where(e => (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase)).ToList();
+            return ApplyDateFilters(events, startedAfter, startedBefore);
+        }
+
+        private static List<EnrollmentEvent> ApplyDateFilters(
+            List<EnrollmentEvent> events, string? startedAfter, string? startedBefore)
+        {
             if (!string.IsNullOrEmpty(startedAfter) && DateTime.TryParse(startedAfter, out var after))
                 events = events.Where(e => e.Timestamp >= after).ToList();
             if (!string.IsNullOrEmpty(startedBefore) && DateTime.TryParse(startedBefore, out var before))
                 events = events.Where(e => e.Timestamp <= before).ToList();
-
-            events = events.Take(limit).OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
-
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(new
-            {
-                tenantId,
-                count = events.Count,
-                events
-            });
-            return response;
+            return events;
         }
     }
 }

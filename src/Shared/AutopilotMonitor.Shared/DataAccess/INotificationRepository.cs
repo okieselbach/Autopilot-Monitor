@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 
 namespace AutopilotMonitor.Shared.DataAccess
 {
@@ -19,7 +20,23 @@ namespace AutopilotMonitor.Shared.DataAccess
 
         // --- Session Reports ---
         Task<bool> StoreSessionReportMetadataAsync(SessionReportMetadata metadata);
-        Task<List<SessionReportMetadata>> GetSessionReportsAsync(string? tenantId = null, int maxResults = 50);
+
+        /// <summary>
+        /// Returns all session reports, newest-first. Optional <paramref name="tenantId"/>
+        /// filters server-side. No row cap on the full-fetch path; for installations
+        /// with very large report archives prefer <see cref="GetSessionReportsPageAsync"/>.
+        /// </summary>
+        Task<List<SessionReportMetadata>> GetSessionReportsAsync(string? tenantId = null);
+
+        /// <summary>
+        /// Reads a single page of session reports newest-first. Optional
+        /// <paramref name="tenantId"/> applies server-side. The returned
+        /// <see cref="RawPage{T}"/> carries the underlying store's opaque
+        /// continuation; <c>null</c> when this page was the last.
+        /// </summary>
+        Task<RawPage<SessionReportMetadata>> GetSessionReportsPageAsync(
+            string? tenantId, int pageSize, string? continuation);
+
         Task<SessionReportMetadata?> GetSessionReportAsync(string reportId);
         Task<bool> UpdateSessionReportAdminNoteAsync(string reportId, string adminNote);
     }

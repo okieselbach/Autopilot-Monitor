@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Azure.Storage.Blobs.Models;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -156,12 +157,20 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Returns all session reports, newest first (by inverted RowKey).
+        /// Returns all session reports newest-first, optionally filtered to a single tenant.
         /// </summary>
-        public async Task<List<SessionReportMetadata>> GetAllReportsAsync()
-        {
-            return await _notificationRepo.GetSessionReportsAsync();
-        }
+        public Task<List<SessionReportMetadata>> GetAllReportsAsync(string? tenantId = null)
+            => _notificationRepo.GetSessionReportsAsync(tenantId);
+
+        /// <summary>
+        /// Returns a single page of session reports newest-first, optionally
+        /// filtered to a single tenant. The opaque <c>NextRawToken</c> on the
+        /// returned <see cref="RawPage{T}"/> is what the function layer wraps
+        /// with the wire continuation envelope.
+        /// </summary>
+        public Task<RawPage<SessionReportMetadata>> GetReportsPageAsync(
+            string? tenantId, int pageSize, string? continuation)
+            => _notificationRepo.GetSessionReportsPageAsync(tenantId, pageSize, continuation);
 
         /// <summary>
         /// Updates the AdminNote field for a report identified by reportId.

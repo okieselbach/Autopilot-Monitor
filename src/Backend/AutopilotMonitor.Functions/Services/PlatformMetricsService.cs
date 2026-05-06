@@ -81,10 +81,10 @@ namespace AutopilotMonitor.Functions.Services
 
         private async Task<PlatformAgentMetricsResponse> ComputePlatformMetricsInternalAsync(int days)
         {
-            // Fetch all sessions in the requested window across all tenants. When `days` is set,
-            // GetAllSessionsAsync ignores `maxResults` and returns the full date-bounded set.
-            var page = await _sessionRepo.GetAllSessionsAsync(maxResults: 500, days: days);
-            var allSessions = page.Sessions;
+            // Fetch all sessions in the requested window across all tenants — drains
+            // every page so the platform metric covers the full date-bounded set
+            // (the previous maxResults:500 was a silent truncation on busy installs).
+            var allSessions = await _sessionRepo.GetAllSessionsAsync(tenantIdFilter: null, days: days);
 
             if (allSessions.Count == 0)
             {
