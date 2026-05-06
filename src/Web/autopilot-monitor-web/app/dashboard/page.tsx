@@ -66,6 +66,8 @@ export default function Home() {
     tenantId,
     globalAdminMode,
     tenantIdFilter,
+    hasMore,
+    loadingMore,
   });
 
   // Redirect regular users (non-admin, non-operator) to progress portal – they must never see the session list
@@ -275,7 +277,6 @@ export default function Home() {
               onSessionsPerPageChange={handleSessionsPerPageChange}
               hasMore={hasMore}
               loadingMore={loadingMore}
-              onLoadMore={loadMore}
               onLoadAll={loadAll}
               adminMode={adminMode}
               globalAdminMode={globalAdminMode}

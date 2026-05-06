@@ -71,7 +71,6 @@ interface SessionTableProps {
   onSessionsPerPageChange: (value: number) => void;
   hasMore: boolean;
   loadingMore: boolean;
-  onLoadMore: () => void;
   onLoadAll: () => void;
   adminMode: boolean;
   globalAdminMode: boolean;
@@ -109,7 +108,6 @@ export function SessionTable({
   onSessionsPerPageChange,
   hasMore,
   loadingMore,
-  onLoadMore,
   onLoadAll,
   adminMode,
   globalAdminMode,
@@ -722,7 +720,17 @@ export function SessionTable({
             {paginatedSessions.length === 0 ? (
               <tr>
                 <td colSpan={colSpan} className="px-6 py-8 text-center text-gray-500">
-                  No sessions found matching your search.
+                  {loadingMore ? (
+                    <span className="inline-flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Loading sessions...
+                    </span>
+                  ) : (
+                    "No sessions found matching your search."
+                  )}
                 </td>
               </tr>
             ) : (
@@ -752,73 +760,37 @@ export function SessionTable({
         </table>
       </div>
 
-      {/* Pagination Controls */}
-      {totalPages > 1 && (
+      {/* Pagination Controls — single Prev/Next surface that transparently fetches
+          the next server batch when the user pages past locally-loaded sessions.
+          Renders whenever there's somewhere to navigate (more local pages OR more
+          on the server). */}
+      {(totalPages > 1 || hasMore) && (
         <div className="mt-4 flex items-center justify-between">
           <div className="text-sm text-gray-700">
-            Page {currentPage} of {totalPages} ({sortedSessions.length}{hasMore ? '+' : ''} total sessions)
+            Page {currentPage} of {totalPages}{hasMore ? '+' : ''} ({sortedSessions.length}{hasMore ? '+' : ''} total sessions)
           </div>
           <div className="flex gap-2">
             <button
               onClick={onPreviousPage}
-              disabled={currentPage === 1}
+              disabled={currentPage === 1 || loadingMore}
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ← Previous
             </button>
             <button
               onClick={onNextPage}
-              disabled={currentPage === totalPages}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={(currentPage >= totalPages && !hasMore) || loadingMore}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
             >
+              {loadingMore && (
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              )}
               Next →
             </button>
           </div>
-        </div>
-      )}
-
-      {/* Load More Button */}
-      {hasMore && (
-        <div className="mt-4 flex justify-center">
-          {searchQuery.trim() ? (
-            // Search active: offer to load all remaining sessions
-            <button
-              onClick={onLoadAll}
-              disabled={loadingMore}
-              className="px-6 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loadingMore ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Searching... ({sessions.length} sessions loaded)
-                </span>
-              ) : (
-                'Search all sessions...'
-              )}
-            </button>
-          ) : (
-            // No search: standard load-more (100 at a time)
-            <button
-              onClick={onLoadMore}
-              disabled={loadingMore}
-              className="px-6 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loadingMore ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Loading...
-                </span>
-              ) : (
-                'Load 100 more sessions...'
-              )}
-            </button>
-          )}
         </div>
       )}
     </div>

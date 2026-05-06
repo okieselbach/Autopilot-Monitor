@@ -13,6 +13,8 @@ interface UseDashboardFiltersParams {
   tenantId: string | null | undefined;
   globalAdminMode: boolean;
   tenantIdFilter: string;
+  hasMore: boolean;
+  loadingMore: boolean;
 }
 
 interface DashboardStats {
@@ -57,6 +59,8 @@ export function useDashboardFilters({
   tenantId,
   globalAdminMode,
   tenantIdFilter,
+  hasMore,
+  loadingMore,
 }: UseDashboardFiltersParams): UseDashboardFiltersReturn {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -213,7 +217,24 @@ export function useDashboardFilters({
   }, [sortedSessions, currentPage, sessionsPerPage]);
 
   const handlePreviousPage = () => setCurrentPage((prev) => Math.max(1, prev - 1));
-  const handleNextPage = () => setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+  // Allow advancing past totalPages when the server has more pages; the auto-load
+  // effect in page.tsx will fetch the next batch and totalPages catches up. Without
+  // this overshoot the user could never trigger a load while staying inside a single
+  // Prev/Next control — they would have to click a separate "Load more" button.
+  const handleNextPage = () => setCurrentPage((prev) => {
+    if (prev < totalPages) return prev + 1;
+    if (hasMore && !loadingMore) return prev + 1;
+    return prev;
+  });
+
+  // Snap currentPage back to the last valid page once a load finishes that did NOT
+  // grow totalPages (e.g. an active filter narrowed the new batch to zero matches).
+  // Without this the user would be stuck on an empty paginated slice with no way
+  // to recover except clicking Prev.
+  useEffect(() => {
+    if (loadingMore) return;
+    if (totalPages > 0 && currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages, loadingMore]);
 
   return {
     searchQuery, setSearchQuery,

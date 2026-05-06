@@ -14,7 +14,9 @@ import FleetStatCard from "./components/FleetStatCard";
 import { Session } from "@/types";
 import { useAdminMode } from "@/hooks/useAdminMode";
 
-const FLEET_PAGE_SIZE = 200;
+// Backend caps pageSize at 1000 — use the maximum so a 90-day window on a busy
+// install (10k+ sessions) drains in a handful of round-trips instead of 50+.
+const FLEET_PAGE_SIZE = 1000;
 
 interface AppMetric {
   appName: string;
