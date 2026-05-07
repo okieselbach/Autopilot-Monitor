@@ -122,6 +122,13 @@ export function useDashboardSessions({
   // (filterTenantId, days) tuple → next loadMore round-trips it back to the
   // backend → 400 filter_mismatch → auto-load-more retries forever → buttons flicker.
   const fetchGenRef = useRef(0);
+  // Tenant filter as captured at the time of the last refetch/refetchWith. Continuation
+  // tokens bind to (filterTenantId, days) at the issuing call — pagination is only valid
+  // while that scope is unchanged. Using the live `tenantIdFilterRef` for fetches would
+  // mismatch the continuation fingerprint whenever the user types between Submit clicks
+  // (the live ref updates per-keystroke; the filter input drives client-side display via
+  // effectiveSessions but is NOT applied to the backend until Submit / refetch).
+  const submittedTenantIdFilterRef = useRef<string>("");
 
   const hasInitialFetch = useRef(false);
   const hasGlobalModeInitialized = useRef(false);
@@ -189,7 +196,10 @@ export function useDashboardSessions({
     globalTenantIdOverride?: string,
   ): Promise<{ sessions: Session[]; hasMore: boolean; nextContinuation: string | null } | null> => {
     try {
-      const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : tenantIdFilterRef.current.trim();
+      // Use the SUBMITTED filter (last refetch's value) instead of the live ref so
+      // a loadMore-with-continuation always queries with the same filter scope the
+      // continuation was issued for. globalTenantIdOverride wins (refetchWith path).
+      const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : submittedTenantIdFilterRef.current.trim();
       const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
       const pageSize = getInitialPageSize();
       const opts = loadMoreContinuation
@@ -272,6 +282,9 @@ export function useDashboardSessions({
   const refetch = useCallback(() => {
     loadAllTokenRef.current++; // cancel any in-flight progressive loader
     fetchGenRef.current++; // invalidate any in-flight loadMore result
+    // Capture the live filter as the new submitted scope — subsequent loadMore
+    // calls will query under this filter regardless of further keystrokes.
+    submittedTenantIdFilterRef.current = tenantIdFilterRef.current;
     // Reset continuation/hasMore synchronously so a stale loadMore that fired
     // before us cannot leave its no-filter token in state if it resolves first.
     setContinuation(null);
@@ -283,6 +296,7 @@ export function useDashboardSessions({
   const refetchWith = useCallback((tenantIdOverride: string) => {
     loadAllTokenRef.current++; // cancel any in-flight progressive loader
     fetchGenRef.current++; // invalidate any in-flight loadMore result
+    submittedTenantIdFilterRef.current = tenantIdOverride;
     setContinuation(null);
     setHasMore(false);
     setLoading(true);
@@ -343,6 +357,9 @@ export function useDashboardSessions({
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
 
+    // Anchor the submitted filter to whatever the input started with (typically "")
+    // so the first paginated loadMore queries under the same scope as the initial fetch.
+    submittedTenantIdFilterRef.current = tenantIdFilterRef.current;
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, tenantId, globalAdminMode]);
@@ -466,6 +483,7 @@ export function useDashboardSessions({
     }
 
     fetchGenRef.current++; // invalidate any in-flight loadMore from the previous mode
+    submittedTenantIdFilterRef.current = tenantIdFilterRef.current;
     setSessions([]);
     setContinuation(null);
     setHasMore(false);
