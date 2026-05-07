@@ -113,6 +113,15 @@ export function useDashboardSessions({
   // session list is being reset (refetch/refetchWith/unmount) so an in-flight
   // loop stops appending to a now-stale list.
   const loadAllTokenRef = useRef(0);
+  // Generation counter for the session-fetch lifecycle. Bumped on every
+  // refetch/refetchWith/global-mode-toggle so an in-flight loadMore that started
+  // under the previous filter scope cannot land its result (or its now-stale
+  // continuation token) into the new scope. Without this guard, a no-filter
+  // loadMore that resolves AFTER a with-filter refetch would clobber the
+  // freshly-set continuation with a token whose fingerprint binds to a different
+  // (filterTenantId, days) tuple → next loadMore round-trips it back to the
+  // backend → 400 filter_mismatch → auto-load-more retries forever → buttons flicker.
+  const fetchGenRef = useRef(0);
 
   const hasInitialFetch = useRef(false);
   const hasGlobalModeInitialized = useRef(false);
@@ -201,7 +210,15 @@ export function useDashboardSessions({
           nextContinuation,
         };
       } else {
-        addNotification("error", "Backend Error", `Failed to fetch sessions: ${response.statusText}`, "backend-error");
+        // Surface the backend's error reason (e.g. "Invalid continuation token (filter_mismatch).")
+        // instead of the generic statusText so a stale-token race is diagnosable from the UI.
+        let detail = response.statusText;
+        try {
+          const body = await response.json();
+          if (body?.message) detail = body.message;
+        } catch { /* response body was not JSON — fall back to statusText */ }
+        console.error(`Failed to fetch sessions (${response.status}): ${detail}`);
+        addNotification("error", "Backend Error", `Failed to fetch sessions: ${detail}`, "backend-error");
         return null;
       }
     } catch (error) {
@@ -222,7 +239,14 @@ export function useDashboardSessions({
 
   // High-level fetch that applies result to state (initial load + single load-more).
   const fetchSessions = useCallback(async (loadMoreContinuation?: string, globalTenantIdOverride?: string) => {
+    // Capture generation BEFORE the await — if a refetch/global-mode-toggle bumps it
+    // while we're in flight, our result is stale and must not land in state.
+    const myGen = fetchGenRef.current;
     const result = await fetchSessionsBatch(loadMoreContinuation, globalTenantIdOverride);
+
+    // Stale fetch — a newer refetch has taken over. Drop the result silently.
+    // Don't even toggle loading flags: the active refetch owns those.
+    if (myGen !== fetchGenRef.current) return;
 
     if (result) {
       if (loadMoreContinuation) {
@@ -233,6 +257,12 @@ export function useDashboardSessions({
       }
       setHasMore(result.hasMore);
       setContinuation(result.nextContinuation);
+    } else if (loadMoreContinuation) {
+      // Auto-load-more failure (e.g. 400 from a stale continuation token).
+      // Stop the retry loop so the page.tsx auto-load-more effect doesn't hammer
+      // the backend with the same broken request. User can refresh to recover.
+      setHasMore(false);
+      setContinuation(null);
     }
 
     setLoading(false);
@@ -241,12 +271,20 @@ export function useDashboardSessions({
 
   const refetch = useCallback(() => {
     loadAllTokenRef.current++; // cancel any in-flight progressive loader
+    fetchGenRef.current++; // invalidate any in-flight loadMore result
+    // Reset continuation/hasMore synchronously so a stale loadMore that fired
+    // before us cannot leave its no-filter token in state if it resolves first.
+    setContinuation(null);
+    setHasMore(false);
     setLoading(true);
     fetchSessions();
   }, [fetchSessions]);
 
   const refetchWith = useCallback((tenantIdOverride: string) => {
     loadAllTokenRef.current++; // cancel any in-flight progressive loader
+    fetchGenRef.current++; // invalidate any in-flight loadMore result
+    setContinuation(null);
+    setHasMore(false);
     setLoading(true);
     fetchSessions(undefined, tenantIdOverride);
   }, [fetchSessions]);
@@ -427,8 +465,10 @@ export function useDashboardSessions({
       return;
     }
 
+    fetchGenRef.current++; // invalidate any in-flight loadMore from the previous mode
     setSessions([]);
     setContinuation(null);
+    setHasMore(false);
     setLoading(true);
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
