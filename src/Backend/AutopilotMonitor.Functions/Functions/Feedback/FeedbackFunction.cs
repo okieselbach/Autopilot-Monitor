@@ -52,7 +52,8 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
         {
             try
             {
-                // 1. Kill-switch
+                // 1. Kill-switch — gate first so a disabled feature doesn't fan out
+                //    four extra Table reads on every poll from every active user.
                 var adminConfig = await _adminConfigService.GetConfigurationAsync();
                 if (!adminConfig.FeedbackEnabled)
                     return await WriteJson(req, new { eligible = false });
@@ -61,24 +62,35 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                 string tenantId = TenantHelper.GetTenantId(req);
                 string upn = TenantHelper.GetUserIdentifier(req);
 
+                // 3-6. The remaining checks each hit a different Table partition and
+                //      depend only on (tenantId, upn) — fan them out in parallel so
+                //      the endpoint is bounded by the slowest read instead of summing
+                //      four sequential round-trips on Flex Consumption.
+                var roleTask = _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
+                var tenantConfigTask = _tenantConfigService.GetConfigurationAsync(tenantId);
+                var sessionsTask = _sessionRepo.GetSessionsPageAsync(tenantId, days: null, pageSize: 1, continuation: null);
+                var feedbackTask = _configRepo.GetFeedbackEntryAsync(upn);
+
+                await Task.WhenAll(roleTask, tenantConfigTask, sessionsTask, feedbackTask);
+
                 // 3. Role check — only Admin + Operator
-                var roleInfo = await _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
+                var roleInfo = roleTask.Result;
                 if (roleInfo == null || roleInfo.Role == Constants.TenantRoles.Viewer)
                     return await WriteJson(req, new { eligible = false });
 
                 // 4. Tenant age check
-                var tenantConfig = await _tenantConfigService.GetConfigurationAsync(tenantId);
+                var tenantConfig = tenantConfigTask.Result;
                 if (tenantConfig.OnboardedAt == null ||
                     (DateTime.UtcNow - tenantConfig.OnboardedAt.Value).TotalDays < adminConfig.FeedbackMinTenantAgeDays)
                     return await WriteJson(req, new { eligible = false });
 
                 // 5. Sessions check — at least 1 session exists.
-                var sessionPage = await _sessionRepo.GetSessionsPageAsync(tenantId, days: null, pageSize: 1, continuation: null);
+                var sessionPage = sessionsTask.Result;
                 if (sessionPage.Items.Count == 0)
                     return await WriteJson(req, new { eligible = false });
 
                 // 6. Cooldown check
-                var feedbackEntry = await _configRepo.GetFeedbackEntryAsync(upn);
+                var feedbackEntry = feedbackTask.Result;
                 if (feedbackEntry?.InteractedAt != null)
                 {
                     // Cooldown = 0 means single wave only

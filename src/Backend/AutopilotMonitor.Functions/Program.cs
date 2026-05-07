@@ -28,6 +28,7 @@ builder.ConfigureFunctionsWebApplication();
 // Order matters: request telemetry (wraps all) → correlation ID → global exception handler → JWT authentication (401) → policy enforcement (403)
 builder.UseMiddleware<RequestTelemetryMiddleware>();
 builder.UseMiddleware<CorrelationIdMiddleware>();
+builder.UseMiddleware<TimingAllowOriginMiddleware>();
 builder.UseMiddleware<GlobalExceptionMiddleware>();
 builder.UseMiddleware<AuthenticationMiddleware>();
 builder.UseMiddleware<PolicyEnforcementMiddleware>();

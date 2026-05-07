@@ -144,13 +144,15 @@ export function SignalRProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    // Defer SignalR connection to avoid competing with critical API calls
-    // (auth/me, sessions, tenant config) during initial page load.
-    const deferTimer = setTimeout(startConnection, 2000);
+    // Start as soon as the user is authenticated. The previous 2s setTimeout
+    // was meant to avoid competing with the initial dashboard fetches, but
+    // the web origin is HTTP/2 and the API is on a different origin, so
+    // there is no real connection contention — the delay only pushed live
+    // updates ~2s into the dashboard load for no benefit.
+    startConnection();
 
     // Cleanup only when provider unmounts (app closes)
     return () => {
-      clearTimeout(deferTimer);
       // Clear any pending retry timeout to prevent reconnection after unmount
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);

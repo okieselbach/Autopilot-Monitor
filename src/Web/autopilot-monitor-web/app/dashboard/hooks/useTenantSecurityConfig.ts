@@ -65,8 +65,13 @@ export function useTenantSecurityConfig(
     };
 
     fetchTenantSecurityConfig();
+    // Depend on the user fields actually read above (primitives), not the
+    // whole user object — its identity flips when AuthContext swaps the
+    // prefetched user object for the freshly fetched one, which would
+    // otherwise refire this effect and produce a duplicate feature-flags
+    // request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, user]);
+  }, [tenantId, user?.isTenantAdmin, user?.isGlobalAdmin, user?.role]);
 
   return serialValidationEnabled;
 }

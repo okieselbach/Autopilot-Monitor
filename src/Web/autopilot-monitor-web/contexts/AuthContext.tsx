@@ -12,11 +12,13 @@ const msalInstance = new PublicClientApplication(msalConfig);
 // Track MSAL initialization state so components can wait for it.
 let msalReady = false;
 
-// Prefetch: store auth/me result fetched during MSAL init so fetchUserInfo
-// can use it immediately without an extra network round-trip.
+// Prefetch: store the in-flight auth/me Promise (not the resolved value) so
+// fetchUserInfo can await it instead of racing a duplicate fetch when the
+// prefetch hasn't settled yet. Resolves to the JSON body, or null if the
+// fetch failed / token acquisition failed.
 // Runs as a fire-and-forget side-effect — MUST NOT block msalInitPromise,
 // otherwise a cold backend would keep the UI on a white screen.
-let prefetchedAuthMe: Record<string, unknown> | null = null;
+let prefetchedAuthMePromise: Promise<Record<string, unknown> | null> | null = null;
 
 const msalInitPromise = msalInstance
   .initialize()
@@ -24,12 +26,11 @@ const msalInitPromise = msalInstance
   .then(() => {
     msalReady = true;
 
-    // Fire-and-forget: prefetch auth/me while React is still mounting.
-    // Not awaited — if it finishes before fetchUserInfo runs, great;
-    // if not, fetchUserInfo does its own fetch as before.
+    // Kick off prefetch while React is still mounting. fetchUserInfo will
+    // await the same Promise instead of firing its own fetch.
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) {
-      msalInstance.acquireTokenSilent({
+      prefetchedAuthMePromise = msalInstance.acquireTokenSilent({
         scopes: apiRequest.scopes,
         account: accounts[0],
       }).then(async (tokenResponse) => {
@@ -37,12 +38,8 @@ const msalInitPromise = msalInstance
           headers: { 'Authorization': `Bearer ${tokenResponse.accessToken}` },
           signal: AbortSignal.timeout(8000),
         });
-        if (res.ok) {
-          prefetchedAuthMe = await res.json();
-        }
-      }).catch(() => {
-        // Best-effort; fetchUserInfo will retry normally.
-      });
+        return res.ok ? (await res.json()) as Record<string, unknown> : null;
+      }).catch(() => null);
     }
   })
   .catch((error) => {
@@ -141,12 +138,15 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
    */
   const fetchUserInfo = useCallback(async (account: AccountInfo): Promise<UserInfo | null> => {
     try {
-      // Use prefetched auth/me result if available (fetched during MSAL init).
-      // Consume it exactly once to avoid stale data on subsequent calls.
-      if (prefetchedAuthMe) {
-        const data = prefetchedAuthMe;
-        prefetchedAuthMe = null;
-        return {
+      // Await the prefetch Promise if one is in flight (or already resolved).
+      // Consume exactly once so subsequent fetchUserInfo calls go through the
+      // normal path. If the prefetch returned null (e.g. token failed), fall
+      // through to a fresh fetch below rather than returning null.
+      if (prefetchedAuthMePromise) {
+        const pending = prefetchedAuthMePromise;
+        prefetchedAuthMePromise = null;
+        const data = await pending;
+        if (data) return {
           displayName: (data.displayName as string) || account.name || '',
           upn: (data.upn as string) || account.username || '',
           tenantId: (data.tenantId as string) || account.tenantId || '',
