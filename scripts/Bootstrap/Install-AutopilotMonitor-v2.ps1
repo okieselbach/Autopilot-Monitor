@@ -310,7 +310,7 @@ try {
     }
     Write-Log "Agent install mode completed successfully"
 
-    $runtimeProcessName = 'AutopilotMonitor.Agent.V2'
+    $runtimeProcessName = 'AutopilotMonitor.Agent'
     $verifyTimeoutSec = 10
     $verifyDeadline = (Get-Date).AddSeconds($verifyTimeoutSec)
     $runtimeProc = $null

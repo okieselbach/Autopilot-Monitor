@@ -268,7 +268,7 @@ try {
     # (PR1, 2026-05-04), bypassing the schtasks /Run queue defer. This still
     # catches AV/EDR or AppLocker/WDAC kills after spawn. On miss, the BootTrigger
     # task (PR2 hardened) takes over at next boot.
-    $runtimeProcessName = 'AutopilotMonitor.Agent.V2'
+    $runtimeProcessName = 'AutopilotMonitor.Agent'
     $verifyTimeoutSec = 10
     $verifyDeadline = (Get-Date).AddSeconds($verifyTimeoutSec)
     $runtimeProc = $null
