@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
@@ -22,6 +22,15 @@ import { useDashboardFilters } from "./hooks/useDashboardFilters";
 import { useDashboardSessions } from "./hooks/useDashboardSessions";
 
 export default function Home() {
+  // useSearchParams() in HomeContent requires a Suspense boundary for static prerender.
+  return (
+    <Suspense fallback={null}>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   // Opt-in full-width layout via ?span=full (also accepts wide/max) — drops the max-w-7xl cap.
