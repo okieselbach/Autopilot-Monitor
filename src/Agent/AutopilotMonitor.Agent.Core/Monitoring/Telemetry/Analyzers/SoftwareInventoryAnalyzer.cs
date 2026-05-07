@@ -441,13 +441,16 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
 
         private void CollectFromKey(RegistryKey rootKey, string subKeyPath, string source, List<SoftwareEntry> results)
         {
+            // rootKey.Name yields the canonical hive name (HKEY_LOCAL_MACHINE / HKEY_USERS / …),
+            // so the log line is a real registry path. `source` is a separate telemetry tag
+            // (e.g. HKLM_64, HKU_<RID>) used as RegistrySource on the SoftwareEntry.
             try
             {
                 using (var key = rootKey.OpenSubKey(subKeyPath, writable: false))
                 {
                     if (key == null)
                     {
-                        _logger.Debug($"{Name}: Registry key not found: {source}\\{subKeyPath}");
+                        _logger.Debug($"{Name}: Registry key not found: {rootKey.Name}\\{subKeyPath} (source={source})");
                         return;
                     }
 
@@ -490,7 +493,7 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
             }
             catch (Exception ex)
             {
-                _logger.Warning($"{Name}: Failed to read {source}\\{subKeyPath}: {ex.Message}");
+                _logger.Warning($"{Name}: Failed to read {rootKey.Name}\\{subKeyPath} (source={source}): {ex.Message}");
             }
         }
 
@@ -515,8 +518,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Telemetry.Analyzers
 
                     foreach (var sid in profileList.GetSubKeyNames())
                     {
-                        // Only real user profiles (S-1-5-21-*), skip well-known SIDs
-                        if (!sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase))
+                        // Real user profiles only:
+                        //   S-1-5-21-*  classic local/AD user accounts
+                        //   S-1-12-1-*  Microsoft Account / Azure AD cloud SIDs (Win10 1903+ AAD-joined devices)
+                        // Skip well-known service SIDs (S-1-5-18/19/20) and everything else.
+                        if (!sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase) &&
+                            !sid.StartsWith("S-1-12-1-", StringComparison.OrdinalIgnoreCase))
                             continue;
 
                         // Skip current user SID — already covered by HKCU read above
