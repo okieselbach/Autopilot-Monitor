@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery, followNextLink } from '../client.js';
+import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText } from './shared.js';
 import { toolError } from './error-handler.js';
@@ -91,7 +91,8 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('search_sessions', async () => {
       try {
         const { deviceProperties, tenantId, pageSize, continuation, ...rest } = args;
-        const basePath = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
+        // GA → /api/global/search/sessions (tenantId is filter); Tenant-Admin → /api/search/sessions (JWT-bound).
+        const basePath = pickGlobalOrTenantPath('/api/global/search/sessions', '/api/search/sessions');
         // followNextLink handles full nextLink paths verbatim. For first-page calls
         // we still need to layer in deviceProperties as `prop.<key>` query params,
         // which followNextLink doesn't know about — so build the param record and
@@ -133,7 +134,7 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('search_sessions_by_event', async () => {
       try {
         const { eventType, tenantId, pageSize, continuation } = args;
-        const basePath = tenantId ? '/api/search/sessions-by-event' : '/api/global/search/sessions-by-event';
+        const basePath = pickGlobalOrTenantPath('/api/global/search/sessions-by-event', '/api/search/sessions-by-event');
         const path = followNextLink(
           basePath,
           { eventType, tenantId, pageSize },
@@ -204,26 +205,16 @@ export function registerSessionTools(server: McpServer): void {
     READ_ONLY,
     async (args) => withToolTelemetry('get_session_events', async () => {
       try {
-        const { sessionId, tenantId, pageSize, continuation, ...filters } = args;
+        const { sessionId, tenantId, pageSize, continuation, eventType, severity, source } = args;
+        // Filters live server-side now — count and nextLink stay coherent (a non-zero
+        // nextLink with count: 0 means "filter didn't match in this page; more raw rows
+        // ahead — follow nextLink to keep scanning").
         const path = followNextLink(
           `/api/sessions/${sessionId}/events`,
-          { tenantId, pageSize },
+          { tenantId, pageSize, eventType, severity, source },
           continuation,
         );
-        const data = await apiFetch(path) as {
-          events?: Array<{ eventType?: string; severity?: string; source?: string }>;
-          count?: number;
-          nextLink?: string;
-        };
-        if (data?.events && (filters.eventType || filters.severity || filters.source)) {
-          data.events = data.events.filter((e) => {
-            if (filters.eventType && e.eventType !== filters.eventType) return false;
-            if (filters.severity && e.severity !== filters.severity) return false;
-            if (filters.source && !e.source?.toLowerCase().includes(filters.source.toLowerCase())) return false;
-            return true;
-          });
-          data.count = data.events.length;
-        }
+        const data = await apiFetch(path);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.events);
       } catch (error: unknown) {
         return toolError('get_session_events', args, error);
@@ -383,7 +374,7 @@ export function registerSessionTools(server: McpServer): void {
         const params: Record<string, string | number | undefined> = { ...rest };
         if (tenantId) params.tenantId = tenantId;
         const q = buildQuery(params);
-        const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+        const prefix = pickGlobalOrTenantPath('/api/global/metrics', '/api/metrics');
         const [summary, apps] = await Promise.all([
           apiFetch(`${prefix}/summary${q}`).catch(() => null),
           apiFetch(`${prefix}/app${q}`).catch(() => null),
@@ -419,7 +410,7 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('search_sessions_by_cve', async () => {
       try {
         const { cveId, tenantId, minCvssScore, overallRisk, pageSize, continuation } = args;
-        const basePath = tenantId ? '/api/search/sessions-by-cve' : '/api/global/search/sessions-by-cve';
+        const basePath = pickGlobalOrTenantPath('/api/global/search/sessions-by-cve', '/api/search/sessions-by-cve');
         const path = followNextLink(
           basePath,
           { cveId, tenantId, minCvssScore, overallRisk, pageSize },
@@ -446,9 +437,10 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('list_blocked_devices', async () => {
       try {
         const { tenantId } = args;
-        const endpoint = tenantId
-          ? `/api/devices/blocked${buildQuery({ tenantId } as Record<string, string | undefined>)}`
-          : '/api/global/devices/blocked';
+        // GA: /api/global/devices/blocked (tenantId is filter); non-GA: /api/devices/blocked
+        // (backend will 403 — list is platform-wide and GA-only by policy).
+        const basePath = pickGlobalOrTenantPath('/api/global/devices/blocked', '/api/devices/blocked');
+        const endpoint = `${basePath}${buildQuery({ tenantId } as Record<string, string | undefined>)}`;
         const data = await apiFetch(endpoint);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.adminStream);
       } catch (error: unknown) {

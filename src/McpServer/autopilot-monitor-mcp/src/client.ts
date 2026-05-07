@@ -29,25 +29,54 @@ export class ApiError extends Error {
 }
 
 /**
- * Per-request token store using AsyncLocalStorage.
+ * Per-request caller context using AsyncLocalStorage.
  *
  * Each incoming MCP request runs inside its own async context (via
- * `runWithToken`), so concurrent sessions cannot overwrite each other's
- * tokens — even when async operations interleave on the event loop.
+ * `runWithCaller`), carrying both the Bearer token and the caller's
+ * resolved Global-Admin status. Tools route based on the role:
+ *   - GA → /api/global/* (cross-tenant; tenantId is a filter param)
+ *   - Tenant-Admin → /api/* (tenant-scoped; JWT-tid is authoritative)
+ *
+ * Concurrent sessions cannot overwrite each other's context even when
+ * async operations interleave on the event loop.
  */
-const tokenStore = new AsyncLocalStorage<string>();
+interface CallerContext {
+  token: string;
+  isGlobalAdmin: boolean;
+}
+
+const callerStore = new AsyncLocalStorage<CallerContext>();
 
 /**
- * Run a callback within an async context that carries the given Bearer token.
- * All calls to `apiFetch` inside the callback (and its async descendants)
- * will automatically use this token.
+ * Run a callback within an async context that carries the given caller info.
+ * All calls to `apiFetch` and routing helpers inside the callback (and its
+ * async descendants) will automatically see this context.
  */
-export function runWithToken<T>(token: string, fn: () => T): T {
-  return tokenStore.run(token, fn);
+export function runWithCaller<T>(ctx: CallerContext, fn: () => T): T {
+  return callerStore.run(ctx, fn);
 }
 
 export function getCurrentToken(): string | undefined {
-  return tokenStore.getStore();
+  return callerStore.getStore()?.token;
+}
+
+/**
+ * Returns true if the current request is being made by a Global Admin.
+ * Defaults to false when no context is active (e.g. unit tests without
+ * an explicit `runWithCaller`).
+ */
+export function isGlobalAdmin(): boolean {
+  return callerStore.getStore()?.isGlobalAdmin === true;
+}
+
+/**
+ * Picks the route prefix for the current caller. GA always uses
+ * `/api/global/*`; tenant-admins use the tenant-scoped variant. The same
+ * `tenantId` query param is meaningful in both worlds — on `/api/global/*`
+ * it filters; on `/api/*` it's informational (backend resolves from JWT).
+ */
+export function pickGlobalOrTenantPath(globalPath: string, tenantPath: string): string {
+  return isGlobalAdmin() ? globalPath : tenantPath;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery } from '../client.js';
+import { apiFetch, buildQuery, pickGlobalOrTenantPath } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import type { SearchProvider } from '../search-provider.js';
 import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText } from './shared.js';
@@ -63,7 +63,7 @@ async function fetchSessionEvents(
           sessionLimit: 10,
         };
         if (tenantId) params.tenantId = tenantId;
-        const basePath = tenantId ? '/api/raw/events/search' : '/api/global/raw/events/search';
+        const basePath = pickGlobalOrTenantPath('/api/global/raw/events/search', '/api/raw/events/search');
         const data = await apiFetch(`${basePath}${buildQuery(params)}`) as {
           events?: EventEntry[];
         };
@@ -83,7 +83,7 @@ async function fetchSessionEvents(
   const searchParams: Record<string, string | number | undefined> = { status: 'Failed', limit: 5 };
   if (tenantId) searchParams.tenantId = tenantId;
   const searchQ = buildQuery(searchParams);
-  const searchBase = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
+  const searchBase = pickGlobalOrTenantPath('/api/global/search/sessions', '/api/search/sessions');
   const sessions = await apiFetch(`${searchBase}${searchQ}`) as {
     sessions?: Array<{ sessionId?: string }>;
   };

@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery, followNextLink } from '../client.js';
+import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY, READ_ONLY_OPEN, MAX_RESULT_SIZE_CHARS, toolResultText } from './shared.js';
 import { toolError } from './error-handler.js';
@@ -58,7 +58,7 @@ export function registerAdminTools(server: McpServer): void {
         const { tenantId, ...rest } = args;
         const params: Record<string, string | number | undefined> = { ...rest };
         if (tenantId) params.tenantId = tenantId;
-        const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+        const prefix = pickGlobalOrTenantPath('/api/global/metrics', '/api/metrics');
         const data = await apiFetch(`${prefix}/geographic${buildQuery(params)}`);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
@@ -93,7 +93,7 @@ export function registerAdminTools(server: McpServer): void {
           params.locationKey = parts.join(', ');
           params.groupBy = city ? 'city' : region ? 'region' : 'country';
         }
-        const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+        const prefix = pickGlobalOrTenantPath('/api/global/metrics', '/api/metrics');
         const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.sessions);
       } catch (error: unknown) {
@@ -232,7 +232,7 @@ export function registerAdminTools(server: McpServer): void {
     async (args) => withToolTelemetry('get_audit_logs', async () => {
       try {
         const { tenantId, dateFrom, dateTo, pageSize, continuation } = args;
-        const basePath = tenantId ? '/api/audit/logs' : '/api/global/audit/logs';
+        const basePath = pickGlobalOrTenantPath('/api/global/audit/logs', '/api/audit/logs');
         const path = followNextLink(
           basePath,
           { tenantId, dateFrom, dateTo, pageSize },
@@ -347,7 +347,7 @@ export function registerAdminTools(server: McpServer): void {
     async (args) => withToolTelemetry('query_raw_events', async () => {
       try {
         const { tenantId, sessionId, eventType, severity, source, startedAfter, startedBefore, pageSize, continuation } = args;
-        const basePath = tenantId ? '/api/raw/events' : '/api/global/raw/events';
+        const basePath = pickGlobalOrTenantPath('/api/global/raw/events', '/api/raw/events');
         const path = followNextLink(
           basePath,
           { tenantId, sessionId, eventType, severity, source, startedAfter, startedBefore, pageSize },
@@ -394,7 +394,7 @@ export function registerAdminTools(server: McpServer): void {
       try {
         const { tenantId, status, startedAfter, startedBefore, serialNumber, agentVersion, agentVersionPrefix,
           imeAgentVersion, imeAgentVersionPrefix, fields, pageSize, continuation } = args;
-        const basePath = tenantId ? '/api/raw/sessions' : '/api/global/raw/sessions';
+        const basePath = pickGlobalOrTenantPath('/api/global/raw/sessions', '/api/raw/sessions');
         const path = followNextLink(
           basePath,
           { tenantId, status, startedAfter, startedBefore, serialNumber, agentVersion, agentVersionPrefix,

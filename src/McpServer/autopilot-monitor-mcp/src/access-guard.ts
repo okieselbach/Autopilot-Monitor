@@ -9,7 +9,7 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import { extractTokenClaims, isTokenExpired } from './auth.js';
-import { runWithToken } from './client.js';
+import { runWithCaller } from './client.js';
 
 const BASE_URL = process.env.AUTOPILOT_API_URL ?? 'https://autopilotmonitor-api.azurewebsites.net';
 
@@ -30,15 +30,22 @@ const ACCESS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 interface AccessCacheEntry {
   allowed: boolean;
   reason: string;
+  isGlobalAdmin: boolean;
   expiresAt: number;
 }
 
 const accessCache = new Map<string, AccessCacheEntry>();
 
-async function checkAccess(upn: string, token: string): Promise<{ allowed: boolean; reason: string }> {
+interface AccessCheckResult {
+  allowed: boolean;
+  reason: string;
+  isGlobalAdmin: boolean;
+}
+
+async function checkAccess(upn: string, token: string): Promise<AccessCheckResult> {
   const cached = accessCache.get(upn);
   if (cached && Date.now() < cached.expiresAt) {
-    return { allowed: cached.allowed, reason: cached.reason };
+    return { allowed: cached.allowed, reason: cached.reason, isGlobalAdmin: cached.isGlobalAdmin };
   }
 
   try {
@@ -49,13 +56,19 @@ async function checkAccess(upn: string, token: string): Promise<{ allowed: boole
     const text = await res.text();
     if (!text) {
       console.error(`[access-guard] Backend returned empty body for ${upn} (status=${res.status})`);
-      return { allowed: false, reason: `Backend returned ${res.status} with empty body` };
+      return { allowed: false, reason: `Backend returned ${res.status} with empty body`, isGlobalAdmin: false };
     }
 
-    const data = JSON.parse(text) as { allowed: boolean; reason?: string; accessGrant?: string };
-    const result = {
+    const data = JSON.parse(text) as {
+      allowed: boolean;
+      reason?: string;
+      accessGrant?: string;
+      isGlobalAdmin?: boolean;
+    };
+    const result: AccessCheckResult = {
       allowed: data.allowed === true,
       reason: data.allowed ? (data.accessGrant ?? 'allowed') : (data.reason ?? 'denied'),
+      isGlobalAdmin: data.isGlobalAdmin === true,
     };
 
     accessCache.set(upn, { ...result, expiresAt: Date.now() + ACCESS_CACHE_TTL_MS });
@@ -63,7 +76,7 @@ async function checkAccess(upn: string, token: string): Promise<{ allowed: boole
   } catch (err) {
     console.error(`[access-guard] Backend check failed for ${upn}:`, err);
     // Fail-closed: deny on backend error
-    return { allowed: false, reason: 'Backend access check unavailable' };
+    return { allowed: false, reason: 'Backend access check unavailable', isGlobalAdmin: false };
   }
 }
 
@@ -148,9 +161,10 @@ export function accessGuard(req: Request, res: Response, next: NextFunction): vo
         return;
       }
 
-      // Scope the token to this async context so concurrent sessions
-      // cannot overwrite each other's tokens on the event loop.
-      runWithToken(token, () => next());
+      // Scope the caller context (token + GA status) to this async context
+      // so concurrent sessions cannot overwrite each other on the event loop,
+      // and so tools can route based on role without re-checking the JWT.
+      runWithCaller({ token, isGlobalAdmin: result.isGlobalAdmin }, () => next());
     })
     .catch(() => {
       res.status(503).json({ error: 'Access check failed' });
