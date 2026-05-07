@@ -47,19 +47,35 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     days = parsedDays;
 
                 var groupBy = query["groupBy"] ?? "city";
+                var full = string.Equals(query["full"], "1", StringComparison.Ordinal);
+                // Optional tenantId filter so a GA can scope a single tenant's sessions
+                // for a location without leaving the cross-tenant endpoint.
+                var filterTenantId = query["tenantId"];
 
-                _logger.LogInformation("Fetching global sessions for location '{LocationKey}' ({Days}d, groupBy={GroupBy}) (User: {UserEmail})",
-                    locationKey, days, groupBy, userEmail);
+                _logger.LogInformation("Fetching global sessions for location '{LocationKey}' ({Days}d, groupBy={GroupBy}, full={Full}, tenantFilter={Tenant}) (User: {UserEmail})",
+                    locationKey, days, groupBy, full, filterTenantId ?? "(none)", userEmail);
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
-                var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1));
+                var sessions = string.IsNullOrEmpty(filterTenantId)
+                    ? await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1))
+                    : await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), filterTenantId);
                 var filtered = GetGeographicLocationSessionsFunction.FilterSessionsByLocation(sessions, locationKey, groupBy);
 
-                var appSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync();
+                var appSummaries = string.IsNullOrEmpty(filterTenantId)
+                    ? await _metricsRepo.GetAllAppInstallSummariesAsync()
+                    : await _metricsRepo.GetAppInstallSummariesByTenantAsync(filterTenantId);
                 var rows = GetGeographicLocationSessionsFunction.BuildRows(filtered, appSummaries);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new { success = true, sessions = rows, totalCount = rows.Count });
+                if (full)
+                {
+                    await response.WriteAsJsonAsync(new { success = true, sessions = rows, totalCount = rows.Count });
+                }
+                else
+                {
+                    var lean = rows.Select(GetGeographicLocationSessionsFunction.ToLeanRow).ToList();
+                    await response.WriteAsJsonAsync(new { success = true, sessions = lean, totalCount = lean.Count });
+                }
                 return response;
             }
             catch (Exception ex)

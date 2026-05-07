@@ -50,9 +50,13 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 if (days > 365) days = 365;
 
                 var groupBy = query["groupBy"] ?? "city";
+                // Default response shape is lean (~15 fields/row) so MCP-driven callers fit
+                // many sessions in a single response. UI sets ?full=1 to opt back into the
+                // full LocationSessionRow shape.
+                var full = string.Equals(query["full"], "1", StringComparison.Ordinal);
 
-                _logger.LogInformation("Fetching sessions for location '{LocationKey}' tenant {TenantId} ({Days}d, groupBy={GroupBy})",
-                    locationKey, tenantId, days, groupBy);
+                _logger.LogInformation("Fetching sessions for location '{LocationKey}' tenant {TenantId} ({Days}d, groupBy={GroupBy}, full={Full})",
+                    locationKey, tenantId, days, groupBy, full);
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
                 var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
@@ -62,7 +66,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var rows = BuildRows(filtered, appSummaries);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new { success = true, sessions = rows, totalCount = rows.Count });
+                if (full)
+                {
+                    await response.WriteAsJsonAsync(new { success = true, sessions = rows, totalCount = rows.Count });
+                }
+                else
+                {
+                    var lean = rows.Select(ToLeanRow).ToList();
+                    await response.WriteAsJsonAsync(new { success = true, sessions = lean, totalCount = lean.Count });
+                }
                 return response;
             }
             catch (Exception ex)
@@ -99,5 +111,33 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             }
             return rows;
         }
+
+        /// <summary>
+        /// Lean projection used as the default response shape. Fields chosen to support
+        /// the typical MCP triage flow (which session, when, where, how big a deal, was
+        /// DO active) while keeping per-row payload an order of magnitude smaller than
+        /// the full <see cref="LocationSessionRow"/>. Callers needing the full shape
+        /// pass <c>?full=1</c>.
+        /// </summary>
+        internal static object ToLeanRow(LocationSessionRow r) => new
+        {
+            sessionId = r.SessionId,
+            tenantId = r.TenantId,
+            serialNumber = r.SerialNumber,
+            deviceName = r.DeviceName,
+            manufacturer = r.Manufacturer,
+            model = r.Model,
+            startedAt = r.StartedAt,
+            completedAt = r.CompletedAt,
+            status = r.Status,
+            failureReason = r.FailureReason,
+            durationSeconds = r.DurationSeconds,
+            enrollmentType = r.EnrollmentType,
+            geoCountry = r.GeoCountry,
+            geoCity = r.GeoCity,
+            totalAppCount = r.TotalAppCount,
+            hasDoTelemetry = r.HasDoTelemetry,
+            doPercentPeerCaching = r.DoPercentPeerCaching,
+        };
     }
 }
