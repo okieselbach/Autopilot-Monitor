@@ -106,6 +106,42 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Sends a Telegram notification when a tenant admin submits a diag-files-only report
+        /// (no session context). Best-effort — silently no-ops if the webhook URL is not configured.
+        /// </summary>
+        public async Task SendDiagFilesReportAsync(string tenantId, string submittedBy, string reportId, string comment)
+        {
+            try
+            {
+                var webhookUrl = await GetWebhookUrlAsync();
+                if (string.IsNullOrWhiteSpace(webhookUrl))
+                {
+                    _logger.LogDebug("Telegram webhook URL not configured — skipping diag-files report notification");
+                    return;
+                }
+
+                var commentLine = string.IsNullOrWhiteSpace(comment) ? "" : $"\nComment: {comment}";
+                var payload = new
+                {
+                    chat_id = "-1003632442830",
+                    text = $"New Diag Files Report submitted!\nTenantID: {tenantId}\nBy: {submittedBy}\nReportID: {reportId}{commentLine}"
+                };
+
+                var json = JsonConvert.SerializeObject(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await _http.PostAsync(webhookUrl, content);
+
+                if (response.IsSuccessStatusCode)
+                    _logger.LogInformation(
+                        "Telegram diag-files report notification sent for report {ReportId}", reportId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send Telegram diag-files report notification for {ReportId}", reportId);
+            }
+        }
+
+        /// <summary>
         /// Posts content to a webhook URL with a single retry on transient failures (429, 5xx, network errors).
         /// </summary>
         private async Task<bool> PostWithRetryAsync(string webhookUrl, StringContent content, string context)

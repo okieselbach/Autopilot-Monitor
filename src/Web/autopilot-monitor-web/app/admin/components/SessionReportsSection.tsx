@@ -19,6 +19,21 @@ interface SessionReport {
   submittedBy: string;
   submittedAt: string;
   adminNote?: string;
+  /** "session" (legacy default) or "diagFiles" (no session context) */
+  reportType?: "session" | "diagFiles";
+}
+
+function ReportTypeBadge({ type }: { type?: string }) {
+  const isDiagFiles = type === "diagFiles";
+  const label = isDiagFiles ? "Diag Files" : "Session";
+  const cls = isDiagFiles
+    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+    : "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
+      {label}
+    </span>
+  );
 }
 
 interface SessionReportsSectionProps {
@@ -304,6 +319,7 @@ export function SessionReportsSection({
               <thead className="bg-gray-50 dark:bg-gray-700/50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Session</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tenant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Submitted By</th>
@@ -321,8 +337,13 @@ export function SessionReportsSection({
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
                       {new Date(r.submittedAt).toLocaleString()}
                     </td>
+                    <td className="px-4 py-3 text-sm whitespace-nowrap">
+                      <ReportTypeBadge type={r.reportType} />
+                    </td>
                     <td className="px-4 py-3 text-sm font-mono text-gray-700 dark:text-gray-300">
-                      {r.sessionId.length > 8 ? `${r.sessionId.slice(0, 8)}...` : r.sessionId}
+                      {r.reportType === "diagFiles"
+                        ? <span className="text-gray-300 dark:text-gray-600">—</span>
+                        : r.sessionId.length > 8 ? `${r.sessionId.slice(0, 8)}...` : r.sessionId}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono text-gray-700 dark:text-gray-300">
                       {r.tenantId.length > 8 ? `${r.tenantId.slice(0, 8)}...` : r.tenantId}
@@ -396,12 +417,20 @@ export function SessionReportsSection({
 
               <dl className="space-y-3 text-sm">
                 <div>
-                  <dt className="font-medium text-gray-500 dark:text-gray-400">Session ID</dt>
-                  <dd className="font-mono text-gray-900 dark:text-gray-100 mt-0.5 flex items-center">
-                    {selectedReport.sessionId}
-                    <CopyButton value={selectedReport.sessionId} />
+                  <dt className="font-medium text-gray-500 dark:text-gray-400">Type</dt>
+                  <dd className="mt-0.5">
+                    <ReportTypeBadge type={selectedReport.reportType} />
                   </dd>
                 </div>
+                {selectedReport.reportType !== "diagFiles" && selectedReport.sessionId && (
+                  <div>
+                    <dt className="font-medium text-gray-500 dark:text-gray-400">Session ID</dt>
+                    <dd className="font-mono text-gray-900 dark:text-gray-100 mt-0.5 flex items-center">
+                      {selectedReport.sessionId}
+                      <CopyButton value={selectedReport.sessionId} />
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt className="font-medium text-gray-500 dark:text-gray-400">Tenant ID</dt>
                   <dd className="font-mono text-gray-900 dark:text-gray-100 mt-0.5 flex items-center">
