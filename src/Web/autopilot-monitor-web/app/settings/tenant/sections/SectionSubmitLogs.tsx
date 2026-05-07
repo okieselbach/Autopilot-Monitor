@@ -148,7 +148,7 @@ export function SectionSubmitLogs() {
   const hasAnyContent = comment.trim().length > 0 || logFiles.length > 0 || screenshotFiles.length > 0;
 
   return (
-    <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
+    <div className="bg-white rounded-lg shadow p-6 max-w-2xl mx-auto">
       <div className="flex items-center mb-4">
         <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
           <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -213,7 +213,7 @@ export function SectionSubmitLogs() {
       {/* Email */}
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Email <span className="text-gray-400">(optional)</span>
+          Communication Email <span className="text-gray-400">(optional but recommended)</span>
         </label>
         <input
           type="email"

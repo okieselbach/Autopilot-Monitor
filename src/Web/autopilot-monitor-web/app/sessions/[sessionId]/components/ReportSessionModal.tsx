@@ -227,7 +227,7 @@ export default function ReportSessionModal({
               {/* Email */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email <span className="text-gray-400">(optional)</span>
+                  Communication Email <span className="text-gray-400">(optional but recommended)</span>
                 </label>
                 <input
                   type="email"
