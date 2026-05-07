@@ -183,6 +183,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
           { id: "cfg-notifications", label: "Notifications", href: "/settings/tenant/notifications" },
           { id: "cfg-sla-targets", label: "SLA Targets", href: "/settings/tenant/sla-targets" },
           { id: "cfg-bootstrap-sessions", label: "Bootstrap Sessions", href: "/settings/tenant/bootstrap-sessions" },
+          { id: "cfg-support", label: "Submit Logs", href: "/settings/tenant/support" },
         ],
       },
       {
