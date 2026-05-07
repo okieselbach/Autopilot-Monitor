@@ -176,10 +176,13 @@ export const api = {
       `${API_BASE_URL}/api/metrics/geographic${qs({ tenantId, days: String(days), groupBy })}`,
     globalGeographic: (days: number, groupBy: string, tenantId?: string) =>
       `${API_BASE_URL}/api/global/metrics/geographic${qs({ days: String(days), groupBy, tenantId })}`,
+    // ?full=1 — UI needs the full LocationSessionRow shape for the page table; default
+    // is now lean (~15 fields/row) so MCP-driven callers fit many sessions in a single
+    // response.
     geographicSessions: (tenantId: string, days: number, groupBy: string, locationKey: string) =>
-      `${API_BASE_URL}/api/metrics/geographic/sessions${qs({ tenantId, days: String(days), groupBy, locationKey })}`,
+      `${API_BASE_URL}/api/metrics/geographic/sessions${qs({ tenantId, days: String(days), groupBy, locationKey, full: '1' })}`,
     globalGeographicSessions: (days: number, groupBy: string, locationKey: string) =>
-      `${API_BASE_URL}/api/global/metrics/geographic/sessions${qs({ days: String(days), groupBy, locationKey })}`,
+      `${API_BASE_URL}/api/global/metrics/geographic/sessions${qs({ days: String(days), groupBy, locationKey, full: '1' })}`,
     platform: (opts?: { limit?: number; days?: number }) =>
       `${API_BASE_URL}/api/global/metrics/platform${qs({
         limit: opts?.limit?.toString(),

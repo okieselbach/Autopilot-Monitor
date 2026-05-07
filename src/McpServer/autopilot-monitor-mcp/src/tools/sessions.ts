@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery, followNextLink } from '../client.js';
+import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText } from './shared.js';
 import { toolError } from './error-handler.js';
@@ -38,7 +38,7 @@ export function registerSessionTools(server: McpServer): void {
     'Search enrollment sessions. Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' +
     'Basic properties (status, serial number, manufacturer, model, etc.) filter on the session index. ' +
     'Use deviceProperties for ANY device hardware/config filter — keys use "eventType.propertyName" notation. ' +
-    'Consult the device_properties resource for available keys. ' +
+    'Consult the device_properties catalog (call get_resource(name="device_properties")) for available keys. ' +
     'Examples: {"tpm_status.specVersion": "2.0"}, {"hardware_spec.ramTotalGB": ">=8"}, {"secureboot_status.uefiSecureBootEnabled": "True"}. ' +
     'Array values are searched as substring match (e.g. disks containing "NVMe"). ' +
     'For COUNTING / AGGREGATION queries (e.g. "how many V2 enrollments?", "how many failed in last 7 days?") ALWAYS pass ' +
@@ -78,7 +78,7 @@ export function registerSessionTools(server: McpServer): void {
                   'isUserDriven, isHybridJoin, agentVersion, imeAgentVersion, geoCountry.'),
       deviceProperties: z.record(z.string(), z.string()).optional().describe(
         'Dynamic device property filters. Keys use "eventType.propertyName" dot notation. ' +
-        'See the device_properties resource for all available keys and types. ' +
+        'See the device_properties catalog (call get_resource(name="device_properties")) for all available keys and types. ' +
         'Values: exact match by default. Prefix with >=, <=, >, < for numeric ranges (e.g. ">=8"). ' +
         'Booleans: use "True" or "False". Arrays: substring match in any element.'
       ),
@@ -91,7 +91,8 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('search_sessions', async () => {
       try {
         const { deviceProperties, tenantId, pageSize, continuation, ...rest } = args;
-        const basePath = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
+        // GA → /api/global/search/sessions (tenantId is filter); Tenant-Admin → /api/search/sessions (JWT-bound).
+        const basePath = pickGlobalOrTenantPath('/api/global/search/sessions', '/api/search/sessions');
         // followNextLink handles full nextLink paths verbatim. For first-page calls
         // we still need to layer in deviceProperties as `prop.<key>` query params,
         // which followNextLink doesn't know about — so build the param record and
@@ -115,14 +116,14 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'search_sessions_by_event',
     'Find sessions that contain a specific event type (e.g. app install failure, phase transitions, errors). ' +
-    'Omit tenantId for cross-tenant search (Global Admin). Check the event_types resource for valid eventType values. ' +
+    'Omit tenantId for cross-tenant search (Global Admin). Check the event_types catalog (call get_resource(name="event_types")) for valid eventType values. ' +
     'Use this to answer: which devices had a failed Teams install, which sessions had an error in DeviceSetup phase. ' +
     'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
     'interactive queries; raise it (up to 1000) for full sweeps. For broad analysis, use pageSize=1000 and follow ' +
     'nextLink repeatedly until absent. Pass the whole nextLink string as "continuation" so all backend-echoed query ' +
     'params round-trip correctly.',
     {
-      eventType: z.string().describe('Event type string — see event_types resource for valid values (e.g. "app_install_failed", "enrollment_failed")'),
+      eventType: z.string().describe('Event type string — see event_types catalog (call get_resource(name="event_types")) for valid values (e.g. "app_install_failed", "enrollment_failed")'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
         .describe('Page size (1-1000, default 200). Returns this many sessions per call; follow nextLink to fetch more.'),
@@ -133,7 +134,7 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('search_sessions_by_event', async () => {
       try {
         const { eventType, tenantId, pageSize, continuation } = args;
-        const basePath = tenantId ? '/api/search/sessions-by-event' : '/api/global/search/sessions-by-event';
+        const basePath = pickGlobalOrTenantPath('/api/global/search/sessions-by-event', '/api/search/sessions-by-event');
         const path = followNextLink(
           basePath,
           { eventType, tenantId, pageSize },
@@ -204,26 +205,16 @@ export function registerSessionTools(server: McpServer): void {
     READ_ONLY,
     async (args) => withToolTelemetry('get_session_events', async () => {
       try {
-        const { sessionId, tenantId, pageSize, continuation, ...filters } = args;
+        const { sessionId, tenantId, pageSize, continuation, eventType, severity, source } = args;
+        // Filters live server-side now — count and nextLink stay coherent (a non-zero
+        // nextLink with count: 0 means "filter didn't match in this page; more raw rows
+        // ahead — follow nextLink to keep scanning").
         const path = followNextLink(
           `/api/sessions/${sessionId}/events`,
-          { tenantId, pageSize },
+          { tenantId, pageSize, eventType, severity, source },
           continuation,
         );
-        const data = await apiFetch(path) as {
-          events?: Array<{ eventType?: string; severity?: string; source?: string }>;
-          count?: number;
-          nextLink?: string;
-        };
-        if (data?.events && (filters.eventType || filters.severity || filters.source)) {
-          data.events = data.events.filter((e) => {
-            if (filters.eventType && e.eventType !== filters.eventType) return false;
-            if (filters.severity && e.severity !== filters.severity) return false;
-            if (filters.source && !e.source?.toLowerCase().includes(filters.source.toLowerCase())) return false;
-            return true;
-          });
-          data.count = data.events.length;
-        }
+        const data = await apiFetch(path);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.events);
       } catch (error: unknown) {
         return toolError('get_session_events', args, error);
@@ -236,8 +227,10 @@ export function registerSessionTools(server: McpServer): void {
     'get_session_summary',
     'Get a concise, structured summary of an enrollment session optimized for analysis. ' +
     'Returns: session overview (status, duration, device, enrollment config), ' +
-    'key events timeline (errors, warnings, phase transitions, app installs — noise filtered out), ' +
-    'rule analysis results (probable cause, remediation), and aggregate stats. ' +
+    'key events timeline (errors, warnings, phase transitions, app installs — noise filtered out, ' +
+    'capped at 50 most-relevant entries; stats.keyEventsTruncated indicates if more were dropped), ' +
+    'rule analysis results (probable cause, remediation), and aggregate stats. Heavy event payloads ' +
+    '(data JSON) are NOT included — pull them via get_session_events for the same sessionId when needed. ' +
     'Use this as the FIRST tool when investigating a session. ' +
     'For raw unfiltered events use get_session_events. For full metadata use get_session.',
     {
@@ -308,23 +301,50 @@ export function registerSessionTools(server: McpServer): void {
           if (et === 'app_install_skipped') appSkipped++;
         }
 
-        let keyEvents = allEvents.filter((e) => {
+        // Triage timeline: keep noise-free events, sort by relevance (errors >
+        // phase transitions > warnings > others, then chronological), cap at 50
+        // entries. Heavy `details` payloads are dropped by default — they were the
+        // root cause of the previous 80 KB+ responses; callers needing full payloads
+        // pull them via get_session_events with the same sessionId.
+        const KEY_EVENTS_CAP = 50;
+        const PHASE_EVENT_TYPES = new Set([
+          'phase_transition', 'esp_phase_changed', 'enrollment_type_detected',
+          'enrollment_complete', 'enrollment_failed', 'desktop_arrived',
+        ]);
+        const allKey = allEvents.filter((e) => {
           const et = String(e.eventType ?? '');
           if (EXCLUDED_EVENT_TYPES.has(et)) return false;
           if (KEY_EVENT_TYPES.has(et)) return true;
           return (SEVERITY_RANK[String(e.severity ?? '')] ?? -1) >= 2;
         });
 
-        const mappedEvents = keyEvents.map((e) => ({
+        const relevanceScore = (e: Record<string, unknown>): number => {
+          const sev = SEVERITY_RANK[String(e.severity ?? '')] ?? -1;
+          if (sev >= 3) return 100;                        // Error/Critical
+          if (PHASE_EVENT_TYPES.has(String(e.eventType ?? ''))) return 60;
+          if (sev === 2) return 30;                        // Warning
+          return 10;                                       // info-level key event
+        };
+
+        const sortedKey = [...allKey].sort((a, b) => {
+          const r = relevanceScore(b) - relevanceScore(a);
+          if (r !== 0) return r;
+          return String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? ''));
+        });
+
+        const truncated = sortedKey.length > KEY_EVENTS_CAP;
+        const cappedKey = truncated ? sortedKey.slice(0, KEY_EVENTS_CAP) : sortedKey;
+
+        // Re-sort the displayed slice chronologically — easier to read as a timeline.
+        cappedKey.sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')));
+
+        const mappedEvents = cappedKey.map((e) => ({
           timestamp: e.timestamp,
           eventType: e.eventType,
           severity: e.severity,
           phase: PHASE_NAMES[Number(e.phase)] ?? String(e.phase ?? ''),
           message: e.message,
           source: e.source,
-          details: e.data && typeof e.data === 'object' && Object.keys(e.data as object).length > 0
-            ? e.data
-            : (e.dataJson ? (() => { try { return JSON.parse(String(e.dataJson)); } catch { return null; } })() : null),
         }));
 
         let analysis = null;
@@ -351,7 +371,9 @@ export function registerSessionTools(server: McpServer): void {
           analysis,
           stats: {
             totalEvents: allEvents.length,
+            keyEventsTotal: sortedKey.length,
             keyEventsShown: mappedEvents.length,
+            keyEventsTruncated: truncated,
             errorCount,
             warningCount,
             appInstalls: { total: appTotal, succeeded: appSucceeded, failed: appFailed, skipped: appSkipped },
@@ -383,7 +405,7 @@ export function registerSessionTools(server: McpServer): void {
         const params: Record<string, string | number | undefined> = { ...rest };
         if (tenantId) params.tenantId = tenantId;
         const q = buildQuery(params);
-        const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
+        const prefix = pickGlobalOrTenantPath('/api/global/metrics', '/api/metrics');
         const [summary, apps] = await Promise.all([
           apiFetch(`${prefix}/summary${q}`).catch(() => null),
           apiFetch(`${prefix}/app${q}`).catch(() => null),
@@ -419,7 +441,7 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('search_sessions_by_cve', async () => {
       try {
         const { cveId, tenantId, minCvssScore, overallRisk, pageSize, continuation } = args;
-        const basePath = tenantId ? '/api/search/sessions-by-cve' : '/api/global/search/sessions-by-cve';
+        const basePath = pickGlobalOrTenantPath('/api/global/search/sessions-by-cve', '/api/search/sessions-by-cve');
         const path = followNextLink(
           basePath,
           { cveId, tenantId, minCvssScore, overallRisk, pageSize },
@@ -446,9 +468,10 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('list_blocked_devices', async () => {
       try {
         const { tenantId } = args;
-        const endpoint = tenantId
-          ? `/api/devices/blocked${buildQuery({ tenantId } as Record<string, string | undefined>)}`
-          : '/api/global/devices/blocked';
+        // GA: /api/global/devices/blocked (tenantId is filter); non-GA: /api/devices/blocked
+        // (backend will 403 — list is platform-wide and GA-only by policy).
+        const basePath = pickGlobalOrTenantPath('/api/global/devices/blocked', '/api/devices/blocked');
+        const endpoint = `${basePath}${buildQuery({ tenantId } as Record<string, string | undefined>)}`;
         const data = await apiFetch(endpoint);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.adminStream);
       } catch (error: unknown) {
