@@ -180,6 +180,13 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var continuations = AutopilotMonitor.Functions.DataAccess.TableStorage.PerPartitionFanOutMerge
                     .DecodeMultiContinuation(continuation);
+                // First-page request (no continuation) fans out across every
+                // tenant in the catalog. Subsequent pages restrict to tenants
+                // still in the continuation map — anything dropped by
+                // MergeAndAdvance (because that partition exhausted on a
+                // prior page) stays dropped, which is what shrinks the
+                // wire-format token from 30+ KB to a few hundred bytes.
+                var isFirstPage = string.IsNullOrEmpty(continuation);
 
                 // Tenants come from TenantConfiguration (1 row per tenant — cheap).
                 // PLUS the synthetic global-tenant partition (Constants.AuditGlobalTenantId)
@@ -199,7 +206,7 @@ namespace AutopilotMonitor.Functions.Services
                 }
 
                 var activeTenantIds = tenantIds
-                    .Where(t => !(continuations.TryGetValue(t, out var c) && c.Exhausted))
+                    .Where(t => isFirstPage || continuations.ContainsKey(t))
                     .ToList();
                 if (activeTenantIds.Count == 0)
                     return new RawPage<AuditLogEntry>(new List<AuditLogEntry>(), null);
@@ -228,8 +235,11 @@ namespace AutopilotMonitor.Functions.Services
                 var (items, nextContinuations) = AutopilotMonitor.Functions.DataAccess.TableStorage.PerPartitionFanOutMerge
                     .MergeAndAdvance(results, continuations, pageSize, e => e.Timestamp);
 
-                bool anyActive = nextContinuations.Any(kv => !kv.Value.Exhausted);
-                string? nextRawToken = anyActive
+                // MergeAndAdvance only puts active partitions into the map now
+                // (exhausted ones are dropped, see PerPartitionFanOutMerge.cs).
+                // An empty map therefore means "every partition is done" and we
+                // emit no continuation, ending the pagination cleanly.
+                string? nextRawToken = nextContinuations.Count > 0
                     ? AutopilotMonitor.Functions.DataAccess.TableStorage.PerPartitionFanOutMerge
                         .EncodeMultiContinuation(nextContinuations)
                     : null;

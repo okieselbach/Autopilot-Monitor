@@ -29,10 +29,18 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
     /// fetched items lost the merge — they get re-fetched next call and compete
     /// again at a lower floor.
     /// </para>
+    /// <para>
+    /// Continuation shape: only <em>active</em> partitions are encoded. Missing
+    /// from the map = exhausted (or never had any data). For 200-tenant audit
+    /// fan-outs that previously kept exhausted entries around, the encoded
+    /// token would balloon past 30 KB and trip URL-length limits before
+    /// reaching the function (browser <c>net::ERR_FAILED</c> on Next click).
+    /// Now the token shrinks page-over-page as partitions exhaust.
+    /// </para>
     /// </remarks>
     internal static class PerPartitionFanOutMerge
     {
-        internal sealed record PartitionContinuation(string? LastRowKey, bool Exhausted);
+        internal sealed record PartitionContinuation(string? LastRowKey);
 
         internal sealed record PartitionFetchResult<T>(
             string Partition,
@@ -41,8 +49,10 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         /// <summary>
         /// Pure merge-and-advance step. Given pre-fetched per-partition items
         /// (already newest-first within each list) and the previous per-partition
-        /// continuation map, returns the top-pageSize merged items plus the next
-        /// continuation map.
+        /// continuation map, returns the top-pageSize merged items plus the
+        /// next continuation map. Partitions with nothing left to return are
+        /// dropped from the map entirely — consumers treat "missing" as
+        /// exhausted on subsequent calls (see class remarks).
         /// </summary>
         public static (List<T> Items, Dictionary<string, PartitionContinuation> NextContinuations)
             MergeAndAdvance<T>(
@@ -72,13 +82,14 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                         .Select(m => m.rk)
                         .OrderBy(rk => rk, StringComparer.Ordinal)
                         .Last();
-                    newContinuations[r.Partition] = new PartitionContinuation(oldestRk, Exhausted: false);
+                    newContinuations[r.Partition] = new PartitionContinuation(oldestRk);
                 }
                 else if (r.Items.Count == 0)
                 {
-                    // No more items past current continuation → partition exhausted.
-                    priorContinuations.TryGetValue(r.Partition, out var prior);
-                    newContinuations[r.Partition] = new PartitionContinuation(prior?.LastRowKey, Exhausted: true);
+                    // No items returned from this partition's query → exhausted.
+                    // Drop from map entirely; the consumer's "missing = exhausted"
+                    // rule (when continuation was provided) does the right thing
+                    // and keeps the encoded token small.
                 }
                 else
                 {
@@ -87,33 +98,29 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                     // win on the next page when the floor drops. Wasted bandwidth, but
                     // correct (no item silently dropped).
                     priorContinuations.TryGetValue(r.Partition, out var prior);
-                    newContinuations[r.Partition] = prior ?? new PartitionContinuation(null, Exhausted: false);
+                    newContinuations[r.Partition] = prior ?? new PartitionContinuation(null);
                 }
-            }
-
-            // Carry over already-exhausted entries from the prior call so they
-            // stay marked across pages (we only fetch from active partitions on
-            // this round and don't see exhausted ones in `fetched`).
-            foreach (var kv in priorContinuations)
-            {
-                if (kv.Value.Exhausted && !newContinuations.ContainsKey(kv.Key))
-                    newContinuations[kv.Key] = kv.Value;
             }
 
             return (returnedItems, newContinuations);
         }
 
+        // Wire format v1 (legacy): every partition encoded with `{rk, x:bool}`.
+        // Wire format v2 (current): only ACTIVE partitions, `{rk}` only. Decoder
+        // accepts both and silently drops v1 `x:true` entries so old tokens
+        // emitted by previous deploys still page through cleanly.
+        private const int WireFormatVersion = 2;
+
         public static string EncodeMultiContinuation(IReadOnlyDictionary<string, PartitionContinuation> continuations)
         {
             var doc = new Dictionary<string, object?>
             {
-                ["v"] = 1,
+                ["v"] = WireFormatVersion,
                 ["c"] = continuations.ToDictionary(
                     kv => kv.Key,
                     kv => (object?)new Dictionary<string, object?>
                     {
                         ["rk"] = kv.Value.LastRowKey,
-                        ["x"]  = kv.Value.Exhausted,
                     }),
             };
             var json = JsonSerializer.Serialize(doc);
@@ -132,11 +139,15 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 if (!doc.RootElement.TryGetProperty("c", out var entries)) return result;
                 foreach (var prop in entries.EnumerateObject())
                 {
+                    // v1 back-compat: skip entries explicitly marked exhausted.
+                    // v2 never writes them, but old in-flight tokens may.
+                    if (prop.Value.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.True)
+                        continue;
+
                     string? rk = prop.Value.TryGetProperty("rk", out var rkEl) && rkEl.ValueKind == JsonValueKind.String
                         ? rkEl.GetString()
                         : null;
-                    bool exhausted = prop.Value.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.True;
-                    result[prop.Name] = new PartitionContinuation(rk, exhausted);
+                    result[prop.Name] = new PartitionContinuation(rk);
                 }
             }
             catch

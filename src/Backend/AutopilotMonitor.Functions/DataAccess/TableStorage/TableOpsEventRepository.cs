@@ -120,9 +120,15 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
         {
             var continuations = PerPartitionFanOutMerge.DecodeMultiContinuation(continuation);
+            // First-page request fans out across every category; subsequent
+            // pages restrict to whatever is still active in the continuation
+            // map. With only 6 fixed categories this never grew to a problem
+            // size, but the convention now matches the audit fan-out so the
+            // shared fan-out helper has one rule.
+            var isFirstPage = string.IsNullOrEmpty(continuation);
 
             var activeCats = AllCategories
-                .Where(cat => !(continuations.TryGetValue(cat, out var c) && c.Exhausted))
+                .Where(cat => isFirstPage || continuations.ContainsKey(cat))
                 .ToList();
             if (activeCats.Count == 0)
                 return new RawPage<OpsEventEntry>(new List<OpsEventEntry>(), null);
@@ -146,8 +152,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             var (items, nextContinuations) = PerPartitionFanOutMerge.MergeAndAdvance(
                 results, continuations, pageSize, e => e.Timestamp);
 
-            bool anyActive = nextContinuations.Any(c => !c.Value.Exhausted);
-            string? nextRawToken = anyActive
+            // Map only carries active partitions; empty = pagination complete.
+            string? nextRawToken = nextContinuations.Count > 0
                 ? PerPartitionFanOutMerge.EncodeMultiContinuation(nextContinuations)
                 : null;
             return new RawPage<OpsEventEntry>(items, nextRawToken);
