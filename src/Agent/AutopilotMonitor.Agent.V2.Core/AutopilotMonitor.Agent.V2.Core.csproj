@@ -13,8 +13,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      The V2 executable's AssemblyName was rebranded to "AutopilotMonitor.Agent"
+      (no V2 in the on-disk file name; V2 release line is signalled via version
+      metadata + version-v2.json manifest). This InternalsVisibleTo therefore
+      grants the V2 exe access to V2.Core internals. V1's Agent project has no
+      ProjectReference to V2.Core, so the shared assembly name does not cause
+      a real cross-version leak.
+    -->
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
-      <_Parameter1>AutopilotMonitor.Agent.V2</_Parameter1>
+      <_Parameter1>AutopilotMonitor.Agent</_Parameter1>
     </AssemblyAttribute>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>AutopilotMonitor.DecisionCore.Tests</_Parameter1>

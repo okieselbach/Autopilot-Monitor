@@ -390,7 +390,7 @@ namespace AutopilotMonitor.Agent.V2
             var v = GetAgentVersion();
             Console.Out.WriteLine($"Autopilot Monitor Agent V2 v{v}");
             Console.Out.WriteLine();
-            Console.Out.WriteLine("Usage: AutopilotMonitor.Agent.V2.exe [options]");
+            Console.Out.WriteLine("Usage: AutopilotMonitor.Agent.exe [options]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("Modes:");
             Console.Out.WriteLine("  --install                         Deploy payload, create Scheduled Task, and start it");

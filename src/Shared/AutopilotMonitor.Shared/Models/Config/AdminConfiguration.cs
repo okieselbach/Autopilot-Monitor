@@ -290,7 +290,7 @@ namespace AutopilotMonitor.Shared.Models
         public string LatestAgentV2Sha256 { get; set; } = default!;
 
         /// <summary>
-        /// SHA-256 hash (lowercase hex) of the latest published V2 agent EXE (AutopilotMonitor.Agent.V2.exe).
+        /// SHA-256 hash (lowercase hex) of the latest published V2 agent EXE (AutopilotMonitor.Agent.exe, V2 release line).
         /// Mirror of <see cref="LatestAgentExeSha256"/> for the V2 release line.
         /// </summary>
         public string LatestAgentV2ExeSha256 { get; set; } = default!;

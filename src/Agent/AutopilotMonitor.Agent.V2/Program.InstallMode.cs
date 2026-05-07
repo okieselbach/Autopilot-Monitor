@@ -31,7 +31,7 @@ namespace AutopilotMonitor.Agent.V2
         internal const string DeploymentRegistryValue = "Deployed";
         internal const string BootstrapConfigFileName = "bootstrap-config.json";
         internal const string AwaitEnrollmentConfigFileName = "await-enrollment.json";
-        private const string InstalledAgentExeName = "AutopilotMonitor.Agent.V2.exe";
+        private const string InstalledAgentExeName = "AutopilotMonitor.Agent.exe";
 
         internal static int RunInstallMode(string[] args)
         {

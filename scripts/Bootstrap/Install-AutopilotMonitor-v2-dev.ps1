@@ -156,7 +156,7 @@ try {
     Write-Log "Pre-flight checks passed -- no prior deployment, no real user profiles, no logged-on user, within bootstrap window"
 
     # Download and extract agent binaries
-    $agentExePath = Join-Path $AgentBinPath "AutopilotMonitor.Agent.V2.exe"
+    $agentExePath = Join-Path $AgentBinPath "AutopilotMonitor.Agent.exe"
 
     if (Test-Path $agentExePath) {
         Write-Log "Agent already installed at $agentExePath"

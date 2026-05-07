@@ -6,7 +6,15 @@
     <LangVersion>latest</LangVersion>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <RootNamespace>AutopilotMonitor.Agent.V2</RootNamespace>
-    <AssemblyName>AutopilotMonitor.Agent.V2</AssemblyName>
+    <!--
+      Output binary is named "AutopilotMonitor.Agent.exe" (no V2 in the file name) so
+      the on-disk layout matches V1. The V2 release line is identified via version
+      metadata: AssemblyVersion / FileVersion = 2.0.<buildcounter>, version-v2.json
+      manifest, and the "Autopilot Monitor Agent V2" string in the version banner.
+      V1 and V2 cannot coexist at the install path (Install-AutopilotMonitor*.ps1
+      Guard 5 enforces this), so the shared file name does not cause collisions.
+    -->
+    <AssemblyName>AutopilotMonitor.Agent</AssemblyName>
 
     <!-- Version Configuration — Plan: 2.0.<buildcounter>, same format as Legacy, own counter file. -->
     <VersionPrefix>2.0</VersionPrefix>

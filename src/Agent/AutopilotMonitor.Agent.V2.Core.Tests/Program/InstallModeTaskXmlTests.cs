@@ -13,7 +13,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
     /// </summary>
     public sealed class InstallModeTaskXmlTests
     {
-        private const string SampleExePath = @"C:\ProgramData\AutopilotMonitor\Agent\AutopilotMonitor.Agent.V2.exe";
+        private const string SampleExePath = @"C:\ProgramData\AutopilotMonitor\Agent\AutopilotMonitor.Agent.exe";
 
         [Fact]
         public void Xml_is_well_formed_and_uses_task_scheduler_1_2_namespace()

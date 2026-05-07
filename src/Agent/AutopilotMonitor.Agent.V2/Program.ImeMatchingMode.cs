@@ -48,7 +48,7 @@ namespace AutopilotMonitor.Agent.V2
             if (pathIndex < 0 || pathIndex + 1 >= args.Length)
             {
                 Console.Error.WriteLine("ERROR: --run-ime-matching requires a path argument (file or directory).");
-                Console.Error.WriteLine("Usage: AutopilotMonitor.Agent.V2.exe --run-ime-matching <path> [--patterns <file>]");
+                Console.Error.WriteLine("Usage: AutopilotMonitor.Agent.exe --run-ime-matching <path> [--patterns <file>]");
                 return 1;
             }
 
