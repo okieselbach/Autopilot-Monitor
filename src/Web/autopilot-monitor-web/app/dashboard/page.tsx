@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
 import { useSignalR } from "../../contexts/SignalRContext";
 import { useTenant } from "../../contexts/TenantContext";
@@ -23,6 +23,13 @@ import { useDashboardSessions } from "./hooks/useDashboardSessions";
 
 export default function Home() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Opt-in full-width layout via ?span=full (also accepts wide/max) — drops the max-w-7xl cap.
+  const spanParam = searchParams?.get("span")?.toLowerCase();
+  const fullWidth = spanParam === "full" || spanParam === "wide" || spanParam === "max";
+  const mainClassName = fullWidth
+    ? "w-full px-4 sm:px-6 lg:px-8 py-4"
+    : "max-w-7xl mx-auto py-4 sm:px-6 lg:px-8";
   const { user, logout, getAccessToken, isPreviewBlocked } = useAuth();
   const { addNotification } = useNotifications();
   const [apiStatus, setApiStatus] = useState<"unchecked" | "checking" | "healthy" | "error">("unchecked");
@@ -142,7 +149,7 @@ export default function Home() {
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
       {/* Main content */}
-      <main className="max-w-7xl mx-auto py-4 sm:px-6 lg:px-8">
+      <main className={mainClassName}>
         <div className="px-4 sm:px-0">
           {/* Feedback & bug report banner */}
           <div className="mb-4 bg-blue-50 border border-blue-300 rounded-lg px-4 py-3 flex items-start gap-3 dark:bg-blue-950/30 dark:border-blue-700/50">
