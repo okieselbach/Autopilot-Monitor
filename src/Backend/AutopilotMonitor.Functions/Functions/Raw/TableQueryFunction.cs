@@ -1,8 +1,11 @@
 using System.Net;
+using System.Web;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
+using AutopilotMonitor.Shared.Pagination;
 using Azure;
 using Azure.Data.Tables;
 using Microsoft.Azure.Functions.Worker;
@@ -85,19 +88,51 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 var actualTableName = Constants.TableNames.All
                     .First(t => t.Equals(tableName, StringComparison.OrdinalIgnoreCase));
 
-                var partitionKey = req.Query["partitionKey"];
-                var rowKeyPrefix = req.Query["rowKeyPrefix"];
-                var filter = req.Query["filter"];
-                var limitStr = req.Query["limit"];
-                var limit = int.TryParse(limitStr, out var l) ? Math.Clamp(l, 1, 500) : 100;
+                var query = HttpUtility.ParseQueryString(req.Url.Query ?? string.Empty);
+                var partitionKey = query["partitionKey"];
+                var rowKeyPrefix = query["rowKeyPrefix"];
+                var filter = query["filter"];
+
+                var pagination = RawTablePagination.ParsePagination(query);
+                if (pagination.Error != null)
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new { error = pagination.Error });
+                    return bad;
+                }
 
                 // Build OData filter
                 var oDataFilter = BuildFilter(partitionKey, rowKeyPrefix, filter);
 
-                var tableClient = _storage.GetTableClient(actualTableName);
-                var entities = new List<Dictionary<string, object?>>();
+                var callerTenantId = TenantHelper.GetTenantId(req);
 
-                await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
+                string? azureToken = null;
+                if (pagination.Continuation != null)
+                {
+                    if (!RawTablePagination.TryAcceptContinuation(
+                            pagination.Continuation, callerTenantId, actualTableName,
+                            partitionKey, rowKeyPrefix, filter,
+                            out azureToken, out var rejectReason))
+                    {
+                        _logger.LogWarning("QueryRawTable: continuation rejected ({Reason})", rejectReason);
+                        var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await bad.WriteAsJsonAsync(new
+                        {
+                            error = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                        });
+                        return bad;
+                    }
+                }
+
+                var tableClient = _storage.GetTableClient(actualTableName);
+                var (rawEntities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                    client: tableClient,
+                    filter: oDataFilter,
+                    pageSize: pagination.PageSize,
+                    continuation: azureToken);
+
+                var entities = new List<Dictionary<string, object?>>(rawEntities.Count);
+                foreach (var entity in rawEntities)
                 {
                     var dict = new Dictionary<string, object?>
                     {
@@ -114,8 +149,15 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                     }
 
                     entities.Add(dict);
-                    if (entities.Count >= limit)
-                        break;
+                }
+
+                string? nextLink = null;
+                if (!string.IsNullOrEmpty(nextRawToken))
+                {
+                    var fp = RawTablePagination.Fingerprint(
+                        callerTenantId, actualTableName, partitionKey, rowKeyPrefix, filter);
+                    var wireToken = ContinuationToken.Encode(nextRawToken!, callerTenantId, fp);
+                    nextLink = RawTablePagination.BuildNextLink(actualTableName, pagination.PageSize, wireToken, query);
                 }
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
@@ -123,7 +165,8 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 {
                     table = actualTableName,
                     count = entities.Count,
-                    entities
+                    entities,
+                    nextLink,
                 });
                 return response;
             }

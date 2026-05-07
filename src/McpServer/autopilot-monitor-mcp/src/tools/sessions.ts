@@ -64,10 +64,10 @@ export function registerSessionTools(server: McpServer): void {
         'Values: exact match by default. Prefix with >=, <=, >, < for numeric ranges (e.g. ">=8"). ' +
         'Booleans: use "True" or "False". Arrays: substring match in any element.'
       ),
-      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(50)
-        .describe('Page size (1-1000, default 50). Returns this many sessions per call; follow nextLink to fetch more.'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many sessions per call; follow nextLink to fetch more.'),
       continuation: z.string().optional()
-        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('search_sessions', async () => {
@@ -97,26 +97,31 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'search_sessions_by_event',
     'Find sessions that contain a specific event type (e.g. app install failure, phase transitions, errors). ' +
-    'Omit tenantId for cross-tenant search (Global Admin). ' +
-    'Check the event_types resource for valid eventType values. ' +
+    'Omit tenantId for cross-tenant search (Global Admin). Check the event_types resource for valid eventType values. ' +
     'Use this to answer: which devices had a failed Teams install, which sessions had an error in DeviceSetup phase. ' +
-    'Pagination: when "nextLink" is present in the response, more sessions are available — call this tool again with "continuation" set to the value embedded in nextLink. Stop when nextLink is absent.',
+    'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
+    'interactive queries; raise it (up to 1000) for full sweeps. For broad analysis, use pageSize=1000 and follow ' +
+    'nextLink repeatedly until absent. Pass the whole nextLink string as "continuation" so all backend-echoed query ' +
+    'params round-trip correctly.',
     {
       eventType: z.string().describe('Event type string — see event_types resource for valid values (e.g. "app_install_failed", "enrollment_failed")'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
-      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(50)
-        .describe('Page size (1-1000, default 50). Returns this many sessions per call; follow nextLink to fetch more.'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many sessions per call; follow nextLink to fetch more.'),
       continuation: z.string().optional()
-        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('search_sessions_by_event', async () => {
       try {
-        const { tenantId, ...rest } = args;
-        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-        if (tenantId) params.tenantId = tenantId;
+        const { eventType, tenantId, pageSize, continuation } = args;
         const basePath = tenantId ? '/api/search/sessions-by-event' : '/api/global/search/sessions-by-event';
-        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+        const path = followNextLink(
+          basePath,
+          { eventType, tenantId, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('search_sessions_by_event', args, error);
@@ -376,23 +381,33 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'search_sessions_by_cve',
     "Find enrollment sessions where a specific CVE was detected in the device's software inventory. " +
-    "Omit tenantId for cross-tenant search (Global Admin). " +
-    "Requires vulnerability scanning to be enabled. Use this to answer: which devices are affected by CVE-2024-XXXX, show all critical vulnerability sessions.",
+    "Omit tenantId for cross-tenant search (Global Admin). Requires vulnerability scanning to be enabled. " +
+    "Use this to answer: which devices are affected by CVE-2024-XXXX, show all critical vulnerability sessions. " +
+    "This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical " +
+    "interactive queries; raise it (up to 1000) for full exposure audits. For \"how many of my devices have CVE-X\" " +
+    "use pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole nextLink string as " +
+    "\"continuation\" so all backend-echoed query params (cveId, minCvssScore, overallRisk) round-trip correctly.",
     {
       cveId: z.string().describe('CVE identifier (e.g. "CVE-2024-21447")'),
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       minCvssScore: z.coerce.number().min(0).max(10).optional().describe('Minimum CVSS score filter (e.g. 7.0 for high+critical)'),
       overallRisk: z.enum(['low', 'medium', 'high', 'critical']).optional(),
-      limit: z.coerce.number().min(1).max(100).optional().default(50),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many affected sessions per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('search_sessions_by_cve', async () => {
       try {
-        const { tenantId, ...rest } = args;
-        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-        if (tenantId) params.tenantId = tenantId;
+        const { cveId, tenantId, minCvssScore, overallRisk, pageSize, continuation } = args;
         const basePath = tenantId ? '/api/search/sessions-by-cve' : '/api/global/search/sessions-by-cve';
-        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+        const path = followNextLink(
+          basePath,
+          { cveId, tenantId, minCvssScore, overallRisk, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('search_sessions_by_cve', args, error);

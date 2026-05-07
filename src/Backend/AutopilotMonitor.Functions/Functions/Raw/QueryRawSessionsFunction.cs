@@ -1,8 +1,10 @@
 using System.Net;
-using System.Text.Json;
+using System.Web;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -30,7 +32,8 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             try
             {
                 var tenantId = TenantHelper.GetTenantId(req);
-                return await QuerySessions(req, tenantId);
+                return await QuerySessions(req, tenantId, scope: "raw-sessions:tenant",
+                    basePath: "/api/raw/sessions", filterTenantId: null);
             }
             catch (UnauthorizedAccessException)
             {
@@ -53,8 +56,10 @@ namespace AutopilotMonitor.Functions.Functions.Raw
         {
             try
             {
-                var tenantId = req.Query["tenantId"];
-                return await QuerySessions(req, tenantId);
+                var filterTenantId = req.Query["tenantId"];
+                var effectiveTenantId = string.IsNullOrEmpty(filterTenantId) ? null : filterTenantId;
+                return await QuerySessions(req, effectiveTenantId, scope: "raw-sessions:global",
+                    basePath: "/api/global/raw/sessions", filterTenantId: effectiveTenantId);
             }
             catch (Exception ex)
             {
@@ -62,17 +67,26 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
         }
 
-        private async Task<HttpResponseData> QuerySessions(HttpRequestData req, string? tenantId)
+        private async Task<HttpResponseData> QuerySessions(
+            HttpRequestData req, string? tenantId, string scope, string basePath, string? filterTenantId)
         {
-            var status = req.Query["status"];
-            var startedAfter = req.Query["startedAfter"];
-            var startedBefore = req.Query["startedBefore"];
-            var serialNumber = req.Query["serialNumber"];
-            var fieldsParam = req.Query["fields"];
-            var limitStr = req.Query["limit"];
-            var limit = int.TryParse(limitStr, out var l) ? Math.Clamp(l, 1, 200) : 50;
+            var query = HttpUtility.ParseQueryString(req.Url.Query ?? string.Empty);
 
-            // Build search filter for the underlying query
+            var status = query["status"];
+            var startedAfter = query["startedAfter"];
+            var startedBefore = query["startedBefore"];
+            var serialNumber = query["serialNumber"];
+            var fieldsParam = query["fields"];
+
+            var pagination = SearchSessionsPagination.ParsePagination(query);
+            if (pagination.Error != null)
+            {
+                var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                await bad.WriteAsJsonAsync(new { error = pagination.Error });
+                return bad;
+            }
+
+            // Build search filter — Limit is ignored, pagination owns size.
             var filter = new SessionSearchFilter();
             if (!string.IsNullOrEmpty(status))
                 filter.Status = status;
@@ -82,36 +96,64 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 filter.StartedBefore = before;
             if (!string.IsNullOrEmpty(serialNumber))
                 filter.SerialNumber = serialNumber;
-            filter.Limit = limit;
 
-            var sessions = await _sessionRepo.SearchSessionsAsync(tenantId, filter);
+            var callerTenantId = TenantHelper.GetTenantId(req);
 
-            // Apply field projection if requested
-            object result;
+            string? azureToken = null;
+            if (pagination.Continuation != null)
+            {
+                if (!SearchSessionsPagination.TryAcceptContinuation(
+                        pagination.Continuation, scope, callerTenantId, filterTenantId, filter,
+                        out azureToken, out var rejectReason))
+                {
+                    _logger.LogWarning("QueryRawSessions: continuation rejected ({Reason})", rejectReason);
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new
+                    {
+                        error = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                    });
+                    return bad;
+                }
+            }
+
+            var page = await _sessionRepo.SearchSessionsPageAsync(tenantId, filter, pagination.PageSize, azureToken);
+
+            // Optional field projection (raw-tool feature) is applied on top of the
+            // paginated SessionSummary set; it doesn't affect cursor mechanics.
+            object sessionsPayload;
             if (!string.IsNullOrEmpty(fieldsParam))
             {
                 var fieldSet = new HashSet<string>(
                     fieldsParam.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                     StringComparer.OrdinalIgnoreCase);
-
-                var projected = sessions.Select(session => ProjectFields(session, fieldSet)).ToList();
-                result = new { tenantId, count = projected.Count, sessions = projected };
+                sessionsPayload = page.Items.Select(s => ProjectFields(s, fieldSet)).ToList();
             }
             else
             {
-                result = new { tenantId, count = sessions.Count, sessions };
+                sessionsPayload = page.Items;
             }
 
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(result);
-            return response;
+            string? nextLink = null;
+            if (!string.IsNullOrEmpty(page.NextRawToken))
+            {
+                var fp = SearchSessionsPagination.Fingerprint(scope, callerTenantId, filterTenantId, filter);
+                var wireToken = ContinuationToken.Encode(page.NextRawToken!, callerTenantId, fp);
+                nextLink = SearchSessionsPagination.BuildNextLink(basePath, pagination.PageSize, wireToken, query);
+            }
+
+            return await req.OkAsync(new
+            {
+                tenantId,
+                count = page.Items.Count,
+                sessions = sessionsPayload,
+                nextLink,
+            });
         }
 
         private static Dictionary<string, object?> ProjectFields(SessionSummary session, HashSet<string> fields)
         {
             var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
-            // Map requested field names to session properties
             if (fields.Contains("sessionId")) dict["sessionId"] = session.SessionId;
             if (fields.Contains("tenantId")) dict["tenantId"] = session.TenantId;
             if (fields.Contains("status")) dict["status"] = session.Status.ToString();
@@ -134,7 +176,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             if (fields.Contains("agentVersion")) dict["agentVersion"] = session.AgentVersion;
             if (fields.Contains("geoCountry")) dict["geoCountry"] = session.GeoCountry;
 
-            // If no fields matched, return all
+            // If no fields matched, return a sensible default subset rather than empty.
             if (dict.Count == 0)
             {
                 dict["sessionId"] = session.SessionId;

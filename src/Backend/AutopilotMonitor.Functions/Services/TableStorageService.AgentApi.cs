@@ -1103,6 +1103,75 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Paged variant of <see cref="SearchSessionsByCveAsync"/>. Walks the
+        /// CveIndex partition page-by-page so callers can drain the full set of
+        /// devices affected by a CVE — the legacy unpaged variant capped at
+        /// limit*2 candidate sessions and silently dropped the rest, which made
+        /// "how many of my devices are exposed to CVE-X" impossible to answer
+        /// truthfully on large tenants.
+        /// </summary>
+        public async Task<RawPage<SessionSummary>> SearchSessionsByCvePageAsync(
+            string? tenantId, string cveId, double? minCvssScore, string? overallRisk,
+            int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.CveIndex);
+
+            // Tenant-scoped: PK exact match (partition-targeted, cheap).
+            // Cross-tenant: PK prefix scan over `{*}_{cveId}` — Azure can't
+            // partition-target a suffix match, so this is the closest range we
+            // can express. Server-side CVSS / risk filters could in theory move
+            // to OData on numeric/string columns, but the existing index rows
+            // already enrich them, so client-side filtering after the page fetch
+            // matches the legacy method's semantics exactly.
+            string oDataFilter;
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                oDataFilter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{ODataSanitizer.EscapeValue(cveId)}'";
+            }
+            else
+            {
+                var safeCveId = ODataSanitizer.EscapeValue(cveId);
+                oDataFilter = $"PartitionKey ge '{safeCveId}' and PartitionKey lt '{safeCveId}~'";
+            }
+
+            var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                client: tableClient,
+                filter: oDataFilter,
+                pageSize: pageSize,
+                continuation: continuation);
+
+            var sessionIds = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entity in entities)
+            {
+                if (minCvssScore.HasValue)
+                {
+                    var score = entity.GetDouble("CvssScore");
+                    if (score == null || score < minCvssScore.Value) continue;
+                }
+                if (!string.IsNullOrEmpty(overallRisk))
+                {
+                    var risk = entity.GetString("OverallRisk");
+                    if (!string.Equals(risk, overallRisk, StringComparison.OrdinalIgnoreCase)) continue;
+                }
+
+                var sessionId = entity.GetString("SessionId") ?? entity.RowKey;
+                if (!string.IsNullOrEmpty(sessionId) && seen.Add(sessionId))
+                {
+                    sessionIds.Add(sessionId);
+                }
+            }
+
+            if (sessionIds.Count == 0)
+                return new RawPage<SessionSummary>(Array.Empty<SessionSummary>(), nextRawToken);
+
+            var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
+            return new RawPage<SessionSummary>(sessions, nextRawToken);
+        }
+
+        /// <summary>
         /// Returns aggregated session metrics grouped by tenant, filtered to the last <paramref name="days"/> days.
         /// Leverages the SessionsIndex inverted-tick RowKey ordering for an efficient server-side range scan.
         /// </summary>

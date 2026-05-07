@@ -158,6 +158,11 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             string? tenantId, string cveId, double? minCvssScore, string? overallRisk, int limit = 50)
             => _storage.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
 
+        public Task<RawPage<SessionSummary>> SearchSessionsByCvePageAsync(
+            string? tenantId, string cveId, double? minCvssScore, string? overallRisk,
+            int pageSize, string? continuation)
+            => _storage.SearchSessionsByCvePageAsync(tenantId, cveId, minCvssScore, overallRisk, pageSize, continuation);
+
         public Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<EnrollmentEvent> events)
             => _storage.UpsertEventTypeIndexBatchAsync(tenantId, sessionId, events);
 

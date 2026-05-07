@@ -286,23 +286,26 @@ export function registerAdminTools(server: McpServer): void {
     'list_session_reports',
     'List session reports submitted by tenant admins. Reports contain user comments, screenshots, and agent logs for troubleshooting. ' +
     'Global Admin only — returns reports across all tenants by default; pass tenantId to filter to one tenant. ' +
-    'Pagination: when "nextLink" is present in the response, more reports are available — call this tool again with "continuation" set to the value embedded in nextLink. Stop when nextLink is absent.',
+    'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
+    'interactive queries; raise it (up to 1000) for bulk pulls. Pass the whole nextLink string as "continuation" so ' +
+    'all backend-echoed query params round-trip correctly.',
     {
       tenantId: z.string().optional().describe('Optional — filter to a single tenant. Omit for cross-tenant view.'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
         .describe('Page size (1-1000, default 200). Returns this many reports per call; follow nextLink to fetch more.'),
       continuation: z.string().optional()
-        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('list_session_reports', async () => {
       try {
         const { tenantId, pageSize, continuation } = args;
-        const data = await apiFetch(`/api/global/session-reports${buildQuery({
-          tenantId,
-          pageSize,
+        const path = followNextLink(
+          '/api/global/session-reports',
+          { tenantId, pageSize },
           continuation,
-        })}`);
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('list_session_reports', args, error);
@@ -320,10 +323,11 @@ export function registerAdminTools(server: McpServer): void {
     'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' +
     'Use this when search_events_semantic does not cover the time range or session scope you need, ' +
     'or when you need exact event-type filtering across many sessions. Returns raw event data. ' +
-    'Pagination: cross-session queries walk the EventTypeIndex page-by-page. When the response includes ' +
-    '"nextLink", more sessions are available — call this tool again with "continuation" set to the value ' +
-    'embedded in nextLink. Stop when nextLink is absent. Note: pageSize controls the index-scan cadence; ' +
-    'a single indexed session can contribute multiple events, so total events per page may exceed pageSize.',
+    'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
+    'interactive queries; raise it (up to 1000) for forensics-grade exact recall. For broad analysis, use ' +
+    'pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole nextLink string as "continuation" ' +
+    'so all backend-echoed query params round-trip correctly. Note: pageSize is the index-scan cadence — a single ' +
+    'indexed session can contribute multiple events, so total events per page may exceed pageSize.',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       sessionId: z.string().optional().describe('Filter to a specific session'),
@@ -335,16 +339,19 @@ export function registerAdminTools(server: McpServer): void {
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
         .describe('Page size (1-1000, default 200). Controls index-scan depth per call; follow nextLink for more.'),
       continuation: z.string().optional()
-        .describe('Pagination cursor — pass the "continuation" value from the previous response\'s nextLink to fetch the next page.'),
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('query_raw_events', async () => {
       try {
-        const { tenantId, ...rest } = args;
-        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
-        if (tenantId) params.tenantId = tenantId;
+        const { tenantId, sessionId, eventType, severity, source, startedAfter, startedBefore, pageSize, continuation } = args;
         const basePath = tenantId ? '/api/raw/events' : '/api/global/raw/events';
-        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+        const path = followNextLink(
+          basePath,
+          { tenantId, sessionId, eventType, severity, source, startedAfter, startedBefore, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('query_raw_events', args, error);
@@ -357,7 +364,11 @@ export function registerAdminTools(server: McpServer): void {
     'query_raw_sessions',
     'Query raw session data with flexible filters and field projection. ' +
     'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' +
-    'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber"). Returns raw session entities.',
+    'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber"). ' +
+    'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical interactive ' +
+    'queries; raise it (up to 1000) for bulk pulls. For broad analysis (e.g. all failures in a 30-day window), use ' +
+    'pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole nextLink string as "continuation" so ' +
+    'all backend-echoed query params (incl. resolved filters) round-trip correctly.',
     {
       tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional(),
@@ -365,16 +376,22 @@ export function registerAdminTools(server: McpServer): void {
       startedBefore: z.string().optional().describe('ISO 8601 datetime'),
       serialNumber: z.string().optional(),
       fields: z.string().optional().describe('Comma-separated fields to return (e.g. "sessionId,status,startedAt,serialNumber,durationSeconds")'),
-      limit: z.coerce.number().min(1).max(200).optional().default(50),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many sessions per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('query_raw_sessions', async () => {
       try {
-        const { tenantId, ...rest } = args;
-        const params: Record<string, string | number | boolean | undefined | null> = { ...rest };
+        const { tenantId, status, startedAfter, startedBefore, serialNumber, fields, pageSize, continuation } = args;
         const basePath = tenantId ? '/api/raw/sessions' : '/api/global/raw/sessions';
-        if (tenantId) params.tenantId = tenantId;
-        const data = await apiFetch(`${basePath}${buildQuery(params)}`);
+        const path = followNextLink(
+          basePath,
+          { tenantId, status, startedAfter, startedBefore, serialNumber, fields, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('query_raw_sessions', args, error);
@@ -408,19 +425,33 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'query_table',
     'Query any Azure Table Storage table directly with OData filters. Global Admin only. ' +
-    'Use list_tables to see available tables. Useful for inspecting TenantConfiguration, RuleResults, or any raw data.',
+    'Use list_tables to see available tables. Useful for inspecting TenantConfiguration, RuleResults, or any raw data ' +
+    'where no specialized tool exists. ' +
+    'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
+    'interactive inspection; raise it (up to 1000) for full-table dumps. For broad analysis (e.g. "all RuleResult ' +
+    'rows for tenant X in 30 days"), use pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole ' +
+    'nextLink string as "continuation" so all backend-echoed query params (tableName + filters) round-trip correctly.',
     {
       tableName: z.string().describe('Table name (e.g. "Sessions", "Events", "RuleResults", "TenantConfiguration")'),
       partitionKey: z.string().optional().describe('Filter by exact partition key (usually TenantId)'),
       rowKeyPrefix: z.string().optional().describe('Filter by row key prefix'),
       filter: z.string().optional().describe('OData filter expression (e.g. "Status eq \'Failed\'")'),
-      limit: z.coerce.number().min(1).max(500).optional().default(100),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
+        .describe('Page size (1-1000, default 200). Returns this many rows per call; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('query_table', async () => {
       try {
-        const { tableName, ...rest } = args;
-        const data = await apiFetch(`/api/global/raw/tables/${encodeURIComponent(tableName)}${buildQuery(rest)}`);
+        const { tableName, partitionKey, rowKeyPrefix, filter, pageSize, continuation } = args;
+        const basePath = `/api/global/raw/tables/${encodeURIComponent(tableName)}`;
+        const path = followNextLink(
+          basePath,
+          { partitionKey, rowKeyPrefix, filter, pageSize },
+          continuation,
+        );
+        const data = await apiFetch(path);
         return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error: unknown) {
         return toolError('query_table', args, error);

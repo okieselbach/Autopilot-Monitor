@@ -1,6 +1,9 @@
 using System.Net;
+using System.Web;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Shared.DataAccess;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -32,16 +35,25 @@ public class SearchSessionsByCveFunction
     {
         try
         {
-            var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            var query = HttpUtility.ParseQueryString(req.Url.Query);
 
             string? tenantId;
+            string? filterTenantId;
+            string scope;
+            string basePath;
             if (isTenantScoped)
             {
                 tenantId = TenantHelper.GetTenantId(req);
+                filterTenantId = null;
+                scope = "search-by-cve:tenant";
+                basePath = "/api/search/sessions-by-cve";
             }
             else
             {
-                tenantId = query["tenantId"];
+                filterTenantId = query["tenantId"];
+                tenantId = string.IsNullOrEmpty(filterTenantId) ? null : filterTenantId;
+                scope = "search-by-cve:global";
+                basePath = "/api/global/search/sessions-by-cve";
             }
 
             var cveId = query["cveId"];
@@ -54,15 +66,54 @@ public class SearchSessionsByCveFunction
 
             double? minCvssScore = double.TryParse(query["minCvssScore"], out var mcs) ? mcs : null;
             var overallRisk = query["overallRisk"];
-            var limit = int.TryParse(query["limit"], out var lim) ? Math.Clamp(lim, 1, 100) : 50;
 
-            var sessions = await _sessionRepo.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);
+            var pagination = SearchSessionsByCvePagination.ParsePagination(query);
+            if (pagination.Error != null)
+            {
+                var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                await bad.WriteAsJsonAsync(new { success = false, message = pagination.Error });
+                return bad;
+            }
+
+            var callerTenantId = TenantHelper.GetTenantId(req);
+
+            string? azureToken = null;
+            if (pagination.Continuation != null)
+            {
+                if (!SearchSessionsByCvePagination.TryAcceptContinuation(
+                        pagination.Continuation, scope, callerTenantId, filterTenantId,
+                        cveId, minCvssScore, overallRisk,
+                        out azureToken, out var rejectReason))
+                {
+                    _logger.LogWarning("SearchSessionsByCve: continuation rejected ({Reason})", rejectReason);
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                    });
+                    return bad;
+                }
+            }
+
+            var page = await _sessionRepo.SearchSessionsByCvePageAsync(
+                tenantId, cveId, minCvssScore, overallRisk, pagination.PageSize, azureToken);
+
+            string? nextLink = null;
+            if (!string.IsNullOrEmpty(page.NextRawToken))
+            {
+                var fp = SearchSessionsByCvePagination.Fingerprint(
+                    scope, callerTenantId, filterTenantId, cveId, minCvssScore, overallRisk);
+                var wireToken = ContinuationToken.Encode(page.NextRawToken!, callerTenantId, fp);
+                nextLink = SearchSessionsByCvePagination.BuildNextLink(basePath, pagination.PageSize, wireToken, query);
+            }
 
             return await req.OkAsync(new
             {
                 success = true,
-                count = sessions.Count,
-                sessions
+                count = page.Items.Count,
+                sessions = page.Items,
+                nextLink,
             });
         }
         catch (Exception ex)

@@ -151,6 +151,16 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<List<SessionSummary>> SearchSessionsByCveAsync(
             string? tenantId, string cveId, double? minCvssScore, string? overallRisk, int limit = 50);
 
+        /// <summary>
+        /// Paged variant of <see cref="SearchSessionsByCveAsync"/>. Walks the
+        /// CveIndex partition page-by-page so callers can drain every device
+        /// affected by a CVE — the legacy unpaged variant capped at <c>limit*2</c>
+        /// candidates and silently dropped the rest.
+        /// </summary>
+        Task<RawPage<SessionSummary>> SearchSessionsByCvePageAsync(
+            string? tenantId, string cveId, double? minCvssScore, string? overallRisk,
+            int pageSize, string? continuation);
+
         // --- Agent Indexes ---
         Task UpsertEventTypeIndexBatchAsync(string tenantId, string sessionId, IEnumerable<EnrollmentEvent> events);
         Task UpsertDeviceSnapshotAsync(string tenantId, string sessionId, IEnumerable<EnrollmentEvent> events);
