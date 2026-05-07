@@ -18,15 +18,16 @@ public class TimingAllowOriginMiddleware : IFunctionsWorkerMiddleware
 
     public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
     {
+        // Write directly on Response.Headers before next() — the
+        // OnStarting() callback is not reliably triggered in the .NET 8
+        // isolated worker (the host bridges the worker's response, so the
+        // hook fires on a shadow object that never reaches the wire). The
+        // direct-write pattern is the same one UserRateLimitMiddleware uses
+        // for X-RateLimit-* and is observed in production responses.
         var httpContext = context.GetHttpContext();
-        if (httpContext != null)
+        if (httpContext != null && !httpContext.Response.Headers.ContainsKey(HeaderName))
         {
-            httpContext.Response.OnStarting(() =>
-            {
-                if (!httpContext.Response.Headers.ContainsKey(HeaderName))
-                    httpContext.Response.Headers[HeaderName] = HeaderValue;
-                return Task.CompletedTask;
-            });
+            httpContext.Response.Headers[HeaderName] = HeaderValue;
         }
 
         await next(context);

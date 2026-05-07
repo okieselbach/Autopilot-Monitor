@@ -40,14 +40,15 @@ public class CorrelationIdMiddleware : IFunctionsWorkerMiddleware
 
         context.Items[ItemsKey] = correlationId;
 
-        if (httpContext != null)
+        if (httpContext != null && !httpContext.Response.Headers.ContainsKey(HeaderName))
         {
-            httpContext.Response.OnStarting(() =>
-            {
-                if (!httpContext.Response.Headers.ContainsKey(HeaderName))
-                    httpContext.Response.Headers[HeaderName] = correlationId;
-                return Task.CompletedTask;
-            });
+            // Write directly before next() — OnStarting() is not reliably
+            // triggered in the .NET 8 isolated worker (the host bridges the
+            // worker's response, so the hook fires on a shadow object that
+            // never reaches the wire). Without this, the correlation ID
+            // never made it back to the client even though it was logged
+            // on the server side.
+            httpContext.Response.Headers[HeaderName] = correlationId;
         }
 
         using (_logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))

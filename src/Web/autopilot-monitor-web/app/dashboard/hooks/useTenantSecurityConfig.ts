@@ -39,12 +39,15 @@ export function useTenantSecurityConfig(
   const [serialValidationEnabled, setSerialValidationEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // Wait until both tenant and user are resolved. Without the !user guard
+    // the effect fires once with user=null (initial render before AuthContext
+    // settles, all user.* deps "undefined") and once with user=UserInfo
+    // (deps now booleans/role string) — two distinct dep tuples, two
+    // fetches. Holding off until user is non-null collapses to one fetch.
+    if (!tenantId || !user) return;
     const fetchTenantSecurityConfig = async () => {
-      if (!tenantId) return;
-      // Read the validateAutopilotDevice flag from the member-readable feature-flags endpoint
-      // (admin-only fields stay behind /api/config/{tenantId}). Skip for unauthenticated users
-      // and users without a tenant role since they would just produce 401/403.
-      if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role == null) return;
+      // Skip for users without a tenant role — they'd just 401/403 anyway.
+      if (!user.isTenantAdmin && !user.isGlobalAdmin && user.role == null) return;
 
       try {
         const response = await authenticatedFetch(api.config.featureFlags(tenantId), getAccessToken);
