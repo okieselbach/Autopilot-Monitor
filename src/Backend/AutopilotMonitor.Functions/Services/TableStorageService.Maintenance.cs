@@ -242,12 +242,20 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        // Suppress automated maintenance entries (SessionTimeout, ExcessiveDataBlock,
+        // DataRetentionCleanup, …) from the human-facing audit list. They are written
+        // by MaintenanceService for traceability but duplicate the OpsEvents stream
+        // and are not actionable as user-attributable audits. Rows stay in storage
+        // and remain reachable via raw table queries.
+        private const string AuditLogSuppressedPerformer = "System.Maintenance";
+
         private static string BuildAuditLogFilterWithRowKeyBound(
             string tenantId, DateTime? dateFrom, DateTime? dateTo, string? lastRowKey)
         {
             var clauses = new List<string>
             {
                 $"PartitionKey eq '{tenantId}'",
+                $"PerformedBy ne '{AuditLogSuppressedPerformer}'",
             };
             if (!string.IsNullOrEmpty(lastRowKey))
                 clauses.Add($"RowKey gt '{lastRowKey!.Replace("'", "''")}'");
@@ -276,7 +284,10 @@ namespace AutopilotMonitor.Functions.Services
         // is always indexed.
         private static string? BuildAuditLogFilter(string? tenantId, DateTime? dateFrom, DateTime? dateTo)
         {
-            var clauses = new List<string>();
+            var clauses = new List<string>
+            {
+                $"PerformedBy ne '{AuditLogSuppressedPerformer}'",
+            };
             if (!string.IsNullOrEmpty(tenantId))
             {
                 clauses.Add($"PartitionKey eq '{tenantId}'");
@@ -289,7 +300,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 clauses.Add($"Timestamp le datetime'{ToUtc(dateTo.Value):o}'");
             }
-            return clauses.Count == 0 ? null : string.Join(" and ", clauses);
+            return string.Join(" and ", clauses);
         }
 
         private static DateTime ToUtc(DateTime dt)
