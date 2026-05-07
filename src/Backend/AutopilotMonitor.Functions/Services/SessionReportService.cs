@@ -148,7 +148,103 @@ namespace AutopilotMonitor.Functions.Services
                 Email = request.Email,
                 BlobName = blobName,
                 SubmittedBy = submittedBy,
-                SubmittedAt = now
+                SubmittedAt = now,
+                ReportType = ReportTypes.Session
+            };
+
+            await _notificationRepo.StoreSessionReportMetadataAsync(metadata);
+
+            return metadata;
+        }
+
+        /// <summary>
+        /// Submits a diagnostic-files report (no session context).
+        /// Persists into the same SessionReports table + session-reports container, but the
+        /// resulting ZIP only contains user-attached files plus a thin metadata header —
+        /// no events.csv / timeline.txt / ruleresults.csv synthesis.
+        /// </summary>
+        public async Task<SessionReportMetadata> SubmitDiagFilesReportAsync(
+            SubmitDiagFilesReportRequest request,
+            string submittedBy)
+        {
+            var reportId = Guid.NewGuid().ToString("N")[..12];
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+            var blobName = $"{request.TenantId}_diag_files_{timestamp}.zip";
+
+            using var zipStream = new MemoryStream();
+            using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                AddJsonEntry(archive, "report-metadata.json", new
+                {
+                    reportId,
+                    reportType = ReportTypes.DiagFiles,
+                    request.TenantId,
+                    request.Comment,
+                    request.Email,
+                    submittedBy,
+                    submittedAt = DateTime.UtcNow.ToString("O")
+                });
+
+                if (!string.IsNullOrEmpty(request.ScreenshotBase64))
+                {
+                    try
+                    {
+                        var screenshotBytes = Convert.FromBase64String(request.ScreenshotBase64);
+                        var ext = Path.GetExtension(request.ScreenshotFileName ?? ".png");
+                        if (string.IsNullOrEmpty(ext)) ext = ".png";
+                        var entry = archive.CreateEntry($"screenshot{ext}", CompressionLevel.Optimal);
+                        using var entryStream = entry.Open();
+                        await entryStream.WriteAsync(screenshotBytes);
+                    }
+                    catch (FormatException ex)
+                    {
+                        _logger.LogWarning(ex, "Invalid base64 screenshot data in diag-files report {ReportId}", reportId);
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(request.AgentLogBase64))
+                {
+                    try
+                    {
+                        var logBytes = Convert.FromBase64String(request.AgentLogBase64);
+                        var logFileName = string.IsNullOrEmpty(request.AgentLogFileName)
+                            ? "diag-files.bin"
+                            : request.AgentLogFileName;
+                        var entry = archive.CreateEntry(logFileName, CompressionLevel.Optimal);
+                        using var entryStream = entry.Open();
+                        await entryStream.WriteAsync(logBytes);
+                    }
+                    catch (FormatException ex)
+                    {
+                        _logger.LogWarning(ex, "Invalid base64 log payload in diag-files report {ReportId}", reportId);
+                    }
+                }
+            }
+
+            zipStream.Position = 0;
+            var containerClient = _blobStorage.GetContainerClient(ContainerName);
+            await containerClient.CreateIfNotExistsAsync();
+            var blobClient = containerClient.GetBlobClient(blobName);
+            await blobClient.UploadAsync(zipStream, new BlobUploadOptions
+            {
+                HttpHeaders = new BlobHttpHeaders { ContentType = "application/zip" }
+            });
+
+            _logger.LogInformation(
+                "Diag-files report uploaded: ReportId={ReportId}, BlobName={BlobName}, Tenant={TenantId}",
+                reportId, blobName, request.TenantId);
+
+            var metadata = new SessionReportMetadata
+            {
+                ReportId = reportId,
+                TenantId = request.TenantId,
+                SessionId = string.Empty,
+                Comment = request.Comment,
+                Email = request.Email,
+                BlobName = blobName,
+                SubmittedBy = submittedBy,
+                SubmittedAt = DateTime.UtcNow,
+                ReportType = ReportTypes.DiagFiles
             };
 
             await _notificationRepo.StoreSessionReportMetadataAsync(metadata);

@@ -285,6 +285,11 @@ export const api = {
       `${API_BASE_URL}/api/global/session-reports/${reportId}/note`,
   },
 
+  // ── Diag Files Reports (no session context) ───────────────────────────────
+  diagFilesReports: {
+    submit: () => `${API_BASE_URL}/api/diag-files-reports`,
+  },
+
   // ── Distress Reports ──────────────────────────────────────────────────────
   distressReports: {
     list: () => `${API_BASE_URL}/api/global/distress-reports`,

@@ -178,6 +178,7 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "sessions/{sessionId}/mark-succeeded", EndpointPolicy.TenantAdminOrGA),
         new("POST",   "sessions/{sessionId}/actions",          EndpointPolicy.TenantAdminOrGA),
         new("POST",   "sessions/{sessionId}/report",        EndpointPolicy.TenantAdminOrGA),
+        new("POST",   "diag-files-reports",                 EndpointPolicy.TenantAdminOrGA),
         new("DELETE", "sessions/{sessionId}",      EndpointPolicy.TenantAdminOrGA),
         new("GET",    "tenants/{tenantId}/admins",           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("POST",   "tenants/{tenantId}/admins",           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),

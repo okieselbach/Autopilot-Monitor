@@ -9,6 +9,7 @@ import { SectionNotifications } from "../sections/SectionNotifications";
 import { SectionAccessManagement } from "../sections/SectionAccessManagement";
 import { SectionBootstrapSessions } from "../sections/SectionBootstrapSessions";
 import { SectionSlaTargets } from "../sections/SectionSlaTargets";
+import { SectionSubmitLogs } from "../sections/SectionSubmitLogs";
 
 const SECTION_COMPONENTS: Record<TenantSectionId, React.ComponentType> = {
   "autopilot": SectionAutopilotValidation,
@@ -17,6 +18,7 @@ const SECTION_COMPONENTS: Record<TenantSectionId, React.ComponentType> = {
   "sla-targets": SectionSlaTargets,
   "access-management": SectionAccessManagement,
   "bootstrap-sessions": SectionBootstrapSessions,
+  "support": SectionSubmitLogs,
 };
 
 export default function TenantSectionPage() {

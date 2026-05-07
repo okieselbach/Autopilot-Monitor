@@ -167,7 +167,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                     ["Email"] = metadata.Email ?? string.Empty,
                     ["BlobName"] = metadata.BlobName ?? string.Empty,
                     ["SubmittedBy"] = metadata.SubmittedBy ?? string.Empty,
-                    ["SubmittedAt"] = metadata.SubmittedAt
+                    ["SubmittedAt"] = metadata.SubmittedAt,
+                    ["ReportType"] = string.IsNullOrEmpty(metadata.ReportType) ? ReportTypes.Session : metadata.ReportType
                 };
 
                 await _reportsTableClient.UpsertEntityAsync(entity);
@@ -309,6 +310,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 
         private static SessionReportMetadata MapToSessionReportMetadata(TableEntity entity)
         {
+            // Legacy rows written before the ReportType column existed default to "session".
+            var reportType = entity.GetString("ReportType");
             return new SessionReportMetadata
             {
                 ReportId = entity.GetString("ReportId") ?? string.Empty,
@@ -319,7 +322,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 BlobName = entity.GetString("BlobName") ?? string.Empty,
                 SubmittedBy = entity.GetString("SubmittedBy") ?? string.Empty,
                 SubmittedAt = entity.GetDateTimeOffset("SubmittedAt")?.UtcDateTime ?? DateTime.MinValue,
-                AdminNote = entity.GetString("AdminNote") ?? string.Empty
+                AdminNote = entity.GetString("AdminNote") ?? string.Empty,
+                ReportType = string.IsNullOrEmpty(reportType) ? ReportTypes.Session : reportType
             };
         }
     }
