@@ -10,6 +10,14 @@ namespace AutopilotMonitor.Shared.Models
         public string? SerialNumber { get; set; }
         public string? AgentVersion { get; set; }
         public string? ImeAgentVersion { get; set; }
+
+        // Prefix-match variants. When set, narrow the candidate set to rows whose
+        // AgentVersion / ImeAgentVersion *starts with* the given string. Mutually
+        // exclusive with the exact-match variants above (the exact match wins).
+        // Use case: "all V2 agents" → AgentVersionPrefix = "2.0." matches every
+        // build in the 2.0.x line in a single call instead of one call per build.
+        public string? AgentVersionPrefix { get; set; }
+        public string? ImeAgentVersionPrefix { get; set; }
         public string? DeviceName { get; set; }
         public string? Manufacturer { get; set; }
         public string? Model { get; set; }

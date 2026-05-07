@@ -92,6 +92,15 @@ public class SearchSessionsFunction
             var page = await _sessionRepo.SearchSessionsPageAsync(
                 tenantId, filter, pagination.PageSize, azureToken);
 
+            // Optional field projection — when the LLM only needs a few columns
+            // (e.g. for counting / aggregation), this prunes the wire payload by
+            // 5-20x and avoids the client-side response cap that fat
+            // SessionSummary objects routinely trip.
+            var fieldsParam = query["fields"];
+            object sessionsPayload = !string.IsNullOrEmpty(fieldsParam)
+                ? ProjectSessionFields(page.Items, fieldsParam!)
+                : page.Items;
+
             string? nextLink = null;
             if (!string.IsNullOrEmpty(page.NextRawToken))
             {
@@ -105,7 +114,7 @@ public class SearchSessionsFunction
             {
                 success = true,
                 count = page.Items.Count,
-                sessions = page.Items,
+                sessions = sessionsPayload,
                 nextLink,
             });
         }
@@ -129,6 +138,8 @@ public class SearchSessionsFunction
             GeoCountry = query["geoCountry"],
             AgentVersion = query["agentVersion"],
             ImeAgentVersion = query["imeAgentVersion"],
+            AgentVersionPrefix = query["agentVersionPrefix"],
+            ImeAgentVersionPrefix = query["imeAgentVersionPrefix"],
             // Limit field is a no-op in the paged path — pagination drives count.
         };
 
@@ -153,5 +164,58 @@ public class SearchSessionsFunction
             filter.DeviceProperties = deviceProperties;
 
         return filter;
+    }
+
+    /// <summary>
+    /// Projects SessionSummary objects down to the comma-separated field set.
+    /// Mirrors the projection table from QueryRawSessionsFunction — kept in sync
+    /// so the same field names work on both endpoints. If no field name matches,
+    /// returns a sensible default subset so callers passing typos still get
+    /// useful data instead of empty objects.
+    /// </summary>
+    private static List<Dictionary<string, object?>> ProjectSessionFields(
+        IReadOnlyList<SessionSummary> sessions, string fieldsParam)
+    {
+        var fields = new HashSet<string>(
+            fieldsParam.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+        var projected = new List<Dictionary<string, object?>>(sessions.Count);
+        foreach (var s in sessions)
+        {
+            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (fields.Contains("sessionId")) dict["sessionId"] = s.SessionId;
+            if (fields.Contains("tenantId")) dict["tenantId"] = s.TenantId;
+            if (fields.Contains("status")) dict["status"] = s.Status.ToString();
+            if (fields.Contains("serialNumber")) dict["serialNumber"] = s.SerialNumber;
+            if (fields.Contains("manufacturer")) dict["manufacturer"] = s.Manufacturer;
+            if (fields.Contains("model")) dict["model"] = s.Model;
+            if (fields.Contains("deviceName")) dict["deviceName"] = s.DeviceName;
+            if (fields.Contains("osBuild")) dict["osBuild"] = s.OsBuild;
+            if (fields.Contains("osName")) dict["osName"] = s.OsName;
+            if (fields.Contains("startedAt")) dict["startedAt"] = s.StartedAt;
+            if (fields.Contains("completedAt")) dict["completedAt"] = s.CompletedAt;
+            if (fields.Contains("durationSeconds")) dict["durationSeconds"] = s.DurationSeconds;
+            if (fields.Contains("currentPhase")) dict["currentPhase"] = s.CurrentPhase;
+            if (fields.Contains("failureReason")) dict["failureReason"] = s.FailureReason;
+            if (fields.Contains("eventCount")) dict["eventCount"] = s.EventCount;
+            if (fields.Contains("enrollmentType")) dict["enrollmentType"] = s.EnrollmentType;
+            if (fields.Contains("isPreProvisioned")) dict["isPreProvisioned"] = s.IsPreProvisioned;
+            if (fields.Contains("isUserDriven")) dict["isUserDriven"] = s.IsUserDriven;
+            if (fields.Contains("isHybridJoin")) dict["isHybridJoin"] = s.IsHybridJoin;
+            if (fields.Contains("agentVersion")) dict["agentVersion"] = s.AgentVersion;
+            if (fields.Contains("imeAgentVersion")) dict["imeAgentVersion"] = s.ImeAgentVersion;
+            if (fields.Contains("geoCountry")) dict["geoCountry"] = s.GeoCountry;
+
+            if (dict.Count == 0)
+            {
+                // No field name matched — fall back to a lean default set.
+                dict["sessionId"] = s.SessionId;
+                dict["tenantId"] = s.TenantId;
+                dict["status"] = s.Status.ToString();
+                dict["startedAt"] = s.StartedAt;
+            }
+            projected.Add(dict);
+        }
+        return projected;
     }
 }

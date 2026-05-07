@@ -76,6 +76,10 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             var startedAfter = query["startedAfter"];
             var startedBefore = query["startedBefore"];
             var serialNumber = query["serialNumber"];
+            var agentVersion = query["agentVersion"];
+            var agentVersionPrefix = query["agentVersionPrefix"];
+            var imeAgentVersion = query["imeAgentVersion"];
+            var imeAgentVersionPrefix = query["imeAgentVersionPrefix"];
             var fieldsParam = query["fields"];
 
             var pagination = SearchSessionsPagination.ParsePagination(query);
@@ -87,15 +91,19 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             }
 
             // Build search filter — Limit is ignored, pagination owns size.
-            var filter = new SessionSearchFilter();
-            if (!string.IsNullOrEmpty(status))
-                filter.Status = status;
+            var filter = new SessionSearchFilter
+            {
+                Status = string.IsNullOrEmpty(status) ? null : status,
+                SerialNumber = string.IsNullOrEmpty(serialNumber) ? null : serialNumber,
+                AgentVersion = string.IsNullOrEmpty(agentVersion) ? null : agentVersion,
+                AgentVersionPrefix = string.IsNullOrEmpty(agentVersionPrefix) ? null : agentVersionPrefix,
+                ImeAgentVersion = string.IsNullOrEmpty(imeAgentVersion) ? null : imeAgentVersion,
+                ImeAgentVersionPrefix = string.IsNullOrEmpty(imeAgentVersionPrefix) ? null : imeAgentVersionPrefix,
+            };
             if (!string.IsNullOrEmpty(startedAfter) && DateTime.TryParse(startedAfter, out var after))
                 filter.StartedAfter = after;
             if (!string.IsNullOrEmpty(startedBefore) && DateTime.TryParse(startedBefore, out var before))
                 filter.StartedBefore = before;
-            if (!string.IsNullOrEmpty(serialNumber))
-                filter.SerialNumber = serialNumber;
 
             var callerTenantId = TenantHelper.GetTenantId(req);
 

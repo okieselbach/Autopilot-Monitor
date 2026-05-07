@@ -563,6 +563,17 @@ namespace AutopilotMonitor.Functions.Services
             if (!string.IsNullOrEmpty(filter.ImeAgentVersion) &&
                 !string.Equals(session.ImeAgentVersion, filter.ImeAgentVersion, StringComparison.OrdinalIgnoreCase))
                 return false;
+            // Prefix variants — only evaluated if the exact-match counterpart is unset.
+            if (string.IsNullOrEmpty(filter.AgentVersion)
+                && !string.IsNullOrEmpty(filter.AgentVersionPrefix)
+                && (session.AgentVersion == null
+                    || !session.AgentVersion.StartsWith(filter.AgentVersionPrefix!, StringComparison.OrdinalIgnoreCase)))
+                return false;
+            if (string.IsNullOrEmpty(filter.ImeAgentVersion)
+                && !string.IsNullOrEmpty(filter.ImeAgentVersionPrefix)
+                && (session.ImeAgentVersion == null
+                    || !session.ImeAgentVersion.StartsWith(filter.ImeAgentVersionPrefix!, StringComparison.OrdinalIgnoreCase)))
+                return false;
             return true;
         }
 
@@ -766,6 +777,16 @@ namespace AutopilotMonitor.Functions.Services
                 if (!string.IsNullOrEmpty(filter.ImeAgentVersion) &&
                     !string.Equals(session.ImeAgentVersion, filter.ImeAgentVersion, StringComparison.OrdinalIgnoreCase))
                     continue;
+                if (string.IsNullOrEmpty(filter.AgentVersion)
+                    && !string.IsNullOrEmpty(filter.AgentVersionPrefix)
+                    && (session.AgentVersion == null
+                        || !session.AgentVersion.StartsWith(filter.AgentVersionPrefix!, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                if (string.IsNullOrEmpty(filter.ImeAgentVersion)
+                    && !string.IsNullOrEmpty(filter.ImeAgentVersionPrefix)
+                    && (session.ImeAgentVersion == null
+                        || !session.ImeAgentVersion.StartsWith(filter.ImeAgentVersionPrefix!, StringComparison.OrdinalIgnoreCase)))
+                    continue;
 
                 sessions.Add(session);
                 if (sessions.Count >= filter.Limit) break;
@@ -791,6 +812,16 @@ namespace AutopilotMonitor.Functions.Services
                     !string.Equals(s.AgentVersion, filter.AgentVersion, StringComparison.OrdinalIgnoreCase)) return false;
                 if (!string.IsNullOrEmpty(filter.ImeAgentVersion) &&
                     !string.Equals(s.ImeAgentVersion, filter.ImeAgentVersion, StringComparison.OrdinalIgnoreCase)) return false;
+                if (string.IsNullOrEmpty(filter.AgentVersion)
+                    && !string.IsNullOrEmpty(filter.AgentVersionPrefix)
+                    && (s.AgentVersion == null
+                        || !s.AgentVersion.StartsWith(filter.AgentVersionPrefix!, StringComparison.OrdinalIgnoreCase)))
+                    return false;
+                if (string.IsNullOrEmpty(filter.ImeAgentVersion)
+                    && !string.IsNullOrEmpty(filter.ImeAgentVersionPrefix)
+                    && (s.ImeAgentVersion == null
+                        || !s.ImeAgentVersion.StartsWith(filter.ImeAgentVersionPrefix!, StringComparison.OrdinalIgnoreCase)))
+                    return false;
                 return true;
             }).ToList();
         }

@@ -38,6 +38,8 @@ namespace AutopilotMonitor.Functions.Pagination
                 new KeyValuePair<string, string?>("serialNumber", filter.SerialNumber),
                 new KeyValuePair<string, string?>("agentVersion", filter.AgentVersion),
                 new KeyValuePair<string, string?>("imeAgentVersion", filter.ImeAgentVersion),
+                new KeyValuePair<string, string?>("agentVersionPrefix", filter.AgentVersionPrefix),
+                new KeyValuePair<string, string?>("imeAgentVersionPrefix", filter.ImeAgentVersionPrefix),
                 new KeyValuePair<string, string?>("deviceName", filter.DeviceName),
                 new KeyValuePair<string, string?>("manufacturer", filter.Manufacturer),
                 new KeyValuePair<string, string?>("model", filter.Model),

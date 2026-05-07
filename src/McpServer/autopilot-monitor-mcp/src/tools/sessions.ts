@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery, followNextLink } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
-import { READ_ONLY } from './shared.js';
+import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText } from './shared.js';
 import { toolError } from './error-handler.js';
 
 // ── Session summary constants ───────────────────────────────────────────
@@ -41,7 +41,15 @@ export function registerSessionTools(server: McpServer): void {
     'Consult the device_properties resource for available keys. ' +
     'Examples: {"tpm_status.specVersion": "2.0"}, {"hardware_spec.ramTotalGB": ">=8"}, {"secureboot_status.uefiSecureBootEnabled": "True"}. ' +
     'Array values are searched as substring match (e.g. disks containing "NVMe"). ' +
-    'Pagination: when "nextLink" is present in the response, more sessions are available — call this tool again with "continuation" set to the value embedded in nextLink. Stop when nextLink is absent.',
+    'For COUNTING / AGGREGATION queries (e.g. "how many V2 enrollments?", "how many failed in last 7 days?") ALWAYS pass ' +
+    '`fields=sessionId,status,agentVersion,startedAt` (or similar lean subset) — full SessionSummary objects are ~1.5KB ' +
+    'each and trip the response cap before pagination would normally deliver the answer. With projection a 100-session ' +
+    'aggregate fits in <10KB. ' +
+    'For VERSION sweeps use `agentVersionPrefix=2.0.` or `imeAgentVersionPrefix=1.23.` instead of one call per build — ' +
+    'matches every patch in the line in a single response. ' +
+    'This endpoint is fully paginated — there is no truncation. Default pageSize=200 is tuned for interactive queries; ' +
+    'raise it (up to 1000) for full sweeps. Pass the whole nextLink string as "continuation" so all backend-echoed ' +
+    'query params round-trip correctly.',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional().describe('Enrollment status filter'),
@@ -56,8 +64,18 @@ export function registerSessionTools(server: McpServer): void {
       geoCountry: z.string().optional().describe('Country of enrollment (2-letter ISO code, e.g. "DE", "US")'),
       startedAfter: z.string().optional().describe('ISO 8601 datetime — only sessions started after this'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime — only sessions started before this'),
-      agentVersion: z.string().optional().describe('Monitor Agent version (exact match, e.g. "1.4.2")'),
+      agentVersion: z.string().optional().describe('Monitor Agent version (exact match, e.g. "2.0.626")'),
+      agentVersionPrefix: z.string().optional()
+        .describe('Monitor Agent version prefix (e.g. "2.0." matches every 2.0.x build). Mutually exclusive with agentVersion (exact wins).'),
       imeAgentVersion: z.string().optional().describe('IME Agent version (exact match, e.g. "1.23.456.789")'),
+      imeAgentVersionPrefix: z.string().optional()
+        .describe('IME Agent version prefix (e.g. "1.23." matches every 1.23.x build). Mutually exclusive with imeAgentVersion.'),
+      fields: z.string().optional()
+        .describe('Comma-separated lean projection (e.g. "sessionId,status,agentVersion,startedAt"). ' +
+                  'Use for counting / aggregation to avoid the response cap. Available: sessionId, tenantId, status, ' +
+                  'serialNumber, manufacturer, model, deviceName, osBuild, osName, startedAt, completedAt, ' +
+                  'durationSeconds, currentPhase, failureReason, eventCount, enrollmentType, isPreProvisioned, ' +
+                  'isUserDriven, isHybridJoin, agentVersion, imeAgentVersion, geoCountry.'),
       deviceProperties: z.record(z.string(), z.string()).optional().describe(
         'Dynamic device property filters. Keys use "eventType.propertyName" dot notation. ' +
         'See the device_properties resource for all available keys and types. ' +
@@ -73,20 +91,20 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('search_sessions', async () => {
       try {
         const { deviceProperties, tenantId, pageSize, continuation, ...rest } = args;
-        const queryParams: Record<string, string | number | boolean | undefined | null> = {
-          ...rest,
-          pageSize,
-          continuation,
-        };
-        if (tenantId) queryParams.tenantId = tenantId;
+        const basePath = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
+        // followNextLink handles full nextLink paths verbatim. For first-page calls
+        // we still need to layer in deviceProperties as `prop.<key>` query params,
+        // which followNextLink doesn't know about — so build the param record and
+        // delegate the URL assembly to it.
+        const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest, tenantId, pageSize };
         if (deviceProperties) {
           for (const [key, value] of Object.entries(deviceProperties)) {
             queryParams[`prop.${key}`] = value;
           }
         }
-        const basePath = tenantId ? '/api/search/sessions' : '/api/global/search/sessions';
-        const data = await apiFetch(`${basePath}${buildQuery(queryParams)}`);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        const path = followNextLink(basePath, queryParams, continuation);
+        const data = await apiFetch(path);
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.sessions);
       } catch (error: unknown) {
         return toolError('search_sessions', args, error);
       }
@@ -122,7 +140,7 @@ export function registerSessionTools(server: McpServer): void {
           continuation,
         );
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.indexSessions);
       } catch (error: unknown) {
         return toolError('search_sessions_by_event', args, error);
       }
@@ -152,7 +170,7 @@ export function registerSessionTools(server: McpServer): void {
             // analysis may not exist yet
           }
         }
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ session: sessionData, analysis: analysisData }, null, 2) }] };
+        return toolResultText({ session: sessionData, analysis: analysisData }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_session', args, error);
       }
@@ -206,7 +224,7 @@ export function registerSessionTools(server: McpServer): void {
           });
           data.count = data.events.length;
         }
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.events);
       } catch (error: unknown) {
         return toolError('get_session_events', args, error);
       }
@@ -340,7 +358,7 @@ export function registerSessionTools(server: McpServer): void {
           },
         };
 
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        return toolResultText(result, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_session_summary', args, error);
       }
@@ -370,7 +388,7 @@ export function registerSessionTools(server: McpServer): void {
           apiFetch(`${prefix}/summary${q}`).catch(() => null),
           apiFetch(`${prefix}/app${q}`).catch(() => null),
         ]);
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ summary, apps }, null, 2) }] };
+        return toolResultText({ summary, apps }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_metrics', args, error);
       }
@@ -408,7 +426,7 @@ export function registerSessionTools(server: McpServer): void {
           continuation,
         );
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.indexSessions);
       } catch (error: unknown) {
         return toolError('search_sessions_by_cve', args, error);
       }
@@ -432,7 +450,7 @@ export function registerSessionTools(server: McpServer): void {
           ? `/api/devices/blocked${buildQuery({ tenantId } as Record<string, string | undefined>)}`
           : '/api/global/devices/blocked';
         const data = await apiFetch(endpoint);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.adminStream);
       } catch (error: unknown) {
         return toolError('list_blocked_devices', args, error);
       }
@@ -451,7 +469,7 @@ export function registerSessionTools(server: McpServer): void {
     async (args) => withToolTelemetry('get_ime_version_history', async () => {
       try {
         const data = await apiFetch('/api/metrics/ime-versions');
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_ime_version_history', args, error);
       }

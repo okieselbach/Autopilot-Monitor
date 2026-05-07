@@ -115,6 +115,43 @@ public class SearchSessionsPaginationTests
     }
 
     [Fact]
+    public void TryAcceptContinuation_rejects_token_when_agentVersionPrefix_changes()
+    {
+        // Prefix is fingerprint-bound — a token issued for "2.0." must not seek
+        // into a "2.1." continuation under the same caller / same other filters.
+        var filterV20 = new SessionSearchFilter { AgentVersionPrefix = "2.0." };
+        var fp = SearchSessionsPagination.Fingerprint("search:tenant", TenantA, null, filterV20);
+        var encoded = ContinuationToken.Encode("rawAzure", TenantA, fp);
+
+        var filterV21 = new SessionSearchFilter { AgentVersionPrefix = "2.1." };
+        var ok = SearchSessionsPagination.TryAcceptContinuation(
+            encoded, "search:tenant", TenantA, null, filterV21,
+            out _, out var reason);
+
+        Assert.False(ok);
+        Assert.Equal("filter_mismatch", reason);
+    }
+
+    [Fact]
+    public void TryAcceptContinuation_distinguishes_exact_match_from_prefix_match_on_agentVersion()
+    {
+        // AgentVersion="2.0.626" and AgentVersionPrefix="2.0.626" select different
+        // result sets (the prefix would also match "2.0.6260" if such existed).
+        // The fingerprint must differentiate.
+        var filterExact = new SessionSearchFilter { AgentVersion = "2.0.626" };
+        var fpExact = SearchSessionsPagination.Fingerprint("search:tenant", TenantA, null, filterExact);
+        var encodedExact = ContinuationToken.Encode("rawAzure", TenantA, fpExact);
+
+        var filterPrefix = new SessionSearchFilter { AgentVersionPrefix = "2.0.626" };
+        var ok = SearchSessionsPagination.TryAcceptContinuation(
+            encodedExact, "search:tenant", TenantA, null, filterPrefix,
+            out _, out var reason);
+
+        Assert.False(ok);
+        Assert.Equal("filter_mismatch", reason);
+    }
+
+    [Fact]
     public void TryAcceptContinuation_rejects_token_across_scan_and_snapshot_paths()
     {
         // Same other filters, but adding/removing deviceProperties switches the

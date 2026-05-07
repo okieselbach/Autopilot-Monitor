@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery, followNextLink } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
-import { READ_ONLY, READ_ONLY_OPEN } from './shared.js';
+import { READ_ONLY, READ_ONLY_OPEN, MAX_RESULT_SIZE_CHARS, toolResultText } from './shared.js';
 import { toolError } from './error-handler.js';
 
 export function registerAdminTools(server: McpServer): void {
@@ -31,7 +31,7 @@ export function registerAdminTools(server: McpServer): void {
         } else {
           data = await apiFetch(`/api/global/metrics/mcp-usage${buildQuery(params)}`);
         }
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_api_usage', args, error);
       }
@@ -60,7 +60,7 @@ export function registerAdminTools(server: McpServer): void {
         if (tenantId) params.tenantId = tenantId;
         const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
         const data = await apiFetch(`${prefix}/geographic${buildQuery(params)}`);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_geographic_metrics', args, error);
       }
@@ -95,7 +95,7 @@ export function registerAdminTools(server: McpServer): void {
         }
         const prefix = tenantId ? '/api/metrics' : '/api/global/metrics';
         const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.sessions);
       } catch (error: unknown) {
         return toolError('get_geographic_sessions', args, error);
       }
@@ -126,7 +126,9 @@ export function registerAdminTools(server: McpServer): void {
         const raw = await apiFetch(`/api/global/metrics/platform${buildQuery({ days: args.days })}`) as { sessions?: SessionMetric[] };
         const sessions = raw?.sessions ?? [];
         if (sessions.length === 0) {
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ windowDays: args.days, sessionsAnalyzed: 0, message: 'No performance data available' }) }] };
+          return toolResultText(
+            { windowDays: args.days, sessionsAnalyzed: 0, message: 'No performance data available' },
+            MAX_RESULT_SIZE_CHARS.small);
         }
 
         const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
@@ -177,7 +179,7 @@ export function registerAdminTools(server: McpServer): void {
           topSessionsByMemory: topMem,
           agentVersionBreakdown: versionBreakdown,
         };
-        return { content: [{ type: 'text' as const, text: JSON.stringify(summary, null, 2) }] };
+        return toolResultText(summary, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_platform_metrics', args, error);
       }
@@ -200,7 +202,7 @@ export function registerAdminTools(server: McpServer): void {
       try {
         const { tenantId, days } = args;
         const data = await apiFetch(`/api/global/metrics/usage${buildQuery({ tenantId, days })}`);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_usage_metrics', args, error);
       }
@@ -237,7 +239,7 @@ export function registerAdminTools(server: McpServer): void {
           continuation,
         );
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.adminStream);
       } catch (error: unknown) {
         return toolError('get_audit_logs', args, error);
       }
@@ -274,7 +276,7 @@ export function registerAdminTools(server: McpServer): void {
           continuation,
         );
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.adminStream);
       } catch (error: unknown) {
         return toolError('get_ops_events', args, error);
       }
@@ -306,7 +308,7 @@ export function registerAdminTools(server: McpServer): void {
           continuation,
         );
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.adminStream);
       } catch (error: unknown) {
         return toolError('list_session_reports', args, error);
       }
@@ -352,7 +354,7 @@ export function registerAdminTools(server: McpServer): void {
           continuation,
         );
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.events);
       } catch (error: unknown) {
         return toolError('query_raw_events', args, error);
       }
@@ -364,17 +366,23 @@ export function registerAdminTools(server: McpServer): void {
     'query_raw_sessions',
     'Query raw session data with flexible filters and field projection. ' +
     'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' +
-    'Use the fields parameter to select specific properties (e.g. "sessionId,status,startedAt,serialNumber"). ' +
-    'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical interactive ' +
-    'queries; raise it (up to 1000) for bulk pulls. For broad analysis (e.g. all failures in a 30-day window), use ' +
-    'pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole nextLink string as "continuation" so ' +
-    'all backend-echoed query params (incl. resolved filters) round-trip correctly.',
+    'For COUNTING / AGGREGATION queries pass `fields=sessionId,status,agentVersion,startedAt` (or similar lean subset) — ' +
+    'avoids the response cap that fat raw rows trip. ' +
+    'For VERSION sweeps use `agentVersionPrefix=2.0.` instead of one call per build. ' +
+    'This endpoint is fully paginated — there is no truncation. Default pageSize=200; raise it (up to 1000) for bulk pulls. ' +
+    'Pass the whole nextLink string as "continuation" so all backend-echoed query params round-trip correctly.',
     {
       tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
       status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional(),
       startedAfter: z.string().optional().describe('ISO 8601 datetime'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime'),
       serialNumber: z.string().optional(),
+      agentVersion: z.string().optional().describe('Monitor Agent version (exact match, e.g. "2.0.626")'),
+      agentVersionPrefix: z.string().optional()
+        .describe('Monitor Agent version prefix (e.g. "2.0." matches every 2.0.x build). Mutually exclusive with agentVersion.'),
+      imeAgentVersion: z.string().optional().describe('IME Agent version (exact match, e.g. "1.23.456.789")'),
+      imeAgentVersionPrefix: z.string().optional()
+        .describe('IME Agent version prefix (e.g. "1.23."). Mutually exclusive with imeAgentVersion.'),
       fields: z.string().optional().describe('Comma-separated fields to return (e.g. "sessionId,status,startedAt,serialNumber,durationSeconds")'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
         .describe('Page size (1-1000, default 200). Returns this many sessions per call; follow nextLink to fetch more.'),
@@ -384,15 +392,17 @@ export function registerAdminTools(server: McpServer): void {
     READ_ONLY,
     async (args) => withToolTelemetry('query_raw_sessions', async () => {
       try {
-        const { tenantId, status, startedAfter, startedBefore, serialNumber, fields, pageSize, continuation } = args;
+        const { tenantId, status, startedAfter, startedBefore, serialNumber, agentVersion, agentVersionPrefix,
+          imeAgentVersion, imeAgentVersionPrefix, fields, pageSize, continuation } = args;
         const basePath = tenantId ? '/api/raw/sessions' : '/api/global/raw/sessions';
         const path = followNextLink(
           basePath,
-          { tenantId, status, startedAfter, startedBefore, serialNumber, fields, pageSize },
+          { tenantId, status, startedAfter, startedBefore, serialNumber, agentVersion, agentVersionPrefix,
+            imeAgentVersion, imeAgentVersionPrefix, fields, pageSize },
           continuation,
         );
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.sessions);
       } catch (error: unknown) {
         return toolError('query_raw_sessions', args, error);
       }
@@ -414,7 +424,7 @@ export function registerAdminTools(server: McpServer): void {
     async (args) => withToolTelemetry('list_tables', async () => {
       try {
         const data = await apiFetch('/api/global/raw/tables');
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('list_tables', args, error);
       }
@@ -427,15 +437,20 @@ export function registerAdminTools(server: McpServer): void {
     'Query any Azure Table Storage table directly with OData filters. Global Admin only. ' +
     'Use list_tables to see available tables. Useful for inspecting TenantConfiguration, RuleResults, or any raw data ' +
     'where no specialized tool exists. ' +
-    'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
-    'interactive inspection; raise it (up to 1000) for full-table dumps. For broad analysis (e.g. "all RuleResult ' +
-    'rows for tenant X in 30 days"), use pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole ' +
-    'nextLink string as "continuation" so all backend-echoed query params (tableName + filters) round-trip correctly.',
+    'For COUNTING / AGGREGATION queries pass `fields=PartitionKey,RowKey,Status,AgentVersion` (or similar lean subset) ' +
+    'to drop unneeded columns client-side — full TableEntity rows can be 1KB+ each and trip the response cap quickly. ' +
+    'This endpoint is fully paginated — there is no truncation. Default pageSize=200; raise it (up to 1000) for ' +
+    'full-table dumps. Pass the whole nextLink string as "continuation" so all backend-echoed query params round-trip ' +
+    'correctly.',
     {
       tableName: z.string().describe('Table name (e.g. "Sessions", "Events", "RuleResults", "TenantConfiguration")'),
       partitionKey: z.string().optional().describe('Filter by exact partition key (usually TenantId)'),
       rowKeyPrefix: z.string().optional().describe('Filter by row key prefix'),
       filter: z.string().optional().describe('OData filter expression (e.g. "Status eq \'Failed\'")'),
+      fields: z.string().optional()
+        .describe('Comma-separated column names to keep (e.g. "PartitionKey,RowKey,Status"). Other columns are dropped ' +
+                  'client-side after fetch. Useful for aggregation/counting on wide tables. Always includes PartitionKey ' +
+                  'and RowKey for cursor stability.'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
         .describe('Page size (1-1000, default 200). Returns this many rows per call; follow nextLink to fetch more.'),
       continuation: z.string().optional()
@@ -444,15 +459,31 @@ export function registerAdminTools(server: McpServer): void {
     READ_ONLY,
     async (args) => withToolTelemetry('query_table', async () => {
       try {
-        const { tableName, partitionKey, rowKeyPrefix, filter, pageSize, continuation } = args;
+        const { tableName, partitionKey, rowKeyPrefix, filter, fields, pageSize, continuation } = args;
         const basePath = `/api/global/raw/tables/${encodeURIComponent(tableName)}`;
         const path = followNextLink(
           basePath,
           { partitionKey, rowKeyPrefix, filter, pageSize },
           continuation,
         );
-        const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        const data = await apiFetch(path) as { table?: string; count?: number; entities?: Record<string, unknown>[]; nextLink?: string | null };
+
+        // Client-side projection — TableEntity columns are dynamic so the backend
+        // can't help. Always retain PartitionKey + RowKey (cursor stability +
+        // identity) and add Timestamp by default since it's universally useful.
+        if (fields && Array.isArray(data?.entities)) {
+          const fieldSet = new Set(
+            fields.split(',').map((f) => f.trim()).filter(Boolean).concat(['PartitionKey', 'RowKey']),
+          );
+          data.entities = data.entities.map((row) => {
+            const projected: Record<string, unknown> = {};
+            for (const key of Object.keys(row)) {
+              if (fieldSet.has(key)) projected[key] = row[key];
+            }
+            return projected;
+          });
+        }
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.rawTable);
       } catch (error: unknown) {
         return toolError('query_table', args, error);
       }
@@ -475,7 +506,7 @@ export function registerAdminTools(server: McpServer): void {
           method: 'POST',
           body: JSON.stringify({ query: args.query, timespan: args.timespan }),
         });
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.events);
       } catch (error: unknown) {
         return toolError('query_backend_logs', args, error);
       }
@@ -507,7 +538,7 @@ export function registerAdminTools(server: McpServer): void {
           ? `/api/metrics/rule-stats${params}`
           : `/api/global/metrics/rule-stats${params}`;
         const data = await apiFetch(path);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_rule_stats', args, error);
       }

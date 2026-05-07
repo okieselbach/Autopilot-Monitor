@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { apiFetch, buildQuery } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import type { SearchProvider } from '../search-provider.js';
-import { READ_ONLY } from './shared.js';
+import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText } from './shared.js';
 import { toolError } from './error-handler.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -255,12 +255,9 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
         // Extract keywords FIRST so we can use them for index-based pre-filtering
         const queryKeywords = extractKeywords(query);
         if (queryKeywords.length === 0) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' }),
-            }],
-          };
+          return toolResultText(
+            { query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' },
+            MAX_RESULT_SIZE_CHARS.small);
         }
 
         const { events, sessionIds, searchMethod } = await fetchSessionEvents(sessionId, tenantId, queryKeywords);
@@ -287,22 +284,17 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
           message: s.event.message,
         }));
 
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              query,
-              searchBackend: 'weighted-keyword',
-              searchMethod,
-              keywordsUsed: queryKeywords,
-              sessionsSearched: sessionIds,
-              eventsScanned: events.length,
-              eventsMatched: scored.length,
-              resultCount: results.length,
-              results,
-            }, null, 2),
-          }],
-        };
+        return toolResultText({
+          query,
+          searchBackend: 'weighted-keyword',
+          searchMethod,
+          keywordsUsed: queryKeywords,
+          sessionsSearched: sessionIds,
+          eventsScanned: events.length,
+          eventsMatched: scored.length,
+          resultCount: results.length,
+          results,
+        }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('search_events_semantic', args, error);
       }
@@ -335,6 +327,7 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
               type: 'text' as const,
               text: JSON.stringify({ error: 'Knowledge base not initialized. The server may still be loading.' }),
             }],
+            _meta: { 'anthropic/maxResultSizeChars': MAX_RESULT_SIZE_CHARS.small },
           };
         }
 
@@ -356,17 +349,12 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
           metadata: r.metadata,
         }));
 
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              query,
-              searchBackend: knowledgeBase.name,
-              resultCount: formatted.length,
-              results: formatted,
-            }, null, 2),
-          }],
-        };
+        return toolResultText({
+          query,
+          searchBackend: knowledgeBase.name,
+          resultCount: formatted.length,
+          results: formatted,
+        }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('search_knowledge', args, error);
       }
@@ -408,21 +396,16 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
               type: 'text' as const,
               text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' }),
             }],
+            _meta: { 'anthropic/maxResultSizeChars': MAX_RESULT_SIZE_CHARS.small },
           };
         }
 
         const { events, sessionIds, searchMethod } = await fetchSessionEvents(sessionId, tenantId, queryKeywords);
 
         if (events.length === 0) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                query, resultCount: 0, eventsMatched: 0,
-                results: [], note: 'No events found.',
-              }),
-            }],
-          };
+          return toolResultText(
+            { query, resultCount: 0, eventsMatched: 0, results: [], note: 'No events found.' },
+            MAX_RESULT_SIZE_CHARS.small);
         }
 
         const scored: Array<ScoredEvent & { event: EventEntry }> = [];
@@ -447,22 +430,17 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
           message: s.event.message,
         }));
 
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              query,
-              searchBackend: 'weighted-keyword',
-              searchMethod,
-              keywordsUsed: queryKeywords,
-              sessionsSearched: sessionIds,
-              totalEventsScanned: events.length,
-              eventsMatched: scored.length,
-              resultCount: results.length,
-              results,
-            }, null, 2),
-          }],
-        };
+        return toolResultText({
+          query,
+          searchBackend: 'weighted-keyword',
+          searchMethod,
+          keywordsUsed: queryKeywords,
+          sessionsSearched: sessionIds,
+          totalEventsScanned: events.length,
+          eventsMatched: scored.length,
+          resultCount: results.length,
+          results,
+        }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('deep_search_events', args, error);
       }

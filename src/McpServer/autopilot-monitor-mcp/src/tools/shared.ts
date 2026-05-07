@@ -15,3 +15,47 @@ export const READ_ONLY_OPEN: ToolAnnotations = {
   idempotentHint: true,
   openWorldHint: true,
 };
+
+/**
+ * Calibrated maximum response size (in characters) per tool. Communicated to
+ * the MCP client via the per-response <c>_meta.anthropic/maxResultSizeChars</c>
+ * annotation; the Anthropic client respects it and does not truncate below the
+ * declared cap.
+ *
+ * Without this annotation, the client falls back to its default cap (~25–30k
+ * chars) and silently truncates large responses mid-page — the LLM then
+ * follows nextLink without realizing it lost rows in the middle of the prior
+ * page. Sizing rule: each tool's cap must comfortably hold a full
+ * default-pageSize response of typical record density, plus headroom for the
+ * occasional fat row.
+ */
+export const MAX_RESULT_SIZE_CHARS = {
+  /** ~200 SessionSummaries (~1.5KB each) + headroom for wide DeviceProperties. */
+  sessions: 300_000,
+  /** ~200 EnrollmentEvents — moderate density, few wide payloads. */
+  events: 250_000,
+  /** Audit / ops / report streams — compact rows. */
+  adminStream: 150_000,
+  /** Cross-session session lookups via index (event/CVE) — SessionSummary density. */
+  indexSessions: 200_000,
+  /** Generic raw table — TableEntity columns are unbounded; paranoid headroom. */
+  rawTable: 500_000,
+  /** Compact metadata responses (single objects, summaries, lists < 50 items). */
+  small: 50_000,
+} as const;
+
+/**
+ * Wraps a tool response payload with the Anthropic <c>maxResultSizeChars</c>
+ * annotation and a single text content block. Use in preference to bare
+ * <c>{ content: [...] }</c> so the cap travels with every call without
+ * client-side configuration.
+ */
+export function toolResultText(
+  data: unknown,
+  maxResultSizeChars: number,
+): { content: Array<{ type: 'text'; text: string }>; _meta: Record<string, unknown> } {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    _meta: { 'anthropic/maxResultSizeChars': maxResultSizeChars },
+  };
+}
