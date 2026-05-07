@@ -86,6 +86,8 @@ interface SessionTableProps {
   onColumnFiltersChange: (filters: Record<string, Set<string>>) => void;
   onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
+  fullWidth: boolean;
+  onToggleFullWidth: () => void;
 }
 
 export function SessionTable({
@@ -123,6 +125,8 @@ export function SessionTable({
   onColumnFiltersChange,
   onDeleteSession,
   onBlockDevice,
+  fullWidth,
+  onToggleFullWidth,
 }: SessionTableProps) {
   const router = useRouter();
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(getInitialVisibleColumns);
@@ -327,6 +331,31 @@ export function SessionTable({
               <option key={n} value={n}>{n} per page</option>
             ))}
           </select>
+
+          {/* Full-width toggle */}
+          <button
+            onClick={onToggleFullWidth}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              fullWidth
+                ? "text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100"
+                : "text-gray-600 bg-gray-100 hover:bg-gray-200 border-gray-200"
+            }`}
+            title={fullWidth ? "Switch to default width" : "Expand to full width"}
+            aria-pressed={fullWidth}
+          >
+            {fullWidth ? (
+              // collapse: arrows pointing inward (>-<)
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12h18M3 8l4 4-4 4M21 8l-4 4 4 4" />
+              </svg>
+            ) : (
+              // expand: arrows pointing outward (<-->)
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4" />
+              </svg>
+            )}
+            <span className="hidden sm:inline">{fullWidth ? "Default" : "Full width"}</span>
+          </button>
 
           {/* Column Selector */}
           <div className="relative" ref={columnSelectorRef}>

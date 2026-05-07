@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
@@ -30,12 +30,51 @@ export default function Home() {
   );
 }
 
+const FULL_WIDTH_STORAGE_KEY = "dashboard_fullWidth";
+
 function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Opt-in full-width layout via ?span=full (also accepts wide/max) — drops the max-w-7xl cap.
-  const spanParam = searchParams?.get("span")?.toLowerCase();
-  const fullWidth = spanParam === "full" || spanParam === "wide" || spanParam === "max";
+  // Full-width layout: URL `?span=full|wide|max` overrides + persists; `?span=default|normal|off` clears.
+  // Without a URL override, falls back to the last user choice from localStorage.
+  const [fullWidth, setFullWidth] = useState<boolean>(() => {
+    const span = searchParams?.get("span")?.toLowerCase();
+    if (span === "full" || span === "wide" || span === "max") return true;
+    if (span === "default" || span === "normal" || span === "off") return false;
+    if (typeof window !== "undefined") {
+      try {
+        return localStorage.getItem(FULL_WIDTH_STORAGE_KEY) === "1";
+      } catch { /* ignore */ }
+    }
+    return false;
+  });
+
+  // Persist any URL-driven override on first mount so it survives subsequent visits without the param.
+  useEffect(() => {
+    const span = searchParams?.get("span")?.toLowerCase();
+    if (span === "full" || span === "wide" || span === "max") {
+      try { localStorage.setItem(FULL_WIDTH_STORAGE_KEY, "1"); } catch { /* ignore */ }
+    } else if (span === "default" || span === "normal" || span === "off") {
+      try { localStorage.setItem(FULL_WIDTH_STORAGE_KEY, "0"); } catch { /* ignore */ }
+    }
+    // Run once on mount; URL re-sync happens via toggleFullWidth.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggleFullWidth = useCallback(() => {
+    setFullWidth((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(FULL_WIDTH_STORAGE_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        if (next) url.searchParams.set("span", "full");
+        else url.searchParams.delete("span");
+        window.history.replaceState(null, "", url.toString());
+      }
+      return next;
+    });
+  }, []);
+
   const mainClassName = fullWidth
     ? "w-full px-4 sm:px-6 lg:px-8 py-4"
     : "max-w-7xl mx-auto py-4 sm:px-6 lg:px-8";
@@ -309,6 +348,8 @@ function HomeContent() {
               onColumnFiltersChange={setColumnFilters}
               onDeleteSession={deleteSession}
               onBlockDevice={blockDevice}
+              fullWidth={fullWidth}
+              onToggleFullWidth={toggleFullWidth}
             />
           )}
         </div>
