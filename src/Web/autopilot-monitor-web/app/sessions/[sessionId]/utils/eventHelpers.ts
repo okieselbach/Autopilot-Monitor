@@ -15,8 +15,13 @@ import { EnrollmentEvent } from "@/types";
 //      Falls back to `resumed.sequence - 1` if no agent_started is found in between.
 //   2. Older agents that never emit `whiteglove_resumed`: the first `agent_started`
 //      AFTER `whiteglove_complete` is the Part 2 boot. Returns its sequence - 1.
-//   3. Pre-provisioning only (no Part 2 yet): the last cleanup event after `whiteglove_complete`
-//      (`agent_shutdown`) ends Part 1; otherwise the `whiteglove_complete` sequence itself.
+//   3. Pre-provisioning only (no Part 2 yet): split AT the last Part-1 cleanup marker
+//      so the entire cleanup tail (software_inventory_analysis, the duplicate
+//      whiteglove_complete from DecisionEngine, local_admin_analysis, agent_shutting_down,
+//      and finally whiteglove_part1_complete) stays in the Pre-Provisioning block.
+//      `whiteglove_part1_complete` is the authoritative end-of-Part-1 marker emitted by
+//      EnrollmentTerminationHandler right before the grace delay; `agent_shutting_down`
+//      is the V2 single-rail name for the legacy `agent_shutdown` precursor.
 //   4. Nothing: -1.
 export function computeWhiteGloveSplitSequence(events: EnrollmentEvent[]): number {
   const wgEvent = events.find(e => e.eventType === "whiteglove_complete");
@@ -47,10 +52,20 @@ export function computeWhiteGloveSplitSequence(events: EnrollmentEvent[]): numbe
     );
     if (nextStart) return nextStart.sequence - 1;
 
-    const shutdownAfterWg = events.find(e =>
-      e.eventType === "agent_shutdown" && e.sequence > wgEvent.sequence
-    );
-    return shutdownAfterWg?.sequence ?? wgEvent.sequence;
+    // Highest-sequence Part-1 cleanup marker after wgEvent. `whiteglove_part1_complete`
+    // is normally the largest; we still scan the broader set so partial/legacy data
+    // (V1 `agent_shutdown`, duplicate `whiteglove_complete` from DecisionEngine) widens
+    // the cleanup tail correctly.
+    const cleanupTail = events
+      .filter(e =>
+        e.sequence > wgEvent.sequence &&
+        (e.eventType === "whiteglove_part1_complete" ||
+         e.eventType === "agent_shutting_down" ||
+         e.eventType === "agent_shutdown" ||
+         e.eventType === "whiteglove_complete")
+      )
+      .sort((a, b) => b.sequence - a.sequence)[0];
+    return cleanupTail?.sequence ?? wgEvent.sequence;
   }
   return -1;
 }

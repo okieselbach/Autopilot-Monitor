@@ -78,6 +78,36 @@ describe("computeWhiteGloveSplitSequence", () => {
     expect(computeWhiteGloveSplitSequence(events)).toBe(3);
   });
 
+  it("splits AFTER the full Part-1 cleanup tail (V2: software_inventory + duplicate wg_complete + agent_shutting_down + whiteglove_part1_complete)", () => {
+    // Real V2 termination order (29b66e83-... session, seq 259-264):
+    //   whiteglove_complete (EspAndHelloTracker, the Windows signal)
+    //   software_inventory_analysis
+    //   whiteglove_complete (DecisionEngine, duplicate)
+    //   local_admin_analysis
+    //   agent_shutting_down                  (V2 emits this name, not agent_shutdown)
+    //   whiteglove_part1_complete            (authoritative end-of-Part-1 marker)
+    // All six belong in the Pre-Provisioning block — User Enrollment hasn't booted yet.
+    const events: EnrollmentEvent[] = [
+      ev(1, "agent_started"),
+      ev(259, "whiteglove_complete"),
+      ev(260, "software_inventory_analysis"),
+      ev(261, "whiteglove_complete"),
+      ev(262, "local_admin_analysis"),
+      ev(263, "agent_shutting_down"),
+      ev(264, "whiteglove_part1_complete"),
+    ];
+    expect(computeWhiteGloveSplitSequence(events)).toBe(264);
+  });
+
+  it("uses whiteglove_part1_complete as the cleanup-tail boundary even without an agent_shutting_down event", () => {
+    const events: EnrollmentEvent[] = [
+      ev(1, "agent_started"),
+      ev(2, "whiteglove_complete"),
+      ev(5, "whiteglove_part1_complete"),
+    ];
+    expect(computeWhiteGloveSplitSequence(events)).toBe(5);
+  });
+
   it("returns whiteglove_complete.sequence when nothing follows it (Part 1 still wrapping up)", () => {
     const events: EnrollmentEvent[] = [
       ev(1, "agent_started"),
