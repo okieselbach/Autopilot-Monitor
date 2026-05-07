@@ -45,7 +45,13 @@ public class MetricsSummaryFunction
         try
         {
             var days = ParseDays(req);
-            var summary = await _metricsRepo.GetMetricsSummaryAsync(null, days);
+            // Optional tenantId filter — when set, GA scopes the cross-tenant summary to one
+            // tenant. When absent, returns the full cross-tenant view (null → all tenants).
+            var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            var filterTenantId = query["tenantId"];
+            var summary = await _metricsRepo.GetMetricsSummaryAsync(
+                string.IsNullOrEmpty(filterTenantId) ? null : filterTenantId,
+                days);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new { success = true, summary, windowDays = days });

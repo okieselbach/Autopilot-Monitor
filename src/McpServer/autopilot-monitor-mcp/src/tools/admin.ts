@@ -260,6 +260,7 @@ export function registerAdminTools(server: McpServer): void {
     'a follow-up call would compute a fresh "now" and the token fingerprint would mismatch). Stop when nextLink is absent.',
     {
       category: z.string().optional().describe('Filter by category: Consent, Maintenance, Security, Tenant, Agent, SLA'),
+      tenantId: z.string().optional().describe('Optional — filter events to a single tenant. Omit for cross-tenant view.'),
       dateFrom: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive lower bound of the window.'),
       dateTo: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive upper bound of the window.'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
@@ -270,10 +271,10 @@ export function registerAdminTools(server: McpServer): void {
     READ_ONLY,
     async (args) => withToolTelemetry('get_ops_events', async () => {
       try {
-        const { category, dateFrom, dateTo, pageSize, continuation } = args;
+        const { category, tenantId, dateFrom, dateTo, pageSize, continuation } = args;
         const path = followNextLink(
           '/api/global/ops-events',
-          { category, dateFrom, dateTo, pageSize },
+          { category, tenantId, dateFrom, dateTo, pageSize },
           continuation,
         );
         const data = await apiFetch(path);
