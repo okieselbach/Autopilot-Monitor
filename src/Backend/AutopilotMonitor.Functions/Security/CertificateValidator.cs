@@ -156,7 +156,9 @@ namespace AutopilotMonitor.Functions.Security
                 if (!chainValid)
                 {
                     var chainErrors = string.Join(", ", chain.ChainStatus.Select(s => s.StatusInformation));
-                    logger?.LogWarning("Certificate chain validation failed: {ChainErrors}", chainErrors);
+                    logger?.LogWarning(
+                        "Certificate chain validation failed: {ChainErrors} (LeafSubject={Subject}, LeafIssuer={Issuer}, Thumbprint={Thumbprint})",
+                        chainErrors, certificate.Subject, certificate.Issuer, thumbprint);
 
                     return new CertificateValidationResult
                     {
