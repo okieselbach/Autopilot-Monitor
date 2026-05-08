@@ -89,21 +89,21 @@ namespace AutopilotMonitor.Functions.Services
 
         public Task RecordEmbeddedCertExpiringSoonAsync(string role, string subject, string thumbprint, DateTime notAfterUtc, int daysUntilExpiry)
             => WriteAsync(OpsEventCategory.Security, "EmbeddedCertExpiringSoon", OpsEventSeverity.Warning,
-                $"Embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u}) - rotate the embedded PEM bundle before {notAfterUtc:yyyy-MM-dd}",
+                $"Newest embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u}) - source a successor PEM and embed it before {notAfterUtc:yyyy-MM-dd}",
                 null, "System.Maintenance",
                 new { role, subject, thumbprint, notAfterUtc = notAfterUtc.ToString("u"), daysUntilExpiry });
 
         public Task RecordEmbeddedCertExpiringUrgentAsync(string role, string subject, string thumbprint, DateTime notAfterUtc, int daysUntilExpiry)
             => WriteAsync(OpsEventCategory.Security, "EmbeddedCertExpiringUrgent", OpsEventSeverity.Error,
-                $"URGENT: embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u}) - agent mTLS will break without bundle rotation",
+                $"URGENT: newest embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u}) and no successor is in the bundle - agent mTLS will break without rotation",
                 null, "System.Maintenance",
                 new { role, subject, thumbprint, notAfterUtc = notAfterUtc.ToString("u"), daysUntilExpiry });
 
         public Task RecordEmbeddedCertExpiredAsync(string role, string subject, string thumbprint, DateTime notAfterUtc, int daysUntilExpiry)
             => WriteAsync(OpsEventCategory.Security, "EmbeddedCertExpired", OpsEventSeverity.Critical,
                 daysUntilExpiry < 0
-                    ? $"CRITICAL: embedded Intune {role.ToLowerInvariant()} '{subject}' EXPIRED {-daysUntilExpiry}d ago ({notAfterUtc:u}) - agent mTLS validation broken"
-                    : $"CRITICAL: embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u})",
+                    ? $"CRITICAL: newest embedded Intune {role.ToLowerInvariant()} '{subject}' EXPIRED {-daysUntilExpiry}d ago ({notAfterUtc:u}) and no successor is embedded - agent mTLS validation broken"
+                    : $"CRITICAL: newest embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u}) and no successor is embedded",
                 null, "System.Maintenance",
                 new { role, subject, thumbprint, notAfterUtc = notAfterUtc.ToString("u"), daysUntilExpiry });
 

@@ -45,10 +45,46 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Bucket-level evaluation for a role group (e.g. all "Root" certs).
+        /// Picks the cert with the MAXIMUM NotAfter and classifies its tier;
+        /// older certs in the same bucket are chain-helpers for in-flight
+        /// device certs (e.g. a soon-to-expire intermediate that already has
+        /// a successor in the bundle) and do NOT trigger their own alarm.
+        ///
+        /// This is the correctness invariant: if a freshness-successor is
+        /// already embedded for this role, the bundle is healthy regardless
+        /// of how many older expiring/expired siblings ride along for chain
+        /// continuity. The operator only gets paged when the freshest itself
+        /// nears expiry, i.e. when there is genuinely no successor yet.
+        /// </summary>
+        internal static CertBucketEvaluation EvaluateBucket(
+            IReadOnlyList<X509Certificate2> certs, DateTime nowUtc)
+        {
+            if (certs.Count == 0)
+                return new CertBucketEvaluation(null, null, 0);
+
+            var freshest = certs
+                .OrderByDescending(c => c.NotAfter.ToUniversalTime())
+                .First();
+            var daysLeft = (int)Math.Floor(
+                (freshest.NotAfter.ToUniversalTime() - nowUtc).TotalDays);
+            var tier = ClassifyCertExpiryTier(daysLeft);
+
+            return new CertBucketEvaluation(tier, freshest, daysLeft);
+        }
+
+        internal sealed record CertBucketEvaluation(
+            string? EventType,
+            X509Certificate2? Freshest,
+            int DaysUntilExpiry);
+
+        /// <summary>
         /// Inspects the embedded Intune CA bundle (roots + intermediates) and
-        /// emits Warning/Error/Critical OpsEvents for any cert near expiry.
-        /// Dedup: one event per cert per tier per UTC day, by querying today's
-        /// Security ops events.
+        /// emits Warning/Error/Critical OpsEvents when the FRESHEST cert in
+        /// each role bucket nears expiry. Older expiring siblings stay silent
+        /// as long as a successor is present (they're chain-continuity helpers).
+        /// Dedup: one event per role-bucket per tier per UTC day, by querying
+        /// today's Security ops events.
         /// </summary>
         public async Task CheckEmbeddedCertExpiryAsync()
         {
@@ -58,49 +94,45 @@ namespace AutopilotMonitor.Functions.Services
 
             if (roots.Count == 0)
             {
-                if (seenToday.Add($"EmbeddedCertBundleEmpty|"))
+                if (seenToday.Add("EmbeddedCertBundleEmpty|"))
                     await _opsEventService.RecordEmbeddedCertBundleEmptyAsync();
                 _logger.LogError("Embedded Intune root bundle is empty - agent mTLS will fail closed");
                 return;
             }
 
-            await EvaluateCertBucketAsync(roots, "Root", seenToday);
-            await EvaluateCertBucketAsync(intermediates, "Intermediate", seenToday);
+            await EmitBucketAlertIfNeededAsync(roots, "Root", seenToday);
+            await EmitBucketAlertIfNeededAsync(intermediates, "Intermediate", seenToday);
         }
 
-        private async Task EvaluateCertBucketAsync(
+        private async Task EmitBucketAlertIfNeededAsync(
             IReadOnlyList<X509Certificate2> certs, string role, HashSet<string> seenToday)
         {
-            var now = DateTime.UtcNow;
-            foreach (var cert in certs)
+            var eval = EvaluateBucket(certs, DateTime.UtcNow);
+            if (eval.EventType is null || eval.Freshest is null) return;
+
+            var freshest = eval.Freshest;
+            var dedupKey = $"{eval.EventType}|{freshest.Thumbprint}";
+            if (!seenToday.Add(dedupKey))
             {
-                var notAfterUtc = cert.NotAfter.ToUniversalTime();
-                var daysLeft = (int)Math.Floor((notAfterUtc - now).TotalDays);
-                var eventType = ClassifyCertExpiryTier(daysLeft);
-                if (eventType is null) continue;
+                _logger.LogDebug("Cert bucket alert already emitted today: {Key}", dedupKey);
+                return;
+            }
 
-                var dedupKey = $"{eventType}|{cert.Thumbprint}";
-                if (!seenToday.Add(dedupKey))
-                {
-                    _logger.LogDebug("Cert expiry already emitted today: {Key}", dedupKey);
-                    continue;
-                }
-
-                switch (eventType)
-                {
-                    case "EmbeddedCertExpired":
-                        await _opsEventService.RecordEmbeddedCertExpiredAsync(
-                            role, cert.Subject, cert.Thumbprint, notAfterUtc, daysLeft);
-                        break;
-                    case "EmbeddedCertExpiringUrgent":
-                        await _opsEventService.RecordEmbeddedCertExpiringUrgentAsync(
-                            role, cert.Subject, cert.Thumbprint, notAfterUtc, daysLeft);
-                        break;
-                    case "EmbeddedCertExpiringSoon":
-                        await _opsEventService.RecordEmbeddedCertExpiringSoonAsync(
-                            role, cert.Subject, cert.Thumbprint, notAfterUtc, daysLeft);
-                        break;
-                }
+            var notAfterUtc = freshest.NotAfter.ToUniversalTime();
+            switch (eval.EventType)
+            {
+                case "EmbeddedCertExpired":
+                    await _opsEventService.RecordEmbeddedCertExpiredAsync(
+                        role, freshest.Subject, freshest.Thumbprint, notAfterUtc, eval.DaysUntilExpiry);
+                    break;
+                case "EmbeddedCertExpiringUrgent":
+                    await _opsEventService.RecordEmbeddedCertExpiringUrgentAsync(
+                        role, freshest.Subject, freshest.Thumbprint, notAfterUtc, eval.DaysUntilExpiry);
+                    break;
+                case "EmbeddedCertExpiringSoon":
+                    await _opsEventService.RecordEmbeddedCertExpiringSoonAsync(
+                        role, freshest.Subject, freshest.Thumbprint, notAfterUtc, eval.DaysUntilExpiry);
+                    break;
             }
         }
 
