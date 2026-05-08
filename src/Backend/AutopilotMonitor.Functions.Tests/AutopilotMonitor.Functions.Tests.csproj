@@ -26,4 +26,10 @@
     <ProjectReference Include="..\..\Shared\AutopilotMonitor.Shared\AutopilotMonitor.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="device-cert-sample.pem">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

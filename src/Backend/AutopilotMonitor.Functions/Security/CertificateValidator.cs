@@ -15,9 +15,9 @@ namespace AutopilotMonitor.Functions.Security
     /// </summary>
     /// <remarks>
     /// Security measures:
-    /// - Full X.509 chain validation using X509Chain.Build()
+    /// - X.509 chain trust pinned to embedded Intune root certificate(s) via
+    ///   X509ChainTrustMode.CustomRootTrust (OS trust store is ignored)
     /// - No revocation checking (Intune certificates have no CRL/OCSP endpoints)
-    /// - Validates entire chain contains Microsoft Intune CA
     /// - Prevents self-signed certificate attacks
     /// - Validates Enhanced Key Usage for Client Authentication
     /// - In-memory cache for validated certificates (5 minute TTL)
@@ -29,8 +29,16 @@ namespace AutopilotMonitor.Functions.Security
         private static readonly ConcurrentDictionary<string, CachedValidationResult> _validationCache = new();
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-        // Lazily loaded Intune CA certs from embedded resources
-        private static readonly Lazy<X509Certificate2[]> _intuneCaCerts = new(LoadIntuneCaCertificates);
+        // Lazily loaded Intune CA certs from embedded PEM resources, split by role:
+        //   roots         -> pinned trust anchors  (chain.ChainPolicy.CustomTrustStore)
+        //   intermediates -> bridge candidates    (chain.ChainPolicy.ExtraStore)
+        // Files are picked up by name prefix from Security/Certificates/, so adding a
+        // future Intune root or intermediate is a drop-in (no code change).
+        // Duplicates (same thumbprint) are deduped at load time.
+        private static readonly Lazy<X509Certificate2[]> _intuneRootCerts =
+            new(() => LoadIntuneCerts("intune-root-"));
+        private static readonly Lazy<X509Certificate2[]> _intuneIntermediateCerts =
+            new(() => LoadIntuneCerts("intune-intermediate-"));
 
         private class CachedValidationResult
         {
@@ -89,43 +97,66 @@ namespace AutopilotMonitor.Functions.Security
 
                 logger?.LogDebug($"Certificate validation cache MISS for thumbprint {thumbprint}, performing full validation");
 
-                // 1. Check expiry
+                // 1. Check expiry. X509Certificate2.NotBefore/NotAfter return Local time on .NET;
+                // normalize to UTC before comparing to DateTime.UtcNow or the result is wrong on
+                // hosts whose TZ != UTC (e.g. test runs on a CEST dev box).
                 var now = DateTime.UtcNow;
-                if (now < certificate.NotBefore || now > certificate.NotAfter)
+                var notBeforeUtc = certificate.NotBefore.ToUniversalTime();
+                var notAfterUtc = certificate.NotAfter.ToUniversalTime();
+                if (now < notBeforeUtc || now > notAfterUtc)
                 {
                     return new CertificateValidationResult
                     {
                         IsValid = false,
-                        ErrorMessage = $"Certificate expired or not yet valid (NotBefore={certificate.NotBefore}, NotAfter={certificate.NotAfter})",
+                        ErrorMessage = $"Certificate expired or not yet valid (NotBefore={notBeforeUtc:u}, NotAfter={notAfterUtc:u})",
                         Thumbprint = thumbprint
                     };
                 }
 
-                // 2. Validate certificate chain (without revocation check - Intune certs have no CRL/OCSP)
+                // 2. Validate certificate chain against pinned Intune roots (no revocation - no CRL/OCSP).
                 //
-                // On Linux (Azure Functions flex consumption plan) the OS trust store does not contain
-                // Microsoft Intune CAs. We load them from embedded PEM resources into ExtraStore and set
-                // AllowUnknownCertificateAuthority so chain.Build() can resolve the issuer without the OS
-                // store. The issuer identity is still enforced in step 3.
+                // CustomTrustStore + CustomRootTrust pins trust to the embedded Intune root cert(s)
+                // only and ignores the OS trust store entirely - works on Linux/Flex Consumption
+                // (no machine store) and replaces a previous AllowUnknownCertificateAuthority
+                // workaround which was bypassable by self-signed leaf certs whose Subject contained
+                // "Microsoft Intune".
+                var roots = _intuneRootCerts.Value;
+                var intermediates = _intuneIntermediateCerts.Value;
+
+                if (roots.Length == 0)
+                {
+                    logger?.LogError("No embedded Intune root certificates loaded - failing closed");
+                    return new CertificateValidationResult
+                    {
+                        IsValid = false,
+                        ErrorMessage = "Server misconfiguration: no Intune trust anchors available",
+                        Thumbprint = thumbprint
+                    };
+                }
+
                 using var chain = new X509Chain();
                 chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
                 chain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
-                chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+                chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
                 chain.ChainPolicy.VerificationTime = DateTime.UtcNow;
                 chain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(10);
+                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
 
-                // Load embedded Intune CA certs into ExtraStore
-                var caCerts = _intuneCaCerts.Value;
-                logger?.LogDebug("Loading {Count} embedded Intune CA certificate(s) into chain ExtraStore", caCerts.Length);
-                foreach (var caCert in caCerts)
-                    chain.ChainPolicy.ExtraStore.Add(caCert);
+                foreach (var root in roots)
+                    chain.ChainPolicy.CustomTrustStore.Add(root);
+                foreach (var intermediate in intermediates)
+                    chain.ChainPolicy.ExtraStore.Add(intermediate);
+
+                logger?.LogDebug(
+                    "Chain build with {RootCount} pinned Intune root(s) + {IntermediateCount} intermediate(s)",
+                    roots.Length, intermediates.Length);
 
                 var chainValid = chain.Build(certificate);
 
                 if (!chainValid)
                 {
                     var chainErrors = string.Join(", ", chain.ChainStatus.Select(s => s.StatusInformation));
-                    logger?.LogWarning($"Certificate chain validation failed: {chainErrors}");
+                    logger?.LogWarning("Certificate chain validation failed: {ChainErrors}", chainErrors);
 
                     return new CertificateValidationResult
                     {
@@ -135,29 +166,12 @@ namespace AutopilotMonitor.Functions.Security
                     };
                 }
 
-                // 3. Verify issuer chain contains Microsoft Intune CA
-                var hasValidIssuer = chain.ChainElements
-                    .Cast<X509ChainElement>()
-                    .Any(element =>
-                        element.Certificate.Issuer.Contains("Microsoft Intune", StringComparison.OrdinalIgnoreCase) ||
-                        element.Certificate.Issuer.Contains("MDM Device CA", StringComparison.OrdinalIgnoreCase) ||
-                        element.Certificate.Subject.Contains("Microsoft Intune", StringComparison.OrdinalIgnoreCase) ||
-                        element.Certificate.Subject.Contains("MDM Device CA", StringComparison.OrdinalIgnoreCase));
+                // chainValid == true under CustomRootTrust proves the leaf is transitively signed
+                // by one of the pinned Intune roots. The previous Subject/Issuer DN substring check
+                // is intentionally removed - it added no security on top of root pinning and would
+                // false-negative if Microsoft renames the CA.
 
-                if (!hasValidIssuer)
-                {
-                    var chainInfo = string.Join(" -> ", chain.ChainElements.Cast<X509ChainElement>().Select(e => e.Certificate.Subject));
-                    logger?.LogWarning($"Certificate chain does not contain Microsoft Intune CA: {chainInfo}");
-
-                    return new CertificateValidationResult
-                    {
-                        IsValid = false,
-                        ErrorMessage = $"Certificate not issued by Microsoft Intune CA",
-                        Thumbprint = thumbprint
-                    };
-                }
-
-                // 4. Check Enhanced Key Usage for Client Authentication (1.3.6.1.5.5.7.3.2)
+                // 3. Check Enhanced Key Usage for Client Authentication (1.3.6.1.5.5.7.3.2)
                 var hasClientAuth = certificate.Extensions
                     .OfType<X509EnhancedKeyUsageExtension>()
                     .Any(ext => ext.EnhancedKeyUsages
@@ -207,45 +221,59 @@ namespace AutopilotMonitor.Functions.Security
         }
 
         /// <summary>
-        /// Loads Intune CA certificates from embedded PEM resources.
-        /// Files: Security/Certificates/intune-intermediate-ca.pem
-        ///        Security/Certificates/intune-root-ca.pem
+        /// Loads all certs whose embedded resource filename starts with the given prefix.
+        /// Multiple PEM blocks per file are supported (cross-signed bundles). Duplicates
+        /// are deduped by thumbprint, so a file accidentally duplicated under another name
+        /// is harmless. Roles are filename-segregated:
+        ///   intune-root-*.pem         -> pinned trust anchors (CustomTrustStore)
+        ///   intune-intermediate-*.pem -> chain bridge candidates (ExtraStore)
         /// </summary>
-        private static X509Certificate2[] LoadIntuneCaCertificates()
+        private static X509Certificate2[] LoadIntuneCerts(string fileNamePrefix)
         {
+            const string resourceNamespace = "AutopilotMonitor.Functions.Security.Certificates.";
             var assembly = Assembly.GetExecutingAssembly();
-            var resourceNames = new[]
-            {
-                "AutopilotMonitor.Functions.Security.Certificates.intune-intermediate-ca.pem",
-                "AutopilotMonitor.Functions.Security.Certificates.intune-root-ca.pem"
-            };
+            var resourcePrefix = resourceNamespace + fileNamePrefix;
 
-            List<X509Certificate2> certs = [];
+            var resourceNames = assembly.GetManifestResourceNames()
+                .Where(n => n.StartsWith(resourcePrefix, StringComparison.Ordinal)
+                            && n.EndsWith(".pem", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(n => n, StringComparer.Ordinal);
+
+            const string begin = "-----BEGIN CERTIFICATE-----";
+            const string end = "-----END CERTIFICATE-----";
+            var seenThumbprints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var certs = new List<X509Certificate2>();
 
             foreach (var resourceName in resourceNames)
             {
                 using var stream = assembly.GetManifestResourceStream(resourceName);
-                if (stream == null)
-                {
-                    // Resource not found - not fatal, chain validation will fall back to OS store
-                    continue;
-                }
+                if (stream == null) continue;
 
                 using var reader = new StreamReader(stream);
                 var pem = reader.ReadToEnd();
 
-                // Skip placeholder files that haven't been filled with a real cert yet
                 if (pem.Contains("PLACEHOLDER_REPLACE_WITH_BASE64"))
                     continue;
 
-                try
+                int idx = 0;
+                while ((idx = pem.IndexOf(begin, idx, StringComparison.Ordinal)) >= 0)
                 {
-                    var cert = X509Certificate2.CreateFromPem(pem);
-                    certs.Add(cert);
-                }
-                catch
-                {
-                    // Malformed PEM - skip silently, chain validation continues with OS store
+                    var endIdx = pem.IndexOf(end, idx, StringComparison.Ordinal);
+                    if (endIdx < 0) break;
+                    var block = pem.Substring(idx, endIdx + end.Length - idx);
+                    try
+                    {
+                        var cert = X509Certificate2.CreateFromPem(block);
+                        if (seenThumbprints.Add(cert.Thumbprint))
+                            certs.Add(cert);
+                        else
+                            cert.Dispose();
+                    }
+                    catch
+                    {
+                        // Malformed block - skip; chain.Build() will fail closed if no roots remain.
+                    }
+                    idx = endIdx + end.Length;
                 }
             }
 
