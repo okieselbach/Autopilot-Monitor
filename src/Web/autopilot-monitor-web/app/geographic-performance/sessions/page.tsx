@@ -33,6 +33,8 @@ interface SessionSummary {
   doBytesFromLanPeers?: number;
   doBytesFromGroupPeers?: number;
   doBytesFromInternetPeers?: number;
+  doBytesFromLinkLocalPeers?: number;
+  doBytesFromCacheServer?: number;
 }
 
 const formatBytes = (bytes: number) => {
@@ -327,8 +329,8 @@ function LocationSessionsContent() {
                           {session.hasDoTelemetry ? (
                             <div
                               title={
-                                `Peers: ${formatBytes(session.doBytesFromPeers ?? 0)} | HTTP: ${formatBytes(session.doBytesFromHttp ?? 0)} | Total: ${formatBytes(session.doTotalBytesDownloaded ?? 0)}\n` +
-                                `LAN: ${formatBytes(session.doBytesFromLanPeers ?? 0)} | Group: ${formatBytes(session.doBytesFromGroupPeers ?? 0)} | Internet: ${formatBytes(session.doBytesFromInternetPeers ?? 0)}`
+                                `Peers: ${formatBytes(session.doBytesFromPeers ?? 0)} | HTTP: ${formatBytes(session.doBytesFromHttp ?? 0)} | MCC: ${formatBytes(session.doBytesFromCacheServer ?? 0)} | Total: ${formatBytes(session.doTotalBytesDownloaded ?? 0)}\n` +
+                                `LAN: ${formatBytes((session.doBytesFromLanPeers ?? 0) + (session.doBytesFromLinkLocalPeers ?? 0))} | Group: ${formatBytes(session.doBytesFromGroupPeers ?? 0)} | Internet: ${formatBytes(session.doBytesFromInternetPeers ?? 0)}`
                               }
                             >
                               <span

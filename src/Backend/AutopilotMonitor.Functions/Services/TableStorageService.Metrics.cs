@@ -220,6 +220,9 @@ namespace AutopilotMonitor.Functions.Services
                             summary.DoBytesFromLanPeers = existing.GetInt64("DoBytesFromLanPeers") ?? 0;
                             summary.DoBytesFromGroupPeers = existing.GetInt64("DoBytesFromGroupPeers") ?? 0;
                             summary.DoBytesFromInternetPeers = existing.GetInt64("DoBytesFromInternetPeers") ?? 0;
+                            summary.DoBytesFromLinkLocalPeers = existing.GetInt64("DoBytesFromLinkLocalPeers") ?? 0;
+                            summary.DoBytesFromCacheServer = existing.GetInt64("DoBytesFromCacheServer") ?? 0;
+                            summary.DoCacheHost = existing.GetString("DoCacheHost") ?? string.Empty;
                         }
                     }
 
@@ -361,6 +364,9 @@ namespace AutopilotMonitor.Functions.Services
                 DoBytesFromLanPeers = entity.GetInt64("DoBytesFromLanPeers") ?? 0,
                 DoBytesFromGroupPeers = entity.GetInt64("DoBytesFromGroupPeers") ?? 0,
                 DoBytesFromInternetPeers = entity.GetInt64("DoBytesFromInternetPeers") ?? 0,
+                DoBytesFromLinkLocalPeers = entity.GetInt64("DoBytesFromLinkLocalPeers") ?? 0,
+                DoBytesFromCacheServer = entity.GetInt64("DoBytesFromCacheServer") ?? 0,
+                DoCacheHost = entity.GetString("DoCacheHost") ?? string.Empty,
                 // App metadata (from IME log parsing)
                 AppVersion = entity.GetString("AppVersion") ?? string.Empty,
                 AppType = entity.GetString("AppType") ?? string.Empty,
@@ -923,6 +929,9 @@ namespace AutopilotMonitor.Functions.Services
                 ["DoBytesFromLanPeers"] = summary.DoBytesFromLanPeers,
                 ["DoBytesFromGroupPeers"] = summary.DoBytesFromGroupPeers,
                 ["DoBytesFromInternetPeers"] = summary.DoBytesFromInternetPeers,
+                ["DoBytesFromLinkLocalPeers"] = summary.DoBytesFromLinkLocalPeers,
+                ["DoBytesFromCacheServer"] = summary.DoBytesFromCacheServer,
+                ["DoCacheHost"] = summary.DoCacheHost ?? string.Empty,
                 // App metadata (from IME log parsing)
                 ["AppVersion"] = summary.AppVersion ?? string.Empty,
                 ["AppType"] = summary.AppType ?? string.Empty,

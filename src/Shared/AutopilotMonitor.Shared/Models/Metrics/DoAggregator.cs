@@ -20,10 +20,17 @@ namespace AutopilotMonitor.Shared.Models
             public long BytesFromLanPeers { get; set; }
             public long BytesFromGroupPeers { get; set; }
             public long BytesFromInternetPeers { get; set; }
+            public long BytesFromLinkLocalPeers { get; set; }
+            public long BytesFromCacheServer { get; set; }
 
             public bool HasTelemetry => DoAppCount > 0;
             public double PercentPeerCaching => TotalBytesDownloaded > 0
                 ? (double)BytesFromPeers / TotalBytesDownloaded * 100
+                : 0;
+            // MCC % share — counted separately from peers because Microsoft's DO classifies
+            // CacheServer bytes outside BytesFromPeers but they still represent network savings.
+            public double PercentCacheServer => TotalBytesDownloaded > 0
+                ? (double)BytesFromCacheServer / TotalBytesDownloaded * 100
                 : 0;
         }
 
@@ -42,6 +49,8 @@ namespace AutopilotMonitor.Shared.Models
                 BytesFromLanPeers = doApps.Sum(a => a.DoBytesFromLanPeers),
                 BytesFromGroupPeers = doApps.Sum(a => a.DoBytesFromGroupPeers),
                 BytesFromInternetPeers = doApps.Sum(a => a.DoBytesFromInternetPeers),
+                BytesFromLinkLocalPeers = doApps.Sum(a => a.DoBytesFromLinkLocalPeers),
+                BytesFromCacheServer = doApps.Sum(a => a.DoBytesFromCacheServer),
             };
         }
     }

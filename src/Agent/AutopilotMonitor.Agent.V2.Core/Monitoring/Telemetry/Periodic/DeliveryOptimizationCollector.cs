@@ -298,11 +298,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                 long bytesLanPeers = GetPropLong(result, "BytesFromLanPeers");
                 long bytesGroupPeers = GetPropLong(result, "BytesFromGroupPeers");
                 long bytesInternetPeers = GetPropLong(result, "BytesFromInternetPeers");
+                long bytesLinkLocalPeers = GetPropLong(result, "BytesFromLinkLocalPeers");
                 int downloadMode = GetPropInt(result, "DownloadMode", -1);
                 long bytesFromHttp = GetPropLong(result, "BytesFromHttp");
                 long bytesFromCacheServer = GetPropLong(result, "BytesFromCacheServer");
                 var downloadDuration = GetPropTimeSpan(result, "DownloadDuration");
                 var sourceUrl = GetPropString(result, "SourceURL");
+                var cacheHost = GetPropUriString(result, "CacheHost");
 
                 // Build log entry for JSONL
                 logEntries.Add(new JObject
@@ -345,25 +347,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                         Source = "DeliveryOptimizationCollector",
                         Phase = EnrollmentPhase.Unknown,
                         Message = $"{pkg.Name ?? appId}: {percentComplete}% ({totalBytes}/{fileSize}) peers={peerCachingPct}% mode={downloadMode}",
-                        Data = new Dictionary<string, object>
-                        {
-                            ["appId"] = appId,
-                            ["appName"] = pkg.Name,
-                            // UI-compatible fields (DownloadProgress.tsx reads these)
-                            ["bytesDownloaded"] = totalBytes,
-                            ["bytesTotal"] = fileSize,
-                            ["progressPercent"] = percentComplete,
-                            // DO-specific fields
-                            ["doFileSize"] = fileSize,
-                            ["doTotalBytesDownloaded"] = totalBytes,
-                            ["doPercentComplete"] = percentComplete,
-                            ["doBytesFromPeers"] = bytesFromPeers,
-                            ["doBytesFromHttp"] = bytesFromHttp,
-                            ["doPercentPeerCaching"] = peerCachingPct,
-                            ["doDownloadMode"] = downloadMode,
-                            ["doBytesFromCacheServer"] = bytesFromCacheServer,
-                            ["doSource"] = "os_cmdlet"
-                        },
+                        Data = BuildDoEventData(
+                            appId, pkg.Name, totalBytes, fileSize, percentComplete,
+                            bytesFromPeers, bytesFromHttp, peerCachingPct, downloadMode,
+                            bytesLanPeers, bytesGroupPeers, bytesInternetPeers, bytesLinkLocalPeers,
+                            bytesFromCacheServer, cacheHost),
                         ImmediateUpload = true
                     });
                 }
@@ -376,7 +364,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 
                     pkg.UpdateDoTelemetry(fileSize, totalBytes, bytesFromPeers, peerCachingPct,
                         bytesLanPeers, bytesGroupPeers, bytesInternetPeers,
-                        downloadMode, durationStr, bytesFromHttp);
+                        downloadMode, durationStr, bytesFromHttp,
+                        bytesFromLinkLocalPeers: bytesLinkLocalPeers,
+                        bytesFromCacheServer: bytesFromCacheServer,
+                        cacheHost: cacheHost);
 
                     _enrichedAppIds.Add(appId);
                     matchCount++;
@@ -432,6 +423,57 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             var val = obj.Properties[name]?.Value;
             if (val is TimeSpan ts) return ts;
             return null;
+        }
+
+        // CacheHost is exposed by the cmdlet as System.Uri (or null when no MCC was used).
+        // .ToString() returns the absolute URI form (e.g. "http://72.144.231.24/").
+        // Returning null on absent or empty hosts so the event omits the field instead of "/".
+        private static string GetPropUriString(PSObject obj, string name)
+        {
+            var val = obj.Properties[name]?.Value;
+            if (val == null) return null;
+            if (val is Uri uri) return uri.ToString();
+            var s = val.ToString();
+            return string.IsNullOrWhiteSpace(s) ? null : s;
+        }
+
+        // Builds the Data dictionary for download_progress events. Centralised so the
+        // download_progress (in-flight) and (potentially future) periodic-snapshot emissions
+        // stay symmetric on the breakdown / cache fields the UI now consumes.
+        private static Dictionary<string, object> BuildDoEventData(
+            string appId, string appName, long totalBytes, long fileSize, int percentComplete,
+            long bytesFromPeers, long bytesFromHttp, int peerCachingPct, int downloadMode,
+            long bytesLanPeers, long bytesGroupPeers, long bytesInternetPeers, long bytesLinkLocalPeers,
+            long bytesFromCacheServer, string cacheHost)
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["appId"] = appId,
+                ["appName"] = appName,
+                // UI-compatible fields (DownloadProgress.tsx reads these)
+                ["bytesDownloaded"] = totalBytes,
+                ["bytesTotal"] = fileSize,
+                ["progressPercent"] = percentComplete,
+                // DO-specific fields
+                ["doFileSize"] = fileSize,
+                ["doTotalBytesDownloaded"] = totalBytes,
+                ["doPercentComplete"] = percentComplete,
+                ["doBytesFromPeers"] = bytesFromPeers,
+                ["doBytesFromHttp"] = bytesFromHttp,
+                ["doPercentPeerCaching"] = peerCachingPct,
+                ["doDownloadMode"] = downloadMode,
+                // Per-source breakdown — the customer-visible bug was these being absent on
+                // download_progress while present on do_telemetry, leaving the UI at 0/0/0 mid-flight.
+                ["doBytesFromLanPeers"] = bytesLanPeers,
+                ["doBytesFromGroupPeers"] = bytesGroupPeers,
+                ["doBytesFromInternetPeers"] = bytesInternetPeers,
+                ["doBytesFromLinkLocalPeers"] = bytesLinkLocalPeers,
+                ["doBytesFromCacheServer"] = bytesFromCacheServer,
+                ["doSource"] = "os_cmdlet"
+            };
+            if (!string.IsNullOrEmpty(cacheHost))
+                data["doCacheHost"] = cacheHost;
+            return data;
         }
 
         // -----------------------------------------------------------------------

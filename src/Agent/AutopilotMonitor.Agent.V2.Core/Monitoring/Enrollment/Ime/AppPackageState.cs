@@ -110,7 +110,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         /// <summary>Detection rule result: "Detected" or "NotDetected". From DetectionActionHandler log lines.</summary>
         public string DetectionResult { get; private set; }
 
-        // Delivery Optimization telemetry (populated from [DO TEL] log entries)
+        // Delivery Optimization telemetry (populated from [DO TEL] log entries OR Get-DeliveryOptimizationStatus poll)
         public long DoFileSize { get; private set; }
         public long DoTotalBytesDownloaded { get; private set; }
         public long DoBytesFromPeers { get; private set; }
@@ -118,6 +118,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         public long DoBytesFromLanPeers { get; private set; }
         public long DoBytesFromGroupPeers { get; private set; }
         public long DoBytesFromInternetPeers { get; private set; }
+        // Microsoft DO splits "peers" into four buckets; LinkLocal (same subnet) is technically separate
+        // from LAN but for UX we typically merge them under "local network" — kept as its own field here
+        // so future tooling can disambiguate.
+        public long DoBytesFromLinkLocalPeers { get; private set; }
+        // Microsoft Connected Cache (MCC) bytes — counted separately from BytesFromPeers by DO; on
+        // machines with an MCC server BytesFromHttp typically equals BytesFromCacheServer. Tracking
+        // it explicitly so the UI can show "From Connected Cache" instead of misleading "From HTTP".
+        public long DoBytesFromCacheServer { get; private set; }
+        // CacheHost URI/IP of the MCC node that served the bytes. Only set when DoBytesFromCacheServer > 0.
+        public string DoCacheHost { get; private set; }
         public int DoDownloadMode { get; private set; } = -1;
         public string DoDownloadDuration { get; private set; }
         public long DoBytesFromHttp { get; private set; }
@@ -163,6 +173,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             long doBytesFromInternetPeers = 0, int doDownloadMode = -1,
             string doDownloadDuration = null, long doBytesFromHttp = 0,
             bool hasDoTelemetry = false,
+            long doBytesFromLinkLocalPeers = 0, long doBytesFromCacheServer = 0,
+            string doCacheHost = null,
             string appVersion = null, string appType = null,
             int attemptNumber = 0, string detectionResult = null)
         {
@@ -191,6 +203,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 DoBytesFromLanPeers = doBytesFromLanPeers,
                 DoBytesFromGroupPeers = doBytesFromGroupPeers,
                 DoBytesFromInternetPeers = doBytesFromInternetPeers,
+                DoBytesFromLinkLocalPeers = doBytesFromLinkLocalPeers,
+                DoBytesFromCacheServer = doBytesFromCacheServer,
+                DoCacheHost = doCacheHost,
                 DoDownloadMode = doDownloadMode,
                 DoDownloadDuration = doDownloadDuration,
                 DoBytesFromHttp = doBytesFromHttp,
@@ -341,12 +356,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
 
         /// <summary>
         /// Updates Delivery Optimization telemetry data for this app package.
-        /// Called when a [DO TEL] log entry is matched and linked to this app.
+        /// Called when a [DO TEL] log entry is matched (IME path) or when
+        /// Get-DeliveryOptimizationStatus reports a completed download (OS poll path).
+        /// LinkLocal/CacheServer/CacheHost default to 0/null on older agents or when
+        /// the source omits them — caller must pass 0/null in that case.
         /// </summary>
         public void UpdateDoTelemetry(long fileSize, long totalBytesDownloaded,
             long bytesFromPeers, int percentPeerCaching,
             long bytesFromLanPeers, long bytesFromGroupPeers, long bytesFromInternetPeers,
-            int downloadMode, string downloadDuration, long bytesFromHttp)
+            int downloadMode, string downloadDuration, long bytesFromHttp,
+            long bytesFromLinkLocalPeers = 0, long bytesFromCacheServer = 0, string cacheHost = null)
         {
             DoFileSize = fileSize;
             DoTotalBytesDownloaded = totalBytesDownloaded;
@@ -355,6 +374,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             DoBytesFromLanPeers = bytesFromLanPeers;
             DoBytesFromGroupPeers = bytesFromGroupPeers;
             DoBytesFromInternetPeers = bytesFromInternetPeers;
+            DoBytesFromLinkLocalPeers = bytesFromLinkLocalPeers;
+            DoBytesFromCacheServer = bytesFromCacheServer;
+            DoCacheHost = string.IsNullOrEmpty(cacheHost) ? null : cacheHost;
             DoDownloadMode = downloadMode;
             DoDownloadDuration = downloadDuration;
             DoBytesFromHttp = bytesFromHttp;
@@ -545,6 +567,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 data["doBytesFromLanPeers"] = DoBytesFromLanPeers;
                 data["doBytesFromGroupPeers"] = DoBytesFromGroupPeers;
                 data["doBytesFromInternetPeers"] = DoBytesFromInternetPeers;
+                data["doBytesFromLinkLocalPeers"] = DoBytesFromLinkLocalPeers;
+                data["doBytesFromCacheServer"] = DoBytesFromCacheServer;
+                if (!string.IsNullOrEmpty(DoCacheHost))
+                    data["doCacheHost"] = DoCacheHost;
                 data["doDownloadMode"] = DoDownloadMode;
                 data["doDownloadDuration"] = DoDownloadDuration ?? "";
                 data["doBytesFromHttp"] = DoBytesFromHttp;

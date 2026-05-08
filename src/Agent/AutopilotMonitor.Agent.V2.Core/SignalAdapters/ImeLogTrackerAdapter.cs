@@ -695,9 +695,12 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 ["doBytesFromLanPeers"] = app.DoBytesFromLanPeers.ToString(culture),
                 ["doBytesFromGroupPeers"] = app.DoBytesFromGroupPeers.ToString(culture),
                 ["doBytesFromInternetPeers"] = app.DoBytesFromInternetPeers.ToString(culture),
+                ["doBytesFromLinkLocalPeers"] = app.DoBytesFromLinkLocalPeers.ToString(culture),
+                ["doBytesFromCacheServer"] = app.DoBytesFromCacheServer.ToString(culture),
                 ["doDownloadMode"] = app.DoDownloadMode.ToString(culture),
                 ["doBytesFromHttp"] = app.DoBytesFromHttp.ToString(culture),
             };
+            if (!string.IsNullOrEmpty(app.DoCacheHost)) data["doCacheHost"] = app.DoCacheHost!;
             if (!string.IsNullOrEmpty(app.DoDownloadDuration)) data["doDownloadDuration"] = app.DoDownloadDuration!;
             if (!string.IsNullOrEmpty(app.DetectionResult)) data["detectionResult"] = app.DetectionResult!;
             var patternId = _tracker.LastMatchedPatternId;

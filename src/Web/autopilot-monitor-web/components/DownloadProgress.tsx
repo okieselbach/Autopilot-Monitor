@@ -34,6 +34,9 @@ interface DoStats {
   bytesFromLanPeers: number;
   bytesFromGroupPeers: number;
   bytesFromInternetPeers: number;
+  bytesFromLinkLocalPeers: number;
+  bytesFromCacheServer: number;
+  cacheHost: string;
 }
 
 interface DownloadItem {
@@ -181,6 +184,9 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
           bytesFromLanPeers: parseInt(d.doBytesFromLanPeers ?? "0", 10),
           bytesFromGroupPeers: parseInt(d.doBytesFromGroupPeers ?? "0", 10),
           bytesFromInternetPeers: parseInt(d.doBytesFromInternetPeers ?? "0", 10),
+          bytesFromLinkLocalPeers: parseInt(d.doBytesFromLinkLocalPeers ?? "0", 10),
+          bytesFromCacheServer: parseInt(d.doBytesFromCacheServer ?? "0", 10),
+          cacheHost: typeof d.doCacheHost === "string" ? d.doCacheHost : "",
         };
       }
 
@@ -431,7 +437,24 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
                     </svg>
                   </button>
-                  {showDoStats && (
+                  {showDoStats && (() => {
+                    // MCC bytes are reported separately by DO and on machines using a cache
+                    // server BytesFromHttp typically equals BytesFromCacheServer (the MCC node
+                    // serves over HTTP). To avoid double-counting in the visual bar, subtract
+                    // CacheServer from HTTP for the "pure HTTP/CDN" remainder.
+                    const total = dl.doStats.fileSize > 0
+                      ? dl.doStats.fileSize
+                      : Math.max(1, dl.doStats.bytesFromPeers + dl.doStats.bytesFromHttp);
+                    const peerBytes = dl.doStats.bytesFromPeers;
+                    const cacheBytes = dl.doStats.bytesFromCacheServer;
+                    const httpBytes = Math.max(0, dl.doStats.bytesFromHttp - cacheBytes);
+                    const peerPct = (peerBytes / total) * 100;
+                    const cachePct = (cacheBytes / total) * 100;
+                    const httpPct = Math.max(0, 100 - peerPct - cachePct);
+                    // LAN + LinkLocal combined for breakdown line — both are "local network"
+                    const localPeers = dl.doStats.bytesFromLanPeers + dl.doStats.bytesFromLinkLocalPeers;
+                    const cachePctRounded = cachePct >= 1 ? Math.round(cachePct) : Math.round(cachePct * 10) / 10;
+                    return (
                     <div className="mt-1 p-2 bg-blue-50 rounded border border-blue-100">
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
                         <div>
@@ -444,7 +467,7 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                         </div>
                         <div>
                           <span className="text-gray-500">From HTTP:</span>{" "}
-                          <span className="font-medium">{formatBytes(dl.doStats.bytesFromHttp)}</span>
+                          <span className="font-medium">{formatBytes(httpBytes)}</span>
                         </div>
                         <div>
                           <span className="text-gray-500">From Peers:</span>{" "}
@@ -455,29 +478,50 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                             )}
                           </span>
                         </div>
+                        {cacheBytes > 0 && (
+                          <div
+                            className="col-span-2"
+                            title={dl.doStats.cacheHost ? `Cache host: ${dl.doStats.cacheHost}` : undefined}
+                          >
+                            <span className="text-gray-500">From Connected Cache:</span>{" "}
+                            <span className="font-medium">
+                              {formatBytes(cacheBytes)}
+                              <span className="text-purple-600 ml-1">({cachePctRounded}%)</span>
+                              {dl.doStats.cacheHost && (
+                                <span className="text-gray-400 ml-1">via {dl.doStats.cacheHost}</span>
+                              )}
+                            </span>
+                          </div>
+                        )}
                         {dl.doStats.bytesFromPeers > 0 && (
                           <div className="col-span-2 mt-1 text-xs text-gray-500">
-                            Peer breakdown: LAN {formatBytes(dl.doStats.bytesFromLanPeers)}
+                            Peer breakdown: LAN {formatBytes(localPeers)}
                             {" | "}Group {formatBytes(dl.doStats.bytesFromGroupPeers)}
                             {" | "}Internet {formatBytes(dl.doStats.bytesFromInternetPeers)}
                           </div>
                         )}
                       </div>
-                      {/* Peer vs HTTP visual bar */}
+                      {/* Peers (green) | MCC (purple) | HTTP (blue) */}
                       <div className="mt-1.5 w-full h-1.5 bg-gray-200 rounded-full overflow-hidden flex">
                         <div
                           className="h-full bg-green-400"
-                          style={{ width: `${dl.doStats.percentPeerCaching}%` }}
-                          title={`${dl.doStats.percentPeerCaching}% from peers`}
+                          style={{ width: `${peerPct}%` }}
+                          title={`${peerPct.toFixed(1)}% from peers`}
+                        />
+                        <div
+                          className="h-full bg-purple-400"
+                          style={{ width: `${cachePct}%` }}
+                          title={`${cachePct.toFixed(1)}% from Connected Cache${dl.doStats.cacheHost ? ` (${dl.doStats.cacheHost})` : ""}`}
                         />
                         <div
                           className="h-full bg-blue-400"
-                          style={{ width: `${100 - dl.doStats.percentPeerCaching}%` }}
-                          title={`${100 - dl.doStats.percentPeerCaching}% from HTTP`}
+                          style={{ width: `${httpPct}%` }}
+                          title={`${httpPct.toFixed(1)}% from HTTP/CDN`}
                         />
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               )}
 

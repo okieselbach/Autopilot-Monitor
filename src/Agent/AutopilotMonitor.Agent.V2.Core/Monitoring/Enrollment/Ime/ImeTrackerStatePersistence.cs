@@ -150,6 +150,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         public long DoBytesFromLanPeers { get; set; }
         public long DoBytesFromGroupPeers { get; set; }
         public long DoBytesFromInternetPeers { get; set; }
+        // Newer DO breakdown fields — null-defaulting deserialization handles older state files
+        // (machines that crashed mid-enrollment before this addition will deserialize these as 0/null).
+        public long DoBytesFromLinkLocalPeers { get; set; }
+        public long DoBytesFromCacheServer { get; set; }
+        public string DoCacheHost { get; set; }
         public int DoDownloadMode { get; set; } = -1;
         public string DoDownloadDuration { get; set; }
         public long DoBytesFromHttp { get; set; }

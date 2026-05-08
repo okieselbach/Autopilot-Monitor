@@ -75,6 +75,15 @@ namespace AutopilotMonitor.Shared.Models
         /// <summary>DO: bytes from internet peers</summary>
         public long DoBytesFromInternetPeers { get; set; }
 
+        /// <summary>DO: bytes from link-local peers (same subnet). Often combined with LAN in UI.</summary>
+        public long DoBytesFromLinkLocalPeers { get; set; }
+
+        /// <summary>DO: bytes served from a Microsoft Connected Cache (MCC) node — counted separately from BytesFromPeers.</summary>
+        public long DoBytesFromCacheServer { get; set; }
+
+        /// <summary>DO: URI/IP of the MCC node that served bytes (only when DoBytesFromCacheServer &gt; 0).</summary>
+        public string DoCacheHost { get; set; } = string.Empty;
+
         // App metadata (extracted from IME logs by ImeLogTracker)
         /// <summary>App version string (e.g. "1.7.00.4472"). Emitted in app_install_started.</summary>
         public string AppVersion { get; set; } = string.Empty;

@@ -155,7 +155,9 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                     TotalDoBytesFromHttp = doAgg.BytesFromHttp,
                     TotalDoBytesFromLanPeers = doAgg.BytesFromLanPeers,
                     TotalDoBytesFromGroupPeers = doAgg.BytesFromGroupPeers,
-                    TotalDoBytesFromInternetPeers = doAgg.BytesFromInternetPeers
+                    TotalDoBytesFromInternetPeers = doAgg.BytesFromInternetPeers,
+                    TotalDoBytesFromLinkLocalPeers = doAgg.BytesFromLinkLocalPeers,
+                    TotalDoBytesFromCacheServer = doAgg.BytesFromCacheServer
                 });
             }
 

@@ -73,6 +73,10 @@ namespace AutopilotMonitor.Shared.Models
         public long TotalDoBytesFromGroupPeers { get; set; }
         /// <summary>Bytes from internet peers</summary>
         public long TotalDoBytesFromInternetPeers { get; set; }
+        /// <summary>Bytes from link-local peers (same subnet)</summary>
+        public long TotalDoBytesFromLinkLocalPeers { get; set; }
+        /// <summary>Bytes served from a Microsoft Connected Cache (MCC) — separate from BytesFromPeers</summary>
+        public long TotalDoBytesFromCacheServer { get; set; }
     }
 
     /// <summary>
@@ -96,6 +100,8 @@ namespace AutopilotMonitor.Shared.Models
         public long DoBytesFromLanPeers { get; set; }
         public long DoBytesFromGroupPeers { get; set; }
         public long DoBytesFromInternetPeers { get; set; }
+        public long DoBytesFromLinkLocalPeers { get; set; }
+        public long DoBytesFromCacheServer { get; set; }
 
         public static LocationSessionRow From(SessionSummary s, DoAggregator.DoAggregate a, int totalAppCount)
         {
@@ -151,6 +157,8 @@ namespace AutopilotMonitor.Shared.Models
                 DoBytesFromLanPeers = a.BytesFromLanPeers,
                 DoBytesFromGroupPeers = a.BytesFromGroupPeers,
                 DoBytesFromInternetPeers = a.BytesFromInternetPeers,
+                DoBytesFromLinkLocalPeers = a.BytesFromLinkLocalPeers,
+                DoBytesFromCacheServer = a.BytesFromCacheServer,
             };
         }
     }

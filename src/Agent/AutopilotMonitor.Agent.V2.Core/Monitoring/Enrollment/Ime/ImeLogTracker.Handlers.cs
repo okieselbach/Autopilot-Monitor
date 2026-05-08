@@ -85,7 +85,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                     return;
                 }
 
-                // Extract all DO fields
+                // Extract all DO fields. Newer breakdown fields (LinkLocal/CacheServer/CacheHost)
+                // may be absent in older IME log JSON — TryGetProperty falls back to defaults.
                 long fileSize = root.TryGetProperty("FileSize", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
                 long totalBytes = root.TryGetProperty("TotalBytesDownloaded", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
                 long bytesFromPeers = root.TryGetProperty("BytesFromPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
@@ -93,17 +94,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 long bytesLanPeers = root.TryGetProperty("BytesFromLanPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
                 long bytesGroupPeers = root.TryGetProperty("BytesFromGroupPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
                 long bytesInternetPeers = root.TryGetProperty("BytesFromInternetPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                long bytesLinkLocalPeers = root.TryGetProperty("BytesFromLinkLocalPeers", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                long bytesFromCacheServer = root.TryGetProperty("BytesFromCacheServer", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
+                string cacheHost = root.TryGetProperty("CacheHost", out p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
                 int downloadMode = root.TryGetProperty("DownloadMode", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : -1;
                 string downloadDuration = root.TryGetProperty("DownloadDuration", out p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
                 long bytesFromHttp = root.TryGetProperty("BytesFromHttp", out p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : 0;
 
                 pkg.UpdateDoTelemetry(fileSize, totalBytes, bytesFromPeers, peerCachingPct,
                     bytesLanPeers, bytesGroupPeers, bytesInternetPeers,
-                    downloadMode, downloadDuration, bytesFromHttp);
+                    downloadMode, downloadDuration, bytesFromHttp,
+                    bytesFromLinkLocalPeers: bytesLinkLocalPeers,
+                    bytesFromCacheServer: bytesFromCacheServer,
+                    cacheHost: cacheHost);
 
                 _logger.Info($"ImeLogTracker: DO TEL for {pkg.Name ?? appId}: " +
                     $"size={fileSize}, peers={bytesFromPeers} ({peerCachingPct}%), " +
-                    $"http={bytesFromHttp}, mode={downloadMode}, duration={downloadDuration}");
+                    $"http={bytesFromHttp}, cache={bytesFromCacheServer}, mode={downloadMode}, duration={downloadDuration}");
 
                 OnDoTelemetryReceived?.Invoke(pkg);
                 _stateDirty = true;

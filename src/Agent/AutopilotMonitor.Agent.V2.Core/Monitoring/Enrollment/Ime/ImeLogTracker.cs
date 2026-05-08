@@ -505,6 +505,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 DoBytesFromLanPeers = p.DoBytesFromLanPeers,
                 DoBytesFromGroupPeers = p.DoBytesFromGroupPeers,
                 DoBytesFromInternetPeers = p.DoBytesFromInternetPeers,
+                DoBytesFromLinkLocalPeers = p.DoBytesFromLinkLocalPeers,
+                DoBytesFromCacheServer = p.DoBytesFromCacheServer,
+                DoCacheHost = p.DoCacheHost,
                 DoDownloadMode = p.DoDownloadMode,
                 DoDownloadDuration = p.DoDownloadDuration,
                 DoBytesFromHttp = p.DoBytesFromHttp,
@@ -530,6 +533,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 doBytesFromInternetPeers: p.DoBytesFromInternetPeers, doDownloadMode: p.DoDownloadMode,
                 doDownloadDuration: p.DoDownloadDuration, doBytesFromHttp: p.DoBytesFromHttp,
                 hasDoTelemetry: p.HasDoTelemetry,
+                doBytesFromLinkLocalPeers: p.DoBytesFromLinkLocalPeers,
+                doBytesFromCacheServer: p.DoBytesFromCacheServer,
+                doCacheHost: p.DoCacheHost,
                 appVersion: p.AppVersion, appType: p.AppType,
                 attemptNumber: p.AttemptNumber, detectionResult: p.DetectionResult);
 

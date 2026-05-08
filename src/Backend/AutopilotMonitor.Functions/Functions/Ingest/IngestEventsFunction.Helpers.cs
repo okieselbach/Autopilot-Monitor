@@ -201,6 +201,12 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                             summary.DoBytesFromGroupPeers = doGroup;
                         if (evt.Data.ContainsKey("doBytesFromInternetPeers") && long.TryParse(evt.Data["doBytesFromInternetPeers"]?.ToString(), out var doInet))
                             summary.DoBytesFromInternetPeers = doInet;
+                        if (evt.Data.ContainsKey("doBytesFromLinkLocalPeers") && long.TryParse(evt.Data["doBytesFromLinkLocalPeers"]?.ToString(), out var doLinkLocal))
+                            summary.DoBytesFromLinkLocalPeers = doLinkLocal;
+                        if (evt.Data.ContainsKey("doBytesFromCacheServer") && long.TryParse(evt.Data["doBytesFromCacheServer"]?.ToString(), out var doCache))
+                            summary.DoBytesFromCacheServer = doCache;
+                        if (evt.Data.ContainsKey("doCacheHost"))
+                            summary.DoCacheHost = evt.Data["doCacheHost"]?.ToString() ?? string.Empty;
                     }
                     break;
             }
