@@ -55,12 +55,31 @@ const registeredClients = new Map<string, { name: string; redirectUris: string[]
 // hostile destinations, but signing the state is a cheap belt-and-suspenders
 // that also catches replay (via iat/exp) and detects accidental client bugs.
 //
-// HMAC key: prefer STATE_HMAC_KEY from the environment so all replicas agree;
-// fall back to a per-instance random key when unset (state has a 10 min
-// lifetime, so per-instance is acceptable for single-replica scale=0..1).
-const STATE_HMAC_KEY: Buffer = process.env.STATE_HMAC_KEY
-  ? Buffer.from(process.env.STATE_HMAC_KEY, 'utf-8')
-  : crypto.randomBytes(32);
+// HMAC key: prefer OAuthStateSigningKey from the environment so all replicas
+// agree on the signature; fall back to a per-instance random key when unset
+// (state has a 10 min lifetime, so per-instance is acceptable for single-
+// replica scale=0..1). Format and naming match the backend's
+// PaginationTokenSigningKey for consistency: PascalCase env var, base64-
+// encoded random bytes, ≥32 bytes after decode. Generate on PowerShell:
+//   [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+const OAUTH_STATE_SIGNING_KEY: Buffer = (() => {
+  const raw = process.env.OAuthStateSigningKey;
+  if (!raw) return crypto.randomBytes(32);
+  // Buffer.from(s, 'base64') silently drops invalid chars — the only useful
+  // signal is the resulting byte length. Anything below 32 bytes is either a
+  // malformed input or a too-weak key; either way we want to fail loud at
+  // boot rather than ship a degraded-security configuration.
+  const decoded = Buffer.from(raw, 'base64');
+  if (decoded.length < 32) {
+    throw new Error(
+      `OAuthStateSigningKey must be a base64-encoded value yielding ≥32 bytes after decode (got ${decoded.length}). ` +
+      'Generate one with PowerShell: ' +
+      '[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)) ' +
+      "or Node: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+    );
+  }
+  return decoded;
+})();
 const STATE_MAX_AGE_SECONDS = 600;
 
 interface ProxyStatePayload {
@@ -74,7 +93,7 @@ export function signState(payload: Omit<ProxyStatePayload, 'iat'>): string {
   const full: ProxyStatePayload = { ...payload, iat: Math.floor(Date.now() / 1000) };
   const json = JSON.stringify(full);
   const body = Buffer.from(json, 'utf-8').toString('base64url');
-  const sig = crypto.createHmac('sha256', STATE_HMAC_KEY).update(body).digest('base64url');
+  const sig = crypto.createHmac('sha256', OAUTH_STATE_SIGNING_KEY).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 
@@ -83,7 +102,7 @@ export function verifyState(state: string, nowSeconds: number = Math.floor(Date.
   if (parts.length !== 2) return null;
   const [body, sig] = parts;
 
-  const expected = crypto.createHmac('sha256', STATE_HMAC_KEY).update(body).digest('base64url');
+  const expected = crypto.createHmac('sha256', OAUTH_STATE_SIGNING_KEY).update(body).digest('base64url');
   // Constant-time compare; lengths must match before timingSafeEqual.
   const sigBuf = Buffer.from(sig, 'utf-8');
   const expBuf = Buffer.from(expected, 'utf-8');
