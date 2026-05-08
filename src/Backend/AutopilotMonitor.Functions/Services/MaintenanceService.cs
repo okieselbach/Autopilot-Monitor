@@ -111,6 +111,7 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOldOpsEventsAsync();
                 await CleanupOrphanedEventsAsync();
                 await CheckAgentBlobStorageAsync();
+                await CheckEmbeddedCertExpiryAsync();
                 await RecomputePlatformStatsAsync();
 
                 // Backfill and repair tasks run only via manual trigger (RunManualAsync)

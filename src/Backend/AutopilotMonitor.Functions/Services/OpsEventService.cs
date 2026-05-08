@@ -87,6 +87,31 @@ namespace AutopilotMonitor.Functions.Services
                 $"Agent version pattern '{pattern}' blocked",
                 null, blockedBy, new { pattern });
 
+        public Task RecordEmbeddedCertExpiringSoonAsync(string role, string subject, string thumbprint, DateTime notAfterUtc, int daysUntilExpiry)
+            => WriteAsync(OpsEventCategory.Security, "EmbeddedCertExpiringSoon", OpsEventSeverity.Warning,
+                $"Embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u}) - rotate the embedded PEM bundle before {notAfterUtc:yyyy-MM-dd}",
+                null, "System.Maintenance",
+                new { role, subject, thumbprint, notAfterUtc = notAfterUtc.ToString("u"), daysUntilExpiry });
+
+        public Task RecordEmbeddedCertExpiringUrgentAsync(string role, string subject, string thumbprint, DateTime notAfterUtc, int daysUntilExpiry)
+            => WriteAsync(OpsEventCategory.Security, "EmbeddedCertExpiringUrgent", OpsEventSeverity.Error,
+                $"URGENT: embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u}) - agent mTLS will break without bundle rotation",
+                null, "System.Maintenance",
+                new { role, subject, thumbprint, notAfterUtc = notAfterUtc.ToString("u"), daysUntilExpiry });
+
+        public Task RecordEmbeddedCertExpiredAsync(string role, string subject, string thumbprint, DateTime notAfterUtc, int daysUntilExpiry)
+            => WriteAsync(OpsEventCategory.Security, "EmbeddedCertExpired", OpsEventSeverity.Critical,
+                daysUntilExpiry < 0
+                    ? $"CRITICAL: embedded Intune {role.ToLowerInvariant()} '{subject}' EXPIRED {-daysUntilExpiry}d ago ({notAfterUtc:u}) - agent mTLS validation broken"
+                    : $"CRITICAL: embedded Intune {role.ToLowerInvariant()} '{subject}' expires in {daysUntilExpiry}d ({notAfterUtc:u})",
+                null, "System.Maintenance",
+                new { role, subject, thumbprint, notAfterUtc = notAfterUtc.ToString("u"), daysUntilExpiry });
+
+        public Task RecordEmbeddedCertBundleEmptyAsync()
+            => WriteAsync(OpsEventCategory.Security, "EmbeddedCertBundleEmpty", OpsEventSeverity.Critical,
+                "No embedded Intune root certificates loaded - agent mTLS validator is failing closed for ALL clients",
+                null, "System.Maintenance", new { });
+
         // ── Tenant ─────────────────────────────────────────────────────────────
 
         public Task RecordTenantOffboardedAsync(string tenantId, string performedBy, Dictionary<string, int> deletedCounts)

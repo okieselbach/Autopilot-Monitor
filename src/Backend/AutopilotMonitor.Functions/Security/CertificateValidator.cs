@@ -40,6 +40,20 @@ namespace AutopilotMonitor.Functions.Security
         private static readonly Lazy<X509Certificate2[]> _intuneIntermediateCerts =
             new(() => LoadIntuneCerts("intune-intermediate-"));
 
+        /// <summary>
+        /// Returns the embedded Intune root certificates loaded into the validator.
+        /// Used by maintenance jobs (e.g. cert-expiry monitor) that need to inspect
+        /// the bundle without re-loading PEM resources. Treat the returned array as
+        /// read-only; the chain validator caches it for process lifetime.
+        /// </summary>
+        internal static IReadOnlyList<X509Certificate2> GetEmbeddedRoots() => _intuneRootCerts.Value;
+
+        /// <summary>
+        /// Returns the embedded Intune intermediate certificates loaded into the validator.
+        /// See <see cref="GetEmbeddedRoots"/> for usage notes.
+        /// </summary>
+        internal static IReadOnlyList<X509Certificate2> GetEmbeddedIntermediates() => _intuneIntermediateCerts.Value;
+
         private class CachedValidationResult
         {
             public CertificateValidationResult Result { get; set; } = null!;
