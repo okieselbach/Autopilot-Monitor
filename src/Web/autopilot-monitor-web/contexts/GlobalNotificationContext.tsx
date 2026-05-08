@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
+import { useSignalR } from './SignalRContext';
 import { api } from '@/lib/api';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
 
@@ -24,14 +25,12 @@ interface GlobalNotificationContextType {
 
 const GlobalNotificationContext = createContext<GlobalNotificationContextType | undefined>(undefined);
 
-const POLL_INTERVAL_MS = 60_000;
-
 export function GlobalNotificationProvider({ children }: { children: React.ReactNode }) {
   const { user, getAccessToken } = useAuth();
+  const { connection, isConnected, joinGroup, leaveGroup } = useSignalR();
   const [notifications, setNotifications] = useState<GlobalNotification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const fetchingRef = useRef(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isGlobal = user?.isGlobalAdmin === true;
 
@@ -55,22 +54,22 @@ export function GlobalNotificationProvider({ children }: { children: React.React
     }
   }, [isGlobal, getAccessToken]);
 
-  // Initial fetch + polling
+  // Initial state hydration. Re-fetched on SignalR reconnect to recover any deltas
+  // pushed during the disconnect window.
   useEffect(() => {
     if (!isGlobal) {
       setNotifications([]);
       return;
     }
-
     setIsLoading(true);
     fetchNotifications().finally(() => setIsLoading(false));
-
-    intervalRef.current = setInterval(fetchNotifications, POLL_INTERVAL_MS);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
   }, [isGlobal, fetchNotifications]);
+
+  useEffect(() => {
+    if (!connection || !isGlobal) return;
+    const handler = () => { fetchNotifications(); };
+    connection.onreconnected(handler);
+  }, [connection, isGlobal, fetchNotifications]);
 
   // Re-fetch when globalAdminMode is toggled in localStorage
   useEffect(() => {
@@ -83,8 +82,42 @@ export function GlobalNotificationProvider({ children }: { children: React.React
     return () => window.removeEventListener('localStorageChange', handleStorageChange);
   }, [isGlobal, fetchNotifications]);
 
+  // Group membership: only Global Admins join the global-admins group.
+  useEffect(() => {
+    if (!isConnected || !isGlobal) return;
+    const group = 'global-admins';
+    joinGroup(group);
+    return () => { leaveGroup(group); };
+  }, [isConnected, isGlobal, joinGroup, leaveGroup]);
+
+  // Live-push handlers.
+  useEffect(() => {
+    if (!connection) return;
+
+    const onCreate = (notification: GlobalNotification) => {
+      if (!notification?.id) return;
+      setNotifications(prev => prev.some(n => n.id === notification.id) ? prev : [notification, ...prev]);
+    };
+    const onDismiss = (payload: { id: string }) => {
+      if (!payload?.id) return;
+      setNotifications(prev => prev.filter(n => n.id !== payload.id));
+    };
+    const onDismissAll = () => {
+      setNotifications([]);
+    };
+
+    connection.on('globalNotification', onCreate);
+    connection.on('globalNotificationDismissed', onDismiss);
+    connection.on('globalNotificationsDismissedAll', onDismissAll);
+
+    return () => {
+      connection.off('globalNotification', onCreate);
+      connection.off('globalNotificationDismissed', onDismiss);
+      connection.off('globalNotificationsDismissedAll', onDismissAll);
+    };
+  }, [connection]);
+
   const dismissNotification = useCallback(async (id: string) => {
-    // Optimistic removal
     setNotifications(prev => prev.filter(n => n.id !== id));
 
     try {
@@ -94,7 +127,7 @@ export function GlobalNotificationProvider({ children }: { children: React.React
         { method: 'POST' },
       );
     } catch {
-      // Best-effort; next poll will reconcile
+      // Best-effort; backend push will reconcile other tabs if dismiss eventually lands
     }
   }, [getAccessToken]);
 

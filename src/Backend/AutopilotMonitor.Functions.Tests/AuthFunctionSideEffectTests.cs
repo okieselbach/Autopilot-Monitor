@@ -55,7 +55,7 @@ public class AuthFunctionSideEffectTests
         { CallBase = false };
 
         _globalNotificationMock = new Mock<GlobalNotificationService>(
-            notificationRepo, Mock.Of<ILogger<GlobalNotificationService>>())
+            notificationRepo, new FakeSignalRNotificationService(), Mock.Of<ILogger<GlobalNotificationService>>())
         { CallBase = false };
 
         var adminConfigService = new Mock<AdminConfigurationService>(

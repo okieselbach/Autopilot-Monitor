@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Helpers;
 using Microsoft.Azure.SignalR.Management;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -11,7 +12,7 @@ namespace AutopilotMonitor.Functions.Services
     /// of Azure Function output bindings (e.g., async rule engine, vulnerability correlation).
     /// Uses the Azure SignalR Management SDK to send messages to connected clients.
     /// </summary>
-    public class SignalRNotificationService : IDisposable
+    public class SignalRNotificationService : ISignalRNotificationService, IDisposable
     {
         private readonly ILogger<SignalRNotificationService> _logger;
         private readonly ServiceManager _serviceManager;
@@ -91,6 +92,124 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to send vulnerabilityReportReady notification for session {SessionId}", sessionId);
+            }
+        }
+
+        /// <summary>
+        /// Push a newly created tenant notification to the appropriate audience-tier group.
+        /// Member-tier notifications go to the -notify-member group (joined by all tenant members);
+        /// Admin-tier notifications go to the -notify-admin group (joined by Tenant Admins + Global Admins only).
+        /// </summary>
+        public virtual async Task SendTenantNotificationAsync(string tenantId, NotificationAudience audience, object dto)
+        {
+            try
+            {
+                var hub = await GetHubContextAsync();
+                var groupName = audience == NotificationAudience.Admin
+                    ? SignalRGroupHelper.TenantNotifyAdminGroup(tenantId)
+                    : SignalRGroupHelper.TenantNotifyMemberGroup(tenantId);
+
+                await hub.Clients.Group(groupName).SendCoreAsync("tenantNotification", new[] { dto });
+                _logger.LogDebug("Sent tenantNotification to group {Group}", groupName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send tenantNotification for tenant {TenantId}", tenantId);
+            }
+        }
+
+        /// <summary>
+        /// Push a tenant notification dismissal to all audience-tier groups for the tenant.
+        /// We do not know the original audience at dismiss time, so we broadcast to both groups —
+        /// receivers filter by id and remove if present (idempotent).
+        /// </summary>
+        public virtual async Task SendTenantNotificationDismissedAsync(string tenantId, string notificationId)
+        {
+            try
+            {
+                var hub = await GetHubContextAsync();
+                var memberGroup = SignalRGroupHelper.TenantNotifyMemberGroup(tenantId);
+                var adminGroup = SignalRGroupHelper.TenantNotifyAdminGroup(tenantId);
+                var payload = new { id = notificationId };
+
+                await Task.WhenAll(
+                    hub.Clients.Group(memberGroup).SendCoreAsync("tenantNotificationDismissed", new object[] { payload }),
+                    hub.Clients.Group(adminGroup).SendCoreAsync("tenantNotificationDismissed", new object[] { payload })
+                );
+                _logger.LogDebug("Sent tenantNotificationDismissed for tenant {TenantId} id {Id}", tenantId, notificationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send tenantNotificationDismissed for tenant {TenantId} id {Id}", tenantId, notificationId);
+            }
+        }
+
+        /// <summary>
+        /// Push a "dismiss all" event to all audience-tier groups for the tenant. Receivers clear local state.
+        /// </summary>
+        public virtual async Task SendTenantNotificationDismissedAllAsync(string tenantId)
+        {
+            try
+            {
+                var hub = await GetHubContextAsync();
+                var memberGroup = SignalRGroupHelper.TenantNotifyMemberGroup(tenantId);
+                var adminGroup = SignalRGroupHelper.TenantNotifyAdminGroup(tenantId);
+
+                await Task.WhenAll(
+                    hub.Clients.Group(memberGroup).SendCoreAsync("tenantNotificationsDismissedAll", Array.Empty<object>()),
+                    hub.Clients.Group(adminGroup).SendCoreAsync("tenantNotificationsDismissedAll", Array.Empty<object>())
+                );
+                _logger.LogDebug("Sent tenantNotificationsDismissedAll for tenant {TenantId}", tenantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send tenantNotificationsDismissedAll for tenant {TenantId}", tenantId);
+            }
+        }
+
+        /// <summary>
+        /// Push a newly created global notification to the global-admins group.
+        /// </summary>
+        public virtual async Task SendGlobalNotificationAsync(object dto)
+        {
+            try
+            {
+                var hub = await GetHubContextAsync();
+                await hub.Clients.Group(SignalRGroupHelper.GlobalAdminsGroup).SendCoreAsync("globalNotification", new[] { dto });
+                _logger.LogDebug("Sent globalNotification to group {Group}", SignalRGroupHelper.GlobalAdminsGroup);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send globalNotification");
+            }
+        }
+
+        public virtual async Task SendGlobalNotificationDismissedAsync(string notificationId)
+        {
+            try
+            {
+                var hub = await GetHubContextAsync();
+                var payload = new { id = notificationId };
+                await hub.Clients.Group(SignalRGroupHelper.GlobalAdminsGroup).SendCoreAsync("globalNotificationDismissed", new object[] { payload });
+                _logger.LogDebug("Sent globalNotificationDismissed for id {Id}", notificationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send globalNotificationDismissed for id {Id}", notificationId);
+            }
+        }
+
+        public virtual async Task SendGlobalNotificationDismissedAllAsync()
+        {
+            try
+            {
+                var hub = await GetHubContextAsync();
+                await hub.Clients.Group(SignalRGroupHelper.GlobalAdminsGroup).SendCoreAsync("globalNotificationsDismissedAll", Array.Empty<object>());
+                _logger.LogDebug("Sent globalNotificationsDismissedAll");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send globalNotificationsDismissedAll");
             }
         }
 

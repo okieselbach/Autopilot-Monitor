@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
+import { useSignalR } from './SignalRContext';
 import { canFetchTenantNotifications } from './tenantNotificationsGate';
 import { api } from '@/lib/api';
 import { authenticatedFetch } from '@/lib/authenticatedFetch';
@@ -25,20 +26,20 @@ interface TenantNotificationContextType {
 
 const TenantNotificationContext = createContext<TenantNotificationContextType | undefined>(undefined);
 
-const POLL_INTERVAL_MS = 60_000;
-
 export function TenantNotificationProvider({ children }: { children: React.ReactNode }) {
   const { user, getAccessToken } = useAuth();
+  const { connection, isConnected, joinGroup, leaveGroup } = useSignalR();
   const [tenantNotifications, setTenantNotifications] = useState<TenantNotification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const fetchingRef = useRef(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Only tenant members (Admin/Operator/Viewer) and Global Admins are entitled to the bell.
   // The backend filters per-notification visibility by audience tier, so it is safe to fetch
   // for every member role — but unauthenticated users and users without a tenant role would
   // just produce 401/403 noise, so we skip them entirely.
   const canFetchNotifications = canFetchTenantNotifications(user);
+  const tenantId = user?.tenantId ?? null;
+  const isAdminTier = user?.isTenantAdmin === true || user?.isGlobalAdmin === true;
 
   const fetchNotifications = useCallback(async () => {
     if (!canFetchNotifications || fetchingRef.current) return;
@@ -60,21 +61,72 @@ export function TenantNotificationProvider({ children }: { children: React.React
     }
   }, [canFetchNotifications, getAccessToken]);
 
+  // Initial state hydration. Runs once on mount and again after every SignalR reconnect to
+  // recover any deltas that were emitted while the SignalR connection was down.
   useEffect(() => {
     if (!canFetchNotifications) {
       setTenantNotifications([]);
       return;
     }
-
     setIsLoading(true);
     fetchNotifications().finally(() => setIsLoading(false));
+  }, [canFetchNotifications, fetchNotifications]);
 
-    intervalRef.current = setInterval(fetchNotifications, POLL_INTERVAL_MS);
+  // Re-fetch on SignalR reconnect — covers the deltas pushed during the disconnect window.
+  useEffect(() => {
+    if (!connection || !canFetchNotifications) return;
+    const handler = () => { fetchNotifications(); };
+    connection.onreconnected(handler);
+    // The signalr-js client does not expose an unsubscribe for onreconnected; rely on the
+    // SignalR connection lifecycle (one connection per app session) for cleanup.
+  }, [connection, canFetchNotifications, fetchNotifications]);
+
+  // Group membership: Member-tier always; Admin-tier only for Tenant Admins / Global Admins.
+  useEffect(() => {
+    if (!isConnected || !canFetchNotifications || !tenantId) return;
+
+    const memberGroup = `tenant-${tenantId}-notify-member`;
+    const adminGroup = `tenant-${tenantId}-notify-admin`;
+
+    joinGroup(memberGroup);
+    if (isAdminTier) {
+      joinGroup(adminGroup);
+    }
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      leaveGroup(memberGroup);
+      if (isAdminTier) {
+        leaveGroup(adminGroup);
+      }
     };
-  }, [canFetchNotifications, fetchNotifications]);
+  }, [isConnected, canFetchNotifications, tenantId, isAdminTier, joinGroup, leaveGroup]);
+
+  // Live-push handlers.
+  useEffect(() => {
+    if (!connection) return;
+
+    const onCreate = (notification: TenantNotification) => {
+      if (!notification?.id) return;
+      setTenantNotifications(prev => prev.some(n => n.id === notification.id) ? prev : [notification, ...prev]);
+    };
+    const onDismiss = (payload: { id: string }) => {
+      if (!payload?.id) return;
+      setTenantNotifications(prev => prev.filter(n => n.id !== payload.id));
+    };
+    const onDismissAll = () => {
+      setTenantNotifications([]);
+    };
+
+    connection.on('tenantNotification', onCreate);
+    connection.on('tenantNotificationDismissed', onDismiss);
+    connection.on('tenantNotificationsDismissedAll', onDismissAll);
+
+    return () => {
+      connection.off('tenantNotification', onCreate);
+      connection.off('tenantNotificationDismissed', onDismiss);
+      connection.off('tenantNotificationsDismissedAll', onDismissAll);
+    };
+  }, [connection]);
 
   const dismissTenantNotification = useCallback(async (id: string) => {
     setTenantNotifications(prev => prev.filter(n => n.id !== id));
@@ -86,7 +138,7 @@ export function TenantNotificationProvider({ children }: { children: React.React
         { method: 'POST' },
       );
     } catch {
-      // Best-effort; next poll will reconcile
+      // Best-effort; the backend push will reconcile other tabs if the dismiss eventually lands
     }
   }, [getAccessToken]);
 

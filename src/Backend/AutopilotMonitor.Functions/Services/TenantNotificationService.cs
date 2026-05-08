@@ -12,13 +12,16 @@ namespace AutopilotMonitor.Functions.Services;
 public class TenantNotificationService
 {
     private readonly ITenantNotificationRepository _repo;
+    private readonly ISignalRNotificationService _signalr;
     private readonly ILogger<TenantNotificationService> _logger;
 
     public TenantNotificationService(
         ITenantNotificationRepository repo,
+        ISignalRNotificationService signalr,
         ILogger<TenantNotificationService> logger)
     {
         _repo = repo;
+        _signalr = signalr;
         _logger = logger;
     }
 
@@ -49,6 +52,19 @@ public class TenantNotificationService
             await _repo.AddNotificationAsync(tenantId, notification);
             _logger.LogInformation("Tenant notification created: tenant={TenantId} id={NotificationId} type={Type}",
                 tenantId, notificationId, type);
+
+            // Push to the audience-tier SignalR group so connected clients update live without polling.
+            var audience = TenantNotificationAudienceCatalog.Resolve(type);
+            var dto = new GlobalNotificationDto
+            {
+                Id = notificationId,
+                Type = type,
+                Title = title,
+                Message = message,
+                Href = href,
+                CreatedAt = notification.CreatedAt
+            };
+            await _signalr.SendTenantNotificationAsync(tenantId, audience, dto);
         }
         catch (Exception ex)
         {
@@ -90,7 +106,12 @@ public class TenantNotificationService
     {
         try
         {
-            return await _repo.DismissNotificationAsync(tenantId, notificationId, dismissedBy);
+            var dismissed = await _repo.DismissNotificationAsync(tenantId, notificationId, dismissedBy);
+            if (dismissed)
+            {
+                await _signalr.SendTenantNotificationDismissedAsync(tenantId, notificationId);
+            }
+            return dismissed;
         }
         catch (Exception ex)
         {
@@ -104,7 +125,12 @@ public class TenantNotificationService
     {
         try
         {
-            return await _repo.DismissAllNotificationsAsync(tenantId);
+            var count = await _repo.DismissAllNotificationsAsync(tenantId);
+            if (count > 0)
+            {
+                await _signalr.SendTenantNotificationDismissedAllAsync(tenantId);
+            }
+            return count;
         }
         catch (Exception ex)
         {

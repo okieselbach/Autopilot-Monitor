@@ -217,6 +217,7 @@ builder.Services.AddHostedService<
 
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
+builder.Services.AddSingleton<ISignalRNotificationService>(sp => sp.GetRequiredService<SignalRNotificationService>());
 
 // Vulnerability correlation services
 builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Vulnerability.NvdApiClient>()

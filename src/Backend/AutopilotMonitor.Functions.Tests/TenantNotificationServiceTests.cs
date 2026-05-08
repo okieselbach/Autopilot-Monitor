@@ -23,7 +23,7 @@ public class TenantNotificationServiceTests
         var repo = new Mock<ITenantNotificationRepository>();
         repo.Setup(r => r.GetNotificationsAsync(TenantId, It.IsAny<int>()))
             .ReturnsAsync(notifications.ToList());
-        return new TenantNotificationService(repo.Object, NullLogger<TenantNotificationService>.Instance);
+        return new TenantNotificationService(repo.Object, new FakeSignalRNotificationService(), NullLogger<TenantNotificationService>.Instance);
     }
 
     private static GlobalNotification Notif(string type, string id) => new()

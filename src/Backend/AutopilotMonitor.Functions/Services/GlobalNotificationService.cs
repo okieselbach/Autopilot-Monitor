@@ -46,13 +46,16 @@ public class GlobalNotificationDto
 public class GlobalNotificationService
 {
     private readonly INotificationRepository _notificationRepo;
+    private readonly ISignalRNotificationService _signalr;
     private readonly ILogger<GlobalNotificationService> _logger;
 
     public GlobalNotificationService(
         INotificationRepository notificationRepo,
+        ISignalRNotificationService signalr,
         ILogger<GlobalNotificationService> logger)
     {
         _notificationRepo = notificationRepo;
+        _signalr = signalr;
         _logger = logger;
     }
 
@@ -79,6 +82,17 @@ public class GlobalNotificationService
 
             await _notificationRepo.AddNotificationAsync(notification);
             _logger.LogInformation("Global notification created: {NotificationId} ({Type})", notificationId, type);
+
+            var dto = new GlobalNotificationDto
+            {
+                Id = notificationId,
+                Type = type,
+                Title = title,
+                Message = message,
+                Href = href,
+                CreatedAt = notification.CreatedAt
+            };
+            await _signalr.SendGlobalNotificationAsync(dto);
         }
         catch (Exception ex)
         {
@@ -120,7 +134,12 @@ public class GlobalNotificationService
     {
         try
         {
-            return await _notificationRepo.DismissNotificationAsync(notificationId, string.Empty);
+            var dismissed = await _notificationRepo.DismissNotificationAsync(notificationId, string.Empty);
+            if (dismissed)
+            {
+                await _signalr.SendGlobalNotificationDismissedAsync(notificationId);
+            }
+            return dismissed;
         }
         catch (Exception ex)
         {
@@ -136,7 +155,12 @@ public class GlobalNotificationService
     {
         try
         {
-            return await _notificationRepo.DismissAllNotificationsAsync();
+            var count = await _notificationRepo.DismissAllNotificationsAsync();
+            if (count > 0)
+            {
+                await _signalr.SendGlobalNotificationDismissedAllAsync();
+            }
+            return count;
         }
         catch (Exception ex)
         {

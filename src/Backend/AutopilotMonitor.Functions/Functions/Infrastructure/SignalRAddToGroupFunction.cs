@@ -93,6 +93,18 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                             _logger.LogInformation($"Global Admin {userEmail} joining cross-tenant group: {request.GroupName}");
                         }
                     }
+
+                    // Admin-tier notification group: only Tenant Admins or Global Admins may join.
+                    // The Member-tier group has no extra check beyond the tenant-membership above.
+                    if (SignalRGroupHelper.IsTenantNotifyAdminGroup(request.GroupName)
+                        && !requestCtx.IsTenantAdmin
+                        && !requestCtx.IsGlobalAdmin)
+                    {
+                        _logger.LogWarning($"User {userEmail} (role={requestCtx.UserRole}) attempted to join Admin-tier notification group: {request.GroupName}");
+                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Tenant Admins can join the admin notification group" });
+                        return new AddToGroupOutput { HttpResponse = forbiddenResponse };
+                    }
                 }
 
                 // Extract session ID from group name if it's a session-specific group

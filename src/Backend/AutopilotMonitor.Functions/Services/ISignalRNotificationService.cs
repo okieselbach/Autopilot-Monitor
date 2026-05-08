@@ -1,0 +1,24 @@
+using System.Threading.Tasks;
+
+namespace AutopilotMonitor.Functions.Services
+{
+    /// <summary>
+    /// Programmatic SignalR message sender. Extracted as an interface so that consumers
+    /// (TenantNotificationService, GlobalNotificationService, IngestEventsFunction, etc.)
+    /// can be unit-tested without instantiating the real Azure SignalR ServiceManager,
+    /// whose constructor validates the connection string.
+    /// </summary>
+    public interface ISignalRNotificationService
+    {
+        Task NotifyRuleResultsAvailableAsync(string tenantId, string sessionId, int resultCount);
+        Task NotifyVulnerabilityReportAvailableAsync(string tenantId, string sessionId, string overallRisk);
+
+        Task SendTenantNotificationAsync(string tenantId, NotificationAudience audience, object dto);
+        Task SendTenantNotificationDismissedAsync(string tenantId, string notificationId);
+        Task SendTenantNotificationDismissedAllAsync(string tenantId);
+
+        Task SendGlobalNotificationAsync(object dto);
+        Task SendGlobalNotificationDismissedAsync(string notificationId);
+        Task SendGlobalNotificationDismissedAllAsync();
+    }
+}

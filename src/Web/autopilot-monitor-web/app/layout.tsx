@@ -118,11 +118,11 @@ export default function RootLayout({
         />
         <ThemeProvider>
           <AuthProvider>
-            <NotificationProvider>
-              <GlobalNotificationProvider>
-                <TenantNotificationProvider>
-                  <TenantProvider>
-                    <SignalRProvider>
+            <SignalRProvider>
+              <NotificationProvider>
+                <GlobalNotificationProvider>
+                  <TenantNotificationProvider>
+                    <TenantProvider>
                       <SidebarProvider>
                         <AppInsightsInit />
                         <Navbar />
@@ -132,11 +132,11 @@ export default function RootLayout({
                         <ScrollToTopButton />
                         <FeedbackBubble />
                       </SidebarProvider>
-                    </SignalRProvider>
-                  </TenantProvider>
-                </TenantNotificationProvider>
-              </GlobalNotificationProvider>
-            </NotificationProvider>
+                    </TenantProvider>
+                  </TenantNotificationProvider>
+                </GlobalNotificationProvider>
+              </NotificationProvider>
+            </SignalRProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>
