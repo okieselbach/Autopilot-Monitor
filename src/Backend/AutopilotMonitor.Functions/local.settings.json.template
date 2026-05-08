@@ -4,6 +4,11 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
     "AzureTableStorageConnectionString": "UseDevelopmentStorage=true",
-    "AzureBlobStorageConnectionString": "UseDevelopmentStorage=true"
+    "AzureBlobStorageConnectionString": "UseDevelopmentStorage=true",
+
+    "// SignalR free-tier quota watcher": "Optional. Set to the full Azure resource id of the SignalR Service to enable hourly OpsEvents when the 20-connections / 20k-messages-per-day free-tier limits are approached. Function App's managed identity needs 'Monitoring Reader' on this resource. Leave unset to skip the watcher.",
+    "SignalRResourceId": "",
+    "SignalRFreeTierConnectionLimit": "20",
+    "SignalRFreeTierDailyMessageLimit": "20000"
   }
 }

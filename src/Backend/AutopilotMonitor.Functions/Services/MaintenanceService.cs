@@ -5,10 +5,12 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Services.Monitoring;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -53,6 +55,8 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IDistressReportRepository _distressReportRepo;
         private readonly IOpsEventRepository _opsEventRepo;
         private readonly OpsEventService _opsEventService;
+        private readonly IAzureMonitorMetricsReader _metricsReader;
+        private readonly IConfiguration _configuration;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<MaintenanceService> _logger;
 
@@ -73,6 +77,8 @@ namespace AutopilotMonitor.Functions.Services
             IDistressReportRepository distressReportRepo,
             IOpsEventRepository opsEventRepo,
             OpsEventService opsEventService,
+            IAzureMonitorMetricsReader metricsReader,
+            IConfiguration configuration,
             IHttpClientFactory httpClientFactory,
             ILogger<MaintenanceService> logger)
         {
@@ -88,6 +94,8 @@ namespace AutopilotMonitor.Functions.Services
             _distressReportRepo = distressReportRepo;
             _opsEventRepo = opsEventRepo;
             _opsEventService = opsEventService;
+            _metricsReader = metricsReader;
+            _configuration = configuration;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
         }
@@ -170,6 +178,11 @@ namespace AutopilotMonitor.Functions.Services
                     // Mirror the timer path: check embedded Intune cert bundle for
                     // expiring members so manual triggers also exercise the watcher.
                     await CheckEmbeddedCertExpiryAsync();
+
+                    // Same parity for SignalR quota - the dedicated 1h timer is the
+                    // primary cadence, but operators triggering maintenance manually
+                    // expect every health/quota check to run.
+                    await CheckSignalRQuotaAsync();
                 }
 
                 await RecomputePlatformStatsAsync();

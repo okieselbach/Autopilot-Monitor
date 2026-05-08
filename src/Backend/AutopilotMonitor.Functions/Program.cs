@@ -154,6 +154,9 @@ builder.Services.AddSingleton<ImeLogPatternService>();
 builder.Services.AddHttpClient<GitHubRuleRepository>()
     .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().ExternalDataApi);
 builder.Services.AddSingleton<MaintenanceService>();
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Monitoring.IAzureMonitorMetricsReader,
+    AutopilotMonitor.Functions.Services.Monitoring.AzureMonitorMetricsReader>();
 builder.Services.AddSingleton<OpsAlertDispatchService>();
 builder.Services.AddSingleton<OpsEventService>();
 builder.Services.AddSingleton<BlockedDeviceService>();
