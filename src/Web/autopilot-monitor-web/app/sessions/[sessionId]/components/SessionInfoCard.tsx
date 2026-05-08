@@ -82,7 +82,7 @@ export default function SessionInfoCard({ session, enrollmentDuration, displaySt
           </span>
         </div>
       )}
-      <FailureSnapshotBlock failureSnapshotJson={session.failureSnapshotJson} sessionId={session.sessionId} />
+      <FailureSnapshotBlock failureSnapshotJson={session.failureSnapshotJson} />
     </div>
   );
 }
