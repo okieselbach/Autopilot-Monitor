@@ -167,6 +167,9 @@ namespace AutopilotMonitor.Functions.Services
                     // StoreSessionAsync Replace-mode IndexRowKey bug (now fixed).
                     await _maintenanceRepo.CleanupGhostSessionIndexEntriesAsync();
 
+                    // Mirror the timer path: check embedded Intune cert bundle for
+                    // expiring members so manual triggers also exercise the watcher.
+                    await CheckEmbeddedCertExpiryAsync();
                 }
 
                 await RecomputePlatformStatsAsync();
