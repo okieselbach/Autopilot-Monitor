@@ -1,4 +1,5 @@
 using System.Net;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -99,6 +100,14 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
             // Perform comprehensive health checks
             var healthCheckResult = await _healthCheckService.PerformAllChecksAsync();
 
+            // SignalR Quota check exposes the subscription/resource-group path of the
+            // backing SignalR resource — restrict to Global Admins. Non-GA callers
+            // (Tenant Admins, Operators) get the rest of the report unchanged.
+            var requestCtx = context.GetRequestContext();
+            var visibleChecks = requestCtx.IsGlobalAdmin
+                ? healthCheckResult.Checks
+                : healthCheckResult.Checks.Where(c => c.Name != "SignalR Quota").ToList();
+
             // Always return 200 OK with the health status in the body
             // This allows the frontend to properly display the results even if some checks fail
             var response = req.CreateResponse(HttpStatusCode.OK);
@@ -107,7 +116,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                 service = "Autopilot Monitor API",
                 timestamp = healthCheckResult.Timestamp,
                 overallStatus = healthCheckResult.OverallStatus,
-                checks = healthCheckResult.Checks,
+                checks = visibleChecks,
                 version = _buildInfo.Version,
                 commitHash = _buildInfo.CommitHash,
                 buildUtc = _buildInfo.BuildUtc

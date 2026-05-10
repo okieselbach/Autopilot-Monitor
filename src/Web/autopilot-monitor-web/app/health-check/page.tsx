@@ -346,14 +346,24 @@ export default function HealthCheckPage() {
                       <div className="mt-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600">
                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Details</h4>
                         <dl className="space-y-1">
-                          {Object.entries(check.details).map(([key, value]) => (
-                            <div key={key} className="flex justify-between text-xs">
-                              <dt className="font-medium text-gray-600 dark:text-gray-400">{key}</dt>
-                              <dd className="text-gray-900 dark:text-gray-100 font-mono">
-                                {Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                              </dd>
-                            </div>
-                          ))}
+                          {Object.entries(check.details).map(([key, value]) => {
+                            const isResourceId = key === 'Resource' && typeof value === 'string' && value.startsWith('/subscriptions/');
+                            return (
+                              <div key={key} className="flex justify-between text-xs items-center gap-3">
+                                <dt className="font-medium text-gray-600 dark:text-gray-400 shrink-0">{key}</dt>
+                                <dd className="text-gray-900 dark:text-gray-100 font-mono text-right break-all">
+                                  {isResourceId ? (
+                                    <span
+                                      title={String(value)}
+                                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400 cursor-help"
+                                    >
+                                      Set
+                                    </span>
+                                  ) : Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                </dd>
+                              </div>
+                            );
+                          })}
                         </dl>
                       </div>
                     )}
