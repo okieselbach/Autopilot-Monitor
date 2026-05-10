@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { PublicPageHeader } from "../../components/PublicPageHeader";
 
 export default function ChangelogPage() {
@@ -33,6 +34,66 @@ export default function ChangelogPage() {
 
           {/* Entries — newest first */}
           <div className="space-y-10">
+
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-xs font-mono font-semibold text-gray-400 uppercase tracking-wider">
+                  2026-05-10 - 12:00 CET
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  Platform Update
+                </span>
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-2">
+                Agent V2 rollout, MS-Graph pagination, SignalR push notifications, and security hardening
+              </h2>
+              <ul className="space-y-2 text-sm text-gray-600 leading-relaxed list-none">
+                <li className="flex gap-2">
+                  <span className="text-orange-500 flex-shrink-0">⚠</span>
+                  <span><span className="font-medium text-gray-800">Agent V2 rollout (action recommended)</span> — The agent has been rebuilt on a new internal architecture (Decision Engine, lifecycle-anchor allowlist, Death-Rattle recovery for crashed runs) for more reliable session detection and stricter completion logic. The Intune bootstrapper script (<code>Install-AutopilotMonitor.ps1</code>) was updated and now verifies the runtime process started after launch. Replace the script in your Intune tenant with the latest version from the repository.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Submit Logs page</span> — A new <Link href="/settings/tenant/support" className="text-blue-600 hover:text-blue-800 underline">Submit Logs</Link> page lets you send diagnostic files to the Autopilot Monitor team without an associated session, useful for issues caught outside of an active enrollment.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Real-time notifications via SignalR push</span> — The notification bell now updates purely from SignalR events (one fetch on mount, re-fetch on reconnect) instead of polling every 60 seconds, with audience-aware delivery for tenant admins vs members.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">MS-Graph style pagination</span> — All large list endpoints (sessions, events, audit, ops events, reports) now support opt-in <code>nextLink</code> pagination with HMAC-bound continuation tokens. Dashboard, Fleet Health, and MCP tools have been migrated to the new model.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">MCP server</span> — A new <code>get_resource</code> tool, leaner <code>get_session_summary</code> payloads, and a security &amp; capability audit covering OAuth proxy hardening, access-guard tightening, and pagination of the last three legacy diagnostic tools.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Backend security hardening</span> — Client-certificate chain trust is now pinned to the embedded Intune root certificate, and query-tenant guards moved to centralized middleware.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Web hardening &amp; portal split</span> — Tightened Content Security Policy, hardened <code>/go</code> bootstrap error handling, and a host-based middleware now cleanly separates the public site from the authenticated portal.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Web performance</span> — In-flight request collapser (<code>dedupedAuthFetch</code>) eliminates duplicate parallel fetches, the dashboard load path was refactored</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Delivery Optimization</span> — Download breakdowns now include Microsoft Connected Cache (MCC) and LinkLocal sources, applied symmetrically across all layers (collector, telemetry, dashboard).</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">WhiteGlove improvements</span> — Timeline now splits Part 1 / Part 2 at the Part-2 <code>agent_started</code> event (not the legacy <code>whiteglove_resumed</code>), Part-2 architectural cleanup landed on the agent side, summary dialog is suppressed on Part 1, and Modern Deployment EventID 1010 was added to the harmless-noise default list.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">•</span>
+                  <span><span className="font-medium text-gray-800">Bugfixes &amp; polish</span> — <code>TenantIdResolver</code> fallbacks for non-Type-6 enrollments and Hybrid Join (CloudDomainJoin + MS-Organization-Access cert), event-driven TenantId wait via RegistryWatcher, software-inventory now accepts AAD/MSA SIDs and emits real registry paths, full-width dashboard toggle with <code>?span=</code> URL persistence, SLA violator link routes correctly, and many smaller fixes across pagination, audit fetching, and submit-diag sidebar entries.</span>
+                </li>
+              </ul>
+            </div>
 
             <div>
               <div className="flex items-center gap-3 mb-3">
