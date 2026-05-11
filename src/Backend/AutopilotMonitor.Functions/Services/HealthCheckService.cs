@@ -17,24 +17,6 @@ public class HealthCheckService
     private readonly IPoisonQueueProbe _poisonQueueProbe;
     private readonly IConfiguration _configuration;
 
-    /// <summary>
-    /// Queues whose poison sibling is surfaced on the detailed-health page. Order matches
-    /// the production impact ranking: rule analysis &gt; vulnerability correlation &gt; index reconcile
-    /// (which has a 2 h background reconcile-timer as safety net).
-    /// </summary>
-    internal static readonly string[] MonitoredPoisonQueues =
-    {
-        Shared.Constants.QueueNames.AnalyzeOnEnrollmentEnd + "-poison",
-        Shared.Constants.QueueNames.VulnerabilityCorrelate + "-poison",
-        Shared.Constants.QueueNames.TelemetryIndexReconcile + "-poison",
-    };
-
-    /// <summary>Default warning threshold (≥1 message) — every poison message is a 5×-failed handler call.</summary>
-    internal const int DefaultPoisonQueueWarningThreshold = 1;
-
-    /// <summary>Default critical threshold — backlog ≥10 means we're not just looking at one transient bug.</summary>
-    internal const int DefaultPoisonQueueCriticalThreshold = 10;
-
     public HealthCheckService(
         ILogger<HealthCheckService> logger,
         AdminConfigurationService adminConfigService,
@@ -300,7 +282,9 @@ public class HealthCheckService
     /// as zero (queues are created lazily on first poison-move). Individual probe failures
     /// are recorded in the details dictionary as <c>error: &lt;message&gt;</c> and force the
     /// overall status to at least <c>warning</c> so a flaky Storage call cannot silently
-    /// mask a real backlog.
+    /// mask a real backlog. Thresholds + monitored-queue list live in
+    /// <see cref="MaintenanceService"/> so the live health card and the timer-driven
+    /// Telegram alert classify identically.
     /// </summary>
     internal async Task<HealthCheck> CheckPoisonQueuesAsync()
     {
@@ -311,18 +295,18 @@ public class HealthCheckService
         };
 
         var warningThreshold = ParsePositiveInt(
-            "PoisonQueueWarningThreshold", DefaultPoisonQueueWarningThreshold);
+            "PoisonQueueWarningThreshold", MaintenanceService.DefaultPoisonQueueWarningThreshold);
         var criticalThreshold = ParsePositiveInt(
-            "PoisonQueueCriticalThreshold", DefaultPoisonQueueCriticalThreshold);
+            "PoisonQueueCriticalThreshold", MaintenanceService.DefaultPoisonQueueCriticalThreshold);
 
-        var probes = MonitoredPoisonQueues
+        var probes = MaintenanceService.MonitoredPoisonQueues
             .Select(name => (name, task: ProbeOneAsync(name)))
             .ToArray();
 
         await Task.WhenAll(probes.Select(p => p.task)).ConfigureAwait(false);
 
         var details = new Dictionary<string, object>();
-        var worstTier = PoisonQueueTier.None;
+        var worstTier = MaintenanceService.PoisonQueueTier.None;
 
         foreach (var (name, task) in probes)
         {
@@ -330,27 +314,28 @@ public class HealthCheckService
             if (result.Error is not null)
             {
                 details[name] = $"error: {result.Error}";
-                if (worstTier < PoisonQueueTier.Warning) worstTier = PoisonQueueTier.Warning;
+                if (worstTier < MaintenanceService.PoisonQueueTier.Warning)
+                    worstTier = MaintenanceService.PoisonQueueTier.Warning;
                 continue;
             }
 
             var count = result.Count!.Value;
             details[name] = count == 1 ? "1 message" : $"{count:N0} messages";
-            var tier = ClassifyPoisonQueueTier(count, warningThreshold, criticalThreshold);
+            var tier = MaintenanceService.ClassifyPoisonQueueTier(count, warningThreshold, criticalThreshold);
             if (tier > worstTier) worstTier = tier;
         }
 
         check.Status = worstTier switch
         {
-            PoisonQueueTier.Critical => "unhealthy",
-            PoisonQueueTier.Warning => "warning",
+            MaintenanceService.PoisonQueueTier.Critical => "unhealthy",
+            MaintenanceService.PoisonQueueTier.Warning => "warning",
             _ => "healthy"
         };
 
         check.Message = worstTier switch
         {
-            PoisonQueueTier.Critical => $"Poison backlog accumulating (≥{criticalThreshold} messages) — investigate failing handlers",
-            PoisonQueueTier.Warning => "Operator review required — failed messages parked after 5 retries",
+            MaintenanceService.PoisonQueueTier.Critical => $"Poison backlog accumulating (≥{criticalThreshold} messages) — investigate failing handlers",
+            MaintenanceService.PoisonQueueTier.Warning => "Operator review required — failed messages parked after 5 retries",
             _ => "All poison queues empty"
         };
         check.Details = details;
@@ -373,24 +358,6 @@ public class HealthCheckService
                 queueName);
             return new PoisonQueueProbeResult(null, ex.Message);
         }
-    }
-
-    /// <summary>
-    /// Tri-tier classifier for poison-queue depth. Thresholds are configurable via
-    /// App Settings so ops can tighten them in production without a code change.
-    /// </summary>
-    internal static PoisonQueueTier ClassifyPoisonQueueTier(long count, int warningThreshold, int criticalThreshold)
-    {
-        if (count >= criticalThreshold) return PoisonQueueTier.Critical;
-        if (count >= warningThreshold) return PoisonQueueTier.Warning;
-        return PoisonQueueTier.None;
-    }
-
-    internal enum PoisonQueueTier
-    {
-        None = 0,
-        Warning = 1,
-        Critical = 2,
     }
 
     private readonly record struct PoisonQueueProbeResult(long? Count, string? Error);

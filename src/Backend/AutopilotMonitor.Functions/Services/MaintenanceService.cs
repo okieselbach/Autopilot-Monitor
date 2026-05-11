@@ -56,6 +56,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IOpsEventRepository _opsEventRepo;
         private readonly OpsEventService _opsEventService;
         private readonly IAzureMonitorMetricsReader _metricsReader;
+        private readonly IPoisonQueueProbe _poisonQueueProbe;
         private readonly IConfiguration _configuration;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<MaintenanceService> _logger;
@@ -78,6 +79,7 @@ namespace AutopilotMonitor.Functions.Services
             IOpsEventRepository opsEventRepo,
             OpsEventService opsEventService,
             IAzureMonitorMetricsReader metricsReader,
+            IPoisonQueueProbe poisonQueueProbe,
             IConfiguration configuration,
             IHttpClientFactory httpClientFactory,
             ILogger<MaintenanceService> logger)
@@ -95,6 +97,7 @@ namespace AutopilotMonitor.Functions.Services
             _opsEventRepo = opsEventRepo;
             _opsEventService = opsEventService;
             _metricsReader = metricsReader;
+            _poisonQueueProbe = poisonQueueProbe;
             _configuration = configuration;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
@@ -120,6 +123,7 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOrphanedEventsAsync();
                 await CheckAgentBlobStorageAsync();
                 await CheckEmbeddedCertExpiryAsync();
+                await CheckPoisonQueueBacklogAsync();
                 await RecomputePlatformStatsAsync();
 
                 // Backfill and repair tasks run only via manual trigger (RunManualAsync)
@@ -183,6 +187,11 @@ namespace AutopilotMonitor.Functions.Services
                     // primary cadence, but operators triggering maintenance manually
                     // expect every health/quota check to run.
                     await CheckSignalRQuotaAsync();
+
+                    // Poison-queue watcher — same one as the 2 h timer path runs, so a
+                    // manual maintenance trigger after a known-bad deploy surfaces
+                    // backlogs immediately instead of waiting for the next tick.
+                    await CheckPoisonQueueBacklogAsync();
                 }
 
                 await RecomputePlatformStatsAsync();

@@ -11,76 +11,19 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace AutopilotMonitor.Functions.Tests;
 
 /// <summary>
-/// Boundary + integration tests for the poison-queue health check. Pure-function
-/// tests cover the tier classifier; service-level tests use an in-memory probe to
-/// drive <c>CheckPoisonQueuesAsync</c> directly so we don't have to stand up the
-/// 5 other dependencies just to exercise the queue path.
+/// Service-level tests for the poison-queue HealthCheck card. Drives
+/// <see cref="HealthCheckService.CheckPoisonQueuesAsync"/> with an in-memory probe
+/// and asserts the health card's status/message/details shape. The pure
+/// boundary classifier and seen-index extractor live in
+/// <see cref="MaintenanceServicePoisonQueueTests"/> next to the canonical definitions.
 /// </summary>
 public class HealthCheckServicePoisonQueueTests
 {
-    // --- ClassifyPoisonQueueTier ---
-    // Defaults (per HealthCheckService): warn=1, critical=10
-    //   count >= critical -> Critical
-    //   count >= warning  -> Warning
-    //   else              -> None
-
-    [Theory]
-    [InlineData(0L)]
-    public void Classify_ZeroCount_ReturnsNone(long count)
-    {
-        Assert.Equal(
-            HealthCheckService.PoisonQueueTier.None,
-            HealthCheckService.ClassifyPoisonQueueTier(count,
-                HealthCheckService.DefaultPoisonQueueWarningThreshold,
-                HealthCheckService.DefaultPoisonQueueCriticalThreshold));
-    }
-
-    [Theory]
-    [InlineData(1L)]
-    [InlineData(5L)]
-    [InlineData(9L)]
-    public void Classify_InWarningBand_ReturnsWarning(long count)
-    {
-        Assert.Equal(
-            HealthCheckService.PoisonQueueTier.Warning,
-            HealthCheckService.ClassifyPoisonQueueTier(count,
-                HealthCheckService.DefaultPoisonQueueWarningThreshold,
-                HealthCheckService.DefaultPoisonQueueCriticalThreshold));
-    }
-
-    [Theory]
-    [InlineData(10L)]
-    [InlineData(100L)]
-    [InlineData(10_000L)]
-    public void Classify_AtOrAboveCritical_ReturnsCritical(long count)
-    {
-        Assert.Equal(
-            HealthCheckService.PoisonQueueTier.Critical,
-            HealthCheckService.ClassifyPoisonQueueTier(count,
-                HealthCheckService.DefaultPoisonQueueWarningThreshold,
-                HealthCheckService.DefaultPoisonQueueCriticalThreshold));
-    }
-
-    [Fact]
-    public void Classify_CustomThresholds_RespectsConfig()
-    {
-        Assert.Equal(HealthCheckService.PoisonQueueTier.None,
-            HealthCheckService.ClassifyPoisonQueueTier(4, 5, 50));
-        Assert.Equal(HealthCheckService.PoisonQueueTier.Warning,
-            HealthCheckService.ClassifyPoisonQueueTier(5, 5, 50));
-        Assert.Equal(HealthCheckService.PoisonQueueTier.Warning,
-            HealthCheckService.ClassifyPoisonQueueTier(49, 5, 50));
-        Assert.Equal(HealthCheckService.PoisonQueueTier.Critical,
-            HealthCheckService.ClassifyPoisonQueueTier(50, 5, 50));
-    }
-
-    // --- CheckPoisonQueuesAsync via fake probe ---
-
     [Fact]
     public async Task Check_AllPoisonQueuesEmpty_ReportsHealthy()
     {
         var probe = new FakePoisonQueueProbe();
-        foreach (var q in HealthCheckService.MonitoredPoisonQueues)
+        foreach (var q in MaintenanceService.MonitoredPoisonQueues)
             probe.Counts[q] = 0;
 
         var svc = BuildService(probe);
@@ -89,7 +32,7 @@ public class HealthCheckServicePoisonQueueTests
         Assert.Equal("Poison Queues", check.Name);
         Assert.Equal("healthy", check.Status);
         Assert.Equal("All poison queues empty", check.Message);
-        Assert.Equal(HealthCheckService.MonitoredPoisonQueues.Length, check.Details!.Count);
+        Assert.Equal(MaintenanceService.MonitoredPoisonQueues.Length, check.Details!.Count);
         Assert.All(check.Details.Values, v => Assert.Equal("0 messages", v));
     }
 
@@ -184,25 +127,6 @@ public class HealthCheckServicePoisonQueueTests
         Assert.Equal("1 message",
             check.Details![Constants.QueueNames.AnalyzeOnEnrollmentEnd + "-poison"]);
     }
-
-    [Fact]
-    public void MonitoredPoisonQueues_CoversAllProducerQueues()
-    {
-        // Guard against silently adding a new producer queue without a poison entry.
-        // If a fourth queue is introduced, MonitoredPoisonQueues + this assertion must move together.
-        Assert.Equal(3, HealthCheckService.MonitoredPoisonQueues.Length);
-        Assert.Contains(
-            Constants.QueueNames.AnalyzeOnEnrollmentEnd + "-poison",
-            HealthCheckService.MonitoredPoisonQueues);
-        Assert.Contains(
-            Constants.QueueNames.VulnerabilityCorrelate + "-poison",
-            HealthCheckService.MonitoredPoisonQueues);
-        Assert.Contains(
-            Constants.QueueNames.TelemetryIndexReconcile + "-poison",
-            HealthCheckService.MonitoredPoisonQueues);
-    }
-
-    // --- helpers ---
 
     /// <summary>
     /// Builds a HealthCheckService wired only with the dependencies that

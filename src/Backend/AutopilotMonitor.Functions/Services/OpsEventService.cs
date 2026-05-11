@@ -136,6 +136,18 @@ namespace AutopilotMonitor.Functions.Services
                 null, "System.Monitoring",
                 new { metric = "MessageCount", aggregation = "Total", windowDay = "UTC", observed, limit, percent, resourceId });
 
+        public Task RecordPoisonQueueBacklogHighAsync(string queueName, long count, int threshold)
+            => WriteAsync(OpsEventCategory.Security, "PoisonQueueBacklogHigh", OpsEventSeverity.Warning,
+                $"Poison queue '{queueName}' backlog at {count} message(s) (threshold: {threshold}) — async worker handler failing repeatedly; inspect dead-letter contents",
+                null, "System.Maintenance",
+                new { queueName, count, threshold });
+
+        public Task RecordPoisonQueueBacklogCriticalAsync(string queueName, long count, int threshold)
+            => WriteAsync(OpsEventCategory.Security, "PoisonQueueBacklogCritical", OpsEventSeverity.Error,
+                $"CRITICAL: poison queue '{queueName}' backlog at {count} messages (threshold: {threshold}) — sustained handler failure, downstream work is silently dropping",
+                null, "System.Maintenance",
+                new { queueName, count, threshold });
+
         // ── Tenant ─────────────────────────────────────────────────────────────
 
         public Task RecordTenantOffboardedAsync(string tenantId, string performedBy, Dictionary<string, int> deletedCounts)
