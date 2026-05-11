@@ -745,23 +745,25 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         {
             if (script == null || string.IsNullOrEmpty(script.PolicyId)) return;
 
-            // Outcome classification — phase-aware. The Microsoft IME Health-Script (Proactive
-            // Remediation) lifecycle treats the detection scripts as compliance reporters:
-            //   - detection exit 0 = compliant
-            //   - detection exit non-zero = non-compliant (script ran perfectly, just reporting state)
-            //   - remediation exit 0 = remediation succeeded
-            //   - remediation exit non-zero = remediation script failed (real script crash)
-            //   - post-detection same as detection (exit non-zero = remediation didn't take, NOT a crash)
-            // So a non-compliant detection that gets remediated must NOT count as a script failure
-            // in metrics or render as red in the timeline. Only the remediation phase + platform
-            // scripts route non-zero exit to script_failed. The cycle-level outcome is conveyed
-            // separately via RemediationStatus (2=Remediated, 3=RemediationFailed) on each event.
+            // Outcome classification — three rules in priority order:
+            //   1. stderr present → script_failed. Per user UX preference (debrief 2026-05-11):
+            //      consistent failure semantics across script types — any time a script writes
+            //      to stderr the user wants visibility, even if exit was 0 and IME reported
+            //      compliant. Eliminates the confusing case where a platform script with stderr
+            //      shows red but a remediation detection with stderr shows green.
+            //   2. Phase-aware exit handling: detection / post-detection use exit code as a
+            //      compliance verdict (not a crash signal), so non-zero exit alone is NOT
+            //      failure for those phases. Only remediation phase + platform scripts route
+            //      non-zero exit to script_failed.
+            //   3. Defensive: explicit Result=="Failed" → script_failed (V1 parity).
             var isHealthScript = IsRemediation(script.ScriptType);
             var isHealthComplianceReport = isHealthScript
                 && (string.Equals(script.ScriptPart, "detection", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(script.ScriptPart, "post-detection", StringComparison.OrdinalIgnoreCase));
 
-            var isFailure = string.Equals(script.Result, "Failed", StringComparison.OrdinalIgnoreCase)
+            var hasStderr = !string.IsNullOrWhiteSpace(script.Stderr);
+            var isFailure = hasStderr
+                            || string.Equals(script.Result, "Failed", StringComparison.OrdinalIgnoreCase)
                             || (!isHealthComplianceReport
                                 && script.ExitCode.HasValue && script.ExitCode.Value != 0);
             var severity = isFailure ? EventSeverity.Error : EventSeverity.Info;

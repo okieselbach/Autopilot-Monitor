@@ -28,12 +28,40 @@ export interface ScriptItem {
   stderr?: string;
   state: "Running" | "Success" | "Failed";
   timestamp: string;
-  firstSeenIndex: number;
   bootstrapVersion?: string | null;
+}
+
+/**
+ * Stable React key for a ScriptItem. Based ONLY on identity-shaped fields (policyId,
+ * scriptType, scriptPart) so re-renders triggered by upstream prop changes (live event
+ * polling, SignalR) keep the same component instance mounted — preserving showDetails
+ * and other local state. Do NOT include timestamp or insertion index here, otherwise
+ * any reducer re-run will remount and collapse expanded detail panels.
+ */
+export function scriptItemKey(item: Pick<ScriptItem, "policyId" | "scriptType" | "scriptPart" | "state">): string {
+  const part = item.state === "Running" ? "_running" : (item.scriptPart ?? "_nopart");
+  return `${item.policyId || "_noid"}-${item.scriptType}-${part}`;
 }
 
 /** Threshold above which a Running placeholder is rendered as "stuck?" rather than animated. */
 export const STALE_RUNNING_THRESHOLD_SECONDS = 600;
+
+/**
+ * Score how complete a script item's data is (higher = better). Used by the reducer to
+ * pick the best entry when re-emissions of the same script collapse into one row.
+ * Counts the presence of fields that meaningfully describe the script's outcome.
+ */
+function dataCompleteness(item: ScriptItem): number {
+  let score = 0;
+  if (item.exitCode != null) score += 4; // exit code is the most important signal
+  if (item.result) score += 2;
+  if (item.complianceResult) score += 2;
+  if (item.remediationStatus != null) score += 1;
+  if (item.stdout && item.stdout.length > 0) score += 1;
+  if (item.stderr && item.stderr.length > 0) score += 1;
+  if (item.runContext) score += 1;
+  return score;
+}
 
 /**
  * Coerce a wire value to a number. Backend serializes integer event-data fields as strings
@@ -62,17 +90,28 @@ export function mapRemediationStatus(status?: number): string | null {
   }
 }
 
-/** Pick the headline label for a row. Five distinct shapes — see in-code comments. */
+/**
+ * Pick the headline label for a row. We use Intune Admin Center terminology — proactive
+ * remediation policies are labelled "Remediation" in the Intune UI, regardless of which
+ * phase (detection / remediation / post-detection) of the cycle this row represents.
+ * The phase is conveyed via the badge next to the title, not the title itself.
+ */
 export function buildScriptItemLabel(item: Pick<ScriptItem, "scriptType" | "scriptPart" | "state" | "remediationStatus">): string {
   if (item.scriptType === "remediation") {
-    if (item.state === "Running") return "Health Script (running)";
-    if (item.scriptPart === "remediation") return "Remediation Run";
-    if (item.scriptPart === "post-detection") return "Detection (post)";
-    // Detection phase — same label whether detect-only (RemediationStatus=4) or pre-detection
-    // of a full cycle. The detect-only badge handles the visual distinction.
-    return "Health Detection";
+    return item.state === "Running" ? "Remediation (running)" : "Remediation";
   }
   return item.state === "Running" ? "Platform Script (running)" : "Platform Script";
+}
+
+/**
+ * Phase badge text for remediation rows (e.g. "detection", "remediation", "post-detection").
+ * Returns null when no phase badge should render (platform scripts, Running placeholders).
+ */
+export function getPhaseBadge(item: Pick<ScriptItem, "scriptType" | "scriptPart" | "state">): string | null {
+  if (item.scriptType !== "remediation") return null;
+  if (item.state === "Running") return null;
+  if (!item.scriptPart) return null;
+  return item.scriptPart;
 }
 
 /** True when this row should display the "detect-only" badge. */
@@ -114,15 +153,14 @@ export function reduceScriptEvents(events: ScriptInputEvent[]): ScriptItem[] {
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
-  const items: ScriptItem[] = [];
-  const seenFinal = new Set<string>();
-  // Keyed by `${policyId}-${scriptType}-${timestamp}` so repeated runs of the same health
-  // script policy in a long-lived session each get their own running placeholder slot.
-  // We can't dedupe a "started"-only emission against a "completed" without a shared
-  // run-id (IME doesn't expose one), so we fall back to nearest-timestamp matching: a
-  // running placeholder vanishes if a final event with a timestamp >= the started
-  // timestamp exists for the same (policyId, scriptType).
-  const finalTimestampsByPolicy = new Map<string, number[]>();
+  // Map of dedupe-key → ScriptItem. Same (policyId, scriptType, scriptPart) re-emissions
+  // collapse into one row keeping the entry with the most-complete data. This is the
+  // common case in IME logs where the same script appears multiple times across ESP-phase
+  // transitions, sometimes with degraded data on the second emission (lost exit code etc).
+  // For Autopilot enrollment sessions (time-bounded, < 1 h typical) this is the right
+  // trade-off — long-running scheduled-script monitoring is out of scope for this UI.
+  const finalsByKey = new Map<string, ScriptItem>();
+  const policyIdsWithFinal = new Set<string>();
 
   for (let idx = 0; idx < sorted.length; idx++) {
     const evt = sorted[idx];
@@ -134,38 +172,35 @@ export function reduceScriptEvents(events: ScriptInputEvent[]): ScriptItem[] {
     const scriptType = d.scriptType ?? d.script_type ?? "platform";
     const scriptPart = d.scriptPart ?? d.script_part;
     const dedupeId = policyId || `_noid_${idx}`;
-    // Including the timestamp distinguishes repeated runs of the same policy in a
-    // long-lived session (e.g. health scripts on a daily schedule). Re-fetched events
-    // carry the same timestamp and still dedupe correctly.
-    const key = `${dedupeId}-${scriptType}-${scriptPart ?? ""}-${evt.timestamp}`;
-    if (seenFinal.has(key)) continue;
-    seenFinal.add(key);
-    if (policyId) {
-      const policyKey = `${policyId}-${scriptType}`;
-      const timestamps = finalTimestampsByPolicy.get(policyKey);
-      const ts = new Date(evt.timestamp).getTime();
-      if (timestamps) timestamps.push(ts);
-      else finalTimestampsByPolicy.set(policyKey, [ts]);
-    }
+    const key = `${dedupeId}-${scriptType}-${scriptPart ?? ""}`;
+    if (policyId) policyIdsWithFinal.add(`${policyId}-${scriptType}`);
 
     const exitCode = toNumber(d.exitCode ?? d.exit_code);
     const remediationStatus = toNumber(d.remediationStatus ?? d.remediation_status);
     const targetType = toNumber(d.targetType ?? d.target_type);
     const errorCode = toNumber(d.errorCode ?? d.error_code);
+    const stdout = typeof d.stdout === "string" ? d.stdout : undefined;
+    const stderr = typeof d.stderr === "string" ? d.stderr : undefined;
+    const hasStderr = !!stderr && stderr.trim().length > 0;
 
-    // State derivation — phase-aware so a non-compliant health-script detection (exit 1)
-    // does NOT show as a red Failed card. Detection / post-detection scripts use the exit
-    // code as a compliance verdict, not a crash signal: exit 0 = compliant, exit non-zero
-    // = non-compliant (the script ran fine, it's reporting state). Only the remediation
-    // phase + platform scripts treat non-zero exit as a real failure. The defensive check
-    // also handles legacy emitters that send script_completed for actual failures.
+    // State derivation — three rules in priority order:
+    //   1. stderr present → Failed. Consistent across script types: any time a script
+    //      writes to stderr the user wants visibility, even if exit was 0. Per user
+    //      preference (debrief 2026-05-11): "exit 0 bedeutet zwar success aber wenn auf
+    //      stderr was gezeigt wird sollte es failed sein".
+    //   2. Phase-aware exit handling: detection / post-detection use exit code as a
+    //      compliance verdict (not a crash signal), so non-zero exit alone is NOT
+    //      failure for those phases. Only remediation phase + platform scripts route
+    //      non-zero exit to Failed.
+    //   3. Defensive: explicit script_failed eventType OR result === "Failed" → Failed.
     const isHealthComplianceReport = scriptType === "remediation"
       && (scriptPart === "detection" || scriptPart === "post-detection");
     const isFailureSignal = evt.eventType === "script_failed"
+      || hasStderr
       || (!isHealthComplianceReport && exitCode != null && exitCode !== 0)
       || d.result === "Failed";
 
-    items.push({
+    const candidate: ScriptItem = {
       policyId,
       scriptType,
       scriptPart,
@@ -177,18 +212,44 @@ export function reduceScriptEvents(events: ScriptInputEvent[]): ScriptItem[] {
       targetType,
       errorCode,
       errorDetails: d.errorDetails ?? d.error_details,
-      stdout: d.stdout,
-      stderr: d.stderr,
+      stdout,
+      stderr,
       state: isFailureSignal ? "Failed" : "Success",
       timestamp: evt.timestamp,
-      firstSeenIndex: items.length,
-      bootstrapVersion: scriptType === "platform" ? extractBootstrapVersion(d.stdout) : null,
-    });
+      bootstrapVersion: scriptType === "platform" ? extractBootstrapVersion(stdout) : null,
+    };
+
+    const existing = finalsByKey.get(key);
+    if (!existing || dataCompleteness(candidate) > dataCompleteness(existing)) {
+      finalsByKey.set(key, candidate);
+    }
   }
 
-  const seenRunning = new Set<string>();
-  for (let idx = 0; idx < sorted.length; idx++) {
-    const evt = sorted[idx];
+  // Assemble the ordered list of finals. Sort by the timestamp of the kept entry so
+  // the timeline reflects actual chronology of the surviving events.
+  const items: ScriptItem[] = Array.from(finalsByKey.values()).sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
+  // Suppression set for Running placeholders: track which (policyId, scriptType) pairs
+  // already have a final, so a started signal that arrives after its own completion
+  // doesn't surface a stale Running indicator.
+  const finalTimestampsByPolicy = new Map<string, number[]>();
+  for (const item of items) {
+    if (!item.policyId) continue;
+    const policyKey = `${item.policyId}-${item.scriptType}`;
+    const ts = new Date(item.timestamp).getTime();
+    const arr = finalTimestampsByPolicy.get(policyKey);
+    if (arr) arr.push(ts);
+    else finalTimestampsByPolicy.set(policyKey, [ts]);
+  }
+
+  // Running placeholders: emit one per (policyId, scriptType) when a started signal
+  // exists without any final at-or-after its timestamp. Collapsed by policyId+type so
+  // a single row shows "running" rather than one per started signal — matches the
+  // collapsed-final dedupe semantics above.
+  const runningEmitted = new Set<string>();
+  for (const evt of sorted) {
     if (evt.eventType !== "script_started") continue;
     const d = evt.data;
     if (!d) continue;
@@ -197,28 +258,19 @@ export function reduceScriptEvents(events: ScriptInputEvent[]): ScriptItem[] {
     const scriptType = d.scriptType ?? d.script_type ?? "platform";
     if (!policyId) continue;
 
-    // Suppress this placeholder if a final event for the same (policyId, scriptType)
-    // exists with a timestamp at-or-after this started timestamp. That covers two
-    // cases: (a) the normal flow where the final lands after the started event;
-    // (b) a re-run scenario where an *earlier* started signal already has a matching
-    // final, but a *later* started should still surface as Running until ITS final
-    // arrives.
+    const policyKey = `${policyId}-${scriptType}`;
+    if (runningEmitted.has(policyKey)) continue;
+
     const startedTs = new Date(evt.timestamp).getTime();
-    const finals = finalTimestampsByPolicy.get(`${policyId}-${scriptType}`);
+    const finals = finalTimestampsByPolicy.get(policyKey);
     if (finals && finals.some(ts => ts >= startedTs)) continue;
 
-    // Per-timestamp key so two started-only signals for the same policy in different
-    // runs both render placeholders.
-    const key = `${policyId}-${scriptType}-_running-${evt.timestamp}`;
-    if (seenRunning.has(key)) continue;
-    seenRunning.add(key);
-
+    runningEmitted.add(policyKey);
     items.push({
       policyId,
       scriptType,
       state: "Running",
       timestamp: evt.timestamp,
-      firstSeenIndex: items.length,
       bootstrapVersion: null,
     });
   }

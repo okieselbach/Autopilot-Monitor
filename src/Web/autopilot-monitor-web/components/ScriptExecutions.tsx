@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { compareVersions } from "@/utils/bootstrapVersion";
 import {
   buildScriptItemLabel,
+  getPhaseBadge,
   isDetectOnlyRow,
   isNonCompliantReport,
   mapRemediationStatus,
   reduceScriptEvents,
+  scriptItemKey,
   STALE_RUNNING_THRESHOLD_SECONDS,
   type ScriptInputEvent,
   type ScriptItem,
@@ -49,7 +51,7 @@ export default function ScriptExecutions({ events, showScriptOutput, latestBoots
           <h2 className="text-lg font-semibold text-gray-900">Script Executions</h2>
           <div className="flex items-center space-x-2 text-xs">
             {runningCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium animate-pulse">
+              <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 font-medium">
                 {runningCount} running
               </span>
             )}
@@ -89,7 +91,7 @@ export default function ScriptExecutions({ events, showScriptOutput, latestBoots
         <div className="space-y-3 mt-4">
           {scripts.map((item) => (
             <ScriptItemRow
-              key={`${item.policyId}-${item.scriptPart ?? "_running"}-${item.firstSeenIndex}`}
+              key={scriptItemKey(item)}
               item={item}
               showScriptOutput={showScriptOutput}
               latestBootstrapVersion={latestBootstrapVersion}
@@ -130,7 +132,10 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
   const containerClass = item.state === "Failed"
     ? "bg-red-50 border border-red-200"
     : item.state === "Running"
-      ? `bg-blue-50 border border-blue-200 ${isStale ? "" : "animate-pulse"}`
+      // Neutral gray for the box itself — only the inline spinner conveys motion.
+      // The full-box pulse was visually distracting with multiple concurrent Running cards
+      // and caused a "flickering" feeling that made the page feel unstable.
+      ? "bg-gray-50 border border-gray-200"
       : isNonCompliant
         ? "bg-amber-50 border border-amber-200"
         : "bg-green-50 border border-green-200";
@@ -160,7 +165,7 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2 min-w-0">
           {item.state === "Running" ? (
-            <svg className={`w-4 h-4 text-blue-500 flex-shrink-0 ${isStale ? "" : "animate-spin"}`} fill="none" viewBox="0 0 24 24">
+            <svg className={`w-4 h-4 text-gray-500 flex-shrink-0 ${isStale ? "" : "animate-spin"}`} fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
@@ -184,13 +189,18 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
           ) : (
             <span className="text-xs font-mono text-gray-500">{shortId}…</span>
           )}
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-            item.scriptType === "remediation"
-              ? "bg-amber-100 text-amber-700"
-              : "bg-blue-100 text-blue-700"
-          }`}>
-            {item.scriptType}
-          </span>
+          {/* Phase badge for remediation rows (detection / remediation / post-detection).
+              For platform scripts we keep showing the type tag. */}
+          {item.scriptType === "remediation" && getPhaseBadge(item) && (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">
+              {getPhaseBadge(item)}
+            </span>
+          )}
+          {item.scriptType !== "remediation" && (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
+              {item.scriptType}
+            </span>
+          )}
           {isDetectOnly && (
             <span
               className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600"
@@ -222,7 +232,7 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
         <div className="flex items-center space-x-3 text-xs text-gray-500 flex-shrink-0 ml-2">
           <span className={`font-medium ${
             item.state === "Failed" ? "text-red-600"
-            : item.state === "Running" ? (isStale ? "text-amber-600" : "text-blue-600")
+            : item.state === "Running" ? (isStale ? "text-amber-600" : "text-gray-600")
             : isNonCompliant ? "text-amber-700"
             : "text-green-600"
           }`}>

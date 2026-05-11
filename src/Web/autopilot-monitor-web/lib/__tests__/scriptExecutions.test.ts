@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildScriptItemLabel,
+  getPhaseBadge,
   isDetectOnlyRow,
   isNonCompliantReport,
   mapRemediationStatus,
   reduceScriptEvents,
+  scriptItemKey,
   toNumber,
   type ScriptInputEvent,
   type ScriptItem,
@@ -62,24 +64,17 @@ describe("buildScriptItemLabel", () => {
     ...overrides,
   });
 
-  it("Health Script (running) for live remediation placeholder", () => {
-    expect(buildScriptItemLabel(base({ state: "Running", scriptPart: undefined }))).toBe("Health Script (running)");
+  it("uses Intune terminology: Remediation for all health-script phases", () => {
+    // The Intune Admin Center calls these policies "Remediations"; the phase (detection /
+    // remediation / post-detection) is conveyed via a separate badge, not the title.
+    expect(buildScriptItemLabel(base({ scriptPart: "detection", remediationStatus: 4 }))).toBe("Remediation");
+    expect(buildScriptItemLabel(base({ scriptPart: "detection", remediationStatus: 2 }))).toBe("Remediation");
+    expect(buildScriptItemLabel(base({ scriptPart: "remediation", remediationStatus: 2 }))).toBe("Remediation");
+    expect(buildScriptItemLabel(base({ scriptPart: "post-detection", remediationStatus: 2 }))).toBe("Remediation");
   });
 
-  it("Health Detection for detect-only remediation phase", () => {
-    expect(buildScriptItemLabel(base({ scriptPart: "detection", remediationStatus: 4 }))).toBe("Health Detection");
-  });
-
-  it("Health Detection for pre-detection phase of full cycle (no special label)", () => {
-    expect(buildScriptItemLabel(base({ scriptPart: "detection", remediationStatus: 2 }))).toBe("Health Detection");
-  });
-
-  it("Remediation Run for the actual remediation phase", () => {
-    expect(buildScriptItemLabel(base({ scriptPart: "remediation", remediationStatus: 2 }))).toBe("Remediation Run");
-  });
-
-  it("Detection (post) for post-detection verification phase", () => {
-    expect(buildScriptItemLabel(base({ scriptPart: "post-detection", remediationStatus: 2 }))).toBe("Detection (post)");
+  it("Remediation (running) for live placeholder", () => {
+    expect(buildScriptItemLabel(base({ state: "Running", scriptPart: undefined }))).toBe("Remediation (running)");
   });
 
   it("Platform Script for completed platform scripts", () => {
@@ -88,6 +83,38 @@ describe("buildScriptItemLabel", () => {
 
   it("Platform Script (running) for live platform placeholder", () => {
     expect(buildScriptItemLabel(base({ scriptType: "platform", scriptPart: undefined, state: "Running" }))).toBe("Platform Script (running)");
+  });
+});
+
+describe("getPhaseBadge", () => {
+  it("returns the scriptPart for completed remediation rows", () => {
+    expect(getPhaseBadge({ scriptType: "remediation", scriptPart: "detection", state: "Success" })).toBe("detection");
+    expect(getPhaseBadge({ scriptType: "remediation", scriptPart: "remediation", state: "Success" })).toBe("remediation");
+    expect(getPhaseBadge({ scriptType: "remediation", scriptPart: "post-detection", state: "Failed" })).toBe("post-detection");
+  });
+  it("returns null for platform scripts (no phase concept)", () => {
+    expect(getPhaseBadge({ scriptType: "platform", scriptPart: undefined, state: "Success" })).toBeNull();
+  });
+  it("returns null for Running placeholders (no phase known yet)", () => {
+    expect(getPhaseBadge({ scriptType: "remediation", scriptPart: undefined, state: "Running" })).toBeNull();
+  });
+});
+
+describe("scriptItemKey", () => {
+  it("is stable across re-renders for the same identity (no timestamp / index in key)", () => {
+    // Critical for preserving showDetails state across upstream prop changes — the React
+    // key MUST NOT include any index or timestamp that shifts on reducer re-runs.
+    const a = scriptItemKey({ policyId: "p1", scriptType: "remediation", scriptPart: "detection", state: "Success" });
+    const b = scriptItemKey({ policyId: "p1", scriptType: "remediation", scriptPart: "detection", state: "Success" });
+    expect(a).toBe(b);
+  });
+  it("differs by phase so multi-phase rows get separate React identities", () => {
+    expect(scriptItemKey({ policyId: "p1", scriptType: "remediation", scriptPart: "detection", state: "Success" }))
+      .not.toBe(scriptItemKey({ policyId: "p1", scriptType: "remediation", scriptPart: "remediation", state: "Success" }));
+  });
+  it("uses a separate slot for Running placeholders so they don't collide with finals", () => {
+    expect(scriptItemKey({ policyId: "p1", scriptType: "remediation", scriptPart: undefined, state: "Running" }))
+      .not.toBe(scriptItemKey({ policyId: "p1", scriptType: "remediation", scriptPart: "detection", state: "Success" }));
   });
 });
 
@@ -189,26 +216,48 @@ describe("reduceScriptEvents", () => {
     expect(items).toHaveLength(1);
   });
 
-  it("does NOT collapse repeated runs of the same policy with different timestamps (Codex finding 3)", () => {
-    // A health script policy on a daily schedule will run multiple times in a long-lived
-    // session. Each run has a distinct timestamp from IME and must surface as its own row,
-    // otherwise the second run silently disappears from the UI.
+  it("collapses repeated emissions of the same (policyId, scriptType, scriptPart) keeping the most-complete entry", () => {
+    // Trade-off vs. Codex finding 3: in an Autopilot enrollment session IME often re-emits
+    // the same script across ESP-phase transitions (DeviceSetup→AccountSetup), and the
+    // second emission frequently has degraded data (lost exit code etc) due to agent state
+    // being cleared after the first emit. The user found this confusing — same script
+    // appearing twice with different data quality. We now collapse and keep the entry with
+    // the most populated fields (exitCode, stdout, etc). For long-running scheduled-script
+    // monitoring outside Autopilot, this would lose distinct runs — out of scope for this UI.
     const items = reduceScriptEvents([
       finalEvent({
         eventType: "script_completed", ts: 0,
-        data: { policyId: "p1", scriptType: "remediation", scriptPart: "detection", exitCode: 0, complianceResult: "True" },
+        data: { policyId: "p1", scriptType: "remediation", scriptPart: "detection", exitCode: 0, complianceResult: "True", stdout: "first run details" },
       }),
       finalEvent({
         eventType: "script_completed", ts: 86400,
-        data: { policyId: "p1", scriptType: "remediation", scriptPart: "detection", exitCode: 1, complianceResult: "False", remediationStatus: 4 },
+        // Second emission has fewer populated fields → must lose the dedupe race.
+        data: { policyId: "p1", scriptType: "remediation", scriptPart: "detection" },
       }),
     ]);
-    expect(items).toHaveLength(2);
-    // Both rows are state=Success (script ran fine each time); the second carries a
-    // non-compliant compliance verdict surfaced via the amber non-compliant styling.
-    expect(items.map(i => i.state)).toEqual(["Success", "Success"]);
+    expect(items).toHaveLength(1);
+    expect(items[0].exitCode).toBe(0);
     expect(items[0].complianceResult).toBe("True");
-    expect(items[1].complianceResult).toBe("False");
+    expect(items[0].stdout).toBe("first run details");
+  });
+
+  it("collapses platform-script re-emissions across ESP phases (real-world Autopilot pattern)", () => {
+    // Pattern observed in session e2929c97: same platform script ran in DeviceSetup
+    // (with full data) and again in AccountSetup (degraded data, no exit code). Earlier
+    // versions surfaced both rows side-by-side which was confusing.
+    const items = reduceScriptEvents([
+      finalEvent({
+        eventType: "script_completed", ts: 0,
+        data: { policyId: "847da54e", scriptType: "platform", exitCode: 0, result: "Success", runContext: "System" },
+      }),
+      finalEvent({
+        eventType: "script_completed", ts: 360,
+        data: { policyId: "847da54e", scriptType: "platform", result: "Success" },
+      }),
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].exitCode).toBe(0);
+    expect(items[0].runContext).toBe("System");
   });
 
   it("two runs interleaved with started signals each show their own Running placeholder until matched", () => {
@@ -415,6 +464,47 @@ describe("reduceScriptEvents", () => {
       }),
     ]);
     expect(items[0].state).toBe("Failed");
+  });
+
+  // ── stderr-as-failure rule (user UX preference, debrief 2026-05-11) ─────────────
+  it("PLATFORM script with stderr present renders as Failed regardless of exit code", () => {
+    const items = reduceScriptEvents([
+      finalEvent({
+        eventType: "script_completed", ts: 0,
+        data: { policyId: "p1", scriptType: "platform", exitCode: 0, result: "Success", stderr: "WARNING: deprecated path" },
+      }),
+    ]);
+    expect(items[0].state).toBe("Failed");
+  });
+
+  it("HEALTH-SCRIPT detection with stderr present renders as Failed (consistency over compliance verdict)", () => {
+    // Earlier behavior: stderr-on-detection was just amber non-compliant. User wanted
+    // consistency: stderr present → Failed everywhere. This is the case from session
+    // e2929c97 (Inventory script with Invoke-WebRequest DNS error).
+    const items = reduceScriptEvents([
+      finalEvent({
+        eventType: "script_completed", ts: 0,
+        data: {
+          policyId: "p1",
+          scriptType: "remediation",
+          scriptPart: "detection",
+          exitCode: 0,
+          complianceResult: "True",
+          stderr: "Invoke-WebRequest : The remote name could not be resolved",
+        },
+      }),
+    ]);
+    expect(items[0].state).toBe("Failed");
+  });
+
+  it("whitespace-only stderr does not flip state to Failed", () => {
+    const items = reduceScriptEvents([
+      finalEvent({
+        eventType: "script_completed", ts: 0,
+        data: { policyId: "p1", scriptType: "platform", exitCode: 0, result: "Success", stderr: "   \n  " },
+      }),
+    ]);
+    expect(items[0].state).toBe("Success");
   });
 });
 
