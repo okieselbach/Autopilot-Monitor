@@ -46,6 +46,12 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<RawPage<SessionSummary>> GetAllSessionsPageAsync(string? tenantIdFilter, int? days, int pageSize, string? continuation)
             => _storage.GetAllSessionsPageAsync(tenantIdFilter, days, pageSize, continuation);
 
+        public Task<SessionStats> GetSessionStatsAsync(string tenantId, int days)
+            => _storage.GetSessionStatsAsync(tenantId, days);
+
+        public Task<SessionStats> GetAllSessionStatsAsync(string? tenantIdFilter, int days)
+            => _storage.GetAllSessionStatsAsync(tenantIdFilter, days);
+
         public Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
             => _storage.DeleteSessionAsync(tenantId, sessionId);
 

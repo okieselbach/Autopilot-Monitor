@@ -20,6 +20,7 @@ import { useTenantSecurityConfig } from "./hooks/useTenantSecurityConfig";
 import { useTenantList } from "./hooks/useTenantList";
 import { useDashboardFilters } from "./hooks/useDashboardFilters";
 import { useDashboardSessions } from "./hooks/useDashboardSessions";
+import { useDashboardStats } from "./hooks/useDashboardStats";
 
 export default function Home() {
   // useSearchParams() in HomeContent requires a Suspense boundary for static prerender.
@@ -82,6 +83,10 @@ function HomeContent() {
   const { addNotification } = useNotifications();
   const [apiStatus, setApiStatus] = useState<"unchecked" | "checking" | "healthy" | "error">("unchecked");
   const [tenantIdFilter, setTenantIdFilter] = useState("");
+  // Mirrors the last filter value the user actually submitted (Submit / Clear).
+  // Drives the stats refetch — server-side stats follow the submitted scope so
+  // typing into the filter input doesn't trigger a backend round-trip per keystroke.
+  const [submittedTenantIdFilter, setSubmittedTenantIdFilter] = useState("");
   const { adminMode, setAdminMode, globalAdminMode, setGlobalAdminMode } = useAdminMode();
 
   const signalR = useSignalR();
@@ -114,7 +119,6 @@ function HomeContent() {
     handlePreviousPage, handleNextPage,
     effectiveSessions, filteredSessions, sortedSessions, paginatedSessions,
     totalPages,
-    stats,
   } = useDashboardFilters({
     sessions,
     blockedDevicesSet,
@@ -124,6 +128,20 @@ function HomeContent() {
     hasMore,
     loadingMore,
     loadMore,
+  });
+
+  // Stats cards: server-side aggregation so the numbers don't drift with whatever
+  // the client has paginated into view. Refreshes on SignalR newSession/newevents
+  // (debounced) and on SignalR reconnect to recover from any missed messages.
+  const isRegularUser = !!user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== "Operator";
+  const { stats: dashboardStats, loading: statsLoading } = useDashboardStats({
+    tenantId,
+    globalAdminMode,
+    submittedTenantIdFilter,
+    getAccessToken,
+    addNotification,
+    signalR,
+    disabled: isRegularUser,
   });
 
   // Redirect regular users (non-admin, non-operator) to progress portal – they must never see the session list
@@ -146,7 +164,10 @@ function HomeContent() {
 
   // Clear tenant filter when leaving Global Admin mode (refetch is owned by useDashboardSessions)
   useEffect(() => {
-    if (!globalAdminMode) setTenantIdFilter("");
+    if (!globalAdminMode) {
+      setTenantIdFilter("");
+      setSubmittedTenantIdFilter("");
+    }
   }, [globalAdminMode]);
 
   // Auto-load more when the user needs more sessions than currently loaded
@@ -185,11 +206,13 @@ function HomeContent() {
   };
 
   const submitTenantIdFilter = () => {
+    setSubmittedTenantIdFilter(tenantIdFilter);
     refetch();
   };
 
   const clearTenantIdFilter = () => {
     setTenantIdFilter("");
+    setSubmittedTenantIdFilter("");
     refetchWith("");
   };
 
@@ -325,35 +348,35 @@ function HomeContent() {
             </div>
           )}
 
-          {/* Stats cards */}
+          {/* Stats cards — server-aggregated (see useDashboardStats) */}
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5 mb-2">
             <StatsCard
               title="Active Sessions"
-              value={loading ? "..." : stats.activeSessionsCount.toString()}
+              value={statsLoading && !dashboardStats ? "..." : (dashboardStats?.activeCount ?? 0).toString()}
               description="Currently enrolling"
               color="blue"
             />
             <StatsCard
               title="Success Rate"
-              value={loading ? "..." : `${stats.successRate}%`}
+              value={statsLoading && !dashboardStats ? "..." : `${dashboardStats?.successRatePct ?? 0}%`}
               description="Last 7 days"
               color="green"
             />
             <StatsCard
               title="Avg. Duration"
-              value={loading ? "..." : `${stats.avgDuration} min`}
+              value={statsLoading && !dashboardStats ? "..." : `${dashboardStats?.avgDurationMinutes ?? 0} min`}
               description="Last 7 days"
               color="purple"
             />
             <StatsCard
               title="Total Today"
-              value={loading ? "..." : stats.totalToday.toString()}
+              value={statsLoading && !dashboardStats ? "..." : (dashboardStats?.totalToday ?? 0).toString()}
               description="Started today"
               color="indigo"
             />
             <StatsCard
               title="Failed Today"
-              value={loading ? "..." : stats.failedToday.toString()}
+              value={statsLoading && !dashboardStats ? "..." : (dashboardStats?.failedToday ?? 0).toString()}
               description="Needs attention"
               color="red"
             />

@@ -794,6 +794,101 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Aggregates the per-tenant dashboard stats in a single SessionsIndex drain.
+        /// Computed server-side so the cards don't depend on whatever the client has
+        /// paginated into memory.
+        /// </summary>
+        public async Task<SessionStats> GetSessionStatsAsync(string tenantId, int days)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            if (days < 1) throw new ArgumentOutOfRangeException(nameof(days));
+
+            var sessions = await GetSessionsAsync(tenantId, days);
+            return AggregateSessionStats(sessions, days);
+        }
+
+        /// <summary>
+        /// Cross-tenant variant. Routes through the per-tenant index when
+        /// <paramref name="tenantIdFilter"/> is set (cheaper scan).
+        /// </summary>
+        public async Task<SessionStats> GetAllSessionStatsAsync(string? tenantIdFilter, int days)
+        {
+            if (days < 1) throw new ArgumentOutOfRangeException(nameof(days));
+
+            var sessions = await GetAllSessionsAsync(tenantIdFilter, days);
+            return AggregateSessionStats(sessions, days);
+        }
+
+        /// <summary>
+        /// Pure aggregation pass over the windowed session list. Today-counters use
+        /// UTC midnight as the boundary so every caller sees the same number regardless
+        /// of browser timezone.
+        /// </summary>
+        internal static SessionStats AggregateSessionStats(IReadOnlyList<SessionSummary> sessions, int days)
+        {
+            var utcMidnight = DateTime.UtcNow.Date;
+
+            int active = 0;
+            int succeeded = 0;
+            int failed = 0;
+            long succeededDurationSeconds = 0;
+            int succeededWithDurationCount = 0;
+            int totalToday = 0;
+            int failedToday = 0;
+
+            foreach (var s in sessions)
+            {
+                switch (s.Status)
+                {
+                    case SessionStatus.InProgress:
+                    case SessionStatus.Pending:
+                    case SessionStatus.Stalled:
+                        active++;
+                        break;
+                    case SessionStatus.Succeeded:
+                        succeeded++;
+                        if (s.DurationSeconds is int d && d > 0)
+                        {
+                            succeededDurationSeconds += d;
+                            succeededWithDurationCount++;
+                        }
+                        break;
+                    case SessionStatus.Failed:
+                        failed++;
+                        break;
+                }
+
+                if (s.StartedAt >= utcMidnight)
+                {
+                    totalToday++;
+                    if (s.Status == SessionStatus.Failed) failedToday++;
+                }
+            }
+
+            int terminal = succeeded + failed;
+            int successRatePct = terminal > 0
+                ? (int)Math.Round((double)succeeded / terminal * 100.0)
+                : 0;
+            int avgDurationMinutes = succeededWithDurationCount > 0
+                ? (int)Math.Round((double)succeededDurationSeconds / succeededWithDurationCount / 60.0)
+                : 0;
+
+            return new SessionStats
+            {
+                Days = days,
+                ActiveCount = active,
+                TotalLastNDays = sessions.Count,
+                SucceededLastNDays = succeeded,
+                FailedLastNDays = failed,
+                SuccessRatePct = successRatePct,
+                AvgDurationMinutes = avgDurationMinutes,
+                TotalToday = totalToday,
+                FailedToday = failedToday,
+                ComputedAt = DateTime.UtcNow,
+            };
+        }
+
+        /// <summary>
         /// Fallback: queries the Sessions table directly (pre-migration, before SessionsIndex is populated).
         /// </summary>
         private async Task<(List<SessionSummary> Sessions, bool HasMore)> FetchSessionsFromPrimaryTableInternalAsync(

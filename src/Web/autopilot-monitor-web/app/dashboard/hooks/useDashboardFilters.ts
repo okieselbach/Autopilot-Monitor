@@ -18,14 +18,6 @@ interface UseDashboardFiltersParams {
   loadMore: () => void;
 }
 
-interface DashboardStats {
-  activeSessionsCount: number;
-  successRate: number;
-  avgDuration: number;
-  totalToday: number;
-  failedToday: number;
-}
-
 export interface UseDashboardFiltersReturn {
   searchQuery: string;
   setSearchQuery: (value: string) => void;
@@ -46,13 +38,13 @@ export interface UseDashboardFiltersReturn {
   sortedSessions: Session[];
   paginatedSessions: Session[];
   totalPages: number;
-  stats: DashboardStats;
 }
 
 /**
- * Owns the dashboard's filtering, sorting, pagination, and derived stats.
- * Pure derivation — no fetches, no side effects beyond localStorage (page size)
- * and an Application Insights event for search usage.
+ * Owns the dashboard's filtering, sorting, and pagination. Pure derivation —
+ * no fetches, no side effects beyond localStorage (page size) and an
+ * Application Insights event for search usage. Stats cards moved off this
+ * hook to <c>useDashboardStats</c> (server-aggregated).
  */
 export function useDashboardFilters({
   sessions,
@@ -119,25 +111,6 @@ export function useDashboardFilters({
     }
     return tenantId ? sessions.filter((s) => s.tenantId === tenantId) : sessions;
   }, [sessions, globalAdminMode, tenantIdFilter, tenantId]);
-
-  const stats = useMemo<DashboardStats>(() => {
-    const activeSessions = effectiveSessions.filter((s) => s.status === "InProgress");
-    const successRate = effectiveSessions.length > 0
-      ? Math.round((effectiveSessions.filter((s) => s.status === "Succeeded").length / effectiveSessions.length) * 100)
-      : 0;
-    const avgDuration = effectiveSessions.length > 0
-      ? Math.round(effectiveSessions.reduce((sum, s) => sum + s.durationSeconds, 0) / effectiveSessions.length / 60)
-      : 0;
-    const today = new Date().toDateString();
-    const sessionsToday = effectiveSessions.filter((s) => new Date(s.startedAt).toDateString() === today);
-    return {
-      activeSessionsCount: activeSessions.length,
-      successRate,
-      avgDuration,
-      totalToday: sessionsToday.length,
-      failedToday: sessionsToday.filter((s) => s.status === "Failed").length,
-    };
-  }, [effectiveSessions]);
 
   const filteredSessions = useMemo(() => {
     return effectiveSessions.filter((session) => {
@@ -257,6 +230,5 @@ export function useDashboardFilters({
     handlePreviousPage, handleNextPage,
     effectiveSessions, filteredSessions, sortedSessions, paginatedSessions,
     totalPages,
-    stats,
   };
 }

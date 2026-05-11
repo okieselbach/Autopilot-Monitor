@@ -58,6 +58,8 @@ export const api = {
       `${API_BASE_URL}/api/sessions/${sessionId}/report${qs({ tenantId })}`,
     quickSearch: (q: string) =>
       `${API_BASE_URL}/api/search/quick${qs({ q })}`,
+    stats: (opts?: { days?: number }) =>
+      `${API_BASE_URL}/api/sessions/stats${qs({ days: opts?.days?.toString() })}`,
   },
 
   // ── Inspector v1 (global admin only — Plan §M6) ───────────────────────────
@@ -82,6 +84,11 @@ export const api = {
         days: days?.toString(),
         pageSize: opts?.pageSize?.toString(),
         continuation: opts?.continuation,
+      })}`,
+    stats: (opts?: { tenantId?: string; days?: number }) =>
+      `${API_BASE_URL}/api/global/sessions/stats${qs({
+        tenantId: opts?.tenantId,
+        days: opts?.days?.toString(),
       })}`,
   },
 

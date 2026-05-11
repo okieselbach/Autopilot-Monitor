@@ -340,6 +340,43 @@ namespace AutopilotMonitor.Shared.Models
     }
 
     /// <summary>
+    /// Aggregated session counters for the dashboard stats cards.
+    /// Computed server-side over a windowed scan of the SessionsIndex so the
+    /// numbers don't drift with whatever the client happens to have paginated
+    /// into memory.
+    /// </summary>
+    public class SessionStats
+    {
+        /// <summary>Window the windowed counters were computed over (matches request).</summary>
+        public int Days { get; set; }
+
+        /// <summary>InProgress sessions inside the window. Used for the "Active Sessions" card.</summary>
+        public int ActiveCount { get; set; }
+
+        /// <summary>Total sessions started inside the window.</summary>
+        public int TotalLastNDays { get; set; }
+
+        public int SucceededLastNDays { get; set; }
+        public int FailedLastNDays { get; set; }
+
+        /// <summary>
+        /// Succeeded / (Succeeded + Failed) * 100, rounded. Zero when no terminal
+        /// sessions are in the window (the card renders "0%" rather than NaN).
+        /// </summary>
+        public int SuccessRatePct { get; set; }
+
+        /// <summary>Average duration of Succeeded sessions in the window, in minutes (rounded).</summary>
+        public int AvgDurationMinutes { get; set; }
+
+        /// <summary>Sessions whose StartedAt is on or after UTC midnight of the current day.</summary>
+        public int TotalToday { get; set; }
+        public int FailedToday { get; set; }
+
+        /// <summary>UTC timestamp of when the snapshot was produced (server clock).</summary>
+        public DateTime ComputedAt { get; set; }
+    }
+
+    /// <summary>
     /// A tracked IME version sighting. Permanent archive that survives data retention.
     /// </summary>
     public class ImeVersionHistoryEntry

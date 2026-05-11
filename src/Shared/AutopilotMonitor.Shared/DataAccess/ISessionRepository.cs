@@ -47,6 +47,20 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<RawPage<SessionSummary>> GetAllSessionsPageAsync(
             string? tenantIdFilter, int? days, int pageSize, string? continuation);
 
+        /// <summary>
+        /// Server-side aggregation for the dashboard stats cards (per-tenant scope).
+        /// Drains the SessionsIndex for the last <paramref name="days"/> days and computes
+        /// counts in a single pass — the client never derives these from a paginated list.
+        /// </summary>
+        Task<SessionStats> GetSessionStatsAsync(string tenantId, int days);
+
+        /// <summary>
+        /// Cross-tenant variant of <see cref="GetSessionStatsAsync"/> (Global Admin).
+        /// <paramref name="tenantIdFilter"/> optionally restricts to a single tenant
+        /// (routes through the per-tenant index for cheaper scan).
+        /// </summary>
+        Task<SessionStats> GetAllSessionStatsAsync(string? tenantIdFilter, int days);
+
         Task<bool> DeleteSessionAsync(string tenantId, string sessionId);
 
         // --- Session Updates ---
