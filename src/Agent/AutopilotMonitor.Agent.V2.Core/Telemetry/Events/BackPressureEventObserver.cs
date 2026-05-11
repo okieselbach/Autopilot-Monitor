@@ -41,7 +41,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Telemetry.Events
                 Message = $"Signal ingress back-pressure on origin '{origin}' (queue {queueLength}/{channelCapacity}, blocked {blockDuration.TotalMilliseconds:F0}ms)",
                 Timestamp = _clock.UtcNow,
                 ImmediateUpload = false,
-                Data = new Dictionary<string, object>(StringComparer.Ordinal)
+                Data = new Dictionary<string, object>(capacity: 4, StringComparer.Ordinal)
                 {
                     ["origin"] = origin,
                     ["channelCapacity"] = channelCapacity,

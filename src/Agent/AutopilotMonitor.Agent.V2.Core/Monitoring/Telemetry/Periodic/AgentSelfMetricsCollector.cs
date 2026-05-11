@@ -76,7 +76,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 
         protected override void Collect()
         {
-            var data = new Dictionary<string, object>
+            // Full path writes 18 keys: agent_version + process metrics (5: cpu, ws, private,
+            // threads, handles) + spool stats (4) + network delta (8: requests, failures,
+            // bytes_up/down, avg_latency, total_up/down/requests). cap=18 → HashHelpers.GetPrime(18)=23
+            // buckets → no resize on the 18th key (cap=16 would land at 17 buckets and resize).
+            var data = new Dictionary<string, object>(capacity: 18, StringComparer.Ordinal)
             {
                 { "agent_version", _agentVersion }
             };
@@ -193,7 +197,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                     || spoolFileSizeBytes > PressureFileSizeBytesThreshold)
                 && Interlocked.CompareExchange(ref _pressureEmitted, 1, 0) == 0)
             {
-                var pressureData = new Dictionary<string, object>
+                var pressureData = new Dictionary<string, object>(capacity: 8, StringComparer.Ordinal)
                 {
                     { "pendingItemCount", pendingItemCount },
                     { "fileSizeBytes", spoolFileSizeBytes },

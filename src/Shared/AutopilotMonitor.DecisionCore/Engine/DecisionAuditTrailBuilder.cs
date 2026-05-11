@@ -69,7 +69,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
             if (postState == null) throw new ArgumentNullException(nameof(postState));
             if (string.IsNullOrEmpty(trigger)) throw new ArgumentException("Trigger is mandatory.", nameof(trigger));
 
-            var data = new Dictionary<string, object>(StringComparer.Ordinal)
+            // Capacity sized for 8 mandatory anchors + up to ~8 optional fields (classifier,
+            // classifierInputs, reason, helloOutcome, helloPolicyEnabled, imePatternMatched,
+            // signalOrdinal). Avoids the default 0→3→7→17 resize cascade on every transition.
+            var data = new Dictionary<string, object>(capacity: 16, StringComparer.Ordinal)
             {
                 ["decisionSource"] = DecisionSource,
                 ["trigger"] = trigger,
@@ -159,7 +162,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         private static Dictionary<string, object> BuildScenarioBlock(DecisionState s)
         {
-            var block = new Dictionary<string, object>(StringComparer.Ordinal);
+            var block = new Dictionary<string, object>(capacity: 6, StringComparer.Ordinal);
             if (s.ScenarioProfile != null)
             {
                 block["mode"] = s.ScenarioProfile.Mode.ToString();
@@ -185,7 +188,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// </summary>
         private static Dictionary<string, object> FlattenClassifierInputs(object snapshot)
         {
-            var result = new Dictionary<string, object>(StringComparer.Ordinal);
+            var result = new Dictionary<string, object>(capacity: 8, StringComparer.Ordinal);
             foreach (var prop in snapshot.GetType().GetProperties())
             {
                 if (!prop.CanRead) continue;
@@ -242,7 +245,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
         public string InputHash { get; }
 
         public Dictionary<string, object> ToDictionary() =>
-            new Dictionary<string, object>(StringComparer.Ordinal)
+            new Dictionary<string, object>(capacity: 5, StringComparer.Ordinal)
             {
                 ["id"] = Id,
                 ["level"] = Level,

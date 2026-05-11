@@ -40,8 +40,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
             if (state == null) throw new ArgumentNullException(nameof(state));
 
             var seen = new List<string>(8);
-            var timestamps = new Dictionary<string, string>(StringComparer.Ordinal);
-            var evidence = new Dictionary<string, object>(StringComparer.Ordinal);
+            var timestamps = new Dictionary<string, string>(capacity: 8, StringComparer.Ordinal);
+            var evidence = new Dictionary<string, object>(capacity: 8, StringComparer.Ordinal);
 
             // Order matches the historical DecisionAuditTrailBuilder.BuildSignalCensus
             // ordering so existing snapshot-style assertions remain stable.
@@ -99,7 +99,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 seen.Add(obs.AadUserJoinWithUserObserved.Value
                     ? "aad_user_joined_with_user"
                     : "aad_user_joined_device_only");
-                evidence["aadUserJoinObserved"] = new Dictionary<string, object>(StringComparer.Ordinal)
+                evidence["aadUserJoinObserved"] = new Dictionary<string, object>(capacity: 2, StringComparer.Ordinal)
                 {
                     ["ordinal"] = obs.AadUserJoinWithUserObserved.SourceSignalOrdinal,
                     ["withUser"] = obs.AadUserJoinWithUserObserved.Value,
@@ -111,7 +111,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         private static Dictionary<string, object> TimestampedEvidence<T>(SignalFact<T>? fact)
         {
-            var dict = new Dictionary<string, object>(StringComparer.Ordinal)
+            var dict = new Dictionary<string, object>(capacity: 2, StringComparer.Ordinal)
             {
                 ["ordinal"] = fact!.SourceSignalOrdinal,
             };
@@ -127,7 +127,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         private static Dictionary<string, object> OrdinalEvidence(long ordinal) =>
-            new Dictionary<string, object>(StringComparer.Ordinal)
+            new Dictionary<string, object>(capacity: 1, StringComparer.Ordinal)
             {
                 ["ordinal"] = ordinal,
             };

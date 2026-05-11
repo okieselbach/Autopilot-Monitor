@@ -88,7 +88,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
 
         protected override void Collect()
         {
-            var data = new Dictionary<string, object>();
+            // Full path writes up to 12 keys (cpu + 3 memory + disk_queue + 2 disk + 5 network).
+            // cap=12 → HashHelpers.GetPrime(12)=17 buckets → no resize on the last network key
+            // (cap=8 would land at 11 buckets and resize on the 12th).
+            var data = new Dictionary<string, object>(capacity: 12, StringComparer.Ordinal);
 
             // CPU usage
             try
