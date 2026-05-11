@@ -68,6 +68,7 @@
             "scriptExitCode",
             "scriptOutput",
             "scriptCompleted",
+            "healthScriptResult",
             "captureExitCode",
             "captureHResult",
             "captureAppVersion",
