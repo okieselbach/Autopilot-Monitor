@@ -157,6 +157,9 @@ builder.Services.AddSingleton<MaintenanceService>();
 builder.Services.AddSingleton<
     AutopilotMonitor.Functions.Services.Monitoring.IAzureMonitorMetricsReader,
     AutopilotMonitor.Functions.Services.Monitoring.AzureMonitorMetricsReader>();
+builder.Services.AddSingleton<
+    AutopilotMonitor.Functions.Services.Monitoring.IPoisonQueueProbe,
+    AutopilotMonitor.Functions.Services.Monitoring.AzurePoisonQueueProbe>();
 builder.Services.AddSingleton<OpsAlertDispatchService>();
 builder.Services.AddSingleton<OpsEventService>();
 builder.Services.AddSingleton<BlockedDeviceService>();

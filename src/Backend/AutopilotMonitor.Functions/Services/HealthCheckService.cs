@@ -14,19 +14,40 @@ public class HealthCheckService
     private readonly AdminConfigurationService _adminConfigService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IAzureMonitorMetricsReader _metricsReader;
+    private readonly IPoisonQueueProbe _poisonQueueProbe;
     private readonly IConfiguration _configuration;
+
+    /// <summary>
+    /// Queues whose poison sibling is surfaced on the detailed-health page. Order matches
+    /// the production impact ranking: rule analysis &gt; vulnerability correlation &gt; index reconcile
+    /// (which has a 2 h background reconcile-timer as safety net).
+    /// </summary>
+    internal static readonly string[] MonitoredPoisonQueues =
+    {
+        Shared.Constants.QueueNames.AnalyzeOnEnrollmentEnd + "-poison",
+        Shared.Constants.QueueNames.VulnerabilityCorrelate + "-poison",
+        Shared.Constants.QueueNames.TelemetryIndexReconcile + "-poison",
+    };
+
+    /// <summary>Default warning threshold (≥1 message) — every poison message is a 5×-failed handler call.</summary>
+    internal const int DefaultPoisonQueueWarningThreshold = 1;
+
+    /// <summary>Default critical threshold — backlog ≥10 means we're not just looking at one transient bug.</summary>
+    internal const int DefaultPoisonQueueCriticalThreshold = 10;
 
     public HealthCheckService(
         ILogger<HealthCheckService> logger,
         AdminConfigurationService adminConfigService,
         IHttpClientFactory httpClientFactory,
         IAzureMonitorMetricsReader metricsReader,
+        IPoisonQueueProbe poisonQueueProbe,
         IConfiguration configuration)
     {
         _logger = logger;
         _adminConfigService = adminConfigService;
         _httpClientFactory = httpClientFactory;
         _metricsReader = metricsReader;
+        _poisonQueueProbe = poisonQueueProbe;
         _configuration = configuration;
     }
 
@@ -45,7 +66,8 @@ public class HealthCheckService
             CheckStorageBackendAsync(),
             CheckProcessingBackendAsync(),
             CheckAgentBinariesAsync(),
-            CheckSignalRQuotaAsync()
+            CheckSignalRQuotaAsync(),
+            CheckPoisonQueuesAsync()
         );
 
         result.Checks.AddRange(checks);
@@ -271,6 +293,107 @@ public class HealthCheckService
         check.Details = details;
         return check;
     }
+
+    /// <summary>
+    /// Polls the approximate message count of each monitored poison queue in parallel and
+    /// surfaces the worst tier as a single health entry. A non-existent poison queue counts
+    /// as zero (queues are created lazily on first poison-move). Individual probe failures
+    /// are recorded in the details dictionary as <c>error: &lt;message&gt;</c> and force the
+    /// overall status to at least <c>warning</c> so a flaky Storage call cannot silently
+    /// mask a real backlog.
+    /// </summary>
+    internal async Task<HealthCheck> CheckPoisonQueuesAsync()
+    {
+        var check = new HealthCheck
+        {
+            Name = "Poison Queues",
+            Description = "Async-worker dead-letter backlog"
+        };
+
+        var warningThreshold = ParsePositiveInt(
+            "PoisonQueueWarningThreshold", DefaultPoisonQueueWarningThreshold);
+        var criticalThreshold = ParsePositiveInt(
+            "PoisonQueueCriticalThreshold", DefaultPoisonQueueCriticalThreshold);
+
+        var probes = MonitoredPoisonQueues
+            .Select(name => (name, task: ProbeOneAsync(name)))
+            .ToArray();
+
+        await Task.WhenAll(probes.Select(p => p.task)).ConfigureAwait(false);
+
+        var details = new Dictionary<string, object>();
+        var worstTier = PoisonQueueTier.None;
+
+        foreach (var (name, task) in probes)
+        {
+            var result = await task.ConfigureAwait(false);
+            if (result.Error is not null)
+            {
+                details[name] = $"error: {result.Error}";
+                if (worstTier < PoisonQueueTier.Warning) worstTier = PoisonQueueTier.Warning;
+                continue;
+            }
+
+            var count = result.Count!.Value;
+            details[name] = count == 1 ? "1 message" : $"{count:N0} messages";
+            var tier = ClassifyPoisonQueueTier(count, warningThreshold, criticalThreshold);
+            if (tier > worstTier) worstTier = tier;
+        }
+
+        check.Status = worstTier switch
+        {
+            PoisonQueueTier.Critical => "unhealthy",
+            PoisonQueueTier.Warning => "warning",
+            _ => "healthy"
+        };
+
+        check.Message = worstTier switch
+        {
+            PoisonQueueTier.Critical => $"Poison backlog accumulating (≥{criticalThreshold} messages) — investigate failing handlers",
+            PoisonQueueTier.Warning => "Operator review required — failed messages parked after 5 retries",
+            _ => "All poison queues empty"
+        };
+        check.Details = details;
+        return check;
+    }
+
+    private async Task<PoisonQueueProbeResult> ProbeOneAsync(string queueName)
+    {
+        try
+        {
+            var count = await _poisonQueueProbe
+                .GetApproximateMessageCountAsync(queueName, CancellationToken.None)
+                .ConfigureAwait(false);
+            return new PoisonQueueProbeResult(count, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Poison queue probe failed for {QueueName} — surfacing as warning in health check",
+                queueName);
+            return new PoisonQueueProbeResult(null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Tri-tier classifier for poison-queue depth. Thresholds are configurable via
+    /// App Settings so ops can tighten them in production without a code change.
+    /// </summary>
+    internal static PoisonQueueTier ClassifyPoisonQueueTier(long count, int warningThreshold, int criticalThreshold)
+    {
+        if (count >= criticalThreshold) return PoisonQueueTier.Critical;
+        if (count >= warningThreshold) return PoisonQueueTier.Warning;
+        return PoisonQueueTier.None;
+    }
+
+    internal enum PoisonQueueTier
+    {
+        None = 0,
+        Warning = 1,
+        Critical = 2,
+    }
+
+    private readonly record struct PoisonQueueProbeResult(long? Count, string? Error);
 
     private int ParsePositiveInt(string key, int fallback)
     {

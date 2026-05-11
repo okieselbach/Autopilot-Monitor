@@ -104,7 +104,8 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
             var healthCheckResult = await _healthCheckService.PerformAllChecksAsync();
 
             // SignalR Quota check exposes the subscription/resource-group path of the
-            // backing SignalR resource — restrict to Global Admins. Non-GA callers
+            // backing SignalR resource, and Poison Queues exposes internal async-worker
+            // queue topology — restrict both to Global Admins. Non-GA callers
             // (Tenant Admins, Operators) get the rest of the report unchanged.
             // The route is registered as AuthenticatedUser, so PolicyEnforcementMiddleware
             // does NOT compute IsGlobalAdmin; resolve it directly via GlobalAdminService.
@@ -112,7 +113,9 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
             var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(requestCtx.UserPrincipalName);
             var visibleChecks = isGlobalAdmin
                 ? healthCheckResult.Checks
-                : healthCheckResult.Checks.Where(c => c.Name != "SignalR Quota").ToList();
+                : healthCheckResult.Checks
+                    .Where(c => c.Name != "SignalR Quota" && c.Name != "Poison Queues")
+                    .ToList();
 
             // Always return 200 OK with the health status in the body
             // This allows the frontend to properly display the results even if some checks fail
