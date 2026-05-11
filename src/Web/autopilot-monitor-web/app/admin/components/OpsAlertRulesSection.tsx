@@ -19,6 +19,8 @@ const OPS_EVENT_TYPES: Record<string, string[]> = {
     "SignalRConnectionsCritical",
     "SignalRMessagesHigh",
     "SignalRMessagesCritical",
+    "PoisonQueueBacklogHigh",
+    "PoisonQueueBacklogCritical",
   ],
   Tenant: ["TenantOffboarded"],
   Agent: ["BlobStorageMissing", "BlobStorageUnreachable", "NewImeVersionDetected", "ExcessiveSessionEvents"],
