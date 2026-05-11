@@ -10,6 +10,7 @@ export interface AdminConfiguration {
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
   opsEventRetentionDays?: number;
+  slaNotificationCooldownHours?: number;
   diagnosticsGlobalLogPathsJson?: string;
   customSettings?: string;
   nvdApiKey?: string;

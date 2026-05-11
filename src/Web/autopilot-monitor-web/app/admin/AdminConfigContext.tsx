@@ -30,6 +30,8 @@ interface AdminConfigContextValue {
   setMaintenanceBlockDurationHours: (value: number) => void;
   opsEventRetentionDays: number;
   setOpsEventRetentionDays: (value: number) => void;
+  slaNotificationCooldownHours: number;
+  setSlaNotificationCooldownHours: (value: number) => void;
   allowAgentDowngrade: boolean;
   setAllowAgentDowngrade: (value: boolean) => void;
   modernDeploymentHarmlessEventIds: string;
@@ -110,6 +112,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [maxSessionWindowHours, setMaxSessionWindowHours] = useState(24);
   const [maintenanceBlockDurationHours, setMaintenanceBlockDurationHours] = useState(12);
   const [opsEventRetentionDays, setOpsEventRetentionDays] = useState(90);
+  const [slaNotificationCooldownHours, setSlaNotificationCooldownHours] = useState(24);
   const [allowAgentDowngrade, setAllowAgentDowngrade] = useState(false);
   const [modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds] = useState("100, 1005, 1010");
   const [enableIndexDualWrite, setEnableIndexDualWrite] = useState(false);
@@ -163,6 +166,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setMaxSessionWindowHours(data.maxSessionWindowHours ?? 24);
         setMaintenanceBlockDurationHours(data.maintenanceBlockDurationHours ?? 12);
         setOpsEventRetentionDays(data.opsEventRetentionDays ?? 90);
+        setSlaNotificationCooldownHours(data.slaNotificationCooldownHours ?? 24);
         setAllowAgentDowngrade(data.allowAgentDowngrade ?? false);
         setModernDeploymentHarmlessEventIds(parseHarmlessEventIdsJson(data.modernDeploymentHarmlessEventIdsJson));
         setEnableIndexDualWrite(data.enableIndexDualWrite ?? false);
@@ -257,6 +261,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         maxSessionWindowHours,
         maintenanceBlockDurationHours,
         opsEventRetentionDays,
+        slaNotificationCooldownHours,
         allowAgentDowngrade,
         modernDeploymentHarmlessEventIdsJson: serializeHarmlessEventIds(modernDeploymentHarmlessEventIds),
         enableIndexDualWrite,
@@ -286,7 +291,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingConfig(false);
     }
-  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, getAccessToken]);
+  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, slaNotificationCooldownHours, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, getAccessToken]);
 
   // Reset admin config
   const handleResetAdminConfig = useCallback(() => {
@@ -297,6 +302,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     setMaxSessionWindowHours(adminConfig.maxSessionWindowHours ?? 24);
     setMaintenanceBlockDurationHours(adminConfig.maintenanceBlockDurationHours ?? 12);
     setOpsEventRetentionDays(adminConfig.opsEventRetentionDays ?? 90);
+    setSlaNotificationCooldownHours(adminConfig.slaNotificationCooldownHours ?? 24);
     setAllowAgentDowngrade(adminConfig.allowAgentDowngrade ?? false);
     setModernDeploymentHarmlessEventIds(parseHarmlessEventIdsJson(adminConfig.modernDeploymentHarmlessEventIdsJson));
     setEnableIndexDualWrite(adminConfig.enableIndexDualWrite ?? false);
@@ -422,6 +428,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       maxSessionWindowHours, setMaxSessionWindowHours,
       maintenanceBlockDurationHours, setMaintenanceBlockDurationHours,
       opsEventRetentionDays, setOpsEventRetentionDays,
+      slaNotificationCooldownHours, setSlaNotificationCooldownHours,
       allowAgentDowngrade, setAllowAgentDowngrade,
       modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds,
       enableIndexDualWrite, setEnableIndexDualWrite,

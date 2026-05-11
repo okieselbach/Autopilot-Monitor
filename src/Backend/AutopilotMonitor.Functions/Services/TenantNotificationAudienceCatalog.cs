@@ -28,6 +28,7 @@ public static class TenantNotificationAudienceCatalog
         ["hardware_rejection"]       = NotificationAudience.Admin,
         ["sla_breach"]               = NotificationAudience.Member,
         ["sla_consecutive_failures"] = NotificationAudience.Member,
+        ["sla_resolved"]             = NotificationAudience.Member,
     };
 
     public static NotificationAudience Resolve(string? type)

@@ -104,6 +104,13 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int OpsEventRetentionDays { get; set; } = 90;
 
+        /// <summary>
+        /// Cooldown in hours between repeat SLA breach notifications for the same
+        /// tenant + breach type. Persisted via SlaTenantStatus so it survives Function
+        /// host recycles. Default: 24 hours (one notification per day). Range: 1-168.
+        /// </summary>
+        public int SlaNotificationCooldownHours { get; set; } = 24;
+
         // ===== FEEDBACK SETTINGS =====
 
         /// <summary>

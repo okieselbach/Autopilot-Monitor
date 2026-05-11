@@ -12,6 +12,8 @@ interface AdminConfigSettingsSectionProps {
   setPlatformStatsBlobSasUrl: (value: string) => void;
   collectorIdleTimeoutMinutes: number;
   setCollectorIdleTimeoutMinutes: (value: number) => void;
+  slaNotificationCooldownHours: number;
+  setSlaNotificationCooldownHours: (value: number) => void;
   allowAgentDowngrade: boolean;
   setAllowAgentDowngrade: (value: boolean) => void;
   modernDeploymentHarmlessEventIds: string;
@@ -32,6 +34,8 @@ export function AdminConfigSettingsSection({
   setPlatformStatsBlobSasUrl,
   collectorIdleTimeoutMinutes,
   setCollectorIdleTimeoutMinutes,
+  slaNotificationCooldownHours,
+  setSlaNotificationCooldownHours,
   allowAgentDowngrade,
   setAllowAgentDowngrade,
   modernDeploymentHarmlessEventIds,
@@ -115,6 +119,26 @@ export function AdminConfigSettingsSection({
                   max="120"
                   value={collectorIdleTimeoutMinutes}
                   onChange={(e) => setCollectorIdleTimeoutMinutes(parseInt(e.target.value) || 0)}
+                  className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                />
+              </label>
+            </div>
+
+            <div>
+              <label className="block">
+                <span className="text-indigo-900 dark:text-indigo-100 font-medium">SLA Notification Cooldown (Hours)</span>
+                <p className="text-sm text-indigo-800 dark:text-gray-300 mb-2">
+                  Minimum interval between repeat SLA breach notifications for the same tenant and breach type
+                  (success rate, p95 duration, app install success, consecutive failures). Persisted across host recycles
+                  via the <code className="text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">SlaTenantStatus</code> table.
+                  Default: <strong>24</strong> (one notification per breach type per day). Range: 1&ndash;168.
+                </p>
+                <input
+                  type="number"
+                  min="1"
+                  max="168"
+                  value={slaNotificationCooldownHours}
+                  onChange={(e) => setSlaNotificationCooldownHours(parseInt(e.target.value) || 24)}
                   className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                 />
               </label>

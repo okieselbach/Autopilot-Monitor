@@ -185,45 +185,78 @@ namespace AutopilotMonitor.Functions.Services.Notifications
         }
 
         /// <summary>
-        /// Builds a notification alert for an SLA breach (success rate or duration).
+        /// Builds a notification alert for an SLA breach. Dispatches on
+        /// <paramref name="breachType"/>: <c>SuccessRate</c>, <c>Duration</c>, or <c>AppInstall</c>.
+        /// Unknown types fall back to a neutral template rather than silently rendering as Duration.
         /// </summary>
         public static NotificationAlert BuildSlaBreachAlert(
             string tenantId, double currentRate, double targetRate,
-            int totalSessions, int failedSessions, string breachType, string? dashboardUrl = null)
+            int totalSessions, int failedSessions, string breachType, string? dashboardUrl = null,
+            string? extraContext = null)
         {
-            var isSuccessRate = breachType == "SuccessRate";
-            var title = isSuccessRate
-                ? $"\u26a0\ufe0f SLA Breach: Success Rate {currentRate:F1}%"
-                : $"\u26a0\ufe0f SLA Breach: P95 Duration Exceeds Target";
             var themeColor = "FFA500"; // warning orange
-
+            string title;
+            string summary;
+            string period;
+            string label;
             var facts = new List<NotificationFact>
             {
                 new() { Name = "Tenant", Value = tenantId },
-                new() { Name = "Breach Type", Value = isSuccessRate ? "Success Rate" : "Duration (P95)" },
             };
 
-            if (isSuccessRate)
+            switch (breachType)
             {
-                facts.Add(new NotificationFact { Name = "Current Rate", Value = $"{currentRate:F1}%" });
-                facts.Add(new NotificationFact { Name = "Target Rate", Value = $"{targetRate:F1}%" });
-                facts.Add(new NotificationFact { Name = "Total Sessions", Value = totalSessions.ToString() });
-                facts.Add(new NotificationFact { Name = "Failed Sessions", Value = failedSessions.ToString() });
-            }
-            else
-            {
-                facts.Add(new NotificationFact { Name = "Current P95", Value = $"{currentRate:F1} min" });
-                facts.Add(new NotificationFact { Name = "Target Max", Value = $"{targetRate:F0} min" });
+                case "SuccessRate":
+                    label = "Success Rate";
+                    title = $"\u26a0\ufe0f SLA Breach: Success Rate {currentRate:F1}%";
+                    summary = $"SLA breach: success rate {currentRate:F1}% is below target {targetRate:F1}%";
+                    period = "Current Month";
+                    facts.Add(new NotificationFact { Name = "Breach Type", Value = label });
+                    facts.Add(new NotificationFact { Name = "Current Rate", Value = $"{currentRate:F1}%" });
+                    facts.Add(new NotificationFact { Name = "Target Rate", Value = $"{targetRate:F1}%" });
+                    facts.Add(new NotificationFact { Name = "Total Sessions", Value = totalSessions.ToString() });
+                    facts.Add(new NotificationFact { Name = "Failed Sessions", Value = failedSessions.ToString() });
+                    break;
+
+                case "Duration":
+                    label = "Duration (P95)";
+                    title = "\u26a0\ufe0f SLA Breach: P95 Duration Exceeds Target";
+                    summary = $"SLA breach: P95 duration {currentRate:F1}min exceeds target {targetRate:F0}min";
+                    period = "Current Month";
+                    facts.Add(new NotificationFact { Name = "Breach Type", Value = label });
+                    facts.Add(new NotificationFact { Name = "Current P95", Value = $"{currentRate:F1} min" });
+                    facts.Add(new NotificationFact { Name = "Target Max", Value = $"{targetRate:F0} min" });
+                    break;
+
+                case "AppInstall":
+                    label = "App Install Success";
+                    title = $"\u26a0\ufe0f SLA Breach: App Install Success Rate {currentRate:F1}%";
+                    summary = $"SLA breach: app install success rate {currentRate:F1}% is below target {targetRate:F1}%";
+                    period = "Current Week";
+                    facts.Add(new NotificationFact { Name = "Breach Type", Value = label });
+                    facts.Add(new NotificationFact { Name = "Current Rate", Value = $"{currentRate:F1}%" });
+                    facts.Add(new NotificationFact { Name = "Target Rate", Value = $"{targetRate:F1}%" });
+                    if (!string.IsNullOrEmpty(extraContext))
+                        facts.Add(new NotificationFact { Name = "Top Failing App", Value = extraContext });
+                    break;
+
+                default:
+                    label = breachType;
+                    title = $"\u26a0\ufe0f SLA Breach: {breachType}";
+                    summary = $"SLA breach: {breachType} current {currentRate:F1} vs target {targetRate:F1}";
+                    period = "Current Period";
+                    facts.Add(new NotificationFact { Name = "Breach Type", Value = label });
+                    facts.Add(new NotificationFact { Name = "Current", Value = $"{currentRate:F1}" });
+                    facts.Add(new NotificationFact { Name = "Target", Value = $"{targetRate:F1}" });
+                    break;
             }
 
-            facts.Add(new NotificationFact { Name = "Period", Value = "Current Month" });
+            facts.Add(new NotificationFact { Name = "Period", Value = period });
 
             var alert = new NotificationAlert
             {
                 Title = title,
-                Summary = isSuccessRate
-                    ? $"SLA breach: success rate {currentRate:F1}% is below target {targetRate:F1}%"
-                    : $"SLA breach: P95 duration {currentRate:F1}min exceeds target {targetRate:F0}min",
+                Summary = summary,
                 Severity = NotificationSeverity.Warning,
                 ThemeColor = themeColor,
                 Facts = facts,
@@ -233,6 +266,61 @@ namespace AutopilotMonitor.Functions.Services.Notifications
                 alert.Actions.Add(new NotificationAction { Type = "openUrl", Title = "Open SLA Dashboard", Url = dashboardUrl });
 
             return alert;
+        }
+
+        /// <summary>
+        /// Builds a notification alert announcing an SLA breach has been resolved.
+        /// Emitted once when a previously-active breach is no longer detected on the next evaluation.
+        /// </summary>
+        public static NotificationAlert BuildSlaResolvedAlert(
+            string tenantId, string breachType, double? currentValue, double? targetValue,
+            DateTime? firstBreachAt, DateTime resolvedAt, string? dashboardUrl = null)
+        {
+            var label = breachType switch
+            {
+                "SuccessRate" => "Success Rate",
+                "Duration" => "Duration (P95)",
+                "AppInstall" => "App Install Success",
+                "ConsecutiveFailures" => "Consecutive Failures",
+                _ => breachType
+            };
+
+            var durationText = firstBreachAt.HasValue
+                ? FormatDuration(resolvedAt - firstBreachAt.Value)
+                : "–";
+
+            var facts = new List<NotificationFact>
+            {
+                new() { Name = "Tenant", Value = tenantId },
+                new() { Name = "Breach Type", Value = label },
+                new() { Name = "Active For", Value = durationText },
+            };
+
+            if (currentValue.HasValue)
+                facts.Add(new NotificationFact { Name = "Current", Value = $"{currentValue.Value:F1}" });
+            if (targetValue.HasValue)
+                facts.Add(new NotificationFact { Name = "Target", Value = $"{targetValue.Value:F1}" });
+
+            var alert = new NotificationAlert
+            {
+                Title = $"✅ SLA Breach Resolved: {label}",
+                Summary = $"SLA breach resolved for tenant {tenantId}: {label} is back within target.",
+                Severity = NotificationSeverity.Success,
+                ThemeColor = "00B050",
+                Facts = facts,
+            };
+
+            if (!string.IsNullOrEmpty(dashboardUrl))
+                alert.Actions.Add(new NotificationAction { Type = "openUrl", Title = "Open SLA Dashboard", Url = dashboardUrl });
+
+            return alert;
+        }
+
+        private static string FormatDuration(TimeSpan span)
+        {
+            if (span.TotalDays >= 1) return $"{(int)span.TotalDays}d {span.Hours}h";
+            if (span.TotalHours >= 1) return $"{(int)span.TotalHours}h {span.Minutes}m";
+            return $"{(int)span.TotalMinutes}m";
         }
 
         /// <summary>

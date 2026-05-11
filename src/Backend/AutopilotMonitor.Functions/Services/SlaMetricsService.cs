@@ -257,7 +257,7 @@ namespace AutopilotMonitor.Functions.Services
             return response;
         }
 
-        private static string GetIsoWeekKey(DateTime dt)
+        internal static string GetIsoWeekKey(DateTime dt)
         {
             var week = ISOWeek.GetWeekOfYear(dt);
             var year = ISOWeek.GetYear(dt);

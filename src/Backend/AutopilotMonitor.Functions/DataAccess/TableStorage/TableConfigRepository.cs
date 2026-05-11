@@ -550,6 +550,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "MaxDiagnosticsDownloadSizeMB", config.MaxDiagnosticsDownloadSizeMB },
                 { "DiagnosticsDownloadTimeoutSeconds", config.DiagnosticsDownloadTimeoutSeconds },
                 { "OpsEventRetentionDays", config.OpsEventRetentionDays },
+                { "SlaNotificationCooldownHours", config.SlaNotificationCooldownHours },
                 // Ops Alert settings
                 { "OpsAlertRulesJson", config.OpsAlertRulesJson ?? string.Empty },
                 { "OpsAlertTelegramEnabled", config.OpsAlertTelegramEnabled },
@@ -612,6 +613,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 MaxDiagnosticsDownloadSizeMB = entity.GetInt32("MaxDiagnosticsDownloadSizeMB") ?? 500,
                 DiagnosticsDownloadTimeoutSeconds = entity.GetInt32("DiagnosticsDownloadTimeoutSeconds") ?? 120,
                 OpsEventRetentionDays = entity.GetInt32("OpsEventRetentionDays") ?? 90,
+                SlaNotificationCooldownHours = entity.GetInt32("SlaNotificationCooldownHours") ?? 24,
                 // Ops Alert settings
                 OpsAlertRulesJson = entity.GetString("OpsAlertRulesJson"),
                 OpsAlertTelegramEnabled = entity.GetBoolean("OpsAlertTelegramEnabled") ?? false,

@@ -405,6 +405,11 @@ namespace AutopilotMonitor.Shared
             // Persistent software inventory per tenant (aggregated from enrollment snapshots)
             public const string SoftwareInventory = "SoftwareInventory";
 
+            // SLA breach status per tenant (one row per tenant, RowKey = "status").
+            // Persists across host recycles so SLA-breach notifications can be throttled
+            // reliably and a GA cross-tenant overview can be served without re-aggregation.
+            public const string SlaTenantStatus = "SlaTenantStatus";
+
             // Agent-queryable indexes (for MCP API)
             public const string EventTypeIndex = "EventTypeIndex";
             public const string DeviceSnapshot = "DeviceSnapshot";
@@ -476,6 +481,7 @@ namespace AutopilotMonitor.Shared
                 VulnerabilityCache,
                 VulnerabilityReports,
                 SoftwareInventory,
+                SlaTenantStatus,
                 EventTypeIndex,
                 DeviceSnapshot,
                 CveIndex,

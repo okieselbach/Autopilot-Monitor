@@ -10,6 +10,7 @@ export function SectionGlobalSettings() {
     globalRateLimit, setGlobalRateLimit,
     platformStatsBlobSasUrl, setPlatformStatsBlobSasUrl,
     collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes,
+    slaNotificationCooldownHours, setSlaNotificationCooldownHours,
     allowAgentDowngrade, setAllowAgentDowngrade,
     modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds,
     enableIndexDualWrite, setEnableIndexDualWrite,
@@ -29,6 +30,8 @@ export function SectionGlobalSettings() {
         setPlatformStatsBlobSasUrl={setPlatformStatsBlobSasUrl}
         collectorIdleTimeoutMinutes={collectorIdleTimeoutMinutes}
         setCollectorIdleTimeoutMinutes={setCollectorIdleTimeoutMinutes}
+        slaNotificationCooldownHours={slaNotificationCooldownHours}
+        setSlaNotificationCooldownHours={setSlaNotificationCooldownHours}
         allowAgentDowngrade={allowAgentDowngrade}
         setAllowAgentDowngrade={setAllowAgentDowngrade}
         modernDeploymentHarmlessEventIds={modernDeploymentHarmlessEventIds}
