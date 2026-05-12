@@ -41,7 +41,7 @@ namespace AutopilotMonitor.Functions.Services
     /// </summary>
     public partial class TableStorageService : ISessionDeletionInventoryReader
     {
-        public async Task<TableEntity?> GetSessionRowAsync(string tenantId, string sessionId, CancellationToken cancellationToken = default)
+        public virtual async Task<TableEntity?> GetSessionRowAsync(string tenantId, string sessionId, CancellationToken cancellationToken = default)
         {
             var tableClient = _tableServiceClient.GetTableClient(Shared.Constants.TableNames.Sessions);
             try
@@ -108,7 +108,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Returns <see cref="DeletionBatchResult"/> for accurate progress accounting on
         /// re-runs of partially-completed cascades.
         /// </summary>
-        public async Task<DeletionBatchResult> DeleteByExactKeysInBatchesAsync(
+        public virtual async Task<DeletionBatchResult> DeleteByExactKeysInBatchesAsync(
             string tableName,
             IReadOnlyList<(string Pk, string Rk)> keys,
             CancellationToken cancellationToken = default)

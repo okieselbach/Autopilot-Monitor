@@ -136,6 +136,10 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.Delet
 // the producer into DeleteSessionFunction + the dedicated SessionDeletionMaintenanceFunction.
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionGuard>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionProducer>();
+// PR4b: cascade-delete restore endpoint (full + partial-poisoned-recovery). Consumed by
+// RestoreSessionFunction; GA-only via EndpointAccessPolicyCatalog. No hosted-service registration
+// needed — the function is HTTP-triggered.
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionRestoreService>();
 builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
 
 // Data Access Layer — repository interfaces backed by Table Storage.

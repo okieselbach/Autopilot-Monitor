@@ -20,6 +20,7 @@ public class FakeSignalRNotificationService : ISignalRNotificationService
     public int GlobalDismissAllCount { get; private set; }
     public List<(string TenantId, string SessionId, int Count)> RuleResultsCalls { get; } = new();
     public List<(string TenantId, string SessionId, string Risk)> VulnReportCalls { get; } = new();
+    public List<(string TenantId, string SessionId)> SessionDeletedCalls { get; } = new();
 
     public Task NotifyRuleResultsAvailableAsync(string tenantId, string sessionId, int resultCount)
     {
@@ -30,6 +31,12 @@ public class FakeSignalRNotificationService : ISignalRNotificationService
     public Task NotifyVulnerabilityReportAvailableAsync(string tenantId, string sessionId, string overallRisk)
     {
         VulnReportCalls.Add((tenantId, sessionId, overallRisk));
+        return Task.CompletedTask;
+    }
+
+    public Task NotifySessionDeletedAsync(string tenantId, string sessionId)
+    {
+        SessionDeletedCalls.Add((tenantId, sessionId));
         return Task.CompletedTask;
     }
 

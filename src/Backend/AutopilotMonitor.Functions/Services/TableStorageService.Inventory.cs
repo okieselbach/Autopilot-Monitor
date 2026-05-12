@@ -300,7 +300,7 @@ namespace AutopilotMonitor.Functions.Services
         /// zero. 404 = idempotent no-op. Bounded retry per <see cref="InventoryCasMaxAttempts"/> /
         /// <see cref="InventoryCasMaxWallClock"/>; throws on exhaustion.
         /// </summary>
-        public async Task DecrementSoftwareInventoryEntryAsync(
+        public virtual async Task DecrementSoftwareInventoryEntryAsync(
             string tenantId, string normalizedVendor, string normalizedName, string normalizedVersion,
             CancellationToken ct = default)
         {
@@ -359,6 +359,91 @@ namespace AutopilotMonitor.Functions.Services
 
             throw new InvalidOperationException(
                 $"SoftwareInventory decrement ETag-CAS exhausted after {InventoryCasMaxAttempts} attempts or "
+                + $"{InventoryCasMaxWallClock.TotalSeconds:0}s wall-clock. tenant={tenantId} key={rowKey}");
+        }
+
+        /// <summary>
+        /// Re-increments a SoftwareInventory counter from a <see cref="DeletionDecrementKey"/>
+        /// (vendor, name, version only — no DisplayName/Publisher). Symmetric inverse of
+        /// <see cref="DecrementSoftwareInventoryEntryAsync"/>; used by the cascade-delete restore
+        /// path (PR4b plan §13.6) where the manifest's side-row only carries the decrement keys.
+        /// <para>
+        /// If the inventory row exists → ETag-CAS <c>SessionCount += 1</c>, preserving DisplayName,
+        /// Publisher, and every other column untouched. If the row is missing (count had dropped
+        /// to zero and the cascade deleted it) → AddEntity with vendor/name/version + count=1 +
+        /// FirstSeenAt + LastSeenAt + empty DisplayName/Publisher. The fidelity loss on display
+        /// metadata is accepted per plan §13.6 ("re-creates the inventory row with SessionCount=1");
+        /// the next live inventory-correlation will fill in DisplayName + Publisher.
+        /// </para>
+        /// Bounded retry per <see cref="InventoryCasMaxAttempts"/> / <see cref="InventoryCasMaxWallClock"/>;
+        /// throws on exhaustion per memory <c>feedback_storage_helpers_fail_soft</c>.
+        /// </summary>
+        public virtual async Task RestoreSoftwareInventoryEntryByKeyAsync(
+            string tenantId, DeletionDecrementKey key, CancellationToken ct = default)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            if (key == null) throw new ArgumentNullException(nameof(key));
+            var rowKey = BuildSoftwareInventoryRowKey(key.Vendor, key.Name, key.Version);
+            if (string.IsNullOrWhiteSpace(rowKey) || rowKey == "::")
+            {
+                throw new ArgumentException(
+                    "DeletionDecrementKey has empty vendor/name/version — cannot restore a SoftwareInventory entry with no identity.",
+                    nameof(key));
+            }
+
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SoftwareInventory);
+            var deadline = DateTime.UtcNow + InventoryCasMaxWallClock;
+
+            for (var attempt = 0; attempt < InventoryCasMaxAttempts && DateTime.UtcNow < deadline; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                TableEntity existing;
+                try
+                {
+                    var response = await tableClient.GetEntityAsync<TableEntity>(tenantId, rowKey, cancellationToken: ct);
+                    existing = response.Value;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // Row was deleted by cascade (count reached zero) — re-create with minimal data.
+                    var now = DateTime.UtcNow;
+                    var fresh = new TableEntity(tenantId, rowKey)
+                    {
+                        ["NormalizedVendor"] = key.Vendor ?? string.Empty,
+                        ["NormalizedName"] = key.Name ?? string.Empty,
+                        ["NormalizedVersion"] = key.Version ?? string.Empty,
+                        ["SessionCount"] = 1,
+                        ["FirstSeenAt"] = now.ToString("o"),
+                        ["LastSeenAt"] = now.ToString("o"),
+                    };
+                    try
+                    {
+                        await tableClient.AddEntityAsync(fresh, ct);
+                        return;
+                    }
+                    catch (RequestFailedException rfe) when (rfe.Status == 409)
+                    {
+                        // Race: another writer created the row between our Get and our Add — retry.
+                        continue;
+                    }
+                }
+
+                existing["SessionCount"] = (existing.GetInt32("SessionCount") ?? 0) + 1;
+                existing["LastSeenAt"] = DateTime.UtcNow.ToString("o");
+                try
+                {
+                    await tableClient.UpdateEntityAsync(existing, existing.ETag, TableUpdateMode.Replace, ct);
+                    return;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 412)
+                {
+                    continue;
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"SoftwareInventory restore ETag-CAS exhausted after {InventoryCasMaxAttempts} attempts or "
                 + $"{InventoryCasMaxWallClock.TotalSeconds:0}s wall-clock. tenant={tenantId} key={rowKey}");
         }
 

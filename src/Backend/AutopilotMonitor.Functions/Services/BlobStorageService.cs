@@ -191,7 +191,22 @@ namespace AutopilotMonitor.Functions.Services
         /// restore semantics rely on this); rethrows the underlying <see cref="RequestFailedException"/>
         /// on 404 or other storage error.
         /// </summary>
-        public async Task<DeletionManifest> DownloadDeletionManifestAsync(
+        public virtual async Task<DeletionManifest> DownloadDeletionManifestAsync(
+            string tenantId, string sessionId, string manifestId, CancellationToken cancellationToken = default)
+        {
+            var (manifest, _) = await DownloadDeletionManifestWithShaAsync(tenantId, sessionId, manifestId, cancellationToken).ConfigureAwait(false);
+            return manifest;
+        }
+
+        /// <summary>
+        /// PR4c F6: variant of <see cref="DownloadDeletionManifestAsync"/> that also returns the
+        /// verified snapshot SHA-256 (hex string, lowercase) so the caller can enforce the
+        /// snapshot↔progress binding (plan §3): the caller compares this against
+        /// <see cref="DeletionProgress.SnapshotSha256"/> and refuses to proceed on mismatch.
+        /// Existing behaviour is preserved — the helper still throws
+        /// <see cref="InvalidDataException"/> on blob-metadata vs payload SHA mismatch.
+        /// </summary>
+        public virtual async Task<(DeletionManifest Manifest, string Sha256Hex)> DownloadDeletionManifestWithShaAsync(
             string tenantId, string sessionId, string manifestId, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
@@ -238,7 +253,7 @@ namespace AutopilotMonitor.Functions.Services
             {
                 throw new InvalidDataException($"Deletion manifest blob {blobName} deserialized to null.");
             }
-            return manifest;
+            return (manifest, actualSha256);
         }
 
         /// <summary>
@@ -325,6 +340,79 @@ namespace AutopilotMonitor.Functions.Services
             using var ms = new MemoryStream(payload, writable: false);
             var response = await blobClient.UploadAsync(ms, options, cancellationToken);
             return response.Value.ETag;
+        }
+
+        /// <summary>
+        /// Downloads the cascade-deletion progress blob and returns the parsed
+        /// <see cref="DeletionProgress"/> alongside the current ETag. The ETag must be passed
+        /// back to <see cref="UpdateDeletionProgressAsync"/> for the ETag-CAS that prevents two
+        /// parallel worker invocations (e.g. queue re-delivery before visibility expires) from
+        /// clobbering each other's progress writes (plan §3 + §12-Q10). Fails loud on 404 — the
+        /// progress blob is uploaded by the producer before the queue message is sent, so its
+        /// absence at worker pickup time is a corruption signal.
+        /// </summary>
+        public virtual async Task<(DeletionProgress Progress, string ETag)> DownloadDeletionProgressAsync(
+            string tenantId, string sessionId, string manifestId, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
+            if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("sessionId is required", nameof(sessionId));
+            if (string.IsNullOrEmpty(manifestId)) throw new ArgumentException("manifestId is required", nameof(manifestId));
+
+            var blobName = BuildProgressBlobName(tenantId, sessionId, manifestId);
+            var (payload, etag) = await ReadDeletionProgressBlobAsync(blobName, cancellationToken);
+
+            var progress = JsonSerializer.Deserialize<DeletionProgress>(payload, DeletionManifestJson.SerializerOptions);
+            if (progress == null)
+            {
+                throw new InvalidDataException($"Deletion progress blob {blobName} deserialized to null.");
+            }
+            return (progress, etag.ToString());
+        }
+
+        /// <summary>
+        /// Test seam: reads the progress blob bytes + current ETag. Production override calls
+        /// Azure Blob Storage; tests subclass to return canned bytes without spinning up the SDK.
+        /// </summary>
+        protected internal virtual async Task<(byte[] Payload, ETag ETag)> ReadDeletionProgressBlobAsync(
+            string blobName, CancellationToken cancellationToken)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(DeletionManifestsContainer);
+            var blobClient = containerClient.GetBlobClient(blobName);
+            using var downloaded = new MemoryStream();
+            var response = await blobClient.DownloadToAsync(downloaded, cancellationToken);
+            var properties = await blobClient.GetPropertiesAsync(cancellationToken: cancellationToken);
+            return (downloaded.ToArray(), properties.Value.ETag);
+        }
+
+        /// <summary>
+        /// Writes the progress blob with <c>If-Match=ifMatchEtag</c> — single CAS attempt. On
+        /// ETag mismatch (412 Precondition Failed) the underlying
+        /// <see cref="RequestFailedException"/> propagates unchanged so the caller can implement
+        /// the §12-Q10 bounded-retry loop (re-download progress, check whether the target step
+        /// is already in <see cref="DeletionProgress.CompletedSteps"/> — concurrent-winner case
+        /// — or retry the write). Returns the freshly-assigned ETag on success.
+        /// </summary>
+        public virtual async Task<string> UpdateDeletionProgressAsync(
+            string tenantId, string sessionId, string manifestId,
+            DeletionProgress progress, string ifMatchEtag,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
+            if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("sessionId is required", nameof(sessionId));
+            if (string.IsNullOrEmpty(manifestId)) throw new ArgumentException("manifestId is required", nameof(manifestId));
+            if (progress == null) throw new ArgumentNullException(nameof(progress));
+            if (string.IsNullOrEmpty(ifMatchEtag)) throw new ArgumentException("ifMatchEtag is required", nameof(ifMatchEtag));
+
+            var json = JsonSerializer.SerializeToUtf8Bytes(progress, DeletionManifestJson.SerializerOptions);
+            var blobName = BuildProgressBlobName(tenantId, sessionId, manifestId);
+            var options = new BlobUploadOptions
+            {
+                HttpHeaders = new BlobHttpHeaders { ContentType = "application/json" },
+                Conditions = new BlobRequestConditions { IfMatch = new ETag(ifMatchEtag) },
+            };
+
+            var etag = await WriteDeletionProgressBlobAsync(blobName, json, options, cancellationToken);
+            return etag.ToString();
         }
 
         /// <summary>
