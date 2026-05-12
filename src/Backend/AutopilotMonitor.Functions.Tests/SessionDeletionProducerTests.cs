@@ -241,9 +241,13 @@ public class SessionDeletionProducerTests
                 Mock.Of<IConfigRepository>(),
                 NullLogger<AdminConfigurationService>.Instance,
                 new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
-            // Default: kill-switch off.
+            // Default: kill-switch off. Mock both the cached + uncached surfaces — PR5 finding 1
+            // moved the producer's read onto IsSessionDeletionKillSwitchActiveAsync; the cached
+            // setter is preserved for any sibling test that still observes it.
             AdminConfig.Setup(a => a.GetConfigurationAsync())
                        .ReturnsAsync(new AdminConfiguration { SessionDeletionKillSwitch = false });
+            AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync())
+                       .ReturnsAsync(false);
 
             Maintenance = new Mock<IMaintenanceRepository>();
             Maintenance.Setup(m => m.LogAuditEntryAsync(
@@ -270,8 +274,13 @@ public class SessionDeletionProducerTests
 
         public void SetKillSwitch(bool active)
         {
+            // PR5 finding 1: producer checks the kill-switch via the uncached helper, not via
+            // the 5-minute-cached GetConfigurationAsync. Mock both surfaces so the existing
+            // happy-path tests still pass alongside the kill-switch test.
             AdminConfig.Setup(a => a.GetConfigurationAsync())
                        .ReturnsAsync(new AdminConfiguration { SessionDeletionKillSwitch = active });
+            AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync())
+                       .ReturnsAsync(active);
         }
 
         public void SetSessionMissing()

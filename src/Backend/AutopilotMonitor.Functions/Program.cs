@@ -132,14 +132,24 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.ISess
     sp => sp.GetRequiredService<TableStorageService>());
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.DeletionManifestBuilder>();
 // PR3: cascade-delete guard (writer-block invariant) + producer (CAS state-machine + queue enqueue).
-// No production caller in PR3 (preview endpoint uses the guard only as a hint); PR5/PR6 wire
-// the producer into DeleteSessionFunction + the dedicated SessionDeletionMaintenanceFunction.
+// PR5 wires the producer into DeleteSessionFunction (admin-delete dispatcher) via the
+// ISessionDeletionEnqueuer interface; PR6 will wire it into the dedicated
+// SessionDeletionMaintenanceFunction (retention fanout).
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionGuard>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionProducer>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.ISessionDeletionEnqueuer>(
+    sp => sp.GetRequiredService<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionProducer>());
 // PR4b: cascade-delete restore endpoint (full + partial-poisoned-recovery). Consumed by
 // RestoreSessionFunction; GA-only via EndpointAccessPolicyCatalog. No hosted-service registration
 // needed — the function is HTTP-triggered.
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionRestoreService>();
+// PR4: cascade-delete worker pipeline. Verifier + Handler are pure DI plumbing; Worker is the
+// queue poll-loop. Registered as HostedService in PR5 (the producer-wiring PR) so the queue
+// drains as soon as the flag-gated DeleteSessionFunction starts producing envelopes; without
+// this the session-deletion queue would back up.
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.CascadeVerificationService>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionHandler>();
+builder.Services.AddHostedService<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionWorker>();
 builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
 
 // Data Access Layer — repository interfaces backed by Table Storage.

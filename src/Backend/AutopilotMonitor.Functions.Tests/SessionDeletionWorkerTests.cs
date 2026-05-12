@@ -377,8 +377,12 @@ public class SessionDeletionWorkerTests
                 Mock.Of<IConfigRepository>(),
                 NullLogger<AdminConfigurationService>.Instance,
                 new MemoryCache(new MemoryCacheOptions()));
+            // Default: kill-switch off. PR5 finding 1 moved the worker's read onto the uncached
+            // helper; the cached setter is preserved for any sibling test that still observes it.
             AdminConfig.Setup(a => a.GetConfigurationAsync())
                 .ReturnsAsync(new AdminConfiguration { SessionDeletionKillSwitch = false });
+            AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync())
+                .ReturnsAsync(false);
 
             Maintenance = new Mock<IMaintenanceRepository>();
             Maintenance.Setup(m => m.LogAuditEntryAsync(
@@ -406,8 +410,14 @@ public class SessionDeletionWorkerTests
 
         public void SetKillSwitch(bool active)
         {
+            // PR5 finding 1: worker checks the kill-switch via the uncached helper, not via the
+            // 5-minute-cached GetConfigurationAsync, so a flip-ON is honored across instances
+            // within seconds. Mock both paths so existing tests keep working regardless of which
+            // surface the production code uses.
             AdminConfig.Setup(a => a.GetConfigurationAsync())
                 .ReturnsAsync(new AdminConfiguration { SessionDeletionKillSwitch = active });
+            AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync())
+                .ReturnsAsync(active);
         }
 
         public void EnqueueMessage(string body, int dequeueCount)

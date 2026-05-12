@@ -4,6 +4,7 @@ using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Models.Deletion;
 using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -2019,7 +2020,23 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Deletes a session from storage
+        /// Deletes a session from storage (legacy direct-delete tombstone, PR5 finding 2).
+        /// <para>
+        /// CAS-guarded against the V2 cascade lock: the read selects <c>DeletionState</c> +
+        /// captures the ETag; if the row is in <c>Preparing/Queued/Running/Poisoned</c> the
+        /// delete is refused (returns false → caller surfaces 409). The subsequent
+        /// <c>DeleteEntityAsync</c> passes the captured ETag so a concurrent V2 producer that
+        /// CAS-set <c>DeletionState=Preparing</c> between our read and our write loses the race
+        /// (412 → returns false). Without this guard, scaled-out instances with stale
+        /// tenant-config cache could legacy-delete a session whose V2 cascade is already in
+        /// flight, orphaning every side-table row the cascade was supposed to clean up.
+        /// </para>
+        /// <para>
+        /// The V2 worker's tombstone uses <c>DeleteByExactKeysInBatchesAsync</c> (a different
+        /// code path), so this CAS guard does NOT block the worker — only legacy callers
+        /// (<c>DeleteSessionFunction</c> flag-OFF path + <c>MaintenanceService</c> retention
+        /// fanout).
+        /// </para>
         /// </summary>
         public async Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
         {
@@ -2027,13 +2044,19 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
-                // Read IndexRowKey before deleting so we can also delete the index entry
-                string? indexRowKey = null;
+                // Read IndexRowKey + DeletionState + ETag in one go. PR5 finding 2: we need
+                // ALL three to (a) cascade-delete the SessionsIndex row, (b) refuse if locked,
+                // (c) ETag-CAS on the actual delete to close the read-write race.
+                string? indexRowKey;
+                string? deletionState;
+                ETag etag;
                 try
                 {
                     var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId,
-                        select: new[] { "IndexRowKey" });
-                    indexRowKey = entity.Value.GetString("IndexRowKey");
+                        select: new[] { "IndexRowKey", "DeletionState" });
+                    indexRowKey   = entity.Value.GetString("IndexRowKey");
+                    deletionState = entity.Value.GetString("DeletionState");
+                    etag          = entity.Value.ETag;
                 }
                 catch (RequestFailedException ex) when (ex.Status == 404)
                 {
@@ -2041,7 +2064,34 @@ namespace AutopilotMonitor.Functions.Services
                     return true;
                 }
 
-                await tableClient.DeleteEntityAsync(tenantId, sessionId);
+                if (SessionDeletionState.IsLocked(deletionState))
+                {
+                    _logger.LogWarning(
+                        "Legacy DeleteSessionAsync refused: session is locked by a V2 cascade. " +
+                        "tenant={TenantId} session={SessionId} state={State}",
+                        tenantId, sessionId, deletionState);
+                    return false;
+                }
+
+                // ETag-conditional delete: closes the T2-T4 race where a parallel V2 producer
+                // CAS-set DeletionState=Preparing between our DeletionState read and this write.
+                try
+                {
+                    await tableClient.DeleteEntityAsync(tenantId, sessionId, etag);
+                }
+                catch (RequestFailedException ex) when (ex.Status == 412)
+                {
+                    _logger.LogWarning(
+                        "Legacy DeleteSessionAsync ETag-CAS lost: Sessions row was mutated by a concurrent writer " +
+                        "(likely a V2 cascade producer CAS-claiming DeletionState=Preparing). tenant={TenantId} session={SessionId}",
+                        tenantId, sessionId);
+                    return false;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // Lost a race with another deleter that also got 200 — treat as idempotent success.
+                    indexRowKey = null;
+                }
 
                 // Dual-write: delete from SessionsIndex
                 await DeleteSessionIndexAsync(tenantId, indexRowKey);

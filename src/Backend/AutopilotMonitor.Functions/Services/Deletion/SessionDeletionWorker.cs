@@ -177,8 +177,10 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                     // Kill-switch entry guard (plan §1 P8 / §9). When active, the worker does not
                     // dequeue — the message stays visible on the main queue until the operator
                     // flips the switch back. Envelope is preserved without losing dequeue budget.
-                    var admin = await _adminConfig.GetConfigurationAsync().ConfigureAwait(false);
-                    if (admin.SessionDeletionKillSwitch)
+                    // PR5 finding 1: uncached read so a flip-ON is honored within seconds across
+                    // all worker instances, not minutes (the cache TTL). One extra storage read
+                    // per poll interval (10s default) is fine — config row is tiny.
+                    if (await _adminConfig.IsSessionDeletionKillSwitchActiveAsync().ConfigureAwait(false))
                     {
                         _logger.LogDebug("SessionDeletionWorker: kill-switch active; idling for {Interval}", _pollInterval);
                         await Task.Delay(_pollInterval, stoppingToken).ConfigureAwait(false);

@@ -61,7 +61,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
     /// function (PR6) clears Preparing-with-no-progress-blob rows older than 1h back to <c>None</c>.
     /// States <c>Queued</c>, <c>Running</c>, <c>Poisoned</c> are NEVER auto-cleared — operator action only.
     /// </summary>
-    public sealed class SessionDeletionProducer
+    public sealed class SessionDeletionProducer : ISessionDeletionEnqueuer
     {
         private readonly TableStorageService _storage;
         private readonly DeletionManifestBuilder _builder;
@@ -151,8 +151,9 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             if (actor == null) throw new ArgumentNullException(nameof(actor));
 
             // Step 0: kill-switch (Plan §1 P8 / §9). Independent of per-tenant flag — that's the caller's job (PR5/PR6).
-            var globalConfig = await _adminConfig.GetConfigurationAsync().ConfigureAwait(false);
-            if (globalConfig.SessionDeletionKillSwitch)
+            // PR5 finding 1: uncached, fail-closed read so a flip-ON is honored across scaled-out
+            // Function-host instances within seconds instead of up to 5 minutes (the cache TTL).
+            if (await _adminConfig.IsSessionDeletionKillSwitchActiveAsync().ConfigureAwait(false))
             {
                 _logger.LogWarning(
                     "SessionDeletionProducer rejected (kill-switch active). tenant={TenantId} session={SessionId}",
