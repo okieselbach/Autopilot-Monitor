@@ -58,8 +58,10 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Test seam: construct directly from a (possibly Moq'd) <see cref="BlobServiceClient"/>.
         /// Used by xUnit so manifest upload/download paths can be exercised without hitting Azure.
+        /// Public (not internal) because Moq's dynamic proxy assembly cannot see internal ctors
+        /// even via InternalsVisibleTo.
         /// </summary>
-        internal BlobStorageService(BlobServiceClient blobServiceClient, ILogger<BlobStorageService> logger, bool usesManagedIdentity = false)
+        public BlobStorageService(BlobServiceClient blobServiceClient, ILogger<BlobStorageService> logger, bool usesManagedIdentity = false)
         {
             _blobServiceClient = blobServiceClient;
             _logger = logger;
@@ -123,7 +125,7 @@ namespace AutopilotMonitor.Functions.Services
         /// Uses <c>If-None-Match=*</c> so a duplicate-id upload fails loud — the snapshot is
         /// supposed to be written exactly once per producer attempt (plan §1 P1).
         /// </summary>
-        public async Task<DeletionManifestBlobPointer> UploadDeletionManifestAsync(
+        public virtual async Task<DeletionManifestBlobPointer> UploadDeletionManifestAsync(
             DeletionManifest manifest, CancellationToken cancellationToken = default)
         {
             if (manifest == null) throw new ArgumentNullException(nameof(manifest));
@@ -269,8 +271,67 @@ namespace AutopilotMonitor.Functions.Services
             return (downloaded.ToArray(), properties.Value?.Metadata);
         }
 
+        /// <summary>
+        /// Uploads the initial mutable progress blob (Plan §3 Round-2 R9 schema). Companion to
+        /// the immutable snapshot uploaded by <see cref="UploadDeletionManifestAsync"/>;
+        /// the snapshot SHA-256 is pinned into the progress so the worker can detect
+        /// snapshot-tampering on download. Uses <c>If-None-Match=*</c> so a duplicate-id
+        /// upload fails loud — the producer creates this exactly once per cascade attempt
+        /// (subsequent CAS-updates by the worker land in PR4). Returns the blob's ETag for
+        /// the caller's downstream CAS chain.
+        /// </summary>
+        public virtual async Task<string> UploadInitialDeletionProgressAsync(
+            string tenantId, string sessionId, string manifestId, string snapshotSha256, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
+            if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("sessionId is required", nameof(sessionId));
+            if (string.IsNullOrEmpty(manifestId)) throw new ArgumentException("manifestId is required", nameof(manifestId));
+            if (string.IsNullOrEmpty(snapshotSha256)) throw new ArgumentException("snapshotSha256 is required", nameof(snapshotSha256));
+
+            var progress = new DeletionProgress
+            {
+                SnapshotSha256 = snapshotSha256,
+                CompletedSteps = new HashSet<int>(),
+                VerificationDone = false,
+                CompletedAt = null,
+            };
+            var json = JsonSerializer.SerializeToUtf8Bytes(progress, DeletionManifestJson.SerializerOptions);
+            var blobName = BuildProgressBlobName(tenantId, sessionId, manifestId);
+
+            var options = new BlobUploadOptions
+            {
+                HttpHeaders = new BlobHttpHeaders { ContentType = "application/json" },
+                Conditions = new BlobRequestConditions { IfNoneMatch = ETag.All },
+            };
+
+            var etag = await WriteDeletionProgressBlobAsync(blobName, json, options, cancellationToken);
+            _logger.LogInformation(
+                "Uploaded deletion progress blob={Blob} sha256={Sha} sizeBytes={Size}",
+                blobName, snapshotSha256, json.Length);
+            return etag.ToString();
+        }
+
+        /// <summary>
+        /// Test seam: writes the progress blob with the supplied upload options. Production
+        /// override calls Azure Blob Storage; tests subclass to capture the bytes + options.
+        /// Returns the freshly-assigned ETag so the producer can attach it to its CAS chain.
+        /// </summary>
+        protected internal virtual async Task<ETag> WriteDeletionProgressBlobAsync(
+            string blobName, byte[] payload, BlobUploadOptions options, CancellationToken cancellationToken)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(DeletionManifestsContainer);
+            await containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+            var blobClient = containerClient.GetBlobClient(blobName);
+            using var ms = new MemoryStream(payload, writable: false);
+            var response = await blobClient.UploadAsync(ms, options, cancellationToken);
+            return response.Value.ETag;
+        }
+
         private static string BuildSnapshotBlobName(string tenantId, string sessionId, string manifestId)
             => $"{tenantId}/{sessionId}/{manifestId}.snapshot.json.gz";
+
+        private static string BuildProgressBlobName(string tenantId, string sessionId, string manifestId)
+            => $"{tenantId}/{sessionId}/{manifestId}.progress.json";
     }
 
     /// <summary>

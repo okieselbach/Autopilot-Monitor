@@ -392,6 +392,24 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public bool EnableIndexDualWrite { get; set; } = false;
 
+        // ===== CASCADE-DELETE GLOBAL KILL-SWITCH =====
+
+        /// <summary>
+        /// Global emergency kill-switch for the cascade-deletion subsystem (Plan §1 P8 / §9).
+        /// When true:
+        /// <list type="bullet">
+        ///   <item>V2 cascade producers return 503 Service Unavailable;</item>
+        ///   <item>legacy direct-delete paths also return 503 (so the switch is truly global);</item>
+        ///   <item>the cascade worker (PR4) returns its message to the queue on entry without
+        ///       processing.</item>
+        /// </list>
+        /// Independent of per-tenant <see cref="TenantConfiguration.EnableCascadeDeleteV2"/>:
+        /// flag selects path, kill-switch halts everything. Round-tripped via the 4-file web
+        /// chain (memory <c>feedback_admin_config_ui_roundtrip</c>) so admin saves preserve it.
+        /// Default false.
+        /// </summary>
+        public bool SessionDeletionKillSwitch { get; set; } = false;
+
         /// <summary>
         /// Last successful CISA KEV catalog sync timestamp (UTC ISO 8601).
         /// Updated by VulnerabilityDataSyncFunction (daily timer) and TriggerVulnerabilityDataSyncFunction

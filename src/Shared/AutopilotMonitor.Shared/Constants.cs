@@ -568,6 +568,15 @@ namespace AutopilotMonitor.Shared
             /// <c>ReasonVulnerabilityCorrelated</c> so vulnerability-driven analyze rules can fire.
             /// </summary>
             public const string VulnerabilityCorrelate = "vulnerability-correlate";
+
+            /// <summary>
+            /// Cascade-delete worker queue (PR3+). Producer (admin click or maintenance retention
+            /// fan-out) writes one envelope per session-to-delete after acquiring the
+            /// <c>DeletionState=Preparing</c> CAS lock and uploading the snapshot blob. Worker
+            /// (PR4) drains the queue, deletes by exact (PK, RK) per the manifest, and tombstones
+            /// the Sessions row. Poison suffix <c>-poison</c>, max-dequeue 5.
+            /// </summary>
+            public const string SessionDeletion = "session-deletion";
         }
     }
 }

@@ -252,7 +252,11 @@ namespace AutopilotMonitor.Functions.Services
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
                 ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
-                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty
+                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty,
+                // PR3: cascade-delete state-machine columns. Empty/null on legacy rows is fine —
+                // SessionDeletionGuard treats null/empty as "None" (no cascade in flight).
+                DeletionState = entity.GetString("DeletionState") ?? string.Empty,
+                PendingDeletionManifestId = entity.GetString("PendingDeletionManifestId"),
             };
         }
 
@@ -2087,7 +2091,11 @@ namespace AutopilotMonitor.Functions.Services
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
                 ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
-                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty
+                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty,
+                // PR3: cascade-delete state-machine columns. Empty/null on legacy rows is fine —
+                // SessionDeletionGuard treats null/empty as "None" (no cascade in flight).
+                DeletionState = entity.GetString("DeletionState") ?? string.Empty,
+                PendingDeletionManifestId = entity.GetString("PendingDeletionManifestId"),
             };
         }
 

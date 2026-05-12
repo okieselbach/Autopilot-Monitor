@@ -57,7 +57,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
         /// from a preview endpoint. The returned manifest carries full row dumps suitable for
         /// both forward execution (cascade) and reverse execution (restore).
         /// </summary>
-        public async Task<DeletionManifest> BuildAsync(
+        public virtual async Task<DeletionManifest> BuildAsync(
             string tenantId,
             string sessionId,
             string reason,

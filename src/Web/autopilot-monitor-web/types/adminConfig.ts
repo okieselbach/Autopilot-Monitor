@@ -43,6 +43,13 @@ export interface AdminConfiguration {
    * a safety net. Default false — keeps pre-M5.d behaviour bit-exact until explicitly flipped.
    */
   enableIndexDualWrite?: boolean;
+  /**
+   * Global emergency kill-switch for the cascade-deletion subsystem (Plan §1 P8 / §9).
+   * When true: V2 cascade producers + legacy direct-delete return 503; cascade worker (PR4)
+   * pauses on entry. Independent of per-tenant EnableCascadeDeleteV2 (that selects path,
+   * this halts both). Default false.
+   */
+  sessionDeletionKillSwitch?: boolean;
 }
 
 export interface OpsAlertRule {

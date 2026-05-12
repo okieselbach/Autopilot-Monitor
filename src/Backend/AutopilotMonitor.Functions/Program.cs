@@ -131,6 +131,11 @@ builder.Services.AddSingleton<TableStorageService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.ISessionDeletionInventoryReader>(
     sp => sp.GetRequiredService<TableStorageService>());
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.DeletionManifestBuilder>();
+// PR3: cascade-delete guard (writer-block invariant) + producer (CAS state-machine + queue enqueue).
+// No production caller in PR3 (preview endpoint uses the guard only as a hint); PR5/PR6 wire
+// the producer into DeleteSessionFunction + the dedicated SessionDeletionMaintenanceFunction.
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionGuard>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionProducer>();
 builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
 
 // Data Access Layer — repository interfaces backed by Table Storage.

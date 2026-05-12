@@ -227,6 +227,111 @@ namespace AutopilotMonitor.Functions.Services
         public Task<DeletionBatchResult> DeleteSessionDecisionTransitionsAsync(string tenantId, string sessionId, CancellationToken ct = default)
             => DeletePkBySessionAsync(Shared.Constants.TableNames.DecisionTransitions, tenantId, sessionId, ct);
 
+        // ============================================================ Sessions DeletionState CAS (PR3) ====
+
+        /// <summary>
+        /// Outcome of a <see cref="CasSetSessionDeletionStateAsync"/> call. Distinguishes the
+        /// happy path from the lost-CAS / wrong-state / session-missing branches the producer
+        /// surfaces to its caller.
+        /// </summary>
+        public enum SessionDeletionStateCasOutcome
+        {
+            /// <summary>CAS succeeded; <see cref="SessionDeletionStateCasResult.CurrentState"/> is the new state.</summary>
+            Updated,
+            /// <summary>Sessions row not found at preflight time. No write performed.</summary>
+            SessionMissing,
+            /// <summary>Existing state did not match <c>fromState</c>. The current state is reported back so
+            ///     the caller can decide: resume (state already past <c>fromState</c>), reject (different cascade),
+            ///     or 409 (Poisoned).</summary>
+            WrongState,
+            /// <summary>ETag conflict on Update — concurrent writer raced us. Caller should retry.</summary>
+            EtagConflict,
+        }
+
+        public class SessionDeletionStateCasResult
+        {
+            public SessionDeletionStateCasOutcome Outcome { get; set; }
+            public string CurrentState { get; set; } = string.Empty;
+            public string? CurrentManifestId { get; set; }
+        }
+
+        /// <summary>
+        /// CAS-update <c>Sessions.DeletionState</c> from <paramref name="fromState"/> to
+        /// <paramref name="toState"/>, optionally stamping <paramref name="newManifestId"/>
+        /// when the transition is <c>None → Preparing</c>. ETag-CAS so a concurrent writer
+        /// can't silently clobber. Returns the structured outcome for the producer's
+        /// idempotent-resume / 409-conflict / poisoned-recovery branches.
+        /// </summary>
+        public virtual async Task<SessionDeletionStateCasResult> CasSetSessionDeletionStateAsync(
+            string tenantId, string sessionId,
+            string fromState, string toState,
+            string? newManifestId,
+            CancellationToken cancellationToken = default)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Shared.Constants.TableNames.Sessions);
+
+            TableEntity existing;
+            try
+            {
+                var response = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId, cancellationToken: cancellationToken);
+                existing = response.Value;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return new SessionDeletionStateCasResult { Outcome = SessionDeletionStateCasOutcome.SessionMissing };
+            }
+
+            var currentState = existing.GetString("DeletionState") ?? string.Empty;
+            // Empty/null → treat as None for legacy rows that pre-date the column.
+            if (string.IsNullOrEmpty(currentState)) currentState = Shared.Models.Deletion.SessionDeletionState.None;
+            var currentManifestId = existing.GetString("PendingDeletionManifestId");
+
+            if (currentState != fromState)
+            {
+                return new SessionDeletionStateCasResult
+                {
+                    Outcome = SessionDeletionStateCasOutcome.WrongState,
+                    CurrentState = currentState,
+                    CurrentManifestId = currentManifestId,
+                };
+            }
+
+            existing["DeletionState"] = toState;
+            // Manifest id is stamped on entry to Preparing and CLEARED when going back to None
+            // (poisoned-recovery restore path); preserved in-flight transitions otherwise.
+            if (toState == Shared.Models.Deletion.SessionDeletionState.None)
+            {
+                existing["PendingDeletionManifestId"] = null;
+            }
+            else if (!string.IsNullOrEmpty(newManifestId))
+            {
+                existing["PendingDeletionManifestId"] = newManifestId;
+            }
+            // else: keep existing PendingDeletionManifestId (Preparing → Queued → Running progression).
+
+            try
+            {
+                await tableClient.UpdateEntityAsync(existing, existing.ETag, TableUpdateMode.Merge, cancellationToken);
+                return new SessionDeletionStateCasResult
+                {
+                    Outcome = SessionDeletionStateCasOutcome.Updated,
+                    CurrentState = toState,
+                    CurrentManifestId = !string.IsNullOrEmpty(newManifestId) ? newManifestId : currentManifestId,
+                };
+            }
+            catch (RequestFailedException ex) when (ex.Status == 412)
+            {
+                return new SessionDeletionStateCasResult
+                {
+                    Outcome = SessionDeletionStateCasOutcome.EtagConflict,
+                    CurrentState = currentState,
+                    CurrentManifestId = currentManifestId,
+                };
+            }
+        }
+
+        // ============================================================ PR2 helpers continued ====
+
         /// <summary>
         /// Enumerates every row in <paramref name="tableName"/> with
         /// <c>PartitionKey == {tenantId}_{sessionId}</c> and deletes them via
