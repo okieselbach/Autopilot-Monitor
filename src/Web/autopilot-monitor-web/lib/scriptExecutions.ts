@@ -43,6 +43,38 @@ export function scriptItemKey(item: Pick<ScriptItem, "policyId" | "scriptType" |
   return `${item.policyId || "_noid"}-${item.scriptType}-${part}`;
 }
 
+/**
+ * A logical script card shown in the UI. Platform scripts and detect-only / running
+ * remediations render as a single-phase card; non-compliant remediation cycles group
+ * the 2-3 phases (detection / remediation / post-detection) under one parent so the
+ * cycle reads as one unit rather than three disconnected rows. The header carries the
+ * cycle-level outcome derived across all phases + RemediationStatus.
+ */
+export interface ScriptCard {
+  policyId: string;
+  scriptType: string;        // "platform" | "remediation"
+  /**
+   * The phase items that make up this card, sorted in their natural cycle order
+   * (detection → remediation → post-detection). For platform / single-phase cards
+   * this contains exactly one item.
+   */
+  phases: ScriptItem[];
+  /** Header outcome label, e.g. "Compliant", "Remediated successfully", "Remediation failed". */
+  headerLabel: string;
+  /** Overall card state — drives the container colour. */
+  headerState: "Running" | "Success" | "Failed" | "NonCompliant";
+  /** True when the card represents a multi-phase remediation cycle (header expandable). */
+  isCycle: boolean;
+  /** First-phase timestamp; used for sorting cards chronologically in the UI. */
+  timestamp: string;
+}
+
+/** Stable React key for a ScriptCard. */
+export function scriptCardKey(card: Pick<ScriptCard, "policyId" | "scriptType" | "headerState">): string {
+  const idPart = card.headerState === "Running" ? "_running" : "_card";
+  return `${card.policyId || "_noid"}-${card.scriptType}-${idPart}`;
+}
+
 /** Threshold above which a Running placeholder is rendered as "stuck?" rather than animated. */
 export const STALE_RUNNING_THRESHOLD_SECONDS = 600;
 
@@ -276,4 +308,167 @@ export function reduceScriptEvents(events: ScriptInputEvent[]): ScriptItem[] {
   }
 
   return items;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Card grouping — folds multi-phase remediation cycles under a single header
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PHASE_ORDER: Record<string, number> = {
+  "detection": 0,
+  "remediation": 1,
+  "post-detection": 2,
+};
+
+function phaseSortKey(part?: string): number {
+  if (!part) return 0;
+  return PHASE_ORDER[part] ?? 99;
+}
+
+/**
+ * Derive the human-readable header label + state for a remediation card based on its
+ * phases and the cycle-level RemediationStatus. The label communicates the cycle
+ * outcome at a glance; the state drives the card colour. Priority (highest wins):
+ *   1. Any phase Running       → state=Running, label="Running"
+ *   2. Any phase Failed (real script crash, e.g. remediation phase exit != 0 or stderr)
+ *                               → state=Failed,  label="Remediation script failed"
+ *   3. Has post-detection AND post-detection compliance=False
+ *                               → state=NonCompliant, label="Non-compliant after remediation"
+ *   4. Has remediation phase AND post-detection compliance=True
+ *                               → state=Success,  label="Remediated successfully"
+ *   5. detection-only AND compliance=False (RemediationStatus=4)
+ *                               → state=NonCompliant, label="Non-compliant (detect-only)"
+ *   6. detection-only AND compliance=True
+ *                               → state=Success,  label="Compliant"
+ *   7. Fallback
+ *                               → state mirrors first phase, label = generic
+ */
+function deriveRemediationHeader(
+  phases: ScriptItem[]
+): { label: string; state: ScriptCard["headerState"] } {
+  if (phases.some(p => p.state === "Running")) {
+    return { label: "Running", state: "Running" };
+  }
+
+  const detection = phases.find(p => p.scriptPart === "detection");
+  const remediation = phases.find(p => p.scriptPart === "remediation");
+  const postDetection = phases.find(p => p.scriptPart === "post-detection");
+  const remediationStatus = phases
+    .map(p => p.remediationStatus)
+    .find(s => s != null);
+
+  // Real script crash (not a non-compliant compliance verdict). The reducer already
+  // routes detection / post-detection non-zero-exit to state=Success-with-amber, so
+  // any phase here in state=Failed means a genuine failure: stderr or exit on the
+  // remediation phase or platform-style failure.
+  const failedPhase = phases.find(p => p.state === "Failed");
+  if (failedPhase) {
+    if (failedPhase.scriptPart === "remediation") {
+      return { label: "Remediation script failed", state: "Failed" };
+    }
+    return { label: "Script error", state: "Failed" };
+  }
+
+  // Multi-phase cycle (a remediation actually ran). The cycle outcome lives in the
+  // post-detection compliance + RemediationStatus.
+  if (remediation || postDetection) {
+    if (postDetection?.complianceResult === "False") {
+      return { label: "Non-compliant after remediation", state: "NonCompliant" };
+    }
+    if (postDetection?.complianceResult === "True") {
+      return { label: "Remediated successfully", state: "Success" };
+    }
+    // Remediation ran but post-detection result not yet known — mid-flight or partial data.
+    return { label: "Remediation ran", state: "Success" };
+  }
+
+  // Detect-only path — only the detection phase ever ran (RemediationStatus=4
+  // = NoRemediation, OR no remediation script attached to the policy).
+  if (detection) {
+    const isDetectOnly = remediationStatus === 4
+      || (remediation == null && postDetection == null);
+    if (detection.complianceResult === "False") {
+      return {
+        label: isDetectOnly ? "Non-compliant (detect-only)" : "Non-compliant",
+        state: "NonCompliant",
+      };
+    }
+    if (detection.complianceResult === "True") {
+      return {
+        label: isDetectOnly ? "Compliant (detect-only)" : "Compliant",
+        state: "Success",
+      };
+    }
+  }
+
+  // Fallback for unknown shapes.
+  return { label: "Health script ran", state: "Success" };
+}
+
+/**
+ * Group flat ScriptItems into card entries: remediation phases for the same policyId
+ * collapse into one parent card with a phases array; platform scripts and lone
+ * remediation entries (single phase) become single-phase cards. Cards are returned in
+ * chronological order based on the earliest phase timestamp.
+ *
+ * This is the structural change that lets the UI render
+ *   [ Remediation 99e1274b ── Non-compliant after remediation ]
+ *     ⟶ detection (pre)
+ *     ⟶ remediation
+ *     ⟶ detection (post)
+ * instead of three disconnected sibling rows.
+ */
+export function groupScriptItems(items: ScriptItem[]): ScriptCard[] {
+  if (items.length === 0) return [];
+
+  // Group by (policyId, scriptType). Empty policyId items get unique single-phase cards
+  // so they never collide with each other.
+  const byPolicy = new Map<string, ScriptItem[]>();
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx];
+    const key = item.policyId
+      ? `${item.policyId}-${item.scriptType}`
+      : `_noid_${idx}-${item.scriptType}`;
+    const arr = byPolicy.get(key);
+    if (arr) arr.push(item);
+    else byPolicy.set(key, [item]);
+  }
+
+  const cards: ScriptCard[] = [];
+  for (const phases of byPolicy.values()) {
+    // Sort phases inside each card: detection → remediation → post-detection
+    // (Running entries naturally sort first since they have no scriptPart).
+    phases.sort((a, b) => phaseSortKey(a.scriptPart) - phaseSortKey(b.scriptPart));
+
+    const first = phases[0];
+    const isCycle = first.scriptType === "remediation" && phases.length > 1;
+
+    let headerLabel: string;
+    let headerState: ScriptCard["headerState"];
+    if (first.scriptType === "remediation") {
+      const derived = deriveRemediationHeader(phases);
+      headerLabel = derived.label;
+      headerState = derived.state;
+    } else {
+      // Platform scripts: header mirrors the single phase.
+      headerState = first.state === "Running" ? "Running" : (first.state === "Failed" ? "Failed" : "Success");
+      headerLabel = first.state === "Running"
+        ? "Running"
+        : (first.result ?? (first.state === "Failed" ? "Failed" : "Success"));
+    }
+
+    cards.push({
+      policyId: first.policyId,
+      scriptType: first.scriptType,
+      phases,
+      headerLabel,
+      headerState,
+      isCycle,
+      timestamp: first.timestamp,
+    });
+  }
+
+  // Sort cards by earliest-phase timestamp so the timeline order is preserved.
+  cards.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return cards;
 }

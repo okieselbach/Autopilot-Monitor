@@ -5,12 +5,15 @@ import { compareVersions } from "@/utils/bootstrapVersion";
 import {
   buildScriptItemLabel,
   getPhaseBadge,
+  groupScriptItems,
   isDetectOnlyRow,
   isNonCompliantReport,
   mapRemediationStatus,
   reduceScriptEvents,
+  scriptCardKey,
   scriptItemKey,
   STALE_RUNNING_THRESHOLD_SECONDS,
+  type ScriptCard,
   type ScriptInputEvent,
   type ScriptItem,
 } from "@/lib/scriptExecutions";
@@ -22,21 +25,21 @@ interface ScriptExecutionsProps {
 }
 
 export default function ScriptExecutions({ events, showScriptOutput, latestBootstrapVersion }: ScriptExecutionsProps) {
-  const scripts = useMemo(() => reduceScriptEvents(events), [events]);
+  const cards = useMemo(() => groupScriptItems(reduceScriptEvents(events)), [events]);
 
   const [expanded, setExpanded] = useState(true);
 
-  if (scripts.length === 0) return null;
+  if (cards.length === 0) return null;
 
-  // Distinguish "script ran fine and was compliant" from "script ran fine but reported
-  // non-compliance" — the latter isn't a failure but deserves visibility (it's the
-  // "needs attention" middle ground for health-script detection / post-detection).
-  const nonCompliantCount = scripts.filter(isNonCompliantReport).length;
-  const successCount = scripts.filter(s => s.state === "Success").length - nonCompliantCount;
-  const failedCount = scripts.filter(s => s.state === "Failed").length;
-  const runningCount = scripts.filter(s => s.state === "Running").length;
-  const platformCount = scripts.filter(s => s.scriptType === "platform").length;
-  const remediationCount = scripts.filter(s => s.scriptType === "remediation").length;
+  // Header counters work on cards (one per policy), so a remediated cycle reads as
+  // "1 succeeded" rather than "1 succeeded + 2 non-compliant" when its detection /
+  // post-detection were non-compliant en route.
+  const runningCount = cards.filter(c => c.headerState === "Running").length;
+  const successCount = cards.filter(c => c.headerState === "Success").length;
+  const nonCompliantCount = cards.filter(c => c.headerState === "NonCompliant").length;
+  const failedCount = cards.filter(c => c.headerState === "Failed").length;
+  const platformCount = cards.filter(c => c.scriptType === "platform").length;
+  const remediationCount = cards.filter(c => c.scriptType === "remediation").length;
 
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
@@ -61,7 +64,7 @@ export default function ScriptExecutions({ events, showScriptOutput, latestBoots
               </span>
             )}
             {nonCompliantCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium" title="Detection script ran successfully but reported a non-compliant state">
+              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium" title="Detection ran successfully but reported a non-compliant state">
                 {nonCompliantCount} non-compliant
               </span>
             )}
@@ -89,10 +92,10 @@ export default function ScriptExecutions({ events, showScriptOutput, latestBoots
 
       {expanded && (
         <div className="space-y-3 mt-4">
-          {scripts.map((item) => (
-            <ScriptItemRow
-              key={scriptItemKey(item)}
-              item={item}
+          {cards.map((card) => (
+            <ScriptCardView
+              key={scriptCardKey(card)}
+              card={card}
               showScriptOutput={showScriptOutput}
               latestBootstrapVersion={latestBootstrapVersion}
             />
@@ -110,7 +113,148 @@ function getIntuneScriptUrl(policyId: string, scriptType: string): string | null
   return `https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/ConfigureWMPolicyMenuBlade/~/overview/policyId/${policyId}/policyType/0`;
 }
 
-function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { item: ScriptItem; showScriptOutput?: boolean; latestBootstrapVersion?: string | null }) {
+function cardContainerClass(state: ScriptCard["headerState"]): string {
+  switch (state) {
+    case "Failed": return "bg-red-50 border border-red-200";
+    case "Running": return "bg-gray-50 border border-gray-200";
+    case "NonCompliant": return "bg-amber-50 border border-amber-200";
+    default: return "bg-green-50 border border-green-200";
+  }
+}
+
+function cardIconColor(state: ScriptCard["headerState"]): string {
+  switch (state) {
+    case "Failed": return "text-red-500";
+    case "Running": return "text-gray-500";
+    case "NonCompliant": return "text-amber-500";
+    default: return "text-green-500";
+  }
+}
+
+function cardStatusTextColor(state: ScriptCard["headerState"]): string {
+  switch (state) {
+    case "Failed": return "text-red-600";
+    case "Running": return "text-gray-600";
+    case "NonCompliant": return "text-amber-700";
+    default: return "text-green-600";
+  }
+}
+
+/**
+ * Top-level renderer for one logical script card. Multi-phase remediation cycles render
+ * the parent header + nested phase rows under it; platform / single-phase remediation
+ * cards collapse the parent header into the single phase row (no nesting).
+ */
+function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion }: { card: ScriptCard; showScriptOutput?: boolean; latestBootstrapVersion?: string | null }) {
+  // Cycles default to expanded (the user usually wants to see what happened in each
+  // phase); single-phase cards have nothing nested so the toggle would be a no-op.
+  const [phasesOpen, setPhasesOpen] = useState(true);
+
+  if (!card.isCycle) {
+    // Single-phase / platform: keep the existing row layout, no parent wrapper.
+    return (
+      <ScriptItemRow
+        item={card.phases[0]}
+        showScriptOutput={showScriptOutput}
+        latestBootstrapVersion={latestBootstrapVersion}
+      />
+    );
+  }
+
+  // Multi-phase remediation cycle — render parent header + nested phase rows.
+  const containerClass = cardContainerClass(card.headerState);
+  const iconColor = cardIconColor(card.headerState);
+  const statusColor = cardStatusTextColor(card.headerState);
+  const shortId = card.policyId
+    ? (card.policyId.length >= 8 ? card.policyId.substring(0, 8) : card.policyId)
+    : "unknown";
+
+  // Pull the most-relevant cycle metadata once for the header detail strip.
+  const meta = card.phases.find(p => p.runContext) ?? card.phases[0];
+  const remediationStatus = card.phases.map(p => p.remediationStatus).find(s => s != null);
+  const remediationStatusLabel = mapRemediationStatus(remediationStatus);
+
+  return (
+    <div className={`rounded-lg ${containerClass}`}>
+      <button
+        onClick={() => setPhasesOpen(!phasesOpen)}
+        className="flex items-center justify-between w-full text-left p-3 hover:bg-black/[.02]"
+        aria-expanded={phasesOpen}
+      >
+        <div className="flex items-center space-x-2 min-w-0">
+          <CardIcon state={card.headerState} className={iconColor} />
+          <span className="text-sm font-medium text-gray-900 truncate">Remediation</span>
+          <span className="text-xs font-mono text-gray-500">{shortId}…</span>
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">
+            cycle · {card.phases.length} phases
+          </span>
+          {meta.runContext && (
+            <span className="text-xs text-gray-500">{meta.runContext}</span>
+          )}
+          {meta.targetType != null && (
+            <span className="text-xs text-gray-500">Target: {meta.targetType === 2 ? "Device" : "User"}</span>
+          )}
+          {remediationStatusLabel && (
+            <span className="text-xs text-gray-500">Status: {remediationStatusLabel}</span>
+          )}
+        </div>
+        <div className="flex items-center space-x-3 text-xs flex-shrink-0 ml-2">
+          <span className={`font-medium ${statusColor}`}>{card.headerLabel}</span>
+          <svg className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${phasesOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </button>
+
+      {phasesOpen && (
+        // Nested phase rows. Slightly inset so the parent → child relationship is visual.
+        <div className="border-t border-black/5 px-3 py-2 space-y-2">
+          {card.phases.map((phase) => (
+            <ScriptItemRow
+              key={scriptItemKey(phase)}
+              item={phase}
+              showScriptOutput={showScriptOutput}
+              latestBootstrapVersion={latestBootstrapVersion}
+              nested
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CardIcon({ state, className }: { state: ScriptCard["headerState"]; className: string }) {
+  if (state === "Running") {
+    return (
+      <svg className={`w-4 h-4 flex-shrink-0 animate-spin ${className}`} fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+    );
+  }
+  if (state === "Failed") {
+    return (
+      <svg className={`w-4 h-4 flex-shrink-0 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    );
+  }
+  if (state === "NonCompliant") {
+    return (
+      <svg className={`w-4 h-4 flex-shrink-0 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    );
+  }
+  return (
+    <svg className={`w-4 h-4 flex-shrink-0 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion, nested }: { item: ScriptItem; showScriptOutput?: boolean; latestBootstrapVersion?: string | null; nested?: boolean }) {
   const [showDetails, setShowDetails] = useState(false);
   // Re-render every 5s while in Running state so elapsed-time updates live.
   const [now, setNow] = useState(() => Date.now());
@@ -129,16 +273,18 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
   const isDetectOnly = isDetectOnlyRow(item);
   const isNonCompliant = isNonCompliantReport(item);
 
-  const containerClass = item.state === "Failed"
-    ? "bg-red-50 border border-red-200"
-    : item.state === "Running"
-      // Neutral gray for the box itself — only the inline spinner conveys motion.
-      // The full-box pulse was visually distracting with multiple concurrent Running cards
-      // and caused a "flickering" feeling that made the page feel unstable.
-      ? "bg-gray-50 border border-gray-200"
-      : isNonCompliant
-        ? "bg-amber-50 border border-amber-200"
-        : "bg-green-50 border border-green-200";
+  // Standalone rows get their own coloured container; nested phase rows live inside an
+  // already-coloured parent card so they use a lighter, neutral inner background to
+  // avoid the noisy double-tinting effect.
+  const containerClass = nested
+    ? "bg-white/60 border border-black/5"
+    : item.state === "Failed"
+      ? "bg-red-50 border border-red-200"
+      : item.state === "Running"
+        ? "bg-gray-50 border border-gray-200"
+        : isNonCompliant
+          ? "bg-amber-50 border border-amber-200"
+          : "bg-green-50 border border-green-200";
 
   const shortId = item.policyId
     ? (item.policyId.length >= 8 ? item.policyId.substring(0, 8) : item.policyId)
@@ -174,7 +320,6 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           ) : isNonCompliant ? (
-            // Triangle warning icon — script ran fine but reported non-compliant state.
             <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
@@ -184,13 +329,14 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
             </svg>
           )}
           <span className="text-sm font-medium text-gray-900 truncate">{label}</span>
-          {intuneUrl ? (
-            <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-blue-600 hover:text-blue-800 hover:underline" title="Open in Intune portal">{shortId}…</a>
-          ) : (
-            <span className="text-xs font-mono text-gray-500">{shortId}…</span>
+          {/* shortId only on standalone rows — inside a cycle the parent header already shows it. */}
+          {!nested && (
+            intuneUrl ? (
+              <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-blue-600 hover:text-blue-800 hover:underline" title="Open in Intune portal">{shortId}…</a>
+            ) : (
+              <span className="text-xs font-mono text-gray-500">{shortId}…</span>
+            )
           )}
-          {/* Phase badge for remediation rows (detection / remediation / post-detection).
-              For platform scripts we keep showing the type tag. */}
           {item.scriptType === "remediation" && getPhaseBadge(item) && (
             <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">
               {getPhaseBadge(item)}
@@ -225,7 +371,8 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
               outdated
             </span>
           )}
-          {item.runContext && (
+          {/* runContext/Target only on standalone rows — inside a cycle the parent header carries them. */}
+          {!nested && item.runContext && (
             <span className="text-xs text-gray-500">{item.runContext}</span>
           )}
         </div>
@@ -260,19 +407,21 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
 
       {showDetails && item.state !== "Running" && (
         <div className="mt-3 space-y-2">
-          {/* Metadata */}
+          {/* Metadata — slimmer when nested (parent header already shows policy id / context / target / status). */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
-            <span><span className="font-medium text-gray-700">Policy ID:</span> {intuneUrl ? (
-              <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-600 hover:text-blue-800 hover:underline">{item.policyId}</a>
-            ) : (
-              <span className="font-mono">{item.policyId}</span>
-            )}</span>
-            {item.runContext && <span><span className="font-medium text-gray-700">Context:</span> {item.runContext}</span>}
-            {item.targetType != null && <span><span className="font-medium text-gray-700">Target:</span> {item.targetType === 2 ? "Device" : "User"}</span>}
+            {!nested && (
+              <span><span className="font-medium text-gray-700">Policy ID:</span> {intuneUrl ? (
+                <a href={intuneUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-blue-600 hover:text-blue-800 hover:underline">{item.policyId}</a>
+              ) : (
+                <span className="font-mono">{item.policyId}</span>
+              )}</span>
+            )}
+            {!nested && item.runContext && <span><span className="font-medium text-gray-700">Context:</span> {item.runContext}</span>}
+            {!nested && item.targetType != null && <span><span className="font-medium text-gray-700">Target:</span> {item.targetType === 2 ? "Device" : "User"}</span>}
             {item.exitCode != null && <span><span className="font-medium text-gray-700">Exit Code:</span> <span className="font-mono">{item.exitCode}</span></span>}
             {item.result && <span><span className="font-medium text-gray-700">Result:</span> {item.result}</span>}
             {item.complianceResult && <span><span className="font-medium text-gray-700">Compliance:</span> {item.complianceResult === "True" ? "Compliant" : "Non-compliant"}</span>}
-            {remediationStatusLabel && <span><span className="font-medium text-gray-700">Status:</span> {remediationStatusLabel}</span>}
+            {!nested && remediationStatusLabel && <span><span className="font-medium text-gray-700">Status:</span> {remediationStatusLabel}</span>}
             {item.errorCode != null && item.errorCode !== 0 && (
               <span><span className="font-medium text-gray-700">Error Code:</span> <span className="font-mono">{item.errorCode}</span></span>
             )}
@@ -285,7 +434,6 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
             </div>
           )}
 
-          {/* stdout */}
           {hasStdout && (
             <div>
               <div className="text-xs font-medium text-gray-500 mb-1">stdout</div>
@@ -295,12 +443,10 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
             </div>
           )}
 
-          {/* stdout hidden hint */}
           {showScriptOutput === false && item.stdout && item.stdout.trim().length > 0 && (
             <div className="text-xs text-gray-400 italic">stdout hidden by admin setting</div>
           )}
 
-          {/* stderr */}
           {hasStderr && (
             <div>
               <div className="text-xs font-medium text-red-500 mb-1">stderr</div>
@@ -310,7 +456,6 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion }: { ite
             </div>
           )}
 
-          {/* No output */}
           {!hasOutput && !(showScriptOutput === false && item.stdout && item.stdout.trim().length > 0) && (
             <div className="text-xs text-gray-400 italic">No script output captured</div>
           )}

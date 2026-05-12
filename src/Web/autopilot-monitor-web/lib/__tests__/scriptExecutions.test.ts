@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildScriptItemLabel,
   getPhaseBadge,
+  groupScriptItems,
   isDetectOnlyRow,
   isNonCompliantReport,
   mapRemediationStatus,
@@ -571,5 +572,140 @@ describe("isNonCompliantReport", () => {
   });
   it("false for platform scripts", () => {
     expect(isNonCompliantReport({ scriptType: "platform", scriptPart: undefined, complianceResult: undefined, state: "Success" })).toBe(false);
+  });
+});
+
+// ── Card grouping (multi-phase remediation cycles fold into one parent card) ────────
+describe("groupScriptItems", () => {
+  // Helper to construct a ScriptItem inline.
+  const item = (overrides: Partial<ScriptItem>): ScriptItem => ({
+    policyId: "p1",
+    scriptType: "remediation",
+    state: "Success",
+    timestamp: ts(0),
+    ...overrides,
+  });
+
+  it("returns empty for empty input", () => {
+    expect(groupScriptItems([])).toEqual([]);
+  });
+
+  it("platform scripts stay as single-phase cards (no nesting)", () => {
+    const cards = groupScriptItems([
+      item({ policyId: "plat1", scriptType: "platform", scriptPart: undefined, exitCode: 0, result: "Success" }),
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].isCycle).toBe(false);
+    expect(cards[0].phases).toHaveLength(1);
+    expect(cards[0].headerState).toBe("Success");
+  });
+
+  it("detect-only remediation (single phase, RemediationStatus=4) → single-phase card with detect-only header", () => {
+    const cards = groupScriptItems([
+      item({ scriptPart: "detection", complianceResult: "True", exitCode: 0, remediationStatus: 4 }),
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].isCycle).toBe(false);
+    expect(cards[0].headerState).toBe("Success");
+  });
+
+  it("3-phase remediation cycle for the same policy folds into ONE parent card (the user-reported regression)", () => {
+    // Real shape from session 8810cf81 / policy 99e1274b: detection non-compliant,
+    // remediation script crashed (exit 1), post-detection still non-compliant. The user
+    // wants this to read as ONE card with three phase rows under it, not three siblings.
+    const cards = groupScriptItems([
+      item({ scriptPart: "detection", complianceResult: "False", exitCode: 1, remediationStatus: 2, timestamp: ts(0) }),
+      item({ scriptPart: "remediation", state: "Failed", exitCode: 1, remediationStatus: 2, timestamp: ts(1) }),
+      item({ scriptPart: "post-detection", complianceResult: "False", exitCode: 1, remediationStatus: 2, timestamp: ts(2) }),
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].isCycle).toBe(true);
+    expect(cards[0].phases).toHaveLength(3);
+    // The remediation phase failed → header reads as Failed.
+    expect(cards[0].headerState).toBe("Failed");
+    expect(cards[0].headerLabel).toBe("Remediation script failed");
+    // Phases are sorted detection → remediation → post-detection regardless of insertion order.
+    expect(cards[0].phases.map(p => p.scriptPart)).toEqual(["detection", "remediation", "post-detection"]);
+  });
+
+  it("phases sort detection→remediation→post-detection even when input arrives reversed", () => {
+    const cards = groupScriptItems([
+      item({ scriptPart: "post-detection", complianceResult: "True", exitCode: 0, remediationStatus: 2, timestamp: ts(2) }),
+      item({ scriptPart: "remediation", exitCode: 0, remediationStatus: 2, timestamp: ts(1) }),
+      item({ scriptPart: "detection", complianceResult: "False", exitCode: 1, remediationStatus: 2, timestamp: ts(0) }),
+    ]);
+    expect(cards[0].phases.map(p => p.scriptPart)).toEqual(["detection", "remediation", "post-detection"]);
+  });
+
+  it("successful remediation cycle (post-detection now compliant) → header 'Remediated successfully' green", () => {
+    const cards = groupScriptItems([
+      item({ scriptPart: "detection", complianceResult: "False", exitCode: 1, remediationStatus: 2, timestamp: ts(0) }),
+      item({ scriptPart: "remediation", exitCode: 0, remediationStatus: 2, timestamp: ts(1) }),
+      item({ scriptPart: "post-detection", complianceResult: "True", exitCode: 0, remediationStatus: 2, timestamp: ts(2) }),
+    ]);
+    expect(cards[0].headerState).toBe("Success");
+    expect(cards[0].headerLabel).toBe("Remediated successfully");
+  });
+
+  it("non-compliant cycle (remediation didn't fix) → header 'Non-compliant after remediation' amber", () => {
+    const cards = groupScriptItems([
+      item({ scriptPart: "detection", complianceResult: "False", exitCode: 1, remediationStatus: 3, timestamp: ts(0) }),
+      item({ scriptPart: "remediation", exitCode: 0, remediationStatus: 3, timestamp: ts(1) }),
+      item({ scriptPart: "post-detection", complianceResult: "False", exitCode: 1, remediationStatus: 3, timestamp: ts(2) }),
+    ]);
+    expect(cards[0].headerState).toBe("NonCompliant");
+    expect(cards[0].headerLabel).toBe("Non-compliant after remediation");
+  });
+
+  it("detect-only non-compliant → header 'Non-compliant (detect-only)' amber, single phase", () => {
+    const cards = groupScriptItems([
+      item({ scriptPart: "detection", complianceResult: "False", exitCode: 1, remediationStatus: 4 }),
+    ]);
+    expect(cards[0].isCycle).toBe(false);
+    expect(cards[0].headerState).toBe("NonCompliant");
+    expect(cards[0].headerLabel).toBe("Non-compliant (detect-only)");
+  });
+
+  it("detect-only compliant → header 'Compliant (detect-only)' green, single phase", () => {
+    const cards = groupScriptItems([
+      item({ scriptPart: "detection", complianceResult: "True", exitCode: 0, remediationStatus: 4 }),
+    ]);
+    expect(cards[0].headerState).toBe("Success");
+    expect(cards[0].headerLabel).toBe("Compliant (detect-only)");
+  });
+
+  it("Running placeholder card surfaces with header state Running", () => {
+    const cards = groupScriptItems([
+      item({ scriptPart: undefined, state: "Running", complianceResult: undefined, exitCode: undefined }),
+    ]);
+    expect(cards[0].headerState).toBe("Running");
+    expect(cards[0].headerLabel).toBe("Running");
+  });
+
+  it("multiple distinct policies produce multiple cards in chronological order", () => {
+    const cards = groupScriptItems([
+      item({ policyId: "p2", scriptPart: "detection", complianceResult: "True", exitCode: 0, remediationStatus: 4, timestamp: ts(10) }),
+      item({ policyId: "p1", scriptPart: "detection", complianceResult: "False", exitCode: 1, remediationStatus: 4, timestamp: ts(5) }),
+    ]);
+    expect(cards).toHaveLength(2);
+    // Sorted by earliest-phase timestamp ascending.
+    expect(cards[0].policyId).toBe("p1");
+    expect(cards[1].policyId).toBe("p2");
+  });
+
+  it("does NOT collapse different policies together (sanity check)", () => {
+    const cards = groupScriptItems([
+      item({ policyId: "p1", scriptPart: "detection", complianceResult: "True", exitCode: 0, remediationStatus: 4 }),
+      item({ policyId: "p2", scriptPart: "detection", complianceResult: "False", exitCode: 1, remediationStatus: 4 }),
+    ]);
+    expect(cards).toHaveLength(2);
+  });
+
+  it("does NOT collapse remediation and platform of same policyId together (different scriptType)", () => {
+    const cards = groupScriptItems([
+      item({ policyId: "p1", scriptType: "remediation", scriptPart: "detection", complianceResult: "True", exitCode: 0, remediationStatus: 4 }),
+      item({ policyId: "p1", scriptType: "platform", scriptPart: undefined, exitCode: 0, result: "Success" }),
+    ]);
+    expect(cards).toHaveLength(2);
   });
 });
