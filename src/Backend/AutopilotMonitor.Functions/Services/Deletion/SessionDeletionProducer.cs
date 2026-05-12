@@ -184,10 +184,41 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                             ExistingState = cas1.CurrentState,
                         };
                     }
+                    if (cas1.CurrentState == SessionDeletionState.Queued && !string.IsNullOrEmpty(cas1.CurrentManifestId))
+                    {
+                        // Resume: snapshot + progress blobs were uploaded by a prior producer
+                        // call but the SendMessageAsync step failed (or the queue message was
+                        // lost). Re-send the envelope with the EXISTING ManifestId so PR4's
+                        // worker picks it up. Idempotent — if the queue already has a message,
+                        // duplicates are handled by the worker via the manifest's CAS-bound
+                        // progress blob (Plan §5 PR3 step 4 + §16-R12).
+                        await EnsureQueueExistsAsync(cancellationToken).ConfigureAwait(false);
+                        var resumeEnvelope = new SessionDeletionEnvelope
+                        {
+                            TenantId = tenantId,
+                            SessionId = sessionId,
+                            ManifestId = cas1.CurrentManifestId!,
+                            Reason = reason + ":resume",
+                            EnqueuedAt = DateTime.UtcNow,
+                        };
+                        await _queueClient.SendMessageAsync(JsonConvert.SerializeObject(resumeEnvelope), cancellationToken).ConfigureAwait(false);
+                        _logger.LogInformation(
+                            "SessionDeletionProducer re-enqueued (resume) for stranded Queued: tenant={TenantId} session={SessionId} manifestId={ManifestId}",
+                            tenantId, sessionId, cas1.CurrentManifestId);
+                        return new SessionDeletionEnqueueResult
+                        {
+                            Outcome = SessionDeletionEnqueueOutcome.Enqueued,
+                            ManifestId = cas1.CurrentManifestId,
+                            ExistingState = cas1.CurrentState,
+                            Reason = "resume",
+                        };
+                    }
                     if (SessionDeletionState.IsLocked(cas1.CurrentState))
                     {
-                        // Cascade is already in flight — return its ManifestId. Caller decides UX
-                        // (admin → 409 Conflict, maintenance → skip + audit).
+                        // Preparing or Running — caller decides UX (admin → 409 Conflict,
+                        // maintenance → skip + audit). Preparing without progress blob is GC'd
+                        // after 1h by PR6's maintenance function; Running is the worker actively
+                        // processing.
                         return new SessionDeletionEnqueueResult
                         {
                             Outcome = SessionDeletionEnqueueOutcome.AlreadyInFlight,
@@ -213,15 +244,17 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                     throw new InvalidOperationException("Unhandled CAS outcome: " + cas1.Outcome);
             }
 
-            // Step 2: Build manifest. The guard now blocks any new writers across the wired sites
-            // (PR3 wiring), so enumeration is consistent. Manifest carries OUR pre-allocated
-            // ManifestId so the snapshot blob path matches our CAS marker.
+            // Step 2: Build manifest. Pass our pre-allocated ManifestId so the builder stamps
+            // it on the manifest AND computes SchemaHash against it — overwriting after build
+            // would invalidate the hash (Codex finding #3). The guard now blocks any new writers
+            // across the wired sites (PR3 wiring), so enumeration is consistent.
             var ctx = retentionContext ?? new DeletionRetentionContext();
             DeletionManifest manifest;
             try
             {
-                manifest = await _builder.BuildAsync(tenantId, sessionId, reason, actor, ctx, cancellationToken).ConfigureAwait(false);
-                manifest.ManifestId = manifestId;
+                manifest = await _builder.BuildAsync(
+                    tenantId, sessionId, reason, actor, ctx, cancellationToken,
+                    preAllocatedManifestId: manifestId).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

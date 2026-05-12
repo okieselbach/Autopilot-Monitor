@@ -56,6 +56,13 @@ namespace AutopilotMonitor.Functions.Services.Deletion
         /// Builds a complete cascade snapshot for the given session. Read-only; safe to call
         /// from a preview endpoint. The returned manifest carries full row dumps suitable for
         /// both forward execution (cascade) and reverse execution (restore).
+        /// <para>
+        /// Pass <paramref name="preAllocatedManifestId"/> when the caller has already CAS-stamped
+        /// a ManifestId on the Sessions row (producer's <c>None → Preparing</c> step). The
+        /// builder then computes <c>SchemaHash</c> against the FINAL ManifestId, so post-build
+        /// overwrites by the caller don't invalidate the hash. The preview endpoint passes null
+        /// (transient ID, never persisted to a Sessions row).
+        /// </para>
         /// </summary>
         public virtual async Task<DeletionManifest> BuildAsync(
             string tenantId,
@@ -63,11 +70,12 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             string reason,
             DeletionActor actor,
             DeletionRetentionContext retentionContext,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? preAllocatedManifestId = null)
         {
             var manifest = new DeletionManifest
             {
-                ManifestId = NewManifestId(),
+                ManifestId = preAllocatedManifestId ?? NewManifestId(),
                 ManifestVersion = 1,
                 TenantId = tenantId,
                 SessionId = sessionId,

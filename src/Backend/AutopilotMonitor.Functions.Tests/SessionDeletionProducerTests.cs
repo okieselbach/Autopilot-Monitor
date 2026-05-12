@@ -56,26 +56,26 @@ public class SessionDeletionProducerTests
         // Builder, blob upload, audit, queue should NOT be called.
         harness.Builder.Verify(b => b.BuildAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DeletionActor>(),
-            It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
     }
 
     [Fact]
-    public async Task EnqueueAsync_returns_AlreadyInFlight_when_session_is_already_locked()
+    public async Task EnqueueAsync_returns_AlreadyInFlight_when_session_is_already_Running()
     {
-        // Cascade is already in flight (Preparing/Queued/Running) — second producer call returns
-        // the existing ManifestId. Caller (PR5/PR6) decides UX (admin → 409, maintenance → skip).
+        // Worker is actively processing — second producer call returns the existing ManifestId
+        // without re-enqueueing (Codex F4: only Queued state gets the re-enqueue resume path).
         var harness = new Harness();
-        harness.SetWrongState(SessionDeletionState.Queued, "EXISTING-MANIFEST-1234");
+        harness.SetWrongState(SessionDeletionState.Running, "EXISTING-MANIFEST-1234");
 
         var result = await harness.Sut.EnqueueAsync(TenantId, SessionId, "admin_delete", AdminActor());
 
         Assert.Equal(SessionDeletionEnqueueOutcome.AlreadyInFlight, result.Outcome);
         Assert.Equal("EXISTING-MANIFEST-1234", result.ManifestId);
-        Assert.Equal(SessionDeletionState.Queued, result.ExistingState);
+        Assert.Equal(SessionDeletionState.Running, result.ExistingState);
         // Builder must NOT run — we're not building a new manifest, we're reporting the existing one.
         harness.Builder.Verify(b => b.BuildAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DeletionActor>(),
-            It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class SessionDeletionProducerTests
         // Step 2: builder.BuildAsync.
         harness.Builder.Verify(b => b.BuildAsync(
             TenantId, SessionId, "admin_delete", It.IsAny<DeletionActor>(),
-            It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>()),
+            It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Once);
         // Step 3: snapshot blob upload.
         harness.Blob.Verify(b => b.UploadDeletionManifestAsync(
@@ -333,14 +333,15 @@ public class SessionDeletionProducerTests
                         CurrentManifestId = mid,
                     });
 
-            // Step 2: Builder returns a manifest with whatever ID the producer assigned (the producer overwrites it).
+            // Step 2: Builder honors the producer's pre-allocated ManifestId so SchemaHash stays consistent.
             Builder.Setup(b => b.BuildAsync(
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                    It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string tid, string sid, string reason, DeletionActor actor, DeletionRetentionContext ctx, CancellationToken _) =>
+                    It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext>(), It.IsAny<CancellationToken>(),
+                    It.IsAny<string?>()))
+                .ReturnsAsync((string tid, string sid, string reason, DeletionActor actor, DeletionRetentionContext ctx, CancellationToken _, string? preAllocatedId) =>
                     new DeletionManifest
                     {
-                        ManifestId = "BUILDER-WILL-BE-OVERWRITTEN",
+                        ManifestId = preAllocatedId ?? "BUILDER-FALLBACK",
                         TenantId = tid,
                         SessionId = sid,
                         CreatedAt = DateTime.UtcNow,

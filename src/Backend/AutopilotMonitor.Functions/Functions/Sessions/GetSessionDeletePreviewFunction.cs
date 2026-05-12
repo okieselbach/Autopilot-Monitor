@@ -191,17 +191,23 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
         private static async Task<HttpResponseData> BuildFullResponse(
             HttpRequestData req, DeletionManifest manifest, string? inFlightHint, long builderDurationMs)
         {
+            // mode=full returns the RAW manifest JSON — byte-identical to what the producer
+            // would upload to the deletion-manifests blob container (modulo gzip). This lets
+            // operators diff a dry-run against the actual cascade's snapshot without parsing
+            // through an envelope. Side-channel data (in-flight hint, builder duration) is
+            // surfaced via response headers so the body stays clean.
+            var json = JsonSerializer.SerializeToUtf8Bytes(manifest, DeletionManifestJson.SerializerOptions);
             var response = req.CreateResponse(HttpStatusCode.OK);
-            // Wrap the manifest in an envelope so the response carries the in-flight hint + duration
-            // alongside the (possibly large) full manifest payload.
-            await response.WriteAsJsonAsync(new
+            response.Headers.Add("Content-Type", "application/json");
+            response.Headers.Add("X-Deletion-Preview-Mode", "full");
+            response.Headers.Add("X-Deletion-Preview-Builder-Duration-Ms", builderDurationMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            response.Headers.Add("X-Deletion-Preview-Manifest-Id", manifest.ManifestId);
+            response.Headers.Add("X-Deletion-Preview-Schema-Hash", manifest.SchemaHash);
+            if (!string.IsNullOrEmpty(inFlightHint))
             {
-                success = true,
-                mode = "full",
-                inFlightHint,
-                builderDurationMs,
-                manifest,
-            });
+                response.Headers.Add("X-Deletion-Preview-InFlight-Hint", inFlightHint);
+            }
+            await response.Body.WriteAsync(json, 0, json.Length);
             return response;
         }
 

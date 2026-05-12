@@ -323,6 +323,11 @@ namespace AutopilotMonitor.Functions.Services
                 string geoCity = string.Empty;
                 string geoLoc = string.Empty;
                 string? existingIndexRowKey = null;
+                // PR3: cascade-delete state-machine columns. Re-registration MUST preserve
+                // these — losing them would silently clear the lock and let the agent's writes
+                // race the in-flight cascade. Empty/null is fine on first registration.
+                string? existingDeletionState = null;
+                string? existingPendingDeletionManifestId = null;
 
                 try
                 {
@@ -354,6 +359,8 @@ namespace AutopilotMonitor.Functions.Services
                     geoCity = existingEntity.GetString("GeoCity") ?? string.Empty;
                     geoLoc = existingEntity.GetString("GeoLoc") ?? string.Empty;
                     existingIndexRowKey = existingEntity.GetString("IndexRowKey");
+                    existingDeletionState = existingEntity.GetString("DeletionState");
+                    existingPendingDeletionManifestId = existingEntity.GetString("PendingDeletionManifestId");
 
                     // Guard: never regress a terminal status (Succeeded/Failed) back to InProgress.
                     // StoreSessionAsync uses UpsertEntity (Replace mode) which overwrites all fields.
@@ -446,6 +453,16 @@ namespace AutopilotMonitor.Functions.Services
                 // 2. UpsertSessionIndexAsync can detect and delete old index entries when startedAt shifts
                 if (!string.IsNullOrEmpty(existingIndexRowKey))
                     entity["IndexRowKey"] = existingIndexRowKey;
+
+                // PR3: preserve cascade-delete state-machine columns through the UpsertEntity (Replace).
+                // Without this, an agent re-register during Preparing/Queued/Running would silently
+                // clear the lock — letting the agent's subsequent writes race the in-flight cascade.
+                // Empty/null on first registration is fine; the columns are written by the producer's
+                // CAS, not by the agent path.
+                if (!string.IsNullOrEmpty(existingDeletionState))
+                    entity["DeletionState"] = existingDeletionState;
+                if (!string.IsNullOrEmpty(existingPendingDeletionManifestId))
+                    entity["PendingDeletionManifestId"] = existingPendingDeletionManifestId;
 
                 await tableClient.UpsertEntityAsync(entity);
 
