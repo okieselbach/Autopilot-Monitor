@@ -187,102 +187,12 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
-        /// <summary>
-        /// Cleans up old sessions and events based on tenant retention policies
-        /// </summary>
-        private async Task CleanupOldDataAsync()
-        {
-            _logger.LogInformation("Starting data retention cleanup...");
-            var cleanupStart = Stopwatch.StartNew();
-
-            try
-            {
-                var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
-                int totalSessionsDeleted = 0;
-                int totalEventsDeleted = 0;
-
-                foreach (var tenantId in tenantIds)
-                {
-                    try
-                    {
-                        var config = await _tenantConfigService.GetConfigurationAsync(tenantId);
-                        var retentionDays = config?.DataRetentionDays ?? 90;
-
-                        // 0 = infinite retention, skip cleanup for this tenant
-                        if (retentionDays <= 0)
-                        {
-                            _logger.LogInformation($"Tenant {tenantId}: Data retention set to infinite (0), skipping cleanup");
-                            continue;
-                        }
-
-                        var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
-
-                        var oldSessions = await _maintenanceRepo.GetSessionsOlderThanAsync(tenantId, cutoffDate);
-
-                        if (oldSessions.Count == 0)
-                        {
-                            _logger.LogInformation($"Tenant {tenantId}: No sessions older than {retentionDays} days");
-                            continue;
-                        }
-
-                        int sessionCount = 0;
-                        int eventCount = 0;
-                        int ruleResultCount = 0;
-                        int appSummaryCount = 0;
-
-                        foreach (var session in oldSessions)
-                        {
-                            var deletedEvents = await _maintenanceRepo.DeleteSessionEventsAsync(session.TenantId, session.SessionId);
-                            eventCount += deletedEvents;
-
-                            var deletedRuleResults = await _maintenanceRepo.DeleteSessionRuleResultsAsync(session.TenantId, session.SessionId);
-                            ruleResultCount += deletedRuleResults;
-
-                            var deletedAppSummaries = await _maintenanceRepo.DeleteSessionAppInstallSummariesAsync(session.TenantId, session.SessionId);
-                            appSummaryCount += deletedAppSummaries;
-
-                            await _sessionRepo.DeleteSessionAsync(session.TenantId, session.SessionId);
-                            sessionCount++;
-                        }
-
-                        totalSessionsDeleted += sessionCount;
-                        totalEventsDeleted += eventCount;
-
-                        await _maintenanceRepo.LogAuditEntryAsync(
-                            tenantId,
-                            "DataRetentionCleanup",
-                            "Session",
-                            $"{sessionCount} sessions",
-                            "System.Maintenance",
-                            new Dictionary<string, string>
-                            {
-                                { "SessionsDeleted", sessionCount.ToString() },
-                                { "EventsDeleted", eventCount.ToString() },
-                                { "RuleResultsDeleted", ruleResultCount.ToString() },
-                                { "AppSummariesDeleted", appSummaryCount.ToString() },
-                                { "RetentionDays", retentionDays.ToString() },
-                                { "CutoffDate", cutoffDate.ToString("yyyy-MM-dd") }
-                            });
-
-                        _logger.LogInformation($"Tenant {tenantId}: Deleted {sessionCount} sessions, {eventCount} events, {ruleResultCount} rule results, {appSummaryCount} app summaries (retention: {retentionDays} days)");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, $"Failed to cleanup data for tenant {tenantId}");
-                    }
-                }
-
-                // Usage data cleanup: delete UserUsageLog records older than 90 days
-                await CleanupOldUsageDataAsync();
-
-                cleanupStart.Stop();
-                _logger.LogInformation($"Data retention cleanup completed: {totalSessionsDeleted} sessions and {totalEventsDeleted} events deleted in {cleanupStart.ElapsedMilliseconds}ms");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to cleanup old data");
-            }
-        }
+        // Plan §5 PR6 / §16 R14: the session retention loop that previously lived here is now
+        // owned by SessionDeletionMaintenanceFunction (12h cadence, dedicated watchdog OpsEvents,
+        // V2 cascade vs legacy direct-delete dispatch via SessionRetentionFanoutService). The
+        // non-session tail of this method (UserUsageLog + RuleStats cleanup) was already a
+        // separate method (CleanupOldUsageDataAsync) and is now called directly from RunAllAsync
+        // and RunManualAsync.
 
         /// <summary>
         /// Reconciles rule stats for a given date by computing global aggregate rows

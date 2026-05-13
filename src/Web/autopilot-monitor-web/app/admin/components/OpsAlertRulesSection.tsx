@@ -6,7 +6,19 @@ import { type OpsAlertRule } from "../AdminConfigContext";
 // All known ops event types grouped by category
 const OPS_EVENT_TYPES: Record<string, string[]> = {
   Consent: ["ConsentFlowStarted", "ConsentFlowSuccess", "ConsentFlowFailed", "ConsentRedirectUriMismatch"],
-  Maintenance: ["MaintenanceCompleted", "MaintenanceFailed", "OpsEventCleanup", "SessionTimeouts"],
+  Maintenance: [
+    "MaintenanceCompleted",
+    "MaintenanceFailed",
+    "OpsEventCleanup",
+    "SessionTimeouts",
+    // Cascade-delete maintenance (PR6) — dual-register per memory feedback_ops_event_types_dual_register.
+    // Dispatched by SessionDeletionMaintenanceFunction; backend helpers in OpsEventService.cs are
+    // RecordSessionDeletionMaintenance{LongRunning,LongRunningSevere,Failed}Async + RecordSessionDeletionStrandedQueuedAsync.
+    "SessionDeletionMaintenanceLongRunning",
+    "SessionDeletionMaintenanceLongRunningSevere",
+    "SessionDeletionMaintenanceFailed",
+    "SessionDeletionStrandedQueued",
+  ],
   Security: [
     "DeviceBlocked",
     "ExcessiveDataBlocked",

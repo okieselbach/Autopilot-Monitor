@@ -95,6 +95,86 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Cascade-maintenance probe (PR6). Scans the Sessions table for rows whose
+        /// <c>DeletionState</c> matches <paramref name="state"/>; used by
+        /// <c>SessionDeletionMaintenanceFunction</c> for the stale-<c>Preparing</c> GC and the
+        /// stranded-<c>Queued</c> alert. Returns the minimal projection needed by both callers
+        /// (PK, RK, DeletionState, PendingDeletionManifestId, Timestamp).
+        /// <para>
+        /// Cross-partition scan — acceptable for a 12h maintenance cadence and the small absolute
+        /// row count expected to be in non-<c>None</c> states at any moment (typically &lt; 10 per
+        /// run during steady state). The yield contract lets the caller bound peak memory on
+        /// pathological tenants.
+        /// </para>
+        /// </summary>
+        public virtual async IAsyncEnumerable<TableEntity> GetSessionsByDeletionStateAsync(
+            string state,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(state)) throw new ArgumentException("state is required", nameof(state));
+
+            var tableClient = _tableServiceClient.GetTableClient(Shared.Constants.TableNames.Sessions);
+            var filter = $"DeletionState eq '{state}'";
+            await foreach (var entity in tableClient.QueryAsync<TableEntity>(
+                filter,
+                select: new[] { "PartitionKey", "RowKey", "DeletionState", "PendingDeletionManifestId", "Timestamp" },
+                cancellationToken: cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return entity;
+            }
+        }
+
+        /// <summary>
+        /// Conditional <c>Preparing → None</c> revert used by the stale-Preparing GC (PR6).
+        /// Reads the row, verifies it is still in <c>Preparing</c> with the expected manifest id,
+        /// then writes back the cleared state under the captured ETag so a racing producer that
+        /// just transitioned the row to <c>Queued</c> wins (412 → returns false). On success
+        /// the manifest id is also cleared so the slot can be re-acquired on the next admin click.
+        /// </summary>
+        public virtual async Task<bool> RevertStalePreparingToNoneAsync(
+            string tenantId, string sessionId, string expectedManifestId, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
+            if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("sessionId is required", nameof(sessionId));
+            if (string.IsNullOrEmpty(expectedManifestId)) throw new ArgumentException("expectedManifestId is required", nameof(expectedManifestId));
+
+            var tableClient = _tableServiceClient.GetTableClient(Shared.Constants.TableNames.Sessions);
+            TableEntity entity;
+            ETag etag;
+            try
+            {
+                var response = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId, cancellationToken: cancellationToken);
+                entity = response.Value;
+                etag = response.Value.ETag;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+
+            var currentState = entity.GetString("DeletionState");
+            var currentManifestId = entity.GetString("PendingDeletionManifestId");
+
+            if (!string.Equals(currentState, AutopilotMonitor.Shared.Models.Deletion.SessionDeletionState.Preparing, StringComparison.Ordinal)) return false;
+            if (!string.Equals(currentManifestId, expectedManifestId, StringComparison.Ordinal)) return false;
+
+            entity["DeletionState"] = AutopilotMonitor.Shared.Models.Deletion.SessionDeletionState.None;
+            entity["PendingDeletionManifestId"] = null;
+
+            try
+            {
+                await tableClient.UpdateEntityAsync(entity, etag, TableUpdateMode.Replace, cancellationToken);
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 412)
+            {
+                // Concurrent producer beat us to it — Preparing → Queued already happened. Caller treats as no-op.
+                return false;
+            }
+        }
+
         // ============================================================ Delete helpers (PR2) ====
 
         // Azure Tables batch transactions cap at 100 actions per submission, all sharing a PartitionKey.

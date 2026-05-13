@@ -150,6 +150,11 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.Sessi
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.CascadeVerificationService>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionHandler>();
 builder.Services.AddHostedService<AutopilotMonitor.Functions.Services.Deletion.SessionDeletionWorker>();
+
+// PR6: cascade-delete maintenance subsystem — dedicated 12h timer with watchdog OpsEvents,
+// retention fanout (V2 + legacy), manifest-blob TTL sweep, stale-Preparing GC, and stranded-
+// Queued detection. Independent cadence + kill-switch from the generic 2h Maintenance timer.
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Deletion.SessionRetentionFanoutService>();
 builder.Services.AddHostedService<TableInitializerService>(); // Initialize all tables at startup
 
 // Data Access Layer — repository interfaces backed by Table Storage.

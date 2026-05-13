@@ -70,6 +70,34 @@ namespace AutopilotMonitor.Functions.Services
                 $"Cleaned {totalEventsDeleted} orphaned events across {orphanSessions} sessions",
                 null, "System.Maintenance", new { orphanSessions, totalEventsDeleted });
 
+        // ── Cascade-Delete Maintenance (Plan §5 PR6 / §16 R14) ─────────────────
+        // Four event types dispatched by SessionDeletionMaintenanceFunction. Each is also
+        // listed in OpsAlertRulesSection.tsx OPS_EVENT_TYPES (memory feedback_ops_event_types_dual_register).
+
+        /// <summary>Watchdog: maintenance run still in flight 30 minutes after start. Warning-level early signal.</summary>
+        public Task RecordSessionDeletionMaintenanceLongRunningAsync(int elapsedMinutes, int tenantsProcessed, int sessionsEnqueued)
+            => WriteAsync(OpsEventCategory.Maintenance, "SessionDeletionMaintenanceLongRunning", OpsEventSeverity.Warning,
+                $"SessionDeletionMaintenance still running after {elapsedMinutes}min (tenants={tenantsProcessed}, enqueued={sessionsEnqueued})",
+                null, "System.Maintenance", new { elapsedMinutes, tenantsProcessed, sessionsEnqueued });
+
+        /// <summary>Watchdog: maintenance run still in flight 60 minutes after start. Error-level escalation in case the operator missed the 30min warning.</summary>
+        public Task RecordSessionDeletionMaintenanceLongRunningSevereAsync(int elapsedMinutes, int tenantsProcessed, int sessionsEnqueued)
+            => WriteAsync(OpsEventCategory.Maintenance, "SessionDeletionMaintenanceLongRunningSevere", OpsEventSeverity.Error,
+                $"SessionDeletionMaintenance has been running for {elapsedMinutes}min — Azure Functions host will abort at 60min (tenants={tenantsProcessed}, enqueued={sessionsEnqueued})",
+                null, "System.Maintenance", new { elapsedMinutes, tenantsProcessed, sessionsEnqueued });
+
+        /// <summary>Unhandled exception path. Re-thrown after this audit so the Azure Functions runtime records the failure.</summary>
+        public Task RecordSessionDeletionMaintenanceFailedAsync(string exceptionType, string message, string stackPreview)
+            => WriteAsync(OpsEventCategory.Maintenance, "SessionDeletionMaintenanceFailed", OpsEventSeverity.Error,
+                $"SessionDeletionMaintenance failed: {exceptionType}: {message}",
+                null, "System.Maintenance", new { exceptionType, message, stackPreview });
+
+        /// <summary>Stale Queued state detected (no worker pickup) — operator must inspect the manifest + progress blobs. No auto-clear.</summary>
+        public Task RecordSessionDeletionStrandedQueuedAsync(string tenantId, string sessionId, DateTime queuedSince, string manifestId)
+            => WriteAsync(OpsEventCategory.Maintenance, "SessionDeletionStrandedQueued", OpsEventSeverity.Warning,
+                $"Session {sessionId} stuck in DeletionState=Queued since {queuedSince:o} (manifestId={manifestId})",
+                tenantId, "System.Maintenance", new { tenantId, sessionId, queuedSince = queuedSince.ToString("o"), manifestId });
+
         // ── Security ───────────────────────────────────────────────────────────
 
         public Task RecordDeviceBlockedAsync(string tenantId, string serialNumber, string reason, string blockedBy)

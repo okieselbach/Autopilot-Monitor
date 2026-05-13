@@ -450,6 +450,146 @@ namespace AutopilotMonitor.Functions.Services
 
         private static string BuildProgressBlobName(string tenantId, string sessionId, string manifestId)
             => $"{tenantId}/{sessionId}/{manifestId}.progress.json";
+
+        // ============================================================================== Maintenance helpers (PR6) ==
+        // Defence-in-depth on top of Azure Blob Lifecycle Management. SessionDeletionMaintenanceFunction
+        // sweeps these every 12h so a misconfigured / disabled Lifecycle policy can't strand manifests
+        // past the documented 33-day window. Plan §5 PR6 + §10.
+
+        /// <summary>
+        /// Existence probe for the *progress* blob of a manifest. Counterpart to
+        /// <see cref="DeletionSnapshotExistsAsync"/>; the stale-Preparing GC uses this to decide
+        /// whether a <c>DeletionState=Preparing</c> row is safe to revert to <c>None</c>: no
+        /// progress blob means no cascade step has been recorded, so reverting is safe.
+        /// </summary>
+        public virtual async Task<bool> DeletionProgressBlobExistsAsync(
+            string tenantId, string sessionId, string manifestId, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
+            if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("sessionId is required", nameof(sessionId));
+            if (string.IsNullOrEmpty(manifestId)) throw new ArgumentException("manifestId is required", nameof(manifestId));
+
+            var blobName = BuildProgressBlobName(tenantId, sessionId, manifestId);
+            return await DeletionProgressBlobExistsByNameAsync(blobName, cancellationToken);
+        }
+
+        /// <summary>
+        /// Test seam mirroring <see cref="DeletionSnapshotBlobExistsAsync"/> so xUnit can fake
+        /// existence without spinning up a BlobServiceClient.
+        /// </summary>
+        protected internal virtual async Task<bool> DeletionProgressBlobExistsByNameAsync(
+            string blobName, CancellationToken cancellationToken)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(DeletionManifestsContainer);
+            var blobClient = containerClient.GetBlobClient(blobName);
+            var response = await blobClient.ExistsAsync(cancellationToken);
+            return response.Value;
+        }
+
+        /// <summary>
+        /// Enumerates <c>.snapshot.json.gz</c> blobs whose LastModified is at or before
+        /// <paramref name="olderThanUtc"/>. Each yielded entry carries the parsed
+        /// <c>(tenantId, sessionId, manifestId)</c> tuple plus the LastModified timestamp so the
+        /// caller can audit + delete pairs (snapshot + progress) together. Snapshots are the
+        /// authoritative blob — progress blobs without a matching snapshot are also swept by
+        /// <see cref="DeleteDeletionManifestPairAsync"/> when the snapshot is gone, but we drive
+        /// the sweep off snapshots because they're written exactly once at preflight.
+        /// </summary>
+        public virtual async IAsyncEnumerable<DeletionManifestBlobSummary> EnumerateOldDeletionManifestsAsync(
+            DateTime olderThanUtc,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var containerClient = _blobServiceClient.GetBlobContainerClient(DeletionManifestsContainer);
+
+            // Container may not exist in a brand-new install — treat that as "no manifests".
+            if (!await containerClient.ExistsAsync(cancellationToken))
+                yield break;
+
+            await foreach (var item in containerClient.GetBlobsAsync(BlobTraits.None, BlobStates.None, prefix: null, cancellationToken: cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Only sweep snapshot blobs — driving off ".snapshot.json.gz" means we never delete
+                // a progress blob whose snapshot has already been GC'd by Lifecycle (that's the
+                // expected steady-state and a no-op for us anyway).
+                if (!item.Name.EndsWith(".snapshot.json.gz", StringComparison.Ordinal)) continue;
+
+                var lastModified = item.Properties.LastModified;
+                if (lastModified is null || lastModified.Value.UtcDateTime > olderThanUtc) continue;
+
+                if (!TryParseManifestBlobName(item.Name, out var tenantId, out var sessionId, out var manifestId))
+                {
+                    _logger.LogWarning("EnumerateOldDeletionManifestsAsync: skipping malformed blob name {Name}", item.Name);
+                    continue;
+                }
+
+                yield return new DeletionManifestBlobSummary(tenantId, sessionId, manifestId, lastModified.Value.UtcDateTime);
+            }
+        }
+
+        /// <summary>
+        /// Deletes both the snapshot blob and the progress blob for a (tenant, session, manifest)
+        /// triple. 404 on either is treated as success — the maintenance sweep is idempotent and a
+        /// re-run after a partial completion must not throw. Fail-loud on every other storage error
+        /// so the caller's catch records an OpsEvent and re-throws.
+        /// </summary>
+        public virtual async Task DeleteDeletionManifestPairAsync(
+            string tenantId, string sessionId, string manifestId, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
+            if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("sessionId is required", nameof(sessionId));
+            if (string.IsNullOrEmpty(manifestId)) throw new ArgumentException("manifestId is required", nameof(manifestId));
+
+            var containerClient = _blobServiceClient.GetBlobContainerClient(DeletionManifestsContainer);
+            var snapshotBlob = containerClient.GetBlobClient(BuildSnapshotBlobName(tenantId, sessionId, manifestId));
+            var progressBlob = containerClient.GetBlobClient(BuildProgressBlobName(tenantId, sessionId, manifestId));
+
+            // Soft-delete (3-day window per plan §3) is the storage-account-level setting; this
+            // DeleteIfExistsAsync just moves the blobs into that soft-delete tombstone. Recovery is
+            // possible within the soft-delete window — the maintenance sweep does NOT permanently
+            // delete.
+            await snapshotBlob.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancellationToken);
+            await progressBlob.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancellationToken);
+        }
+
+        /// <summary>
+        /// Parses <c>{tenantId}/{sessionId}/{manifestId}.snapshot.json.gz</c> into its three components.
+        /// Returns false on malformed names so the enumerator can audit-and-skip rather than throw.
+        /// </summary>
+        private static bool TryParseManifestBlobName(string name, out string tenantId, out string sessionId, out string manifestId)
+        {
+            tenantId = sessionId = manifestId = string.Empty;
+            // Expected: {tenantId}/{sessionId}/{manifestId}.snapshot.json.gz
+            var segments = name.Split('/');
+            if (segments.Length != 3) return false;
+            const string Suffix = ".snapshot.json.gz";
+            if (!segments[2].EndsWith(Suffix, StringComparison.Ordinal)) return false;
+            tenantId   = segments[0];
+            sessionId  = segments[1];
+            manifestId = segments[2].Substring(0, segments[2].Length - Suffix.Length);
+            return tenantId.Length > 0 && sessionId.Length > 0 && manifestId.Length > 0;
+        }
+    }
+
+    /// <summary>
+    /// Summary record yielded by <see cref="BlobStorageService.EnumerateOldDeletionManifestsAsync"/>.
+    /// Carries the parsed blob-name triple + the LastModified timestamp so the maintenance sweep
+    /// can audit each pair (manifestId + age) it deletes.
+    /// </summary>
+    public sealed class DeletionManifestBlobSummary
+    {
+        public string TenantId { get; }
+        public string SessionId { get; }
+        public string ManifestId { get; }
+        public DateTime LastModifiedUtc { get; }
+
+        public DeletionManifestBlobSummary(string tenantId, string sessionId, string manifestId, DateTime lastModifiedUtc)
+        {
+            TenantId = tenantId;
+            SessionId = sessionId;
+            ManifestId = manifestId;
+            LastModifiedUtc = lastModifiedUtc;
+        }
     }
 
     /// <summary>
