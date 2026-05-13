@@ -310,6 +310,21 @@ namespace AutopilotMonitor.Shared.Models
         /// <see cref="AutopilotMonitor.Functions.Services.FailureSnapshotBuilder"/>.
         /// </summary>
         public string FailureSnapshotJson { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Cascade-delete state-machine value (Plan §1 P7 / PR3). One of
+        /// <see cref="AutopilotMonitor.Shared.Models.Deletion.SessionDeletionState"/> constants.
+        /// Empty / null means no cascade in flight (legacy rows; treated as <c>None</c>).
+        /// Surfaced via the SessionsIndex projection so list / search endpoints don't hide locked sessions.
+        /// </summary>
+        public string DeletionState { get; set; } = string.Empty;
+
+        /// <summary>
+        /// ULID of the in-flight cascade manifest when <see cref="DeletionState"/> is non-None.
+        /// Used by the producer to detect concurrent re-enqueues (same ManifestId → resume,
+        /// different ManifestId → 409 Conflict). Null otherwise.
+        /// </summary>
+        public string? PendingDeletionManifestId { get; set; }
     }
 
     /// <summary>

@@ -106,7 +106,7 @@ function HomeContent() {
   });
 
   const {
-    showDeleteConfirm, sessionToDelete,
+    showDeleteConfirm, sessionToDelete, pendingDeletions,
     deleteSession, confirmDelete, cancelDelete,
   } = useDeleteSession(getAccessToken, addNotification, adminMode, removeSession);
 
@@ -426,6 +426,7 @@ function HomeContent() {
               columnFilters={columnFilters}
               onColumnFiltersChange={setColumnFilters}
               onDeleteSession={deleteSession}
+              pendingDeletions={pendingDeletions}
               onBlockDevice={blockDevice}
               fullWidth={fullWidth}
               onToggleFullWidth={toggleFullWidth}

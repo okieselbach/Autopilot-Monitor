@@ -4,6 +4,7 @@ using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Models.Deletion;
 using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -252,7 +253,11 @@ namespace AutopilotMonitor.Functions.Services
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
                 ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
-                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty
+                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty,
+                // PR3: cascade-delete state-machine columns. Empty/null on legacy rows is fine —
+                // SessionDeletionGuard treats null/empty as "None" (no cascade in flight).
+                DeletionState = entity.GetString("DeletionState") ?? string.Empty,
+                PendingDeletionManifestId = entity.GetString("PendingDeletionManifestId"),
             };
         }
 
@@ -319,6 +324,11 @@ namespace AutopilotMonitor.Functions.Services
                 string geoCity = string.Empty;
                 string geoLoc = string.Empty;
                 string? existingIndexRowKey = null;
+                // PR3: cascade-delete state-machine columns. Re-registration MUST preserve
+                // these — losing them would silently clear the lock and let the agent's writes
+                // race the in-flight cascade. Empty/null is fine on first registration.
+                string? existingDeletionState = null;
+                string? existingPendingDeletionManifestId = null;
 
                 try
                 {
@@ -350,6 +360,8 @@ namespace AutopilotMonitor.Functions.Services
                     geoCity = existingEntity.GetString("GeoCity") ?? string.Empty;
                     geoLoc = existingEntity.GetString("GeoLoc") ?? string.Empty;
                     existingIndexRowKey = existingEntity.GetString("IndexRowKey");
+                    existingDeletionState = existingEntity.GetString("DeletionState");
+                    existingPendingDeletionManifestId = existingEntity.GetString("PendingDeletionManifestId");
 
                     // Guard: never regress a terminal status (Succeeded/Failed) back to InProgress.
                     // StoreSessionAsync uses UpsertEntity (Replace mode) which overwrites all fields.
@@ -443,7 +455,69 @@ namespace AutopilotMonitor.Functions.Services
                 if (!string.IsNullOrEmpty(existingIndexRowKey))
                     entity["IndexRowKey"] = existingIndexRowKey;
 
-                await tableClient.UpsertEntityAsync(entity);
+                // PR3 (codex round 2 follow-up): ETag-bound CAS write loop. The plain
+                // UpsertEntity (Replace) had a TOCTOU race against the cascade-delete producer:
+                // (T1) StoreSessionAsync reads row → DeletionState=None, captures preserved fields.
+                // (T2) Producer concurrently CAS-es None → Preparing.
+                // (T3) StoreSessionAsync writes Replace → silently clobbers DeletionState=Preparing.
+                // ETag-bound UpdateEntity makes T3 fail with 412 instead, the loop re-reads the
+                // fresh row (now DeletionState=Preparing), re-stamps the cascade-lock columns
+                // onto our entity, and retries. The initial-read extract above is preserved as a
+                // best-effort hint; the per-iteration fresh read is what actually wins the race.
+                const int MaxStoreSessionCasAttempts = 5;
+                for (var casAttempt = 0; ; casAttempt++)
+                {
+                    Azure.ETag? freshEtag = null;
+                    string? freshDeletionState = null;
+                    string? freshPendingDeletionManifestId = null;
+                    try
+                    {
+                        var freshResponse = await tableClient.GetEntityAsync<TableEntity>(
+                            registration.TenantId, registration.SessionId,
+                            select: new[] { "DeletionState", "PendingDeletionManifestId" });
+                        freshEtag = freshResponse.Value.ETag;
+                        freshDeletionState = freshResponse.Value.GetString("DeletionState");
+                        freshPendingDeletionManifestId = freshResponse.Value.GetString("PendingDeletionManifestId");
+                    }
+                    catch (RequestFailedException ex) when (ex.Status == 404)
+                    {
+                        // Row was deleted between the initial extract above and now (cascade
+                        // tombstone happened, or maintenance cleanup raced). Fall through to
+                        // AddEntity — re-creates the row from registration data only.
+                    }
+
+                    // Stamp cascade-lock columns from the FRESH read so the Replace below
+                    // doesn't silently clear them. This kicks in even when the initial read
+                    // saw None and the producer transitioned to Preparing in between.
+                    if (!string.IsNullOrEmpty(freshDeletionState))
+                        entity["DeletionState"] = freshDeletionState;
+                    else if (!string.IsNullOrEmpty(existingDeletionState))
+                        entity["DeletionState"] = existingDeletionState;
+                    if (!string.IsNullOrEmpty(freshPendingDeletionManifestId))
+                        entity["PendingDeletionManifestId"] = freshPendingDeletionManifestId;
+                    else if (!string.IsNullOrEmpty(existingPendingDeletionManifestId))
+                        entity["PendingDeletionManifestId"] = existingPendingDeletionManifestId;
+
+                    try
+                    {
+                        if (freshEtag.HasValue)
+                        {
+                            await tableClient.UpdateEntityAsync(entity, freshEtag.Value, TableUpdateMode.Replace);
+                        }
+                        else
+                        {
+                            await tableClient.AddEntityAsync(entity);
+                        }
+                        break;
+                    }
+                    catch (RequestFailedException ex) when ((ex.Status == 412 || ex.Status == 409) && casAttempt < MaxStoreSessionCasAttempts - 1)
+                    {
+                        _logger.LogDebug(
+                            "StoreSessionAsync ETag CAS conflict (status={Status}, attempt={Attempt}); retrying for tenant={TenantId} session={SessionId}",
+                            ex.Status, casAttempt + 1, registration.TenantId, registration.SessionId);
+                        continue;
+                    }
+                }
 
                 // Dual-write: upsert into SessionsIndex for time-sorted listing
                 await UpsertSessionIndexAsync(entity, startedAt);
@@ -1926,6 +2000,14 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Stores the IME agent version on an existing session (Merge-mode, single field update).
         /// Non-fatal: failures are logged as warnings and do not block ingest.
+        /// <para>
+        /// Uses <see cref="TableClient.UpdateEntityAsync(ITableEntity, ETag, TableUpdateMode, System.Threading.CancellationToken)"/>
+        /// with <see cref="ETag.All"/>, not <c>UpsertEntityAsync</c>: a tombstoned Sessions row
+        /// must stay tombstoned. The previous Upsert would silently recreate a partial Sessions
+        /// row (PK/RK + ImeAgentVersion only) after the cascade-delete worker had removed it,
+        /// breaking the manifest-snapshot invariant. 404 here means "row already gone" and is
+        /// the correct no-op outcome.
+        /// </para>
         /// </summary>
         public async Task UpdateSessionImeAgentVersionAsync(string tenantId, string sessionId, string version)
         {
@@ -1936,7 +2018,13 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     ["ImeAgentVersion"] = version
                 };
-                await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Merge);
+                await tableClient.UpdateEntityAsync(entity, ETag.All, TableUpdateMode.Merge);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogDebug(
+                    "UpdateSessionImeAgentVersion no-op: Sessions row {Tenant}/{Session} is absent (tombstoned or never registered)",
+                    tenantId, sessionId);
             }
             catch (Exception ex)
             {
@@ -1946,7 +2034,23 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Deletes a session from storage
+        /// Deletes a session from storage (legacy direct-delete tombstone, PR5 finding 2).
+        /// <para>
+        /// CAS-guarded against the V2 cascade lock: the read selects <c>DeletionState</c> +
+        /// captures the ETag; if the row is in <c>Preparing/Queued/Running/Poisoned</c> the
+        /// delete is refused (returns false → caller surfaces 409). The subsequent
+        /// <c>DeleteEntityAsync</c> passes the captured ETag so a concurrent V2 producer that
+        /// CAS-set <c>DeletionState=Preparing</c> between our read and our write loses the race
+        /// (412 → returns false). Without this guard, scaled-out instances with stale
+        /// tenant-config cache could legacy-delete a session whose V2 cascade is already in
+        /// flight, orphaning every side-table row the cascade was supposed to clean up.
+        /// </para>
+        /// <para>
+        /// The V2 worker's tombstone uses <c>DeleteByExactKeysInBatchesAsync</c> (a different
+        /// code path), so this CAS guard does NOT block the worker — only legacy callers
+        /// (<c>DeleteSessionFunction</c> flag-OFF path + <c>MaintenanceService</c> retention
+        /// fanout).
+        /// </para>
         /// </summary>
         public async Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
         {
@@ -1954,13 +2058,19 @@ namespace AutopilotMonitor.Functions.Services
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
 
-                // Read IndexRowKey before deleting so we can also delete the index entry
-                string? indexRowKey = null;
+                // Read IndexRowKey + DeletionState + ETag in one go. PR5 finding 2: we need
+                // ALL three to (a) cascade-delete the SessionsIndex row, (b) refuse if locked,
+                // (c) ETag-CAS on the actual delete to close the read-write race.
+                string? indexRowKey;
+                string? deletionState;
+                ETag etag;
                 try
                 {
                     var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId,
-                        select: new[] { "IndexRowKey" });
-                    indexRowKey = entity.Value.GetString("IndexRowKey");
+                        select: new[] { "IndexRowKey", "DeletionState" });
+                    indexRowKey   = entity.Value.GetString("IndexRowKey");
+                    deletionState = entity.Value.GetString("DeletionState");
+                    etag          = entity.Value.ETag;
                 }
                 catch (RequestFailedException ex) when (ex.Status == 404)
                 {
@@ -1968,7 +2078,34 @@ namespace AutopilotMonitor.Functions.Services
                     return true;
                 }
 
-                await tableClient.DeleteEntityAsync(tenantId, sessionId);
+                if (SessionDeletionState.IsLocked(deletionState))
+                {
+                    _logger.LogWarning(
+                        "Legacy DeleteSessionAsync refused: session is locked by a V2 cascade. " +
+                        "tenant={TenantId} session={SessionId} state={State}",
+                        tenantId, sessionId, deletionState);
+                    return false;
+                }
+
+                // ETag-conditional delete: closes the T2-T4 race where a parallel V2 producer
+                // CAS-set DeletionState=Preparing between our DeletionState read and this write.
+                try
+                {
+                    await tableClient.DeleteEntityAsync(tenantId, sessionId, etag);
+                }
+                catch (RequestFailedException ex) when (ex.Status == 412)
+                {
+                    _logger.LogWarning(
+                        "Legacy DeleteSessionAsync ETag-CAS lost: Sessions row was mutated by a concurrent writer " +
+                        "(likely a V2 cascade producer CAS-claiming DeletionState=Preparing). tenant={TenantId} session={SessionId}",
+                        tenantId, sessionId);
+                    return false;
+                }
+                catch (RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // Lost a race with another deleter that also got 200 — treat as idempotent success.
+                    indexRowKey = null;
+                }
 
                 // Dual-write: delete from SessionsIndex
                 await DeleteSessionIndexAsync(tenantId, indexRowKey);
@@ -2087,7 +2224,11 @@ namespace AutopilotMonitor.Functions.Services
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
                 ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
-                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty
+                FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty,
+                // PR3: cascade-delete state-machine columns. Empty/null on legacy rows is fine —
+                // SessionDeletionGuard treats null/empty as "None" (no cascade in flight).
+                DeletionState = entity.GetString("DeletionState") ?? string.Empty,
+                PendingDeletionManifestId = entity.GetString("PendingDeletionManifestId"),
             };
         }
 

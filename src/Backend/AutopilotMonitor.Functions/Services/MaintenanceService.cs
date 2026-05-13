@@ -117,7 +117,11 @@ namespace AutopilotMonitor.Functions.Services
                 await DetectExcessiveEventSessionsAsync();
                 await BlockExcessiveDataSendersAsync();
                 await AggregateMetricsWithCatchUpAsync();
-                await CleanupOldDataAsync();
+                // Plan §5 PR6 / §16 R14: session retention fanout extracted out of the 2h timer
+                // into the dedicated 12h SessionDeletionMaintenanceFunction so cascade-lifecycle
+                // work has independent cadence + kill-switch + OpsEvent watchdogs. The non-session
+                // tail of the old CleanupOldDataAsync (UserUsageLog + RuleStats) stays here.
+                await CleanupOldUsageDataAsync();
                 await CleanupOldDistressReportsAsync();
                 await CleanupOldOpsEventsAsync();
                 await CleanupOrphanedEventsAsync();
@@ -167,7 +171,10 @@ namespace AutopilotMonitor.Functions.Services
 
                 if (!aggregateOnly)
                 {
-                    await CleanupOldDataAsync();
+                    // Plan §5 PR6: session retention is now SessionDeletionMaintenanceFunction's
+                    // responsibility. The manual trigger keeps the non-session housekeeping below
+                    // (usage logs, rule-stats, cert expiry, SignalR quota, poison-queue watcher).
+                    await CleanupOldUsageDataAsync();
                     result.DataCleanupExecuted = true;
 
                     // --- Backfill & repair tasks (manual-only, not in timer path) ---

@@ -10,7 +10,7 @@ using AutopilotMonitor.Shared.Models;
 namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
 {
     /// <summary>
-    /// Adapter for <see cref="ShellCoreTracker"/> — translates its 3 events into Decision-Signals.
+    /// Adapter for <see cref="ShellCoreTracker"/> — translates its 4 events into Decision-Signals.
     /// Plan §2.1a / §2.2.
     /// <para>
     /// Event mapping (Plan §2.2 DecisionSignalKind):
@@ -18,12 +18,16 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
     ///   <item><c>FinalizingSetupPhaseTriggered</c> → <see cref="DecisionSignalKind.EspPhaseChanged"/> (phase=Finalizing)</item>
     ///   <item><c>WhiteGloveCompleted</c> → <see cref="DecisionSignalKind.WhiteGloveShellCoreSuccess"/></item>
     ///   <item><c>EspFailureDetected</c> → <see cref="DecisionSignalKind.EspTerminalFailure"/></item>
+    ///   <item><c>EspExited</c> → <see cref="DecisionSignalKind.EspExiting"/></item>
     /// </list>
     /// </para>
     /// <para>
-    /// Jeder Signaltyp ist fire-once (ShellCoreTracker selbst hat Dedup-Guards; der Adapter
-    /// führt zusätzlich pro-Kind-Flag-Dedup, damit doppelte Subscribe-Calls oder externe
-    /// Re-Entry-Szenarien nicht zweimal posten).
+    /// Finalizing / WhiteGloveSuccess / EspFailure are fire-once (ShellCoreTracker has Dedup-Guards;
+    /// the adapter adds per-kind flags so duplicate Subscribe-Calls or external re-entry can't
+    /// double-post). <c>EspExiting</c> is intentionally NOT deduped at the adapter — Shell-Core
+    /// 62407 fires at every ESP phase transition (Device→Account, Account→End), and the
+    /// reducer (HandleEspExitingV1 + ShouldTransitionToAwaitingHello) decides which occurrence
+    /// is the genuine post-AccountSetup exit that arms HelloSafety.
     /// </para>
     /// </summary>
     internal sealed class ShellCoreTrackerAdapter : IDisposable
@@ -48,6 +52,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _tracker.FinalizingSetupPhaseTriggered += OnFinalizing;
             _tracker.WhiteGloveCompleted += OnWhiteGloveCompleted;
             _tracker.EspFailureDetected += OnEspFailure;
+            _tracker.EspExited += OnEspExited;
         }
 
         public void Dispose()
@@ -55,15 +60,18 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _tracker.FinalizingSetupPhaseTriggered -= OnFinalizing;
             _tracker.WhiteGloveCompleted -= OnWhiteGloveCompleted;
             _tracker.EspFailureDetected -= OnEspFailure;
+            _tracker.EspExited -= OnEspExited;
         }
 
         private void OnFinalizing(object sender, string reason) => EmitFinalizing(reason);
         private void OnWhiteGloveCompleted(object sender, EventArgs e) => EmitWhiteGloveSuccess();
         private void OnEspFailure(object sender, string failureType) => EmitEspFailure(failureType);
+        private void OnEspExited(object sender, EspExitedEventArgs args) => EmitEspExiting(args.OccurredAtUtc);
 
         internal void TriggerFinalizingFromTest(string reason) => EmitFinalizing(reason);
         internal void TriggerWhiteGloveCompletedFromTest() => EmitWhiteGloveSuccess();
         internal void TriggerEspFailureFromTest(string failureType) => EmitEspFailure(failureType);
+        internal void TriggerEspExitingFromTest(DateTime occurredAtUtc) => EmitEspExiting(occurredAtUtc);
 
         private void EmitFinalizing(string reason)
         {
@@ -134,6 +142,26 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 {
                     ["failureType"] = safeFailureType,
                 });
+        }
+
+        // OccurredAtUtc comes from the tracker (live = log time, backfill = record.TimeCreated)
+        // rather than _clock.UtcNow so HandleEspExitingV1 can floor HelloSafety at the actual
+        // ESP-exit moment via EffectiveDeadlineBase, not at wall-clock-now on a backfilled run.
+        private void EmitEspExiting(DateTime occurredAtUtc)
+        {
+            _ingress.Post(
+                kind: DecisionSignalKind.EspExiting,
+                occurredAtUtc: occurredAtUtc,
+                sourceOrigin: "ShellCoreTracker",
+                evidence: new Evidence(
+                    kind: EvidenceKind.Derived,
+                    identifier: "shell-core-tracker-v1",
+                    summary: "ESP exiting (Shell-Core 62407 OOBE_ESP*Exiting)",
+                    derivationInputs: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["eventSource"] = "Microsoft-Windows-Shell-Core",
+                        ["eventId"] = "62407",
+                    }));
         }
     }
 }

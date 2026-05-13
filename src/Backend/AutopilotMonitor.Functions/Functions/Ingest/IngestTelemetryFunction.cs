@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Functions.Services.Deletion;
 using AutopilotMonitor.Functions.Services.Indexing;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
@@ -52,6 +53,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly BootstrapSessionService _bootstrapSessionService;
         private readonly BlockedDeviceService _blockedDeviceService;
         private readonly BlockedVersionService _blockedVersionService;
+        private readonly SessionDeletionGuard _deletionGuard;
 
         public IngestTelemetryFunction(
             ILogger<IngestTelemetryFunction> logger,
@@ -67,7 +69,8 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             DeviceAssociationValidator deviceAssociationValidator,
             BootstrapSessionService bootstrapSessionService,
             BlockedDeviceService blockedDeviceService,
-            BlockedVersionService blockedVersionService)
+            BlockedVersionService blockedVersionService,
+            SessionDeletionGuard deletionGuard)
         {
             _logger = logger;
             _sessionRepo = sessionRepo;
@@ -83,6 +86,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             _bootstrapSessionService = bootstrapSessionService;
             _blockedDeviceService = blockedDeviceService;
             _blockedVersionService = blockedVersionService;
+            _deletionGuard = deletionGuard;
         }
 
         [Function("IngestTelemetry")]
@@ -190,6 +194,24 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                         "All telemetry items in a batch must share the same PartitionKey"));
                 }
 
+                // Cascade-delete guard: refuse the batch with 410 Gone when a V2 cascade owns the
+                // Sessions row (states Preparing/Queued/Running/Poisoned). Without this check, the
+                // hot-path writers below (StoreEventsBatchAsync, signal/transition StoreBatchAsync,
+                // UpdateSessionImeAgentVersionAsync upsert, …) would land rows past the lock and
+                // leave orphan data the manifest cannot describe. One read per batch; absent
+                // Sessions row → silent pass (caller handles session-not-found in its own write).
+                try
+                {
+                    await _deletionGuard.EnsureWritableAsync(bodyTenantId, sessionId, "V2.IngestTelemetry");
+                }
+                catch (SessionDeletionLockedException locked)
+                {
+                    _logger.LogInformation(
+                        "IngestTelemetry: refused batch — cascade in flight tenant={Tenant} session={Session} state={State} manifestId={ManifestId}",
+                        bodyTenantId, sessionId, locked.CurrentState, locked.ManifestId);
+                    return AsOutput(await WriteSessionLockedAsync(req, locked));
+                }
+
                 // Partition + persist. Events are routed through EventIngestProcessor which runs the
                 // full pipeline (rule engine / app-install aggregation / SignalR / webhooks / ...);
                 // Signal + Transition go straight to their repositories.
@@ -289,6 +311,26 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 DeviceKillSignal = isKill,
                 UnblockAt = unblockAt,
                 Message = message,
+                ProcessedAt = DateTime.UtcNow,
+            });
+            return response;
+        }
+
+        /// <summary>
+        /// Responds 410 Gone when the V2 cascade-delete guard refuses the batch. Per plan §5 PR3
+        /// wiring table, telemetry ingest of a locked session is a terminal condition for the
+        /// agent: the session is being torn down server-side and any further writes would create
+        /// orphan rows. 410 is the documented status; the body shape mirrors the device-blocked
+        /// response so existing agent code paths (which already short-circuit on Success=false)
+        /// drop the batch without retry.
+        /// </summary>
+        private static async Task<HttpResponseData> WriteSessionLockedAsync(HttpRequestData req, SessionDeletionLockedException locked)
+        {
+            var response = req.CreateResponse(HttpStatusCode.Gone);
+            await response.WriteAsJsonAsync(new IngestEventsResponse
+            {
+                Success = false,
+                Message = $"Session is being deleted by an administrator (state={locked.CurrentState}); further telemetry will be rejected.",
                 ProcessedAt = DateTime.UtcNow,
             });
             return response;

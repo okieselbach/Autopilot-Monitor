@@ -96,6 +96,37 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Notify the session group that the cascade-deletion worker has tombstoned the session
+        /// (plan §5 PR4). Receivers (web UI) remove the row and close any open detail pane.
+        /// Failures are logged and swallowed — the SignalR push is observability, not correctness;
+        /// the audit log entry <c>deletion_completed</c> remains the canonical record.
+        /// </summary>
+        public async Task NotifySessionDeletedAsync(string tenantId, string sessionId)
+        {
+            try
+            {
+                var hub = await GetHubContextAsync();
+                var groupName = $"session-{tenantId}-{sessionId}";
+
+                await hub.Clients.Group(groupName).SendCoreAsync("sessionDeleted", new object[]
+                {
+                    new
+                    {
+                        sessionId,
+                        tenantId,
+                        timestamp = DateTime.UtcNow.ToString("o")
+                    }
+                });
+
+                _logger.LogDebug("Sent sessionDeleted to group {Group}", groupName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send sessionDeleted notification for session {SessionId}", sessionId);
+            }
+        }
+
+        /// <summary>
         /// Push a newly created tenant notification to the appropriate audience-tier group.
         /// Member-tier notifications go to the -notify-member group (joined by all tenant members);
         /// Admin-tier notifications go to the -notify-admin group (joined by Tenant Admins + Global Admins only).

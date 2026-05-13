@@ -20,6 +20,8 @@ interface AdminConfigSettingsSectionProps {
   setModernDeploymentHarmlessEventIds: (value: string) => void;
   enableIndexDualWrite: boolean;
   setEnableIndexDualWrite: (value: boolean) => void;
+  sessionDeletionKillSwitch: boolean;
+  setSessionDeletionKillSwitch: (value: boolean) => void;
   onSave: () => Promise<void>;
   onReset: () => void;
 }
@@ -42,6 +44,8 @@ export function AdminConfigSettingsSection({
   setModernDeploymentHarmlessEventIds,
   enableIndexDualWrite,
   setEnableIndexDualWrite,
+  sessionDeletionKillSwitch,
+  setSessionDeletionKillSwitch,
   onSave,
   onReset,
 }: AdminConfigSettingsSectionProps) {
@@ -203,6 +207,29 @@ export function AdminConfigSettingsSection({
                     <code className="ml-1 text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">SignalsByKind</code>).
                     A 2h timer re-scans the last 4h as a safety net against queue failures. Flip this on only after the
                     M5.d release-gate tests have been verified in the target environment.
+                  </p>
+                </span>
+              </label>
+            </div>
+
+            <div>
+              <label className="flex items-start space-x-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sessionDeletionKillSwitch}
+                  onChange={(e) => setSessionDeletionKillSwitch(e.target.checked)}
+                  className="mt-1 h-5 w-5 rounded border-red-300 dark:border-red-600 text-red-600 focus:ring-red-500"
+                />
+                <span>
+                  <span className="text-red-900 dark:text-red-100 font-medium">Cascade-Delete Kill-Switch (emergency)</span>
+                  <p className="text-sm text-red-800 dark:text-gray-300 mt-1">
+                    Global emergency stop for the V2 cascade-deletion subsystem. When <strong>on</strong>: the cascade producer
+                    returns <code className="text-xs bg-red-100 dark:bg-red-900 dark:text-red-200 px-1 rounded">503 Service Unavailable</code>,
+                    the legacy direct-delete path also returns 503 (so the switch is truly global, not just V2),
+                    and the cascade worker pauses on entry. Flip on if a runaway cascade or storage incident requires
+                    halting all session-delete activity across all tenants. Independent of the per-tenant
+                    <code className="ml-1 text-xs bg-red-100 dark:bg-red-900 dark:text-red-200 px-1 rounded">EnableCascadeDeleteV2</code> flag —
+                    that selects the path, this halts both paths. Default <strong>off</strong>.
                   </p>
                 </span>
               </label>

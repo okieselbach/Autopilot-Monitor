@@ -85,6 +85,14 @@ interface SessionTableProps {
   columnFilters: Record<string, Set<string>>;
   onColumnFiltersChange: (filters: Record<string, Set<string>>) => void;
   onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
+  /**
+   * Sessions currently awaiting the V2 cascade worker's `sessionDeleted` SignalR notification.
+   * Plan §5 PR5 finding 3: when this set contains a session id, the action cell renders a
+   * spinner instead of the delete button so the user can see that the click was accepted and
+   * the row is being drained server-side. Empty by default; only V2-flagged tenants populate
+   * it (the legacy direct-delete returns 200 and removes the row immediately).
+   */
+  pendingDeletions: ReadonlySet<string>;
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
   fullWidth: boolean;
   onToggleFullWidth: () => void;
@@ -124,6 +132,7 @@ export function SessionTable({
   columnFilters,
   onColumnFiltersChange,
   onDeleteSession,
+  pendingDeletions,
   onBlockDevice,
   fullWidth,
   onToggleFullWidth,
@@ -779,6 +788,7 @@ export function SessionTable({
                     blockedDevicesSet={blockedDevicesSet}
                     user={user}
                     onDeleteSession={onDeleteSession}
+                    isDeletionPending={pendingDeletions.has(session.sessionId)}
                     onBlockDevice={onBlockDevice}
                   />
                 ))}
@@ -834,6 +844,7 @@ function SessionCell({
   blockedDevicesSet,
   user,
   onDeleteSession,
+  isDeletionPending,
   onBlockDevice,
 }: {
   columnKey: string;
@@ -843,6 +854,8 @@ function SessionCell({
   blockedDevicesSet: Set<string>;
   user: { isGlobalAdmin?: boolean } | null;
   onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
+  /** True when the V2 cascade has been queued for this session and we're awaiting `sessionDeleted`. */
+  isDeletionPending: boolean;
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
 }) {
   switch (columnKey) {
@@ -1004,7 +1017,7 @@ function SessionCell({
       return (
         <td className="pl-3 pr-4 py-4 whitespace-nowrap text-right text-sm font-medium">
           <div className="flex items-center justify-end gap-2">
-            {globalAdminMode && user?.isGlobalAdmin && (
+            {globalAdminMode && user?.isGlobalAdmin && !isDeletionPending && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1018,18 +1031,34 @@ function SessionCell({
                 </svg>
               </button>
             )}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteSession(session.sessionId, session.tenantId, session.deviceName || session.serialNumber);
-              }}
-              className="text-red-600 hover:text-red-900 transition-colors"
-              title="Session löschen"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
+            {isDeletionPending ? (
+              // V2 cascade in flight — render a disabled spinner so the user knows the click
+              // was accepted and the row will disappear when the worker fires `sessionDeleted`.
+              // Plan §5 PR5 finding 3.
+              <span
+                className="inline-flex items-center text-gray-400"
+                title="Deletion queued — cascade worker is draining this session"
+                aria-label="Deletion in progress"
+              >
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle cx="12" cy="12" r="10" strokeWidth="3" className="opacity-25" />
+                  <path d="M4 12a8 8 0 018-8" strokeWidth="3" className="opacity-75" />
+                </svg>
+              </span>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteSession(session.sessionId, session.tenantId, session.deviceName || session.serialNumber);
+                }}
+                className="text-red-600 hover:text-red-900 transition-colors"
+                title="Session löschen"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            )}
           </div>
         </td>
       );

@@ -431,6 +431,12 @@ namespace AutopilotMonitor.Shared
             // Persistent software inventory per tenant (aggregated from enrollment snapshots)
             public const string SoftwareInventory = "SoftwareInventory";
 
+            // One side-row per inventory-correlated session, keyed by (tenantId, sessionId).
+            // Drives at-most-once-per-session inventory counter increments via delta-update,
+            // and gives the cascade-delete the exact decrement keys at preflight time.
+            // Written by VulnerabilityCorrelationService (PR2); read by DeletionManifestBuilder (PR1).
+            public const string SessionInventoryContributions = "SessionInventoryContributions";
+
             // SLA breach status per tenant (one row per tenant, RowKey = "status").
             // Persists across host recycles so SLA-breach notifications can be throttled
             // reliably and a GA cross-tenant overview can be served without re-aggregation.
@@ -455,6 +461,14 @@ namespace AutopilotMonitor.Shared
 
             // Lightweight index of sessions that have events (for orphan detection)
             public const string EventSessionIndex = "EventSessionIndex";
+
+            // Short-lived "session was deleted" markers, written by the cascade-delete worker
+            // immediately before the FINAL tombstone removes the Sessions row. Read by
+            // SessionDeletionGuard when a writer (register / ingest) sees a missing Sessions row:
+            // marker present → reject with 410 Gone. Pruned by SessionDeletionMaintenanceFunction
+            // after the tombstone-retention window expires (default 7 days). PartitionKey =
+            // {TenantId}, RowKey = {SessionId}.
+            public const string SessionTombstones = "SessionTombstones";
 
             // V2 Decision Engine primary tables (Plan §M5).
             // SignalLog (input-truth) and Journal (decision-truth) projected to the backend for
@@ -507,6 +521,7 @@ namespace AutopilotMonitor.Shared
                 VulnerabilityCache,
                 VulnerabilityReports,
                 SoftwareInventory,
+                SessionInventoryContributions,
                 SlaTenantStatus,
                 EventTypeIndex,
                 DeviceSnapshot,
@@ -517,6 +532,7 @@ namespace AutopilotMonitor.Shared
                 ImeVersionHistory,
                 RuleStats,
                 EventSessionIndex,
+                SessionTombstones,
                 Signals,
                 DecisionTransitions,
                 SessionsByTerminal,
@@ -561,6 +577,15 @@ namespace AutopilotMonitor.Shared
             /// <c>ReasonVulnerabilityCorrelated</c> so vulnerability-driven analyze rules can fire.
             /// </summary>
             public const string VulnerabilityCorrelate = "vulnerability-correlate";
+
+            /// <summary>
+            /// Cascade-delete worker queue (PR3+). Producer (admin click or maintenance retention
+            /// fan-out) writes one envelope per session-to-delete after acquiring the
+            /// <c>DeletionState=Preparing</c> CAS lock and uploading the snapshot blob. Worker
+            /// (PR4) drains the queue, deletes by exact (PK, RK) per the manifest, and tombstones
+            /// the Sessions row. Poison suffix <c>-poison</c>, max-dequeue 5.
+            /// </summary>
+            public const string SessionDeletion = "session-deletion";
         }
     }
 }

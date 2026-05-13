@@ -38,6 +38,8 @@ interface AdminConfigContextValue {
   setModernDeploymentHarmlessEventIds: (value: string) => void;
   enableIndexDualWrite: boolean;
   setEnableIndexDualWrite: (value: boolean) => void;
+  sessionDeletionKillSwitch: boolean;
+  setSessionDeletionKillSwitch: (value: boolean) => void;
 
   // Diagnostics log paths
   globalDiagPaths: DiagnosticsLogPath[];
@@ -116,6 +118,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [allowAgentDowngrade, setAllowAgentDowngrade] = useState(false);
   const [modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds] = useState("100, 1005, 1010");
   const [enableIndexDualWrite, setEnableIndexDualWrite] = useState(false);
+  const [sessionDeletionKillSwitch, setSessionDeletionKillSwitch] = useState(false);
 
   // Diagnostics Log Paths state
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
@@ -170,6 +173,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setAllowAgentDowngrade(data.allowAgentDowngrade ?? false);
         setModernDeploymentHarmlessEventIds(parseHarmlessEventIdsJson(data.modernDeploymentHarmlessEventIdsJson));
         setEnableIndexDualWrite(data.enableIndexDualWrite ?? false);
+        setSessionDeletionKillSwitch(data.sessionDeletionKillSwitch ?? false);
         try {
           setGlobalDiagPaths(data.diagnosticsGlobalLogPathsJson ? JSON.parse(data.diagnosticsGlobalLogPathsJson) : []);
         } catch {
@@ -265,6 +269,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         allowAgentDowngrade,
         modernDeploymentHarmlessEventIdsJson: serializeHarmlessEventIds(modernDeploymentHarmlessEventIds),
         enableIndexDualWrite,
+        sessionDeletionKillSwitch,
       };
 
       const response = await authenticatedFetch(api.globalConfig.get(), getAccessToken, {
@@ -291,7 +296,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingConfig(false);
     }
-  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, slaNotificationCooldownHours, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, getAccessToken]);
+  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, slaNotificationCooldownHours, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, sessionDeletionKillSwitch, getAccessToken]);
 
   // Reset admin config
   const handleResetAdminConfig = useCallback(() => {
@@ -306,6 +311,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     setAllowAgentDowngrade(adminConfig.allowAgentDowngrade ?? false);
     setModernDeploymentHarmlessEventIds(parseHarmlessEventIdsJson(adminConfig.modernDeploymentHarmlessEventIdsJson));
     setEnableIndexDualWrite(adminConfig.enableIndexDualWrite ?? false);
+    setSessionDeletionKillSwitch(adminConfig.sessionDeletionKillSwitch ?? false);
     try {
       setGlobalDiagPaths(adminConfig.diagnosticsGlobalLogPathsJson ? JSON.parse(adminConfig.diagnosticsGlobalLogPathsJson) : []);
     } catch {
@@ -432,6 +438,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       allowAgentDowngrade, setAllowAgentDowngrade,
       modernDeploymentHarmlessEventIds, setModernDeploymentHarmlessEventIds,
       enableIndexDualWrite, setEnableIndexDualWrite,
+      sessionDeletionKillSwitch, setSessionDeletionKillSwitch,
       globalDiagPaths, setGlobalDiagPaths, savingDiagPaths,
       opsAlertRules, setOpsAlertRules,
       opsAlertTelegramEnabled, setOpsAlertTelegramEnabled,

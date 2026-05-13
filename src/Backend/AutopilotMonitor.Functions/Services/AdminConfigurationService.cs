@@ -83,6 +83,39 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Cache-bypassing read of <see cref="AdminConfiguration.SessionDeletionKillSwitch"/>
+        /// (plan §5 PR5 finding 1). The general-purpose <see cref="GetConfigurationAsync"/>
+        /// caches for 5 minutes per instance; that's wrong for an *emergency* switch — a
+        /// flip-ON would not be honored across scaled-out Function-host instances until each
+        /// one's cache expires independently. This helper goes straight to the repository so
+        /// every call observes the current row.
+        /// <para>
+        /// <b>Fail-CLOSED on storage error:</b> if the repo throws, we return <c>true</c>
+        /// (treat as kill-switch active). For an emergency switch, blocking new deletes on a
+        /// transient storage failure is the safe default; the alternative would be silently
+        /// failing to honor an in-progress operator action during the incident the switch was
+        /// flipped to mitigate.
+        /// </para>
+        /// <para>
+        /// Virtual so tests can mock it without going through the repository.
+        /// </para>
+        /// </summary>
+        public virtual async Task<bool> IsSessionDeletionKillSwitchActiveAsync()
+        {
+            try
+            {
+                var config = await _configRepo.GetAdminConfigurationAsync();
+                return config?.SessionDeletionKillSwitch ?? false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Failed to read SessionDeletionKillSwitch from repository; failing CLOSED (treating as active) — plan §5 PR5 finding 1");
+                return true;
+            }
+        }
+
+        /// <summary>
         /// Saves global admin configuration and syncs rate limit to all tenant configurations
         /// </summary>
         public async Task SaveConfigurationAsync(AdminConfiguration config)

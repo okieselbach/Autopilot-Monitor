@@ -57,6 +57,19 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Test seam: construct directly from a (possibly Moq'd) <see cref="TableServiceClient"/>.
+        /// Used by xUnit so the storage-touching helpers in the partial classes (Deletion,
+        /// Inventory, …) can be exercised against the SDK's virtual surface without hitting Azure.
+        /// Public (not internal) because Moq's dynamic proxy assembly cannot see internal ctors
+        /// even via InternalsVisibleTo.
+        /// </summary>
+        public TableStorageService(TableServiceClient tableServiceClient, ILogger<TableStorageService> logger)
+        {
+            _tableServiceClient = tableServiceClient;
+            _logger = logger;
+        }
+
+        /// <summary>
         /// Returns a TableClient for the specified table name.
         /// Used by services that need direct table access (e.g. VulnerabilityCorrelationService).
         /// </summary>
