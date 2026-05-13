@@ -61,6 +61,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public event EventHandler WhiteGloveCompleted;
         public event EventHandler<string> EspFailureDetected;
 
+        // ESP exit (Shell-Core 62407 OOBE_ESP*Exiting). Fires once per occurrence — Shell-Core
+        // emits this event at each phase transition (Device→Account, Account→End), and the
+        // DecisionEngine reducer (HandleEspExitingV1 + ShouldTransitionToAwaitingHello) decides
+        // which occurrence is the genuine post-ESP exit that arms HelloSafety. The tracker does
+        // not dedup live events. Backfill is single-shot under _espExitDetected.
+        // Args carry the source-event timestamp (live = log time, backfill = record.TimeCreated).
+        public event EventHandler<EspExitedEventArgs> EspExited;
+
         public ShellCoreTracker(
             string sessionId,
             string tenantId,
@@ -284,6 +292,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     try { EspFailureDetected?.Invoke(this, detectedFailureType); }
                     catch (Exception ex) { _logger.Error($"EspFailureDetected handler failed for '{detectedFailureType}'", ex); }
                 }
+
+                // Fire EspExited AFTER event emission. Subscribers (ShellCoreTrackerAdapter) post
+                // a DecisionSignalKind.EspExiting so the engine can arm HelloSafety on the genuine
+                // post-AccountSetup exit. Engine-side guard (ShouldTransitionToAwaitingHello)
+                // distinguishes intermediate exits from the real one.
+                if (eventType == "esp_exiting")
+                {
+                    try { EspExited?.Invoke(this, new EspExitedEventArgs(timestamp)); }
+                    catch (Exception ex) { _logger.Error("EspExited handler failed", ex); }
+                }
             }
             finally
             {
@@ -356,8 +374,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     _helloTracker?.NotifyEspExited();
                     _logger.Info($"Backfill: ESP exit event found in recent Shell-Core logs (originalAt={occurredAtUtc:o})");
                     LastEventOccurredAtUtc = occurredAtUtc;
-                    try { FinalizingSetupPhaseTriggered?.Invoke(this, "esp_exiting"); }
-                    catch (Exception ex) { _logger.Error("Backfill: FinalizingSetupPhaseTriggered handler failed", ex); }
+                    try
+                    {
+                        try { FinalizingSetupPhaseTriggered?.Invoke(this, "esp_exiting"); }
+                        catch (Exception ex) { _logger.Error("Backfill: FinalizingSetupPhaseTriggered handler failed", ex); }
+                        try { EspExited?.Invoke(this, new EspExitedEventArgs(occurredAtUtc)); }
+                        catch (Exception ex) { _logger.Error("Backfill: EspExited handler failed", ex); }
+                    }
                     finally { LastEventOccurredAtUtc = null; }
                 }
             }
