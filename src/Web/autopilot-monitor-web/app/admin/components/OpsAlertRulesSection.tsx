@@ -13,10 +13,16 @@ const OPS_EVENT_TYPES: Record<string, string[]> = {
     "SessionTimeouts",
     // Cascade-delete maintenance (PR6) — dual-register per memory feedback_ops_event_types_dual_register.
     // Dispatched by SessionDeletionMaintenanceFunction; backend helpers in OpsEventService.cs are
-    // RecordSessionDeletionMaintenance{LongRunning,LongRunningSevere,Failed}Async + RecordSessionDeletionStrandedQueuedAsync.
+    // RecordSessionDeletionMaintenance{LongRunning,LongRunningSevere,Failed,Completed,FanoutSkipped}Async +
+    // RecordSessionDeletionStrandedQueuedAsync. The Completed + FanoutSkipped events landed with the
+    // PR6 follow-up (F3) — they replaced the AuditLogs-based lifecycle audits that silently failed
+    // because the schema requires a non-null PartitionKey (tenantId), but the maintenance lifecycle
+    // events are global-scope.
+    "SessionDeletionMaintenanceCompleted",
     "SessionDeletionMaintenanceLongRunning",
     "SessionDeletionMaintenanceLongRunningSevere",
     "SessionDeletionMaintenanceFailed",
+    "SessionDeletionMaintenanceFanoutSkipped",
     "SessionDeletionStrandedQueued",
   ],
   Security: [

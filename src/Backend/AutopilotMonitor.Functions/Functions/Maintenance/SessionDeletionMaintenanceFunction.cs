@@ -146,24 +146,16 @@ namespace AutopilotMonitor.Functions.Functions.Maintenance
                 // (3) Stranded-Queued detection (alert-only) — runs even when kill-switch=true.
                 var strandedQueuedDetected = await DetectStrandedQueuedAsync(cancellationToken);
 
-                // (4) Retention fanout — skipped when kill-switch=true. Audit the skip so the
-                // operator sees in MCP/admin logs that the fanout was deliberately bypassed.
+                // (4) Retention fanout — skipped when kill-switch=true. Emit a Fanout-Skipped
+                // OpsEvent so the operator can fold the skip into the OpsEvents dashboard alongside
+                // the 30/60min watchdogs. PR6 follow-up F3: previously a LogAuditEntryAsync(null!)
+                // call that silently failed because the AuditLogs schema requires a non-null
+                // PartitionKey — OpsEvents tolerates null TenantId, so global-scope events live there.
                 SessionRetentionFanoutService.FanoutResult? fanoutResult = null;
                 if (killSwitchActive)
                 {
-                    await _maintenanceRepo.LogAuditEntryAsync(
-                        tenantId: null!,
-                        action: "session_deletion_maintenance_fanout_skipped_killswitch",
-                        entityType: "Maintenance",
-                        entityId: "fanout",
-                        performedBy: "System.Maintenance",
-                        details: new Dictionary<string, string>
-                        {
-                            { "Reason", "SessionDeletionKillSwitch is active" },
-                            { "BlobsTtlGced", blobsTtlGced.ToString() },
-                            { "PreparingRowsCleared", preparingRowsCleared.ToString() },
-                            { "StrandedQueuedDetected", strandedQueuedDetected.ToString() },
-                        });
+                    await _opsEvents.RecordSessionDeletionMaintenanceFanoutSkippedAsync(
+                        blobsTtlGced, preparingRowsCleared, strandedQueuedDetected);
                 }
                 else
                 {
@@ -172,26 +164,20 @@ namespace AutopilotMonitor.Functions.Functions.Maintenance
                     sessionsEnqueuedSoFar = fanoutResult.SessionsEnqueued + fanoutResult.SessionsLegacyDeleted;
                 }
 
-                // (5) Completion audit — same shape regardless of kill-switch state, so dashboards can fold both paths together.
-                await _maintenanceRepo.LogAuditEntryAsync(
-                    tenantId: null!,
-                    action: "session_deletion_maintenance_completed",
-                    entityType: "Maintenance",
-                    entityId: $"run-{DateTime.UtcNow:yyyyMMddHHmmss}",
-                    performedBy: "System.Maintenance",
-                    details: new Dictionary<string, string>
-                    {
-                        { "KillSwitchActive", killSwitchActive.ToString() },
-                        { "TenantsProcessed", (fanoutResult?.TenantsProcessed ?? 0).ToString() },
-                        { "SessionsEnqueued", (fanoutResult?.SessionsEnqueued ?? 0).ToString() },
-                        { "SessionsLegacyDeleted", (fanoutResult?.SessionsLegacyDeleted ?? 0).ToString() },
-                        { "SessionsSkipped", (fanoutResult?.SessionsSkipped ?? 0).ToString() },
-                        { "RateLimitedTenants", (fanoutResult?.RateLimitedTenants ?? 0).ToString() },
-                        { "BlobsTtlGced", blobsTtlGced.ToString() },
-                        { "PreparingRowsCleared", preparingRowsCleared.ToString() },
-                        { "StrandedQueuedDetected", strandedQueuedDetected.ToString() },
-                        { "DurationMs", sw.ElapsedMilliseconds.ToString() },
-                    });
+                // (5) Completion OpsEvent — same shape regardless of kill-switch state, so dashboards
+                // can fold both paths together. PR6 follow-up F3.
+                await _opsEvents.RecordSessionDeletionMaintenanceCompletedAsync(
+                    killSwitchActive: killSwitchActive,
+                    tenantsProcessed: fanoutResult?.TenantsProcessed ?? 0,
+                    sessionsEnqueued: fanoutResult?.SessionsEnqueued ?? 0,
+                    sessionsLegacyDeleted: fanoutResult?.SessionsLegacyDeleted ?? 0,
+                    sessionsSkipped: fanoutResult?.SessionsSkipped ?? 0,
+                    rateLimitedTenants: fanoutResult?.RateLimitedTenants ?? 0,
+                    blobsTtlGced: blobsTtlGced,
+                    preparingRowsCleared: preparingRowsCleared,
+                    strandedQueuedDetected: strandedQueuedDetected,
+                    durationMs: (int)sw.ElapsedMilliseconds,
+                    abortedByKillSwitch: fanoutResult?.AbortedByKillSwitch ?? false);
 
                 _logger.LogInformation(
                     "SessionDeletionMaintenance: completed in {Ms}ms — killSwitch={KillSwitch} tenants={Tenants} enqueued={Enqueued} legacy={Legacy} skipped={Skipped} blobs={Blobs} preparing={Preparing} stranded={Stranded}",
@@ -204,21 +190,13 @@ namespace AutopilotMonitor.Functions.Functions.Maintenance
             }
             catch (Exception ex)
             {
-                // Failure path (Plan §5 PR6): OpsEvent → audit → re-throw so the runtime records it.
+                // Failure path (Plan §5 PR6) — emit the SessionDeletionMaintenanceFailed OpsEvent
+                // (captures exceptionType + message + stack preview as event details) and re-throw
+                // so the Azure Functions runtime records the failure. PR6 follow-up F3: the prior
+                // parallel LogAuditEntryAsync(null!) call was a silent no-op because AuditLogs
+                // requires a non-null PartitionKey; the OpsEvent IS the authoritative audit record.
                 var stackPreview = ex.StackTrace is { Length: > 2048 } s ? s.Substring(0, 2048) : ex.StackTrace ?? string.Empty;
                 await _opsEvents.RecordSessionDeletionMaintenanceFailedAsync(ex.GetType().FullName ?? ex.GetType().Name, ex.Message, stackPreview);
-                await _maintenanceRepo.LogAuditEntryAsync(
-                    tenantId: null!,
-                    action: "session_deletion_maintenance_failed",
-                    entityType: "Maintenance",
-                    entityId: $"run-{DateTime.UtcNow:yyyyMMddHHmmss}",
-                    performedBy: "System.Maintenance",
-                    details: new Dictionary<string, string>
-                    {
-                        { "ExceptionType", ex.GetType().FullName ?? ex.GetType().Name },
-                        { "Message", ex.Message },
-                        { "DurationMs", sw.ElapsedMilliseconds.ToString() },
-                    });
                 throw;
             }
             finally

@@ -50,7 +50,9 @@ public class SessionDeletionMaintenanceFunctionTests
 
         harness.BlobMock.Verify(b => b.DeleteDeletionManifestPairAsync("t", "s", "m", It.IsAny<CancellationToken>()), Times.Once);
         harness.Fanout.Verify(f => f.RunAsync(It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Contains(harness.AuditCalls, a => a.Action == "session_deletion_maintenance_completed");
+        // PR6 follow-up F3: lifecycle status now lives on OpsEvents, not AuditLogs (the latter
+        // would silently fail because PartitionKey requires a non-null tenantId).
+        Assert.Contains(harness.OpsEvents, e => e.EventName == "SessionDeletionMaintenanceCompleted");
     }
 
     [Fact]
@@ -66,10 +68,9 @@ public class SessionDeletionMaintenanceFunctionTests
         harness.BlobMock.Verify(b => b.DeleteDeletionManifestPairAsync("t", "s", "m", It.IsAny<CancellationToken>()), Times.Once);
         // Fanout was skipped.
         harness.Fanout.Verify(f => f.RunAsync(It.IsAny<CancellationToken>()), Times.Never);
-        // Skip audit emitted with kill-switch reason.
-        Assert.Contains(harness.AuditCalls, a => a.Action == "session_deletion_maintenance_fanout_skipped_killswitch");
-        // Completion audit still emitted so dashboards fold the run into the timeline.
-        Assert.Contains(harness.AuditCalls, a => a.Action == "session_deletion_maintenance_completed");
+        // PR6 follow-up F3: fanout-skip + completion now both live on OpsEvents.
+        Assert.Contains(harness.OpsEvents, e => e.EventName == "SessionDeletionMaintenanceFanoutSkipped");
+        Assert.Contains(harness.OpsEvents, e => e.EventName == "SessionDeletionMaintenanceCompleted");
     }
 
     // ────────────────────────────────────────────────────────────────────────── Watchdog OpsEvents ─
@@ -139,8 +140,9 @@ public class SessionDeletionMaintenanceFunctionTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Sut.RunCoreAsync(CancellationToken.None));
         Assert.Equal("fanout exploded", ex.Message);
 
+        // PR6 follow-up F3: the SessionDeletionMaintenanceFailed OpsEvent IS the audit. The prior
+        // parallel LogAuditEntryAsync(null!) call was a silent no-op and has been removed.
         Assert.Contains(harness.OpsEvents, e => e.EventName == "SessionDeletionMaintenanceFailed");
-        Assert.Contains(harness.AuditCalls, a => a.Action == "session_deletion_maintenance_failed");
     }
 
     // ────────────────────────────────────────────────────────────────────────── Stranded-Queued detection ─
@@ -284,6 +286,7 @@ public class SessionDeletionMaintenanceFunctionTests
                 Mock.Of<ISessionRepository>(),
                 new Mock<TenantConfigurationService>(Mock.Of<IConfigRepository>(), NullLogger<TenantConfigurationService>.Instance, memCache).Object,
                 Mock.Of<ISessionDeletionEnqueuer>(),
+                AdminConfig.Object,
                 NullLogger<SessionRetentionFanoutService>.Instance);
             Fanout.Setup(f => f.RunAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SessionRetentionFanoutService.FanoutResult { TenantsProcessed = 0, SessionsEnqueued = 0 });

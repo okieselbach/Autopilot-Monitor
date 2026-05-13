@@ -98,6 +98,36 @@ namespace AutopilotMonitor.Functions.Services
                 $"Session {sessionId} stuck in DeletionState=Queued since {queuedSince:o} (manifestId={manifestId})",
                 tenantId, "System.Maintenance", new { tenantId, sessionId, queuedSince = queuedSince.ToString("o"), manifestId });
 
+        /// <summary>
+        /// Successful end of a <see cref="Functions.Maintenance.SessionDeletionMaintenanceFunction"/>
+        /// run — records the per-block totals so dashboards can fold the cadence into the timeline.
+        /// PR6 follow-up F3: replaces the prior <c>LogAuditEntryAsync(null!, ...)</c> call, which
+        /// silently failed because the AuditLogs schema requires a non-null PartitionKey (tenantId).
+        /// </summary>
+        public Task RecordSessionDeletionMaintenanceCompletedAsync(
+            bool killSwitchActive, int tenantsProcessed, int sessionsEnqueued, int sessionsLegacyDeleted,
+            int sessionsSkipped, int rateLimitedTenants, int blobsTtlGced, int preparingRowsCleared,
+            int strandedQueuedDetected, int durationMs, bool abortedByKillSwitch)
+            => WriteAsync(OpsEventCategory.Maintenance, "SessionDeletionMaintenanceCompleted", OpsEventSeverity.Info,
+                $"SessionDeletionMaintenance completed in {durationMs}ms — tenants={tenantsProcessed} enqueued={sessionsEnqueued} legacy={sessionsLegacyDeleted} skipped={sessionsSkipped} blobsTtlGced={blobsTtlGced} preparingCleared={preparingRowsCleared} stranded={strandedQueuedDetected} killSwitch={killSwitchActive}",
+                null, "System.Maintenance", new {
+                    killSwitchActive, tenantsProcessed, sessionsEnqueued, sessionsLegacyDeleted,
+                    sessionsSkipped, rateLimitedTenants, blobsTtlGced, preparingRowsCleared,
+                    strandedQueuedDetected, durationMs, abortedByKillSwitch,
+                });
+
+        /// <summary>
+        /// Records that the retention fanout half of a <see cref="Functions.Maintenance.SessionDeletionMaintenanceFunction"/>
+        /// run was skipped because the global kill-switch was active at entry. The three GCs
+        /// (manifest TTL sweep, stale-Preparing, stranded-Queued) still ran — see the totals on
+        /// the paired <see cref="RecordSessionDeletionMaintenanceCompletedAsync"/> event.
+        /// </summary>
+        public Task RecordSessionDeletionMaintenanceFanoutSkippedAsync(
+            int blobsTtlGced, int preparingRowsCleared, int strandedQueuedDetected)
+            => WriteAsync(OpsEventCategory.Maintenance, "SessionDeletionMaintenanceFanoutSkipped", OpsEventSeverity.Info,
+                $"SessionDeletionMaintenance fanout skipped (kill-switch active) — GCs ran: blobsTtlGced={blobsTtlGced} preparingCleared={preparingRowsCleared} stranded={strandedQueuedDetected}",
+                null, "System.Maintenance", new { reason = "SessionDeletionKillSwitch", blobsTtlGced, preparingRowsCleared, strandedQueuedDetected });
+
         // ── Security ───────────────────────────────────────────────────────────
 
         public Task RecordDeviceBlockedAsync(string tenantId, string serialNumber, string reason, string blockedBy)

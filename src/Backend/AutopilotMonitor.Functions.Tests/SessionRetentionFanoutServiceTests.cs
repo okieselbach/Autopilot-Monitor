@@ -138,6 +138,115 @@ public class SessionRetentionFanoutServiceTests
         harness.MaintenanceRepo.Verify(m => m.GetSessionsOlderThanAsync(TenantA, It.IsAny<DateTime>()), Times.Never);
     }
 
+    // ────────────────────────────────────────────────────────────────────────── PR6 follow-up F1 ─
+
+    [Fact]
+    public async Task RunAsync_legacy_path_skips_locked_session_WITHOUT_touching_side_tables()
+    {
+        // PR6 follow-up F1: pre-read DeletionState before any side-table mutation. Without this
+        // gate the legacy path would delete Events / RuleResults / AppSummaries and only discover
+        // the V2 cascade lock at the tombstone CAS — leaving the V2 cascade's manifest claiming
+        // rows that were silently removed in the meantime.
+        var harness = new Harness();
+        harness.WithTenant(TenantA, retentionDays: 30, v2: false, sessions: new[] { Old("s1", 60) });
+        // Override the default fresh-read: this session is locked by a V2 cascade.
+        harness.SessionRepo.Setup(r => r.GetSessionAsync(TenantA, "s1"))
+            .ReturnsAsync(new SessionSummary
+            {
+                TenantId = TenantA,
+                SessionId = "s1",
+                DeletionState = SessionDeletionState.Queued,
+                PendingDeletionManifestId = "EXISTING-MANIFEST",
+            });
+
+        var result = await harness.Sut.RunAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.SessionsSkipped);
+        Assert.Equal(0, result.SessionsLegacyDeleted);
+        // Critical assertion: NONE of the side-table delete helpers were invoked.
+        harness.MaintenanceRepo.Verify(m => m.DeleteSessionEventsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        harness.MaintenanceRepo.Verify(m => m.DeleteSessionRuleResultsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        harness.MaintenanceRepo.Verify(m => m.DeleteSessionAppInstallSummariesAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        harness.SessionRepo.Verify(r => r.DeleteSessionAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_legacy_path_skips_when_session_already_removed_during_preread()
+    {
+        // Edge case: row disappeared between GetSessionsOlderThan and the pre-read. Treat as skip
+        // (no side-table work needed); no error.
+        var harness = new Harness();
+        harness.WithTenant(TenantA, retentionDays: 30, v2: false, sessions: new[] { Old("s1", 60) });
+        harness.SessionRepo.Setup(r => r.GetSessionAsync(TenantA, "s1")).ReturnsAsync((SessionSummary?)null);
+
+        var result = await harness.Sut.RunAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.SessionsSkipped);
+        harness.MaintenanceRepo.Verify(m => m.DeleteSessionEventsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────── PR6 follow-up F2 ─
+
+    [Fact]
+    public async Task RunAsync_aborts_mid_loop_when_kill_switch_flips_on()
+    {
+        // PR6 follow-up F2: per-session kill-switch check halts the fanout immediately when the
+        // emergency switch flips, instead of finishing the rest of this tenant's backlog.
+        var harness = new Harness();
+        var manySessions = new List<SessionSummary>();
+        for (int i = 0; i < 5; i++) manySessions.Add(Summary(TenantA, $"s{i}"));
+        harness.WithTenantOverride(TenantA, retentionDays: 30, v2: true, sessions: manySessions);
+
+        // First 2 calls return false (kill-switch off), then true → fanout aborts at the 3rd iteration.
+        var calls = 0;
+        harness.AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync())
+            .Returns(() =>
+            {
+                calls++;
+                // Sequence: tenant-entry probe (call 1, false), then per-session probes:
+                // session 0 (call 2, false), session 1 (call 3, false), session 2 (call 4, TRUE — abort).
+                return Task.FromResult(calls >= 4);
+            });
+
+        var result = await harness.Sut.RunAsync(CancellationToken.None);
+
+        Assert.True(result.AbortedByKillSwitch);
+        Assert.Equal(2, result.SessionsEnqueued); // only sessions 0 and 1 made it through
+        // Confirm only the first two enqueues fired.
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantA, "s0", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Once);
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantA, "s1", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Once);
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantA, "s2", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Never);
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantA, "s4", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_aborts_at_tenant_boundary_when_kill_switch_flips_between_tenants()
+    {
+        // Kill-switch flips on between tenant A and tenant B → tenant B is never started.
+        var harness = new Harness();
+        harness.WithTenant(TenantA, retentionDays: 30, v2: true, sessions: new[] { Old("a1", 60) });
+        harness.WithTenant(TenantB, retentionDays: 30, v2: true, sessions: new[] { Old("b1", 60) });
+
+        var calls = 0;
+        harness.AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync())
+            .Returns(() =>
+            {
+                calls++;
+                // Tenant A: entry probe (call 1, false), session probe (call 2, false), enqueue runs.
+                // Tenant B: entry probe (call 3, TRUE — abort).
+                return Task.FromResult(calls >= 3);
+            });
+
+        var result = await harness.Sut.RunAsync(CancellationToken.None);
+
+        Assert.True(result.AbortedByKillSwitch);
+        Assert.Equal(1, result.TenantsProcessed);
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantA, "a1", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Once);
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantB, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
     [Fact]
     public async Task RunAsync_counts_AlreadyInFlight_outcome_as_skip()
     {
@@ -180,6 +289,7 @@ public class SessionRetentionFanoutServiceTests
         public Mock<ISessionRepository> SessionRepo { get; }
         public Mock<TenantConfigurationService> TenantConfig { get; }
         public Mock<ISessionDeletionEnqueuer> Enqueuer { get; }
+        public Mock<AdminConfigurationService> AdminConfig { get; }
         public SessionRetentionFanoutService Sut { get; }
 
         private readonly List<string> _tenantIds = new();
@@ -192,6 +302,17 @@ public class SessionRetentionFanoutServiceTests
             TenantConfig = new Mock<TenantConfigurationService>(
                 Mock.Of<IConfigRepository>(), NullLogger<TenantConfigurationService>.Instance, memCache);
             Enqueuer = new Mock<ISessionDeletionEnqueuer>();
+
+            // PR6 follow-up F1: legacy path now pre-reads the Sessions row via ISessionRepository
+            // to check DeletionState. Default: row exists with DeletionState=None so legacy proceeds.
+            SessionRepo.Setup(r => r.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns<string, string>((tenant, sid) => Task.FromResult<SessionSummary?>(
+                    new SessionSummary { TenantId = tenant, SessionId = sid, DeletionState = SessionDeletionState.None }));
+
+            // PR6 follow-up F2: per-session kill-switch check inside the fanout loop.
+            AdminConfig = new Mock<AdminConfigurationService>(
+                Mock.Of<IConfigRepository>(), NullLogger<AdminConfigurationService>.Instance, memCache);
+            AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync()).ReturnsAsync(false);
 
             // Default: every enqueue succeeds.
             Enqueuer.Setup(e => e.EnqueueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -213,6 +334,7 @@ public class SessionRetentionFanoutServiceTests
             // (50ms × 100 = 5s otherwise).
             Sut = new SessionRetentionFanoutService(
                 MaintenanceRepo.Object, SessionRepo.Object, TenantConfig.Object, Enqueuer.Object,
+                AdminConfig.Object,
                 NullLogger<SessionRetentionFanoutService>.Instance,
                 throttle: (_, _) => Task.CompletedTask);
         }

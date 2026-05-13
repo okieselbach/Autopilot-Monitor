@@ -40,6 +40,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
         private readonly ISessionRepository _sessionRepo;
         private readonly TenantConfigurationService _tenantConfig;
         private readonly ISessionDeletionEnqueuer _enqueuer;
+        private readonly AdminConfigurationService _adminConfig;
         private readonly ILogger<SessionRetentionFanoutService> _logger;
         private readonly Func<TimeSpan, CancellationToken, Task> _throttle;
 
@@ -48,8 +49,9 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             ISessionRepository sessionRepo,
             TenantConfigurationService tenantConfig,
             ISessionDeletionEnqueuer enqueuer,
+            AdminConfigurationService adminConfig,
             ILogger<SessionRetentionFanoutService> logger)
-            : this(maintenanceRepo, sessionRepo, tenantConfig, enqueuer, logger, throttle: Task.Delay)
+            : this(maintenanceRepo, sessionRepo, tenantConfig, enqueuer, adminConfig, logger, throttle: Task.Delay)
         {
         }
 
@@ -62,6 +64,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             ISessionRepository sessionRepo,
             TenantConfigurationService tenantConfig,
             ISessionDeletionEnqueuer enqueuer,
+            AdminConfigurationService adminConfig,
             ILogger<SessionRetentionFanoutService> logger,
             Func<TimeSpan, CancellationToken, Task> throttle)
         {
@@ -69,6 +72,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             _sessionRepo = sessionRepo;
             _tenantConfig = tenantConfig;
             _enqueuer = enqueuer;
+            _adminConfig = adminConfig;
             _logger = logger;
             _throttle = throttle;
         }
@@ -84,6 +88,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             public int SessionsLegacyDeleted { get; set; } // flag-OFF path: direct-delete succeeded
             public int SessionsSkipped { get; set; }       // already locked / poisoned / kill-switch / etc.
             public int RateLimitedTenants { get; set; }    // tenants that hit MaxEnqueuesPerTenantPerRun
+            public bool AbortedByKillSwitch { get; set; }  // PR6 follow-up F2: kill-switch flipped mid-run
         }
 
         /// <summary>
@@ -100,6 +105,18 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             foreach (var tenantId in tenantIds)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // PR6 follow-up F2: per-tenant kill-switch check so a flip-ON mid-run halts the
+                // remaining tenants. The maintenance function gates entry; this gates iteration.
+                if (await _adminConfig.IsSessionDeletionKillSwitchActiveAsync().ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "SessionRetentionFanout: kill-switch flipped on mid-run — halting before tenant {TenantId}",
+                        tenantId);
+                    result.AbortedByKillSwitch = true;
+                    break;
+                }
+
                 try
                 {
                     await RunForTenantAsync(tenantId, result, cancellationToken).ConfigureAwait(false);
@@ -158,6 +175,18 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                     break;
                 }
 
+                // PR6 follow-up F2: per-session kill-switch check so an emergency flip-ON halts
+                // immediately instead of after the rest of this tenant's backlog. Uncached read
+                // (PR5 F1) — uniform behaviour across scaled-out instances within seconds.
+                if (await _adminConfig.IsSessionDeletionKillSwitchActiveAsync().ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "SessionRetentionFanout: kill-switch flipped on mid-tenant — halting at session {SessionId} of {TenantId}",
+                        session.SessionId, tenantId);
+                    result.AbortedByKillSwitch = true;
+                    break;
+                }
+
                 if (useV2Cascade)
                 {
                     var outcome = await EnqueueV2Async(session, cancellationToken).ConfigureAwait(false);
@@ -198,6 +227,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                     { "Enqueued", enqueued.ToString() },
                     { "LegacyDeleted", legacyDeleted.ToString() },
                     { "Skipped", skipped.ToString() },
+                    { "AbortedByKillSwitch", result.AbortedByKillSwitch.ToString() },
                 }).ConfigureAwait(false);
 
             _logger.LogInformation(
@@ -257,11 +287,19 @@ namespace AutopilotMonitor.Functions.Services.Deletion
 
         /// <summary>
         /// Legacy direct-delete path — invoked when the tenant has not yet been migrated to the V2
-        /// cascade (per-tenant flag OFF). Reuses the exact sequence
-        /// <c>MaintenanceService.CleanupOldDataAsync</c> ran before PR6 extracted it: delete
-        /// events / rule-results / app-summaries, then delete the Sessions row itself. PR5
-        /// finding 2 added a CAS guard into <c>DeleteSessionAsync</c>, so a V2 cascade locked by
-        /// a parallel admin click during this run will refuse to be tombstoned here.
+        /// cascade (per-tenant flag OFF). Sequence:
+        /// <list type="number">
+        ///   <item>Pre-read the Sessions row (PR6 follow-up F1). If <c>DeletionState != None</c>
+        ///       the V2 cascade owns the session — return false without touching ANY side table.
+        ///       Without this gate, we would delete Events / RuleResults / AppInstallSummaries
+        ///       and only discover the lock at the tombstone CAS, leaving the V2 cascade with a
+        ///       half-eaten session.</item>
+        ///   <item>Delete events / rule-results / app-summaries.</item>
+        ///   <item>Delete the Sessions row via the CAS-guarded
+        ///       <see cref="ISessionRepository.DeleteSessionAsync"/> (PR5 finding 2) — second-line
+        ///       protection against the T1-T3 race where another instance CAS-claimed the row
+        ///       after our pre-read but before our side-table mutations.</item>
+        /// </list>
         /// </summary>
         private async Task<bool> LegacyDeleteAsync(SessionSummary session, CancellationToken cancellationToken)
         {
@@ -269,18 +307,38 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             var tenantId = session.TenantId;
             var sessionId = session.SessionId;
 
+            // F1: gate side-table mutations on DeletionState. The CAS guard inside DeleteSessionAsync
+            // is the storage-atomic backstop (PR5 finding 2), but it fires AFTER the side-table
+            // deletes. By the time it returns false we've already orphaned events from the V2
+            // cascade's planned manifest. Reading the Sessions row up-front is cheap (one Get) and
+            // skips ~3 side-table deletes when the lock is held.
+            var refreshed = await _sessionRepo.GetSessionAsync(tenantId, sessionId).ConfigureAwait(false);
+            if (refreshed == null)
+            {
+                // Row already gone — nothing to clean up. Treat as skip (no events were ours to delete either).
+                return false;
+            }
+            if (SessionDeletionState.IsLocked(refreshed.DeletionState))
+            {
+                _logger.LogInformation(
+                    "Retention fanout (legacy): session {SessionId} is locked by a V2 cascade (state={State}, manifestId={ManifestId}) — skipping ALL deletes, V2 worker owns the cascade",
+                    sessionId, refreshed.DeletionState, refreshed.PendingDeletionManifestId);
+                return false;
+            }
+
             _ = await _maintenanceRepo.DeleteSessionEventsAsync(tenantId, sessionId).ConfigureAwait(false);
             _ = await _maintenanceRepo.DeleteSessionRuleResultsAsync(tenantId, sessionId).ConfigureAwait(false);
             _ = await _maintenanceRepo.DeleteSessionAppInstallSummariesAsync(tenantId, sessionId).ConfigureAwait(false);
 
-            // CAS guard inside DeleteSessionAsync (PR5 finding 2) refuses if DeletionState is locked.
-            // A `false` here means either 404 (already gone) is treated as success internally, OR
-            // a concurrent V2 cascade claimed the row. The latter is a skip, not a failure.
+            // CAS guard inside DeleteSessionAsync (PR5 finding 2) refuses if DeletionState is locked
+            // — backstop for the T1-T3 race after our pre-read above. A `false` here means either
+            // 404 (already gone) is treated as success internally, OR a concurrent V2 cascade
+            // claimed the row in the brief window between our pre-read and the tombstone.
             var deleted = await _sessionRepo.DeleteSessionAsync(tenantId, sessionId).ConfigureAwait(false);
             if (!deleted)
             {
                 _logger.LogWarning(
-                    "Retention fanout (legacy): session {SessionId} could not be tombstoned — likely claimed by a concurrent V2 cascade. Will retry next run",
+                    "Retention fanout (legacy): session {SessionId} could not be tombstoned — likely claimed by a concurrent V2 cascade. Side tables already deleted; cascade is idempotent so V2 will absorb the difference. Will retry next run",
                     sessionId);
             }
             return deleted;
