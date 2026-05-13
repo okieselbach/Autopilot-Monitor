@@ -179,12 +179,13 @@ namespace AutopilotMonitor.DecisionCore.Tests
         // -------------------------------------------------------- Fix 3 — HelloSafety cancel
 
         [Fact]
-        public void HelloDisabled_FastPath_cancels_armed_HelloSafety_deadline()
+        public void HelloDisabled_FastPath_cancels_armed_HelloSafety_deadline_in_state_and_effects()
         {
             // When EspExiting arms HelloSafety (300s) and Desktop arrives before the deadline,
-            // the fast-path must cancel the deadline so it cannot fire post-Completion. The
-            // reducer's deadline collection on the resulting state must no longer contain
-            // HelloSafety, only FinalizingGrace.
+            // the fast-path must cancel the deadline both in reducer state AND as a
+            // scheduler-visible CancelDeadline effect. Without the effect, the external scheduler
+            // (DefaultComponentFactory) would still fire the timer post-Completion and the
+            // synthesised HelloSafety DeadlineFired signal would dead-end the reducer.
             var engine = new DecisionEngine();
             var state = ProgressToAccountSetupWithHelloDisabled(engine);
 
@@ -199,6 +200,37 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Equal("Skipped", step.NewState.HelloOutcome!.Value);
             Assert.DoesNotContain(step.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
             Assert.Contains(step.NewState.Deadlines, d => d.Name == DeadlineNames.FinalizingGrace);
+
+            // Effect side: CancelDeadline(HelloSafety) must be emitted so the external scheduler
+            // drops its timer. ScheduleDeadline(FinalizingGrace) + phase_transition stay as usual.
+            Assert.Contains(step.Effects,
+                e => e.Kind == DecisionEffectKind.CancelDeadline
+                     && e.CancelDeadlineName == DeadlineNames.HelloSafety);
+            Assert.Contains(step.Effects,
+                e => e.Kind == DecisionEffectKind.ScheduleDeadline
+                     && e.Deadline?.Name == DeadlineNames.FinalizingGrace);
+            Assert.Contains(step.Effects,
+                e => e.Kind == DecisionEffectKind.EmitEventTimelineEntry
+                     && e.Parameters != null
+                     && e.Parameters.TryGetValue("eventType", out var et) && et == "phase_transition");
+        }
+
+        [Fact]
+        public void HelloDisabled_FastPath_without_armed_HelloSafety_does_not_emit_redundant_CancelDeadline_effect()
+        {
+            // When HelloSafety is NOT armed (no EspExiting yet, fast-path is the sole completion
+            // path), the fast-path must NOT emit a no-op CancelDeadline effect — otherwise the
+            // audit trail grows pointless entries and the external scheduler logs cancellations
+            // for timers it never armed.
+            var engine = new DecisionEngine();
+            var state = ProgressToAccountSetupWithHelloDisabled(engine);
+            Assert.DoesNotContain(state.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
+
+            var step = engine.Reduce(state, MakeSignal(10, DecisionSignalKind.DesktopArrived, T0.AddMinutes(5), null));
+
+            Assert.Equal(SessionStage.Finalizing, step.NewState.Stage);
+            Assert.Equal("Skipped", step.NewState.HelloOutcome!.Value);
+            Assert.DoesNotContain(step.Effects, e => e.Kind == DecisionEffectKind.CancelDeadline);
         }
 
         // ====================================================================== test helpers

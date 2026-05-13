@@ -276,17 +276,37 @@ namespace AutopilotMonitor.DecisionCore.Engine
             {
                 builder.HelloResolvedUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
                 builder.HelloOutcome = new SignalFact<string>("Skipped", signal.SessionSignalOrdinal);
-                // Cancel HelloSafety if it was armed by an earlier EspExiting — we're completing
-                // now via the fast-path, the deadline would otherwise fire post-Completion and
-                // dead-end in the reducer.
-                builder.CancelDeadline(DeadlineNames.HelloSafety);
+
+                // Cancel HelloSafety if it was armed by an earlier EspExiting — both in the
+                // reducer state AND as a scheduler-visible CancelDeadline effect, so the
+                // external timer (DefaultComponentFactory's scheduler) doesn't fire the
+                // deadline post-Completion. The effect is only emitted when the deadline was
+                // actually present; otherwise it would be a no-op for the scheduler but adds
+                // noise to the audit trail.
+                List<DecisionEffect>? extraEffects = null;
+                var helloSafetyWasArmed = false;
+                foreach (var d in state.Deadlines)
+                {
+                    if (d.Name == DeadlineNames.HelloSafety) { helloSafetyWasArmed = true; break; }
+                }
+                if (helloSafetyWasArmed)
+                {
+                    builder.CancelDeadline(DeadlineNames.HelloSafety);
+                    extraEffects = new List<DecisionEffect>
+                    {
+                        new DecisionEffect(
+                            DecisionEffectKind.CancelDeadline,
+                            cancelDeadlineName: DeadlineNames.HelloSafety),
+                    };
+                }
 
                 return TransitionToFinalizing(
                     state: state,
                     signal: signal,
                     preparedBuilder: builder,
                     nextStepIndex: nextStep,
-                    trigger: nameof(DecisionSignalKind.DesktopArrived) + ":HelloDisabledFastPath");
+                    trigger: nameof(DecisionSignalKind.DesktopArrived) + ":HelloDisabledFastPath",
+                    extraLeadingEffects: extraEffects);
             }
 
             // Plan §5 Fix 6: mirror of HandleHelloResolvedV1. When both prerequisites are in,
@@ -418,7 +438,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
             DecisionSignal signal,
             DecisionStateBuilder preparedBuilder,
             int nextStepIndex,
-            string trigger)
+            string trigger,
+            IReadOnlyList<DecisionEffect>? extraLeadingEffects = null)
         {
             // Replay-safety: floor the 5-s grace window at AgentBootUtc so a replayed Hello/
             // Desktop signal pair doesn't drive an immediate enrollment_complete the moment
@@ -446,13 +467,19 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStepIndex,
                 trigger: trigger);
 
-            var effects = new[]
+            // extraLeadingEffects (e.g. a Hello-safety CancelDeadline from the Hello-disabled
+            // fast-path) lead the schedule + phase-transition emit so the scheduler observes the
+            // cancel before any subsequent deadline arm. Most callers pass null.
+            var effects = new List<DecisionEffect>(
+                capacity: (extraLeadingEffects?.Count ?? 0) + 2);
+            if (extraLeadingEffects != null && extraLeadingEffects.Count > 0)
             {
-                new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: deadline),
-                BuildPhaseTransitionEffect(EnrollmentPhase.FinalizingSetup),
-            };
+                effects.AddRange(extraLeadingEffects);
+            }
+            effects.Add(new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: deadline));
+            effects.Add(BuildPhaseTransitionEffect(EnrollmentPhase.FinalizingSetup));
 
-            return new DecisionStep(newState, transition, effects);
+            return new DecisionStep(newState, transition, effects.ToArray());
         }
 
         /// <summary>
