@@ -7,6 +7,7 @@ import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch"
 import { useAdminConfig } from "../../AdminConfigContext";
 import { AdminNotifications } from "../../AdminNotifications";
 import { DeletionPreviewModal } from "./components/DeletionPreviewModal";
+import { RestoreBrowserTab } from "./components/RestoreBrowserTab";
 import { RestoreConfirmDialog } from "./components/RestoreConfirmDialog";
 
 type CascadeState = "Preparing" | "Queued" | "Running" | "Poisoned";
@@ -28,7 +29,7 @@ interface SessionDeletionListResponse {
   sessions: SessionDeletionRow[];
 }
 
-type Tab = "in-flight" | "poisoned" | "stranded" | "activity";
+type Tab = "in-flight" | "poisoned" | "stranded" | "restore-browser" | "activity";
 
 const STRANDED_THRESHOLD_MINUTES = 30;
 
@@ -64,6 +65,9 @@ export default function SessionCleanupPage() {
             <TabButton active={activeTab === "stranded"} onClick={() => setActiveTab("stranded")}>
               Stranded&nbsp;Queued
             </TabButton>
+            <TabButton active={activeTab === "restore-browser"} onClick={() => setActiveTab("restore-browser")}>
+              Restore&nbsp;Browser
+            </TabButton>
             <TabButton active={activeTab === "activity"} onClick={() => setActiveTab("activity")}>
               Activity
             </TabButton>
@@ -86,6 +90,13 @@ export default function SessionCleanupPage() {
         )}
         {activeTab === "stranded" && (
           <StrandedTab getAccessToken={getAccessToken} setError={setError} />
+        )}
+        {activeTab === "restore-browser" && (
+          <RestoreBrowserTab
+            getAccessToken={getAccessToken}
+            setError={setError}
+            setSuccessMessage={setSuccessMessage}
+          />
         )}
         {activeTab === "activity" && <ActivityTab />}
       </main>
@@ -285,7 +296,10 @@ function PoisonedTab({
           manifestId={restoring.manifestId}
           onClose={() => setRestoring(null)}
           onRestored={() => {
-            setRestoring(null);
+            // Codex P3: do NOT close the dialog here — the operator wants to see the real-run
+            // result counts beside the dry-run preview before dismissing. The user closes the
+            // dialog explicitly via Close / Start over. Background refresh of the Poisoned list
+            // happens immediately so the row drops out when they look behind the modal.
             setSuccessMessage(`Session ${restoring.sessionId} restore submitted.`);
             setRefreshKey((k) => k + 1);
           }}

@@ -337,6 +337,11 @@ export const api = {
       `${API_BASE_URL}/api/admin/sessions/${encodeURIComponent(sessionId)}/delete/preview${qs({ tenantId, mode })}`,
     restore: (sessionId: string) =>
       `${API_BASE_URL}/api/admin/sessions/${encodeURIComponent(sessionId)}/restore`,
+    // File-browser endpoint: enumerates every persisted manifest blob for one tenant, grouped
+    // by sessionId, sorted by recency. Powers the Restore Browser tab so an operator can pick
+    // a (session, manifest) without knowing the manifestId in advance.
+    tenantManifests: (tenantId: string, sessionFilter?: string) =>
+      `${API_BASE_URL}/api/admin/tenants/${encodeURIComponent(tenantId)}/deletion-manifests${qs({ sessionId: sessionFilter })}`,
   },
 
   // ── Hardware Rejection Insights (tenant-scoped, from distress data) ──────

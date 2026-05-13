@@ -528,6 +528,54 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Enumerates every <c>.snapshot.json.gz</c> blob under a single tenant's prefix. Used by
+        /// the Restore Browser admin page so a Global Admin can pick a session + manifest from a
+        /// file-browser-style tree without knowing the blob path in advance. Tenant-scoped because
+        /// listing across the whole container would mix tenants in the UI and pay needless I/O on
+        /// the (otherwise paginated) container scan.
+        /// <para>
+        /// Yields entries with the parsed <c>(sessionId, manifestId)</c> tuple, the byte size of
+        /// the snapshot, and the LastModified timestamp so the UI can rank by recency. Malformed
+        /// blob names are logged + skipped (same contract as the maintenance enumerator).
+        /// </para>
+        /// </summary>
+        public virtual async IAsyncEnumerable<TenantDeletionManifestEntry> EnumerateDeletionManifestsByTenantAsync(
+            string tenantId,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("tenantId is required", nameof(tenantId));
+
+            var containerClient = _blobServiceClient.GetBlobContainerClient(DeletionManifestsContainer);
+            if (!await containerClient.ExistsAsync(cancellationToken))
+                yield break;
+
+            // Prefix matches the BuildSnapshotBlobName convention. The trailing slash bounds the
+            // match so tenant "abc" doesn't also pull "abcde/...".
+            var prefix = tenantId + "/";
+            await foreach (var item in containerClient.GetBlobsAsync(
+                BlobTraits.None, BlobStates.None, prefix: prefix, cancellationToken: cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Drive off snapshot blobs only — progress blobs are mutable companions to snapshots
+                // and the UI fetches them lazily on selection via DownloadDeletionProgressAsync.
+                if (!item.Name.EndsWith(".snapshot.json.gz", StringComparison.Ordinal)) continue;
+                if (!TryParseManifestBlobName(item.Name, out var parsedTenant, out var sessionId, out var manifestId))
+                {
+                    _logger.LogWarning("EnumerateDeletionManifestsByTenantAsync: skipping malformed blob name {Name}", item.Name);
+                    continue;
+                }
+                // Defensive — the prefix already filters by tenant, but a corrupted path with the
+                // tenant prefix yet a different first segment shouldn't leak into the response.
+                if (!string.Equals(parsedTenant, tenantId, StringComparison.Ordinal)) continue;
+
+                var lastModified = item.Properties.LastModified?.UtcDateTime ?? DateTime.UtcNow;
+                var sizeBytes = item.Properties.ContentLength ?? 0L;
+                yield return new TenantDeletionManifestEntry(sessionId, manifestId, sizeBytes, lastModified);
+            }
+        }
+
+        /// <summary>
         /// Deletes both the snapshot blob and the progress blob for a (tenant, session, manifest)
         /// triple. 404 on either is treated as success — the maintenance sweep is idempotent and a
         /// re-run after a partial completion must not throw. Fail-loud on every other storage error
@@ -588,6 +636,28 @@ namespace AutopilotMonitor.Functions.Services
             TenantId = tenantId;
             SessionId = sessionId;
             ManifestId = manifestId;
+            LastModifiedUtc = lastModifiedUtc;
+        }
+    }
+
+    /// <summary>
+    /// Yielded by <see cref="BlobStorageService.EnumerateDeletionManifestsByTenantAsync"/>. The
+    /// tenantId is implied by the caller's filter, so it isn't repeated on each entry. Size +
+    /// timestamp let the Restore Browser sort and group manifests without needing a follow-up
+    /// HEAD on each blob.
+    /// </summary>
+    public sealed class TenantDeletionManifestEntry
+    {
+        public string SessionId { get; }
+        public string ManifestId { get; }
+        public long SizeBytes { get; }
+        public DateTime LastModifiedUtc { get; }
+
+        public TenantDeletionManifestEntry(string sessionId, string manifestId, long sizeBytes, DateTime lastModifiedUtc)
+        {
+            SessionId = sessionId;
+            ManifestId = manifestId;
+            SizeBytes = sizeBytes;
             LastModifiedUtc = lastModifiedUtc;
         }
     }

@@ -516,10 +516,22 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                         </svg>
                       </button>
-                      {isExpanded && (
+                      {isExpanded && (() => {
+                        // Pick the longest sub.href that matches the current pathname so a
+                        // shorter sibling whose href is a strict prefix of the active route
+                        // doesn't also light up. Example: with /admin/ops (Maintenance) and
+                        // /admin/ops/session-cleanup, navigating to the latter previously
+                        // marked BOTH active. Computed once per render and applied per sub.
+                        const winningSubHref = expandItem.items
+                          .filter((s) => pathname === s.href || pathname.startsWith(s.href + "/"))
+                          .reduce<string | null>(
+                            (longest, s) => longest == null || s.href.length > longest.length ? s.href : longest,
+                            null,
+                          );
+                        return (
                         <ul className="mt-0.5 space-y-px">
                           {expandItem.items.map((sub) => {
-                            const subActive = pathname === sub.href || pathname.startsWith(sub.href + "/");
+                            const subActive = sub.href === winningSubHref;
                             return (
                               <li key={sub.id}>
                                 <Link
@@ -539,7 +551,8 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
                             );
                           })}
                         </ul>
-                      )}
+                        );
+                      })()}
                     </li>
                   );
                 })}
