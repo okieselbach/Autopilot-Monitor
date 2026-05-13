@@ -2000,6 +2000,14 @@ namespace AutopilotMonitor.Functions.Services
         /// <summary>
         /// Stores the IME agent version on an existing session (Merge-mode, single field update).
         /// Non-fatal: failures are logged as warnings and do not block ingest.
+        /// <para>
+        /// Uses <see cref="TableClient.UpdateEntityAsync(ITableEntity, ETag, TableUpdateMode, System.Threading.CancellationToken)"/>
+        /// with <see cref="ETag.All"/>, not <c>UpsertEntityAsync</c>: a tombstoned Sessions row
+        /// must stay tombstoned. The previous Upsert would silently recreate a partial Sessions
+        /// row (PK/RK + ImeAgentVersion only) after the cascade-delete worker had removed it,
+        /// breaking the manifest-snapshot invariant. 404 here means "row already gone" and is
+        /// the correct no-op outcome.
+        /// </para>
         /// </summary>
         public async Task UpdateSessionImeAgentVersionAsync(string tenantId, string sessionId, string version)
         {
@@ -2010,7 +2018,13 @@ namespace AutopilotMonitor.Functions.Services
                 {
                     ["ImeAgentVersion"] = version
                 };
-                await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Merge);
+                await tableClient.UpdateEntityAsync(entity, ETag.All, TableUpdateMode.Merge);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogDebug(
+                    "UpdateSessionImeAgentVersion no-op: Sessions row {Tenant}/{Session} is absent (tombstoned or never registered)",
+                    tenantId, sessionId);
             }
             catch (Exception ex)
             {

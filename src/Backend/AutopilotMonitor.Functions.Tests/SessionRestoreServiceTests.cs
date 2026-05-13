@@ -225,13 +225,14 @@ public class SessionRestoreServiceTests
     }
 
     [Fact]
-    public async Task Restore_partial_skips_inventory_re_increment_when_decrement_never_ran()
+    public async Task Restore_partial_skips_inventory_re_increment_when_no_decrements_applied()
     {
         var harness = new Harness();
         harness.SetPoisonedCascade();
-        // CompletedSteps does NOT include the AGGREGATE step's order (16).
+        // No per-key decrements were ever persisted. Restore must not blindly re-increment.
+        harness.Progress.AggregateDecrementsApplied = null;
         harness.Progress.CompletedSteps.Clear();
-        harness.Progress.CompletedSteps.Add(1);  // poisoned right after step 1
+        harness.Progress.CompletedSteps.Add(1);  // poisoned right after step 1, before AGGREGATE entry
 
         await harness.Sut.RestoreAsync(TenantId, SessionId, ManifestId, dryRun: false, actor: "ga@example.com");
 
@@ -241,18 +242,55 @@ public class SessionRestoreServiceTests
     }
 
     [Fact]
-    public async Task Restore_partial_re_increments_inventory_when_decrement_already_ran()
+    public async Task Restore_partial_re_increments_inventory_for_keys_in_AggregateDecrementsApplied()
     {
         var harness = new Harness();
         harness.SetPoisonedCascade();
-        // CompletedSteps includes the AGGREGATE step's order (16).
-        harness.Progress.CompletedSteps.UnionWith(new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 });
+        // The handler persists each key into AggregateDecrementsApplied BEFORE the underlying
+        // decrement runs. Restore must re-increment exactly those keys — even when the AGGREGATE
+        // step's Order is NOT yet in CompletedSteps (poison fell between two keys).
+        harness.Progress.CompletedSteps.UnionWith(new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
+        harness.Progress.AggregateDecrementsApplied = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Microsoft:Office:16.0",
+            "Adobe:Acrobat:23.1",
+            "Mozilla:Firefox:120.0",
+        };
 
         await harness.Sut.RestoreAsync(TenantId, SessionId, ManifestId, dryRun: false, actor: "ga@example.com");
 
         harness.Storage.Verify(s => s.RestoreSoftwareInventoryEntryByKeyAsync(
             TenantId, It.IsAny<DeletionDecrementKey>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3));
+    }
+
+    [Fact]
+    public async Task Restore_partial_re_increments_only_keys_that_were_actually_decremented()
+    {
+        // The Codex finding scenario: the cascade poisoned mid-AGGREGATE-loop. 2 of 3 keys had
+        // been persisted into AggregateDecrementsApplied (and their counters decremented) before
+        // the crash; the AGGREGATE step never reached CompletedSteps. Restore must re-increment
+        // only the 2 keys that were touched — re-incrementing the 3rd would create +1 drift.
+        var harness = new Harness();
+        harness.SetPoisonedCascade();
+        harness.Progress.AggregateDecrementsApplied = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Microsoft:Office:16.0",
+            "Adobe:Acrobat:23.1",
+            // "Mozilla:Firefox:120.0" was never reached
+        };
+
+        await harness.Sut.RestoreAsync(TenantId, SessionId, ManifestId, dryRun: false, actor: "ga@example.com");
+
+        harness.Storage.Verify(s => s.RestoreSoftwareInventoryEntryByKeyAsync(
+            TenantId, It.Is<DeletionDecrementKey>(k => k.Vendor == "Microsoft" && k.Name == "Office"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        harness.Storage.Verify(s => s.RestoreSoftwareInventoryEntryByKeyAsync(
+            TenantId, It.Is<DeletionDecrementKey>(k => k.Vendor == "Adobe" && k.Name == "Acrobat"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        harness.Storage.Verify(s => s.RestoreSoftwareInventoryEntryByKeyAsync(
+            TenantId, It.Is<DeletionDecrementKey>(k => k.Vendor == "Mozilla" && k.Name == "Firefox"),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]

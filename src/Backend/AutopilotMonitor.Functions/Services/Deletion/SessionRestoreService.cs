@@ -346,11 +346,13 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             DeletionManifest manifest, DeletionProgress progress, string progressEtag,
             SessionRestoreResult result, CancellationToken ct)
         {
-            // Determine whether the AGGREGATE decrement step had already run before the cascade
-            // poisoned. If yes → re-increment to undo it. If no → leave counters alone (avoid
-            // double +1).
-            var aggregate = manifest.Steps.FirstOrDefault(s => s.Class == DeletionStepClass.Aggregate);
-            var decrementAlreadyRan = aggregate != null && progress.CompletedSteps.Contains(aggregate.Order);
+            // Re-increment policy in partial-restore: the AGGREGATE step's CompletedSteps marker
+            // is set AFTER the per-key loop in SessionDeletionHandler. If the cascade poisoned
+            // mid-loop, some keys are in AggregateDecrementsApplied (and were actually
+            // decremented) but the step is NOT in CompletedSteps — using CompletedSteps as the
+            // gate would skip the entire re-increment block and leave -N permanent drift.
+            // Authoritative truth is AggregateDecrementsApplied (handler persists it BEFORE the
+            // decrement call) — re-increment exactly those keys.
 
             // Pass 1: every non-FINAL step in REVERSE cascade order.
             foreach (var step in manifest.Steps
@@ -362,10 +364,31 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                 switch (step.Class)
                 {
                     case DeletionStepClass.Aggregate:
-                        if (!decrementAlreadyRan) break;
+                    {
+                        var appliedKeys = progress.AggregateDecrementsApplied;
+                        if (step.Decrements == null || step.Decrements.Count == 0
+                            || appliedKeys == null || appliedKeys.Count == 0)
+                        {
+                            break;
+                        }
+
+                        var decrementsToReverse = step.Decrements
+                            .Where(k => appliedKeys.Contains(BuildAggregateCompositeKey(k)))
+                            .ToList();
+                        if (decrementsToReverse.Count == 0) break;
+
+                        var partialStep = new DeletionStep
+                        {
+                            Order = step.Order,
+                            Table = step.Table,
+                            Step = step.Step,
+                            Class = step.Class,
+                            Decrements = decrementsToReverse,
+                        };
                         (progress, progressEtag) = await RunInventoryReIncrementWithIdempotencyAsync(
-                            tenantId, sessionId, manifestId, step, progress, progressEtag, result, ct).ConfigureAwait(false);
+                            tenantId, sessionId, manifestId, partialStep, progress, progressEtag, result, ct).ConfigureAwait(false);
                         break;
+                    }
 
                     case DeletionStepClass.PkBySession:
                     case DeletionStepClass.PkRkExact:

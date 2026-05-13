@@ -139,50 +139,49 @@ public class SessionRetentionFanoutServiceTests
     }
 
     // ────────────────────────────────────────────────────────────────────────── PR6 follow-up F1 ─
+    // Codex-followup: the ordering changed from "side-tables first, Sessions-CAS last" to
+    // "Sessions-CAS first, side-tables after". DeleteSessionAsync's internal ETag-CAS is now the
+    // single arbiter against in-flight V2 cascades — if it returns false (locked / 412 / 404),
+    // side-tables stay untouched. This closes the TOCTOU window the pre-read couldn't.
 
     [Fact]
-    public async Task RunAsync_legacy_path_skips_locked_session_WITHOUT_touching_side_tables()
+    public async Task RunAsync_legacy_path_skips_side_tables_when_DeleteSessionAsync_refuses_locked_row()
     {
-        // PR6 follow-up F1: pre-read DeletionState before any side-table mutation. Without this
-        // gate the legacy path would delete Events / RuleResults / AppSummaries and only discover
-        // the V2 cascade lock at the tombstone CAS — leaving the V2 cascade's manifest claiming
-        // rows that were silently removed in the meantime.
+        // DeleteSessionAsync detects the V2 cascade lock internally and returns false. The fanout
+        // must record SessionsSkipped + leave side-tables intact so the V2 worker owns cleanup.
         var harness = new Harness();
         harness.WithTenant(TenantA, retentionDays: 30, v2: false, sessions: new[] { Old("s1", 60) });
-        // Override the default fresh-read: this session is locked by a V2 cascade.
-        harness.SessionRepo.Setup(r => r.GetSessionAsync(TenantA, "s1"))
-            .ReturnsAsync(new SessionSummary
-            {
-                TenantId = TenantA,
-                SessionId = "s1",
-                DeletionState = SessionDeletionState.Queued,
-                PendingDeletionManifestId = "EXISTING-MANIFEST",
-            });
+        harness.SessionRepo.Setup(r => r.DeleteSessionAsync(TenantA, "s1")).ReturnsAsync(false);
 
         var result = await harness.Sut.RunAsync(CancellationToken.None);
 
         Assert.Equal(1, result.SessionsSkipped);
         Assert.Equal(0, result.SessionsLegacyDeleted);
-        // Critical assertion: NONE of the side-table delete helpers were invoked.
+        harness.SessionRepo.Verify(r => r.DeleteSessionAsync(TenantA, "s1"), Times.Once);
+        // Side-tables MUST stay intact when DeleteSessionAsync refused.
         harness.MaintenanceRepo.Verify(m => m.DeleteSessionEventsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         harness.MaintenanceRepo.Verify(m => m.DeleteSessionRuleResultsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         harness.MaintenanceRepo.Verify(m => m.DeleteSessionAppInstallSummariesAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-        harness.SessionRepo.Verify(r => r.DeleteSessionAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
-    public async Task RunAsync_legacy_path_skips_when_session_already_removed_during_preread()
+    public async Task RunAsync_legacy_path_runs_side_tables_only_after_DeleteSessionAsync_succeeds()
     {
-        // Edge case: row disappeared between GetSessionsOlderThan and the pre-read. Treat as skip
-        // (no side-table work needed); no error.
+        // Sessions-first ordering: side-table helpers fire ONLY after DeleteSessionAsync returns
+        // true. No producer can claim a missing Sessions row, so side-table cleanup is race-free.
         var harness = new Harness();
         harness.WithTenant(TenantA, retentionDays: 30, v2: false, sessions: new[] { Old("s1", 60) });
-        harness.SessionRepo.Setup(r => r.GetSessionAsync(TenantA, "s1")).ReturnsAsync((SessionSummary?)null);
+        harness.SessionRepo.Setup(r => r.DeleteSessionAsync(TenantA, "s1")).ReturnsAsync(true);
+        harness.MaintenanceRepo.Setup(m => m.DeleteSessionEventsAsync(TenantA, "s1")).ReturnsAsync(7);
 
         var result = await harness.Sut.RunAsync(CancellationToken.None);
 
-        Assert.Equal(1, result.SessionsSkipped);
-        harness.MaintenanceRepo.Verify(m => m.DeleteSessionEventsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        Assert.Equal(1, result.SessionsLegacyDeleted);
+        Assert.Equal(0, result.SessionsSkipped);
+        harness.SessionRepo.Verify(r => r.DeleteSessionAsync(TenantA, "s1"), Times.Once);
+        harness.MaintenanceRepo.Verify(m => m.DeleteSessionEventsAsync(TenantA, "s1"), Times.Once);
+        harness.MaintenanceRepo.Verify(m => m.DeleteSessionRuleResultsAsync(TenantA, "s1"), Times.Once);
+        harness.MaintenanceRepo.Verify(m => m.DeleteSessionAppInstallSummariesAsync(TenantA, "s1"), Times.Once);
     }
 
     // ────────────────────────────────────────────────────────────────────────── PR6 follow-up F2 ─

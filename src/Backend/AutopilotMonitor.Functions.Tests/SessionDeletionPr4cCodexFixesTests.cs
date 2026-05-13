@@ -226,10 +226,16 @@ public class SessionDeletionPr4cCodexFixesTests
     {
         var harness = new RestoreHarness();
         harness.SetPoisonedCascade();
-        // Simulate a prior partial restore that already re-incremented Office + Acrobat but
-        // crashed before the CAS Poisoned → None (the exact Codex F4 scenario).
-        var aggregateOrder = harness.Manifest.Steps.First(s => s.Class == DeletionStepClass.Aggregate).Order;
-        harness.Progress.CompletedSteps.Add(aggregateOrder);
+        // Scenario: forward cascade decremented all 3 keys → AggregateDecrementsApplied carries
+        // the full set (authoritative ledger). A prior partial-restore re-incremented Office +
+        // Acrobat (RestoreReIncrementsApplied) but crashed before CAS Poisoned → None. On retry,
+        // only Firefox should be re-incremented — the other two are already idempotent.
+        harness.Progress.AggregateDecrementsApplied = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Microsoft:Office:16.0",
+            "Adobe:Acrobat:23.1",
+            "Mozilla:Firefox:120.0",
+        };
         harness.Progress.RestoreReIncrementsApplied = new HashSet<string>(StringComparer.Ordinal)
         {
             "Microsoft:Office:16.0",

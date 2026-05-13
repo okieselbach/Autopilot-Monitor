@@ -245,12 +245,68 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
         };
 
         /// <summary>
-        /// Legacy direct-delete path — preserved unchanged for the flag-OFF default. Removed by
+        /// Legacy direct-delete path — preserved for the flag-OFF default. Removed by
         /// plan §5 PR7 once V2 has been stable on all tenants for at least two weeks.
+        /// <para>
+        /// <b>Ordering</b> (Sessions-first): the ETag-CAS-guarded <c>DeleteSessionAsync</c> runs
+        /// <i>before</i> any side-table delete. This closes the TOCTOU window where a V2
+        /// cascade producer could CAS-claim <c>DeletionState=Preparing</c> after our pre-read
+        /// but before our side-table mutations — leaving the producer's manifest snapshot
+        /// inconsistent against an already-half-purged side-table state. Side-table cleanup
+        /// after the Sessions row is tombstoned is safe: no producer can claim a missing row.
+        /// </para>
         /// </summary>
         private async Task<HttpResponseData> RunLegacyDirectDeletePathAsync(
             HttpRequestData req, string tenantId, string sessionId, string userIdentifier)
         {
+            // Sessions-first: tombstone (and release the writer-lock semantics) before any
+            // side-table mutation. DeleteSessionAsync is ETag-CAS-guarded (PR5 finding 2)
+            // against in-flight V2 cascades.
+            var sessionDeleted = await _sessionRepo.DeleteSessionAsync(tenantId, sessionId);
+
+            if (!sessionDeleted)
+            {
+                // DeleteSessionAsync returned false. Either 404 (already gone) or a concurrent
+                // V2 producer CAS-claimed the row (ETag 412 / non-None DeletionState). Re-read
+                // to disambiguate and pick the right status code.
+                var refreshed = await _sessionRepo.GetSessionAsync(tenantId, sessionId);
+                if (refreshed == null)
+                {
+                    _logger.LogWarning($"Session {sessionId} not found at final delete (race with concurrent caller)");
+                    return await WriteResponse(req, HttpStatusCode.NotFound, new
+                    {
+                        success = false,
+                        message = $"Session {sessionId} not found",
+                    });
+                }
+                if (SessionDeletionState.IsLocked(refreshed.DeletionState))
+                {
+                    _logger.LogWarning(
+                        "Legacy delete refused: V2 cascade owns the session. " +
+                        "tenant={TenantId} session={SessionId} state={State}",
+                        tenantId, sessionId, refreshed.DeletionState);
+                    var poisonedHint = string.Equals(refreshed.DeletionState, SessionDeletionState.Poisoned, StringComparison.Ordinal);
+                    return await WriteResponse(req, HttpStatusCode.Conflict, new
+                    {
+                        success = false,
+                        message = poisonedHint
+                            ? "Cascade is poisoned; recover via POST /api/admin/sessions/{id}/restore before retrying delete."
+                            : "A V2 cascade owns this session; retry later or use the cascade-delete path.",
+                        deletionState = refreshed.DeletionState,
+                        manifestId = refreshed.PendingDeletionManifestId,
+                        hint = poisonedHint ? "cascade_poisoned_use_restore" : "cascade_already_in_flight",
+                    });
+                }
+                _logger.LogError($"Legacy delete failed for session {sessionId} without an identifiable race cause");
+                return await WriteResponse(req, HttpStatusCode.InternalServerError, new
+                {
+                    success = false,
+                    message = "Internal server error",
+                });
+            }
+
+            // Sessions row is gone — no V2 producer can claim it now. Safe to cascade-clean
+            // side tables without ordering races.
             var eventsDeleted = await _maintenanceRepo.DeleteSessionEventsAsync(tenantId, sessionId);
             _logger.LogInformation($"Deleted {eventsDeleted} events for session {sessionId}");
 
@@ -260,72 +316,27 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             var appSummariesDeleted = await _maintenanceRepo.DeleteSessionAppInstallSummariesAsync(tenantId, sessionId);
             _logger.LogInformation($"Deleted {appSummariesDeleted} app install summaries for session {sessionId}");
 
-            var sessionDeleted = await _sessionRepo.DeleteSessionAsync(tenantId, sessionId);
-
-            if (sessionDeleted)
-            {
-                await _maintenanceRepo.LogAuditEntryAsync(
-                    tenantId,
-                    "DELETE",
-                    "Session",
-                    sessionId,
-                    userIdentifier,
-                    new Dictionary<string, string>
-                    {
-                        { "EventsDeleted", eventsDeleted.ToString() },
-                        { "RuleResultsDeleted", ruleResultsDeleted.ToString() },
-                        { "AppInstallSummariesDeleted", appSummariesDeleted.ToString() }
-                    });
-
-                _logger.LogInformation($"Successfully deleted session {sessionId}");
-                return await WriteResponse(req, HttpStatusCode.OK, new
+            await _maintenanceRepo.LogAuditEntryAsync(
+                tenantId,
+                "DELETE",
+                "Session",
+                sessionId,
+                userIdentifier,
+                new Dictionary<string, string>
                 {
-                    success = true,
-                    message = $"Session {sessionId} deleted successfully",
-                    eventsDeleted,
-                    ruleResultsDeleted,
-                    appInstallSummariesDeleted = appSummariesDeleted,
+                    { "EventsDeleted", eventsDeleted.ToString() },
+                    { "RuleResultsDeleted", ruleResultsDeleted.ToString() },
+                    { "AppInstallSummariesDeleted", appSummariesDeleted.ToString() }
                 });
-            }
 
-            // DeleteSessionAsync returned false. PR5 finding 2: this is no longer just a 404
-            // race — it can also mean a concurrent V2 producer CAS-claimed the row (ETag 412)
-            // or the row's DeletionState is now non-None. Re-read to disambiguate and pick the
-            // right status code so the UI shows the right message.
-            var refreshed = await _sessionRepo.GetSessionAsync(tenantId, sessionId);
-            if (refreshed == null)
+            _logger.LogInformation($"Successfully deleted session {sessionId}");
+            return await WriteResponse(req, HttpStatusCode.OK, new
             {
-                _logger.LogWarning($"Session {sessionId} not found at final delete (race with concurrent caller)");
-                return await WriteResponse(req, HttpStatusCode.NotFound, new
-                {
-                    success = false,
-                    message = $"Session {sessionId} not found",
-                });
-            }
-            if (SessionDeletionState.IsLocked(refreshed.DeletionState))
-            {
-                _logger.LogWarning(
-                    "Legacy delete refused: V2 cascade claimed the session between pre-read and tombstone. " +
-                    "tenant={TenantId} session={SessionId} state={State}",
-                    tenantId, sessionId, refreshed.DeletionState);
-                var poisonedHint = string.Equals(refreshed.DeletionState, SessionDeletionState.Poisoned, StringComparison.Ordinal);
-                return await WriteResponse(req, HttpStatusCode.Conflict, new
-                {
-                    success = false,
-                    message = poisonedHint
-                        ? "Cascade is poisoned; recover via POST /api/admin/sessions/{id}/restore before retrying delete."
-                        : "A V2 cascade claimed this session while the legacy delete was running; retry later.",
-                    deletionState = refreshed.DeletionState,
-                    manifestId = refreshed.PendingDeletionManifestId,
-                    hint = poisonedHint ? "cascade_poisoned_use_restore" : "cascade_already_in_flight",
-                });
-            }
-            // Row still exists with DeletionState=None but the delete failed — generic error.
-            _logger.LogError($"Legacy delete failed for session {sessionId} without an identifiable race cause");
-            return await WriteResponse(req, HttpStatusCode.InternalServerError, new
-            {
-                success = false,
-                message = "Internal server error",
+                success = true,
+                message = $"Session {sessionId} deleted successfully",
+                eventsDeleted,
+                ruleResultsDeleted,
+                appInstallSummariesDeleted = appSummariesDeleted,
             });
         }
 

@@ -119,7 +119,7 @@ namespace AutopilotMonitor.Functions.Services
                         await tableClient.SubmitTransactionAsync(actions, cancellationToken);
                         restored += chunk.Count;
                     }
-                    catch (RequestFailedException ex) when (ex.Status == 409 || ex.Status == 400)
+                    catch (RequestFailedException ex) when (IsAlreadyExistsStatus(ex))
                     {
                         // Azure rolls back the entire transaction when any Add hits an existing
                         // row. Fall back to per-row AddEntity so we can distinguish "row already
@@ -138,8 +138,14 @@ namespace AutopilotMonitor.Functions.Services
                                 await tableClient.AddEntityAsync(ConvertDumpToEntity(dump, tableName), cancellationToken);
                                 restored++;
                             }
-                            catch (RequestFailedException rfe) when (rfe.Status == 409)
+                            catch (RequestFailedException rfe) when (IsAlreadyExistsStatus(rfe))
                             {
+                                // Mirror the batch-level relaxation: some Azure deployments and
+                                // the Azurite emulator surface duplicate-row conflict as HTTP 400
+                                // with ErrorCode=EntityAlreadyExists instead of 409. Counting only
+                                // 409 here left the per-row fallback non-idempotent on those
+                                // backends — restore-after-partial would throw on the leftover
+                                // rows that the previous attempt had already inserted.
                                 skipped++;
                             }
                         }
@@ -242,5 +248,20 @@ namespace AutopilotMonitor.Functions.Services
         // Azure Tables batch transactions cap at 100 actions per submission, all sharing a
         // PartitionKey. Mirrors the const in the deletion partial.
         private const int RestoreBatchActionLimit = 100;
+
+        /// <summary>
+        /// True when the Azure SDK exception encodes a "row already exists" outcome — the only
+        /// case where we treat the failed Add as Skipped during restore. Production Azure Tables
+        /// reports this as HTTP 409 Conflict (ErrorCode <c>EntityAlreadyExists</c>), but the
+        /// Azurite emulator and some older service versions report HTTP 400 Bad Request with the
+        /// same ErrorCode. Anything else propagates so we don't silently swallow genuine errors.
+        /// </summary>
+        private static bool IsAlreadyExistsStatus(RequestFailedException ex)
+        {
+            if (ex.Status == 409) return true;
+            if (ex.Status == 400 && string.Equals(ex.ErrorCode, "EntityAlreadyExists", StringComparison.Ordinal))
+                return true;
+            return false;
+        }
     }
 }

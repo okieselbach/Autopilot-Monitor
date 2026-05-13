@@ -307,41 +307,29 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             var tenantId = session.TenantId;
             var sessionId = session.SessionId;
 
-            // F1: gate side-table mutations on DeletionState. The CAS guard inside DeleteSessionAsync
-            // is the storage-atomic backstop (PR5 finding 2), but it fires AFTER the side-table
-            // deletes. By the time it returns false we've already orphaned events from the V2
-            // cascade's planned manifest. Reading the Sessions row up-front is cheap (one Get) and
-            // skips ~3 side-table deletes when the lock is held.
-            var refreshed = await _sessionRepo.GetSessionAsync(tenantId, sessionId).ConfigureAwait(false);
-            if (refreshed == null)
-            {
-                // Row already gone — nothing to clean up. Treat as skip (no events were ours to delete either).
-                return false;
-            }
-            if (SessionDeletionState.IsLocked(refreshed.DeletionState))
+            // Sessions-first: the ETag-CAS-guarded DeleteSessionAsync (PR5 finding 2) is the lock
+            // arbiter against in-flight V2 cascades. Running it BEFORE side-table mutations means
+            // a concurrent V2 producer either claims the row first (we get false → skip side
+            // tables, V2 owns the cascade) or we win (Sessions gone → no producer can claim →
+            // side-tables safe to cascade-clean). The previous side-tables-first ordering left
+            // a TOCTOU window where V2's manifest snapshot landed on top of an already-half-
+            // purged side-table state.
+            var deleted = await _sessionRepo.DeleteSessionAsync(tenantId, sessionId).ConfigureAwait(false);
+            if (!deleted)
             {
                 _logger.LogInformation(
-                    "Retention fanout (legacy): session {SessionId} is locked by a V2 cascade (state={State}, manifestId={ManifestId}) — skipping ALL deletes, V2 worker owns the cascade",
-                    sessionId, refreshed.DeletionState, refreshed.PendingDeletionManifestId);
+                    "Retention fanout (legacy): session {SessionId} not tombstoned — either already gone or owned by a V2 cascade. Side-tables left intact; V2 worker (or next retention run) will absorb",
+                    sessionId);
                 return false;
             }
 
+            // Sessions row is gone — V2 producers cannot claim a missing row. Side-table cleanup
+            // is now race-free.
             _ = await _maintenanceRepo.DeleteSessionEventsAsync(tenantId, sessionId).ConfigureAwait(false);
             _ = await _maintenanceRepo.DeleteSessionRuleResultsAsync(tenantId, sessionId).ConfigureAwait(false);
             _ = await _maintenanceRepo.DeleteSessionAppInstallSummariesAsync(tenantId, sessionId).ConfigureAwait(false);
 
-            // CAS guard inside DeleteSessionAsync (PR5 finding 2) refuses if DeletionState is locked
-            // — backstop for the T1-T3 race after our pre-read above. A `false` here means either
-            // 404 (already gone) is treated as success internally, OR a concurrent V2 cascade
-            // claimed the row in the brief window between our pre-read and the tombstone.
-            var deleted = await _sessionRepo.DeleteSessionAsync(tenantId, sessionId).ConfigureAwait(false);
-            if (!deleted)
-            {
-                _logger.LogWarning(
-                    "Retention fanout (legacy): session {SessionId} could not be tombstoned — likely claimed by a concurrent V2 cascade. Side tables already deleted; cascade is idempotent so V2 will absorb the difference. Will retry next run",
-                    sessionId);
-            }
-            return deleted;
+            return true;
         }
     }
 }

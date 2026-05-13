@@ -131,6 +131,47 @@ public class TableStorageRestoreBatchTests
     }
 
     [Fact]
+    public async Task Restore_perRow_treats_400_EntityAlreadyExists_as_Skipped()
+    {
+        // Codex-followup F4: Azurite and some legacy Azure deployments map duplicate-row conflict
+        // to HTTP 400 (ErrorCode=EntityAlreadyExists) instead of 409. The batch catch already
+        // tolerated 400, but the per-row fallback's `status == 409`-only filter rethrew the 400,
+        // breaking idempotent restore-retry after partial-failed restore.
+        var harness = new Harness
+        {
+            BatchBehavior = _ => throw new RequestFailedException(400, "EntityAlreadyExists", "EntityAlreadyExists", innerException: null),
+            PerRowAddBehavior = _ => throw new RequestFailedException(400, "EntityAlreadyExists", "EntityAlreadyExists", innerException: null),
+        };
+
+        var result = await harness.Sut.RestoreRowsByExactKeysInBatchesAsync(
+            TableName, new[] { MakeDump("pkA", "rk_dup") }, RestoreMode.Partial);
+
+        Assert.Equal(1, result.Attempted);
+        Assert.Equal(0, result.Restored);
+        Assert.Equal(1, result.Skipped);
+    }
+
+    [Fact]
+    public async Task Restore_perRow_400_without_EntityAlreadyExists_propagates()
+    {
+        // Negative case: a 400 that is NOT a duplicate-row conflict (e.g. validation error from
+        // an oversized property) must still propagate. The new IsAlreadyExistsStatus helper keys
+        // off ErrorCode = "EntityAlreadyExists" to distinguish.
+        var harness = new Harness
+        {
+            BatchBehavior = _ => throw new RequestFailedException(400, "PropertyValueTooLarge", "PropertyValueTooLarge", innerException: null),
+            PerRowAddBehavior = _ => throw new RequestFailedException(400, "PropertyValueTooLarge", "PropertyValueTooLarge", innerException: null),
+        };
+
+        var ex = await Assert.ThrowsAsync<RequestFailedException>(() =>
+            harness.Sut.RestoreRowsByExactKeysInBatchesAsync(
+                TableName, new[] { MakeDump("pkA", "rk_x") }, RestoreMode.Partial));
+
+        Assert.Equal(400, ex.Status);
+        Assert.Equal("PropertyValueTooLarge", ex.ErrorCode);
+    }
+
+    [Fact]
     public async Task Restore_throws_on_null_args()
     {
         var harness = new Harness();
