@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Sessions
 {
     /// <summary>
-    /// <c>GET /api/admin/tenants/{tenantId}/deletion-manifests</c> — file-browser-style listing
+    /// <c>GET /api/global/tenants/{tenantId}/deletion-manifests</c> — file-browser-style listing
     /// of every persisted cascade-delete snapshot for a single tenant. Powers the Session Cleanup
     /// admin page's "Restore Browser" tab so a Global Admin can pick a (session, manifest) pair
     /// without already knowing the manifestId.
@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
         [Function("GetTenantDeletionManifests")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/tenants/{tenantId}/deletion-manifests")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/tenants/{tenantId}/deletion-manifests")]
             HttpRequestData req,
             string tenantId)
         {

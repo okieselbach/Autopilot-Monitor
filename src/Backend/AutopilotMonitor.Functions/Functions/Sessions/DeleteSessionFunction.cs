@@ -112,7 +112,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     {
                         success = false,
                         message = poisonedHint
-                            ? "Cascade is poisoned; recover via POST /api/admin/sessions/{id}/restore before retrying delete."
+                            ? "Cascade is poisoned; recover via POST /api/global/sessions/{id}/restore before retrying delete."
                             : "Session is already being deleted by a cascade.",
                         deletionState = session.DeletionState,
                         manifestId = session.PendingDeletionManifestId,
@@ -222,7 +222,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             SessionDeletionEnqueueOutcome.Poisoned => new
             {
                 success = false,
-                message = "Cascade is poisoned; recover via POST /api/admin/sessions/{id}/restore before retrying delete.",
+                message = "Cascade is poisoned; recover via POST /api/global/sessions/{id}/restore before retrying delete.",
                 deletionState = result.ExistingState,
                 manifestId = result.ManifestId,
                 hint = "cascade_poisoned_use_restore",
@@ -297,7 +297,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     {
                         success = false,
                         message = poisonedHint
-                            ? "Cascade is poisoned; recover via POST /api/admin/sessions/{id}/restore before retrying delete."
+                            ? "Cascade is poisoned; recover via POST /api/global/sessions/{id}/restore before retrying delete."
                             : "A V2 cascade owns this session; retry later or use the cascade-delete path.",
                         deletionState = refreshed.DeletionState,
                         manifestId = refreshed.PendingDeletionManifestId,

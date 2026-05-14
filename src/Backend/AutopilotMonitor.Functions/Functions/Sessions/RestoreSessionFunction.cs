@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Sessions
 {
     /// <summary>
-    /// <c>POST /api/admin/sessions/{sessionId}/restore</c> — GA-only cascade-delete restore
+    /// <c>POST /api/global/sessions/{sessionId}/restore</c> — GA-only cascade-delete restore
     /// endpoint (plan §13, PR4b). Body: <c>{ "manifestId": "...", "dryRun": false }</c>.
     /// Dispatches into <see cref="SessionRestoreService"/> which auto-selects full vs
     /// partial-poisoned-recovery mode based on the (Sessions row state, progress.CompletedAt)
@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
         [Function("RestoreSession")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "admin/sessions/{sessionId}/restore")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "global/sessions/{sessionId}/restore")] HttpRequestData req,
             string sessionId)
         {
             if (string.IsNullOrWhiteSpace(sessionId))

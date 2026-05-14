@@ -36,7 +36,7 @@ public class RestoreSessionFunctionTests
         // Per memory feedback_route_policy_catalog — every HTTP route MUST be registered in
         // EndpointAccessPolicyCatalog. An unregistered route fail-closes to 403. This test
         // guards the restore endpoint's GA-only enforcement.
-        var entry = EndpointAccessPolicyCatalog.FindPolicy("POST", "admin/sessions/some-id/restore");
+        var entry = EndpointAccessPolicyCatalog.FindPolicy("POST", "global/sessions/some-id/restore");
 
         Assert.NotNull(entry);
         Assert.Equal(EndpointPolicy.GlobalAdminOnly, entry!.Policy);
@@ -46,10 +46,10 @@ public class RestoreSessionFunctionTests
     public void Restore_route_is_NOT_registered_for_non_POST_methods()
     {
         // GET to the restore route should not match the POST registration.
-        var getEntry = EndpointAccessPolicyCatalog.FindPolicy("GET", "admin/sessions/some-id/restore");
+        var getEntry = EndpointAccessPolicyCatalog.FindPolicy("GET", "global/sessions/some-id/restore");
         Assert.Null(getEntry);
 
-        var putEntry = EndpointAccessPolicyCatalog.FindPolicy("PUT", "admin/sessions/some-id/restore");
+        var putEntry = EndpointAccessPolicyCatalog.FindPolicy("PUT", "global/sessions/some-id/restore");
         Assert.Null(putEntry);
     }
 }

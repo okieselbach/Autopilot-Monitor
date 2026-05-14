@@ -213,10 +213,15 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "sessions/{sessionId}/signals",              EndpointPolicy.GlobalAdminOnly),
         new("GET",    "sessions/{sessionId}/decision-graph",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "sessions/{sessionId}/reducer-verification", EndpointPolicy.GlobalAdminOnly),
-        new("GET",    "admin/sessions/{sessionId}/delete/preview",  EndpointPolicy.GlobalAdminOnly),
-        new("POST",   "admin/sessions/{sessionId}/restore",          EndpointPolicy.GlobalAdminOnly),
-        new("GET",    "admin/sessions/{sessionId}/deletion-manifest", EndpointPolicy.GlobalAdminOnly),
-        new("GET",    "admin/tenants/{tenantId}/deletion-manifests",  EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
+        // Cascade-delete admin endpoints live under /api/global/* (not /api/admin/*) because the
+        // latter prefix collides with the Azure Functions runtime's own admin routes, which are
+        // mTLS-gated — browsers triggering preflight on /api/admin/* get TLS-renegotiation
+        // failures instead of CORS responses. Keep all cross-tenant GA-only HTTP routes under
+        // /api/global/.
+        new("GET",    "global/sessions/{sessionId}/delete/preview",   EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "global/sessions/{sessionId}/restore",          EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/sessions/{sessionId}/deletion-manifest", EndpointPolicy.GlobalAdminOnly),
+        new("GET",    "global/tenants/{tenantId}/deletion-manifests",  EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("GET",    "global/session-deletions",                    EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalAdminOnly),

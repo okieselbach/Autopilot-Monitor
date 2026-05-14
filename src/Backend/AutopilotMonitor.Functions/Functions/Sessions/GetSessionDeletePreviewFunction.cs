@@ -19,13 +19,19 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Sessions
 {
     /// <summary>
-    /// <c>GET /api/admin/sessions/{sessionId}/delete/preview?mode={summary|full|download}</c> —
+    /// <c>GET /api/global/sessions/{sessionId}/delete/preview?mode={summary|full|download}</c> —
     /// read-only cascade-delete preview gated on <c>GlobalAdminOnly</c>. Runs the
     /// <see cref="DeletionManifestBuilder"/> against current data, returns the would-be manifest,
     /// and audits <c>deletion_preview</c>. NEVER mutates state, NEVER uploads a blob, NEVER
     /// enqueues — safety of the real delete must come from the producer's own CAS-then-build-then-upload
     /// sequence, not from a prior preview call (the gap between preview and delete is unsafe by
     /// design — preview is a debug tool, not a precondition; Plan §5 PR3 / §18).
+    /// <para>
+    /// Lives under <c>/api/global/*</c> rather than <c>/api/admin/*</c> because the latter
+    /// collides with Azure Functions runtime admin paths (which require client-cert auth) —
+    /// browser preflights to <c>/api/admin/*</c> trigger TLS renegotiation and die. Stick with
+    /// the <c>global</c> prefix for all cross-tenant GA-only HTTP endpoints.
+    /// </para>
     /// </summary>
     public class GetSessionDeletePreviewFunction
     {
@@ -51,7 +57,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
         [Function("GetSessionDeletePreview")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/sessions/{sessionId}/delete/preview")] HttpRequestData req,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/sessions/{sessionId}/delete/preview")] HttpRequestData req,
             string sessionId)
         {
             if (string.IsNullOrWhiteSpace(sessionId))

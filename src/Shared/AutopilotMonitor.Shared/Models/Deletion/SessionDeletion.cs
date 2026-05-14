@@ -13,7 +13,7 @@ namespace AutopilotMonitor.Shared.Models.Deletion
     ///       not yet picked it up. Never auto-cleared (operator inspection required).</item>
     ///   <item><c>Running</c> — worker is executing cascade steps. Never auto-cleared.</item>
     ///   <item><c>Poisoned</c> — worker hit max-dequeue or live verification failed. Requires
-    ///       <c>POST /api/admin/sessions/{id}/restore</c> (PR4) to recover.</item>
+    ///       <c>POST /api/global/sessions/{id}/restore</c> (PR4) to recover.</item>
     /// </list>
     /// <para>
     /// <c>Completed</c> is deliberately NOT a value — the cascade FINAL step removes the Sessions

@@ -318,6 +318,9 @@ export const api = {
         state,
         strandedSinceMinutes: strandedSinceMinutes?.toString(),
       })}`,
+    // Cross-tenant GA-only routes live under /api/global/* — /api/admin/* collides with the
+    // Azure Functions runtime's mTLS-gated admin paths.
+    //
     // Reads the persisted manifest + progress blob for an in-flight / poisoned cascade.
     // This is what the Session Cleanup page uses — NOT the dry-run preview below.
     storedManifest: (
@@ -326,7 +329,7 @@ export const api = {
       manifestId: string,
       mode: "summary" | "full" | "download" = "summary",
     ) =>
-      `${API_BASE_URL}/api/admin/sessions/${encodeURIComponent(sessionId)}/deletion-manifest${qs({
+      `${API_BASE_URL}/api/global/sessions/${encodeURIComponent(sessionId)}/deletion-manifest${qs({
         tenantId,
         manifestId,
         mode,
@@ -334,14 +337,14 @@ export const api = {
     // Dry-run builder that enumerates current data — only meaningful BEFORE a cascade starts.
     // The Session Cleanup page should use storedManifest instead.
     preview: (sessionId: string, tenantId: string, mode: "summary" | "full" | "download" = "summary") =>
-      `${API_BASE_URL}/api/admin/sessions/${encodeURIComponent(sessionId)}/delete/preview${qs({ tenantId, mode })}`,
+      `${API_BASE_URL}/api/global/sessions/${encodeURIComponent(sessionId)}/delete/preview${qs({ tenantId, mode })}`,
     restore: (sessionId: string) =>
-      `${API_BASE_URL}/api/admin/sessions/${encodeURIComponent(sessionId)}/restore`,
+      `${API_BASE_URL}/api/global/sessions/${encodeURIComponent(sessionId)}/restore`,
     // File-browser endpoint: enumerates every persisted manifest blob for one tenant, grouped
     // by sessionId, sorted by recency. Powers the Restore Browser tab so an operator can pick
     // a (session, manifest) without knowing the manifestId in advance.
     tenantManifests: (tenantId: string, sessionFilter?: string) =>
-      `${API_BASE_URL}/api/admin/tenants/${encodeURIComponent(tenantId)}/deletion-manifests${qs({ sessionId: sessionFilter })}`,
+      `${API_BASE_URL}/api/global/tenants/${encodeURIComponent(tenantId)}/deletion-manifests${qs({ sessionId: sessionFilter })}`,
   },
 
   // ── Hardware Rejection Insights (tenant-scoped, from distress data) ──────

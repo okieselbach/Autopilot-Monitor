@@ -83,7 +83,7 @@ describe("classifyDeleteResponse", () => {
   it("classifies 409 poisoned with the restore-hint title", async () => {
     const r = jsonResponse(409, {
       success: false,
-      message: "Cascade is poisoned; recover via POST /api/admin/sessions/{id}/restore before retrying delete.",
+      message: "Cascade is poisoned; recover via POST /api/global/sessions/{id}/restore before retrying delete.",
       deletionState: "Poisoned",
       hint: "cascade_poisoned_use_restore",
     });

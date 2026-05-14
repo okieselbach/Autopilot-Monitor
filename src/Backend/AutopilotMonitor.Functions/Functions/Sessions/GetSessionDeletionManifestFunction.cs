@@ -17,7 +17,7 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Sessions
 {
     /// <summary>
-    /// <c>GET /api/admin/sessions/{sessionId}/deletion-manifest?tenantId=&amp;manifestId=&amp;mode=...</c> —
+    /// <c>GET /api/global/sessions/{sessionId}/deletion-manifest?tenantId=&amp;manifestId=&amp;mode=...</c> —
     /// reads the persisted cascade-delete snapshot + progress for an in-flight / poisoned cascade.
     /// Distinct from <see cref="GetSessionDeletePreviewFunction"/>, which builds a fresh dry-run
     /// manifest from current data: for a running cascade that view is misleading because the live
@@ -45,7 +45,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
         [Function("GetSessionDeletionManifest")]
         public async Task<HttpResponseData> Run(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/sessions/{sessionId}/deletion-manifest")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "global/sessions/{sessionId}/deletion-manifest")]
             HttpRequestData req,
             string sessionId)
         {
