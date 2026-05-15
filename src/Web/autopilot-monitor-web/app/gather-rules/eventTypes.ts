@@ -36,8 +36,10 @@ export const KNOWN_EVENT_TYPES: EventTypeEntry[] = [
     description: "Throttled state-machine snapshot during completion evaluation." },
   { value: "agent_started", label: "agent_started", category: "enrollment",
     description: "Agent process started." },
-  { value: "agent_shutdown", label: "agent_shutdown", category: "enrollment",
-    description: "Agent process is shutting down." },
+  { value: "agent_shutdown", label: "agent_shutdown (V1)", category: "enrollment",
+    description: "Agent process is shutting down (legacy V1 event type — V2 emits agent_shutting_down)." },
+  { value: "agent_shutting_down", label: "agent_shutting_down (V2)", category: "enrollment",
+    description: "Agent process is shutting down. V2 canonical event; reason field disambiguates (decision_terminal / max_lifetime / auth_failure / ctrl_c / process_exit / unhandled_exception)." },
   { value: "phase_transition", label: "phase_transition", category: "enrollment",
     description: "Enrollment phase transition detected." },
 

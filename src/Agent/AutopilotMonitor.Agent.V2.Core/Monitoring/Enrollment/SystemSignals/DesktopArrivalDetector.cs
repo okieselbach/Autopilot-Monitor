@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Management;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using SharedEventTypes = AutopilotMonitor.Shared.Constants.EventTypes;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 {
@@ -12,6 +13,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
     /// Fires DesktopArrived event exactly once per agent lifetime.
     /// Used for enrollment completion in no-ESP scenarios (WDP v2, ESP disabled) and
     /// as a backup signal for AccountSetup phase correction.
+    /// <para>
+    /// <b>Liveness telemetry</b> (state-change-only, max 3 events per detector lifetime, NOT periodic):
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><c>desktop_detector_started</c> — fired once when Start() or ResetForRealUserSwitch() arms the polling timer.</item>
+    ///   <item><c>desktop_detector_first_poll</c> — fired once after the first PollForDesktop() completes (proves Timer + WMI plumbing is alive).</item>
+    ///   <item><c>desktop_detector_no_candidate</c> — fired once after the configurable threshold (default 10 min) of polling without ANY explorer.exe resolution (neither excluded-user nor real-user).</item>
+    /// </list>
+    /// <para>
+    /// The three liveness events together distinguish three failure modes that all look identical
+    /// when only <c>desktop_arrived</c> is missing: (a) DAD never started after reboot, (b) DAD
+    /// started but timer/WMI dead, (c) DAD running but user never logged in.
+    /// </para>
     /// </summary>
     public class DesktopArrivalDetector : IDisposable
     {
@@ -20,6 +34,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private bool _desktopArrived;
         private bool _excludedUserTraced; // Emit trace event only once for excluded-user skips
         private const int PollingIntervalSeconds = 30;
+
+        // Liveness state (Plan: DAD-liveness telemetry, 2026-05-15) — all flags are
+        // single-shot per detector instance; ResetForRealUserSwitch re-arms them.
+        private DateTime _startedAtUtc;
+        private bool _firstPollDone;
+        private int _pollCount;
+        private bool _explorerEverSeen;            // any explorer.exe observed at all (session 0 OR not)
+        private bool _anyNonZeroSessionEverSeen;   // explorer.exe in a non-SYSTEM session observed
+        private int _wmiErrorCountSinceStart;
+        private bool _noCandidateFired;
+        private readonly int _noCandidateTimeoutMinutes;
 
         /// <summary>
         /// System/service account names that should NOT be considered real users.
@@ -46,19 +71,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         /// </summary>
         public Action<string, string, Dictionary<string, object>> OnTraceEvent { get; set; }
 
-        public DesktopArrivalDetector(AgentLogger logger)
+        public DesktopArrivalDetector(AgentLogger logger, int noCandidateTimeoutMinutes = 10)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            // Clamp negative values to 0 (disabled). Upper bound left open — admin config UI
+            // already enforces a sane 60-min ceiling.
+            _noCandidateTimeoutMinutes = noCandidateTimeoutMinutes < 0 ? 0 : noCandidateTimeoutMinutes;
         }
 
         public void Start()
         {
-            _logger.Info("DesktopArrivalDetector: starting (polling every 30s)");
-            _pollingTimer = new Timer(
-                PollForDesktop,
-                null,
-                TimeSpan.FromSeconds(5), // Initial check after 5s
-                TimeSpan.FromSeconds(PollingIntervalSeconds));
+            _logger.Info($"DesktopArrivalDetector: starting (polling every {PollingIntervalSeconds}s, no-candidate threshold={_noCandidateTimeoutMinutes} min)");
+            ArmTimer(startReason: "initial");
         }
 
         public void Stop()
@@ -89,14 +113,36 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             _desktopArrived = false;
             _excludedUserTraced = false;
 
-            // Restart polling. Dispose any existing timer first to avoid leaking ticks
-            // from an already-running schedule.
+            // Reset liveness state too — the post-reset polling cycle is effectively a fresh
+            // detector lifetime for diagnostic purposes (first_poll fires again, no_candidate
+            // threshold restarts from this moment).
+            _firstPollDone = false;
+            _pollCount = 0;
+            _explorerEverSeen = false;
+            _anyNonZeroSessionEverSeen = false;
+            _wmiErrorCountSinceStart = 0;
+            _noCandidateFired = false;
+
+            ArmTimer(startReason: "real-user-switch-reset");
+        }
+
+        /// <summary>
+        /// (Re-)arms the polling timer + emits the <c>desktop_detector_started</c> liveness
+        /// event. Dispose any existing timer first to avoid leaking ticks. Idempotent except
+        /// for the emit — every Start/Reset call is a real lifecycle event we want visible.
+        /// </summary>
+        private void ArmTimer(string startReason)
+        {
+            _startedAtUtc = DateTime.UtcNow;
+
             _pollingTimer?.Dispose();
             _pollingTimer = new Timer(
                 PollForDesktop,
                 null,
-                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(5), // Initial check after 5s
                 TimeSpan.FromSeconds(PollingIntervalSeconds));
+
+            EmitDetectorStarted(startReason);
         }
 
         private void PollForDesktop(object state)
@@ -104,9 +150,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             if (_desktopArrived)
                 return;
 
+            _pollCount++;
+
             try
             {
                 var explorerProcesses = Process.GetProcessesByName("explorer");
+                int explorerCountThisPoll = explorerProcesses.Length;
+                if (explorerCountThisPoll > 0)
+                    _explorerEverSeen = true;
+
                 foreach (var proc in explorerProcesses)
                 {
                     try
@@ -114,6 +166,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                         // Session 0 = SYSTEM session, skip
                         if (proc.SessionId == 0)
                             continue;
+
+                        _anyNonZeroSessionEverSeen = true;
 
                         var owner = GetProcessOwner(proc.Id);
                         if (owner == null)
@@ -153,6 +207,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                         }
                         catch (Exception ex) { _logger.Verbose($"DesktopArrivalDetector: OnTraceEvent failed: {ex.Message}"); }
 
+                        // First-poll observability snapshot still fires before we stop polling —
+                        // there is value in distinguishing "found on first poll" (Stage already
+                        // past AccountSetup at agent start) from "took N polls" (live transition).
+                        EmitFirstPollIfNeeded(explorerCountThisPoll);
+
                         // Stop polling
                         _pollingTimer?.Dispose();
                         _pollingTimer = null;
@@ -170,11 +229,110 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                         proc.Dispose();
                     }
                 }
+
+                // No resolution this poll (no real user found, no excluded user, or all
+                // candidates were session 0). Emit first-poll snapshot now if pending.
+                EmitFirstPollIfNeeded(explorerCountThisPoll);
+
+                // Threshold-triggered observability: after the configured timeout, emit a
+                // single no-candidate event so dashboards can distinguish "user never logged
+                // in" from "detector broken". Fires exactly once per detector lifetime.
+                EmitNoCandidateIfThresholdReached();
             }
             catch (Exception ex)
             {
+                _wmiErrorCountSinceStart++;
                 _logger.Debug($"DesktopArrivalDetector: polling error: {ex.Message}");
+
+                // Still emit the first-poll snapshot if this was the first poll — the error
+                // count carries the failure mode to the backend.
+                EmitFirstPollIfNeeded(explorerProcessCount: 0);
             }
+        }
+
+        /// <summary>
+        /// One-shot liveness emit after the first <see cref="PollForDesktop"/> completes,
+        /// regardless of outcome. Proves the Timer + Process.GetProcessesByName path is alive
+        /// — distinguishing "DAD started but timer/WMI dead" from "DAD running, no user logged
+        /// in yet" in failed sessions.
+        /// </summary>
+        private void EmitFirstPollIfNeeded(int explorerProcessCount)
+        {
+            if (_firstPollDone) return;
+            _firstPollDone = true;
+
+            try
+            {
+                var elapsedMs = Math.Round((DateTime.UtcNow - _startedAtUtc).TotalMilliseconds, 0);
+                OnTraceEvent?.Invoke(
+                    SharedEventTypes.DesktopDetectorFirstPoll,
+                    $"DAD first poll complete (explorer.exe count={explorerProcessCount}, elapsedMs={elapsedMs}).",
+                    new Dictionary<string, object>
+                    {
+                        { "elapsedMsSinceStart", elapsedMs },
+                        { "explorerProcessCount", explorerProcessCount },
+                        { "anyNonZeroSessionObserved", _anyNonZeroSessionEverSeen },
+                        { "wmiErrorCount", _wmiErrorCountSinceStart },
+                    });
+            }
+            catch (Exception ex) { _logger.Verbose($"DesktopArrivalDetector: first-poll emit failed: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// One-shot threshold-triggered emit: when polling has run for the configured number
+        /// of minutes without ANY resolution (real-user OR excluded-user) AND the threshold
+        /// is enabled (&gt; 0), fire a single <c>desktop_detector_no_candidate</c> event.
+        /// Distinguishes "user never logged in" from "DAD wiring broken" in sessions where
+        /// <c>desktop_arrived</c> never lands.
+        /// </summary>
+        private void EmitNoCandidateIfThresholdReached()
+        {
+            if (_noCandidateFired) return;
+            if (_noCandidateTimeoutMinutes <= 0) return; // disabled
+            if (_excludedUserTraced) return; // we already emitted SOME resolution observability via desktop_excluded_user
+
+            var minutesSinceStart = (DateTime.UtcNow - _startedAtUtc).TotalMinutes;
+            if (minutesSinceStart < _noCandidateTimeoutMinutes) return;
+
+            _noCandidateFired = true;
+            try
+            {
+                OnTraceEvent?.Invoke(
+                    SharedEventTypes.DesktopDetectorNoCandidate,
+                    $"DAD threshold {_noCandidateTimeoutMinutes} min reached without explorer.exe resolution (polls={_pollCount}, explorerEverSeen={_explorerEverSeen}).",
+                    new Dictionary<string, object>
+                    {
+                        { "pollsSinceStart", _pollCount },
+                        { "minutesSinceStart", Math.Round(minutesSinceStart, 1) },
+                        { "thresholdMinutes", _noCandidateTimeoutMinutes },
+                        { "explorerEverSeen", _explorerEverSeen },
+                        { "anyNonZeroSessionEverSeen", _anyNonZeroSessionEverSeen },
+                        { "wmiErrorCount", _wmiErrorCountSinceStart },
+                    });
+            }
+            catch (Exception ex) { _logger.Verbose($"DesktopArrivalDetector: no-candidate emit failed: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// One-shot lifecycle emit at Start/Reset. Confirms detector wiring after a post-
+        /// reboot agent restart — absence of this event after <c>agent_started</c> proves the
+        /// composition-root never instantiated/armed the detector.
+        /// </summary>
+        private void EmitDetectorStarted(string startReason)
+        {
+            try
+            {
+                OnTraceEvent?.Invoke(
+                    SharedEventTypes.DesktopDetectorStarted,
+                    $"DAD armed (startReason={startReason}, pollIntervalSeconds={PollingIntervalSeconds}, noCandidateThresholdMinutes={_noCandidateTimeoutMinutes}).",
+                    new Dictionary<string, object>
+                    {
+                        { "pollIntervalSeconds", PollingIntervalSeconds },
+                        { "noCandidateThresholdMinutes", _noCandidateTimeoutMinutes },
+                        { "startReason", startReason },
+                    });
+            }
+            catch (Exception ex) { _logger.Verbose($"DesktopArrivalDetector: detector-started emit failed: {ex.Message}"); }
         }
 
         /// <summary>

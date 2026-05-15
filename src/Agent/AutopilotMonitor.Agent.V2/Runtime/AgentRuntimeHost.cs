@@ -148,26 +148,71 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     // are both live. Disposed in the same finally block as the rest of the lifecycle.
                     WhiteGloveInventoryTrigger whiteGloveInventoryTrigger = null;
 
+                    // Single-rail refactor (plan §5.1) — lifecycle events flow through
+                    // InformationalEventPost. The post is constructed inside the
+                    // onIngressReady callback below; the watchdog factories + gap-path
+                    // handlers close over the variable so they see the live helper when
+                    // their event fires (read in handler bodies, not at handler creation).
+                    InformationalEventPost lifecyclePost = null;
+
+                    // Shutdown-gap closure (2026-05-15) — cross-path idempotency gate. Every
+                    // <c>agent_shutting_down</c> emit path (EnrollmentTerminationHandler,
+                    // CreateAuthThresholdHandler, the gap emitters below) claims the slot via
+                    // Interlocked.Exchange before emitting. Prevents a Ctrl+C racing a real
+                    // Terminated transition from producing two events on the wire.
+                    int agentShuttingDownEmitted = 0;
+                    bool TryClaimAgentShuttingDownEmit() =>
+                        Interlocked.Exchange(ref agentShuttingDownEmitted, 1) == 0;
+
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
                         e.Cancel = true;
                         logger.Info("Ctrl+C received — initiating graceful shutdown.");
+
+                        // L1 gap-closure: previously the cancelHandler only signalled
+                        // shutdown.Set(), leaving the timeline without an explicit
+                        // agent_shutting_down event. Emit here so dev/console-mode exits are
+                        // distinguishable from silent process death.
+                        if (TryClaimAgentShuttingDownEmit())
+                        {
+                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                                post: lifecyclePost,
+                                agentConfig: agentConfig,
+                                reason: "ctrl_c",
+                                agentStartTimeUtc: agentStartTimeUtc,
+                                agentVersion: agentVersion,
+                                logger: logger);
+                        }
+
                         shutdown.Set();
                     };
                     EventHandler processExitHandler = (s, e) =>
                     {
                         logger.Info("ProcessExit — initiating graceful shutdown.");
+
+                        // L2 gap-closure: Windows gives the ProcessExit handler ~2s before
+                        // killing the process, so the emit is best-effort — the event lands
+                        // in the SignalIngress channel (non-blocking enqueue) and the
+                        // subsequent finally→TerminationPipeline.Run drains the spool via
+                        // orchestrator.Stop's DrainAllAsync. Under a hard Windows shutdown
+                        // race the event may end up persisted-but-not-uploaded; even then it
+                        // surfaces in the next session's diag ZIP (if upload is on).
+                        if (TryClaimAgentShuttingDownEmit())
+                        {
+                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                                post: lifecyclePost,
+                                agentConfig: agentConfig,
+                                reason: "process_exit",
+                                agentStartTimeUtc: agentStartTimeUtc,
+                                agentVersion: agentVersion,
+                                logger: logger);
+                        }
+
                         shutdown.Set();
                     };
 
                     Console.CancelKeyPress += cancelHandler;
                     AppDomain.CurrentDomain.ProcessExit += processExitHandler;
-
-                    // Single-rail refactor (plan §5.1) — lifecycle events flow through
-                    // InformationalEventPost. The post is constructed inside the
-                    // onIngressReady callback below; the watchdog factories close over a
-                    // Func accessor so they see the live helper when their event fires.
-                    InformationalEventPost lifecyclePost = null;
 
                     var maxLifetimeEmitter = LifecycleEmitters.CreateMaxLifetimeEmitter(
                         getLifecyclePost: () => lifecyclePost,
@@ -316,7 +361,13 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                                 // EspTerminalFailure pathway only — other Failed paths leave the
                                 // app list untouched.
                                 promoteActiveInstallsToStuck: (failureType, message)
-                                    => componentFactory.PromoteActiveInstallsToStuck(failureType, message));
+                                    => componentFactory.PromoteActiveInstallsToStuck(failureType, message),
+                                // Shutdown-gap closure (2026-05-15) — share the cross-path
+                                // idempotency gate so a Terminated event that races a Ctrl+C /
+                                // ProcessExit gap-path does not emit two agent_shutting_down
+                                // events on the wire. The handler skips its emit when the
+                                // gate already claimed the slot.
+                                tryClaimShutdownEvent: TryClaimAgentShuttingDownEmit);
 
                             // ServerActionDispatcher (plan §5.3) — constructed inside this
                             // hook so lifecyclePost + terminationHandler are guaranteed
@@ -481,6 +532,29 @@ namespace AutopilotMonitor.Agent.V2.Runtime
 
                         shutdown.Wait();
                     }
+                    catch (Exception runtimeEx)
+                    {
+                        // L3 gap-closure (2026-05-15): unhandled exception inside the try
+                        // block above (Start, post-startup wiring, the long-lived shutdown
+                        // wait if a captured Task escalation reached this thread, etc.).
+                        // Previously this propagated straight to Program.Main's catch which
+                        // logs + WriteCrashLog but emits no timeline event — the session
+                        // looked like silent process death. Emit before re-throwing so the
+                        // crash is visible on the wire.
+                        if (TryClaimAgentShuttingDownEmit())
+                        {
+                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                                post: lifecyclePost,
+                                agentConfig: agentConfig,
+                                reason: "unhandled_exception",
+                                agentStartTimeUtc: agentStartTimeUtc,
+                                agentVersion: agentVersion,
+                                logger: logger,
+                                exceptionType: runtimeEx.GetType().FullName,
+                                exceptionMessage: runtimeEx.Message);
+                        }
+                        throw;
+                    }
                     finally
                     {
                         // Detach the WG-Part-1 inventory trigger before TerminationPipeline runs
@@ -488,6 +562,23 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         // analyzerManager. Idempotent: Dispose unsubscribes via Interlocked guard.
                         try { whiteGloveInventoryTrigger?.Dispose(); }
                         catch (Exception ex) { logger.Warning($"WhiteGloveInventoryTrigger.Dispose threw: {ex.Message}"); }
+
+                        // L4 gap-closure (2026-05-15): defensive fallback emit for any path
+                        // that returned to finally without claiming the gate — e.g. a future
+                        // direct shutdown.Set() from a server-action handler that bypasses
+                        // both Terminated AND the cancel/processExit closures. Best-effort:
+                        // the gate is already claimed by Terminated / Ctrl+C / ProcessExit /
+                        // AuthFailure / L3 in every known path, so this rarely fires.
+                        if (TryClaimAgentShuttingDownEmit())
+                        {
+                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                                post: lifecyclePost,
+                                agentConfig: agentConfig,
+                                reason: "runtime_host_exit",
+                                agentStartTimeUtc: agentStartTimeUtc,
+                                agentVersion: agentVersion,
+                                logger: logger);
+                        }
 
                         TerminationPipeline.Run(
                             orchestrator: orchestrator,

@@ -202,7 +202,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // placeholder, so the detector resets and re-evaluates after the Hybrid reboot
             // instead of staying latched on the foo desktop. Order matters — DesktopArrivalHost
             // must exist before AadJoinHost so the callback target is available.
-            var desktopArrivalHost = new DesktopArrivalHost(logger, ingress, clock);
+            var desktopArrivalHost = new DesktopArrivalHost(
+                logger,
+                ingress,
+                clock,
+                noCandidateTimeoutMinutes: collectors.DesktopDetectorNoCandidateTimeoutMinutes,
+                sessionId: sessionId,
+                tenantId: tenantId);
             hosts.Add(desktopArrivalHost);
 
             _aadJoinHost = new AadJoinHost(

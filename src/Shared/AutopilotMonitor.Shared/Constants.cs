@@ -239,6 +239,13 @@ namespace AutopilotMonitor.Shared
             public const string EnrollmentComplete  = "enrollment_complete";
             public const string EnrollmentFailed    = "enrollment_failed";
             public const string DesktopArrived      = "desktop_arrived";
+            // DAD liveness (state-change-only, max 3 events per detector lifetime, NOT periodic).
+            // Distinguishes "DAD never started after reboot" vs "DAD started but timer/WMI dead" vs
+            // "DAD running but user never logged in" — the three failure-modes that look identical
+            // when only desktop_arrived is missing.
+            public const string DesktopDetectorStarted      = "desktop_detector_started";    // 1x on Start() / ResetForRealUserSwitch()
+            public const string DesktopDetectorFirstPoll    = "desktop_detector_first_poll"; // 1x after first PollForDesktop() completes
+            public const string DesktopDetectorNoCandidate  = "desktop_detector_no_candidate"; // 1x after threshold polls without resolution (configurable)
             public const string CompletionCheck     = "completion_check";
             public const string ScriptStarted       = "script_started";
             public const string ScriptCompleted     = "script_completed";

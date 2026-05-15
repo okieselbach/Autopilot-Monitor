@@ -399,6 +399,103 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             }
         }
 
+        // ====================================================== Cross-path shutdown emit helper
+
+        /// <summary>
+        /// Shutdown-gap closure (2026-05-15) — emits a single
+        /// <c>agent_shutting_down</c> event from one of the non-Terminated exit paths the
+        /// V2 runtime had previously left silent (Ctrl+C, ProcessExit, unhandled exception
+        /// in <c>RunAgent</c>, finally cleanup without prior Terminated). The
+        /// <see cref="EnrollmentTerminationHandler"/> remains the canonical emitter on the
+        /// happy path; this helper is for the gap-closure paths only.
+        /// <para>
+        /// <b>Idempotency contract:</b> the caller (typically <c>AgentRuntimeHost</c>) owns a
+        /// single shared <see cref="int"/> flag and uses
+        /// <c>Interlocked.Exchange(ref flag, 1) == 0</c> to claim the emit slot before
+        /// invoking this method. <see cref="EnrollmentTerminationHandler"/> participates in
+        /// the same gate via its <c>tryClaimShutdownEvent</c> constructor parameter so
+        /// double-emit cannot happen when, say, Ctrl+C races a real Terminated transition.
+        /// </para>
+        /// </summary>
+        /// <param name="post">Live <see cref="InformationalEventPost"/>. Null is treated as
+        /// "ingress not ready"; the call logs and returns false without emitting.</param>
+        /// <param name="agentConfig">Carries SessionId / TenantId / agent build version.</param>
+        /// <param name="reason">Discriminator stored in <c>data["reason"]</c>. Allowed values:
+        /// <c>ctrl_c</c>, <c>process_exit</c>, <c>unhandled_exception</c>,
+        /// <c>runtime_host_exit</c>. Other reasons (auth_failure / decision_terminal /
+        /// max_lifetime) are emitted by their own dedicated paths.</param>
+        /// <param name="agentStartTimeUtc">Used to compute uptime for the event payload.</param>
+        /// <param name="agentVersion">Build hash tag, mirrored from <c>agent_started</c>.</param>
+        /// <param name="logger">For best-effort log on emit failure.</param>
+        /// <param name="exceptionType">Optional .NET exception type, populated when the
+        /// caller is the unhandled-exception path.</param>
+        /// <param name="exceptionMessage">Optional .NET exception message (truncated to
+        /// 500 chars on the wire to keep payload size bounded).</param>
+        /// <returns>true if the event was posted; false if <paramref name="post"/> was null
+        /// or the emit threw.</returns>
+        public static bool EmitAgentShuttingDownGapPath(
+            InformationalEventPost post,
+            AgentConfiguration agentConfig,
+            string reason,
+            DateTime agentStartTimeUtc,
+            string agentVersion,
+            AgentLogger logger,
+            string exceptionType = null,
+            string exceptionMessage = null)
+        {
+            if (post == null)
+            {
+                logger?.Warning($"agent_shutting_down (reason={reason}) suppressed — ingress not ready.");
+                return false;
+            }
+
+            try
+            {
+                var uptimeMinutes = Math.Round((DateTime.UtcNow - agentStartTimeUtc).TotalMinutes, 1);
+
+                var data = new Dictionary<string, object>(StringComparer.Ordinal)
+                {
+                    { "reason", reason ?? "unknown" },
+                    { "outcome", "Unknown" },
+                    { "stage", string.Empty },
+                    { "uptimeMinutes", uptimeMinutes },
+                    { "agentVersion", agentVersion ?? string.Empty },
+                };
+
+                if (!string.IsNullOrEmpty(exceptionType))
+                    data["exceptionType"] = exceptionType;
+                if (!string.IsNullOrEmpty(exceptionMessage))
+                {
+                    // Bound payload growth — exception messages can be long stack-trace text.
+                    var trimmed = exceptionMessage.Length > 500
+                        ? exceptionMessage.Substring(0, 500) + "…"
+                        : exceptionMessage;
+                    data["exceptionMessage"] = trimmed;
+                }
+
+                post.Emit(new EnrollmentEvent
+                {
+                    SessionId = agentConfig.SessionId,
+                    TenantId = agentConfig.TenantId,
+                    EventType = SharedConstants.EventTypes.AgentShuttingDown,
+                    Severity = string.Equals(reason, "unhandled_exception", StringComparison.Ordinal)
+                        ? EventSeverity.Error
+                        : EventSeverity.Info,
+                    Source = "AgentRuntimeHost",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"Agent shutting down (reason={reason}).",
+                    Data = data,
+                    ImmediateUpload = true,
+                });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger?.Warning($"agent_shutting_down (reason={reason}) emission failed: {ex.Message}");
+                return false;
+            }
+        }
+
         // ================================================================ Watchdog handlers
 
         /// <summary>
@@ -484,11 +581,18 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 {
                     try
                     {
+                        // Event-type unification (2026-05-15): the auth-failure path used to
+                        // emit a separate `agent_shutdown` type (legacy V1 string). All V2
+                        // shutdown paths now share `agent_shutting_down` with the failure
+                        // class disambiguated via Data["reason"] — auth_failure here, others
+                        // (decision_terminal / max_lifetime / ctrl_c / process_exit /
+                        // unhandled_exception) in EnrollmentTerminationHandler + the new
+                        // AgentRuntimeHost gap-closure emit paths.
                         post.Emit(new EnrollmentEvent
                         {
                             SessionId = agentConfig.SessionId,
                             TenantId = agentConfig.TenantId,
-                            EventType = "agent_shutdown",
+                            EventType = SharedConstants.EventTypes.AgentShuttingDown,
                             Severity = EventSeverity.Error,
                             Source = "AuthFailureTracker",
                             Phase = EnrollmentPhase.Unknown,
@@ -509,12 +613,12 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     }
                     catch (Exception emitEx)
                     {
-                        logger.Warning($"agent_shutdown emission failed: {emitEx.Message}");
+                        logger.Warning($"agent_shutting_down (auth_failure) emission failed: {emitEx.Message}");
                     }
                 }
                 else
                 {
-                    logger.Warning("agent_shutdown (auth_failure) suppressed — ingress not ready.");
+                    logger.Warning("agent_shutting_down (auth_failure) suppressed — ingress not ready.");
                 }
 
                 signalShutdown();

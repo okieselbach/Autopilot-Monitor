@@ -118,6 +118,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         // treats as Part-1/null).
         private readonly Func<bool> _isWhiteGlovePart2Accessor;
 
+        // Shutdown-gap closure (2026-05-15): cross-path idempotency gate shared with the
+        // AgentRuntimeHost's gap emitters (Ctrl+C, ProcessExit, unhandled exception,
+        // runtime-host finally). The handler calls TryClaim() before emitting
+        // <c>agent_shutting_down</c> in <see cref="EmitAgentShuttingDown"/> so a Terminated
+        // event that races a Ctrl+C cannot produce two events on the wire. Null = legacy
+        // behaviour (always emit; backward compat for tests + standalone construction).
+        private readonly Func<bool> _tryClaimShutdownEvent;
+
         // c117946b debrief (2026-05-12): on terminal ESP-Apps failure, promote any apps the
         // agent observed in <see cref="AppInstallationState.Installing"/> to Error so the
         // user sees a name (not just an opaque "installing: 1" counter) and the
@@ -154,7 +162,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             Action writeCleanExitMarker = null,
             Func<long> ingressPendingSignalCountAccessor = null,
             Func<bool> isWhiteGlovePart2Accessor = null,
-            Func<string, string, IReadOnlyList<string>> promoteActiveInstallsToStuck = null)
+            Func<string, string, IReadOnlyList<string>> promoteActiveInstallsToStuck = null,
+            Func<bool> tryClaimShutdownEvent = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -185,6 +194,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _ingressPendingSignalCountAccessor = ingressPendingSignalCountAccessor;
             _isWhiteGlovePart2Accessor = isWhiteGlovePart2Accessor;
             _promoteActiveInstallsToStuck = promoteActiveInstallsToStuck;
+            _tryClaimShutdownEvent = tryClaimShutdownEvent;
         }
 
         /// <summary>
@@ -726,11 +736,42 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
         // V1-parity acknowledgement that the agent has accepted termination. Carries enough
         // context for the backend to correlate the shutdown with its trigger (reason/outcome/
-        // stage) and for diagnostics to show how long the agent ran. Always emitted, regardless
-        // of whether self-destruct cleanup actually runs afterwards.
+        // stage) and for diagnostics to show how long the agent ran.
+        // <para>
+        // Shutdown-gap closure (2026-05-15): participates in the cross-path idempotency gate
+        // owned by AgentRuntimeHost so a Terminated event that races a Ctrl+C / ProcessExit
+        // does not produce two <c>agent_shutting_down</c> events on the wire. When the gate
+        // is not wired (tests / standalone construction), the legacy always-emit behaviour
+        // is preserved.
+        // </para>
         private void EmitAgentShuttingDown(EnrollmentTerminatedEventArgs args)
         {
+            if (_tryClaimShutdownEvent != null && !_tryClaimShutdownEvent())
+            {
+                _logger.Debug("EnrollmentTerminationHandler: agent_shutting_down already emitted via gap-path — skipping duplicate.");
+                return;
+            }
+
             var uptimeMinutes = Math.Round((DateTime.UtcNow - _agentStartTimeUtc).TotalMinutes, 1);
+
+            // Discriminator stored in data["reason"]. Maps the V2 EnrollmentTerminationReason
+            // enum to the shared reason vocabulary used by the AgentRuntimeHost gap paths
+            // (ctrl_c / process_exit / unhandled_exception / runtime_host_exit) so all
+            // shutdown events on the wire share the same reason taxonomy.
+            string reasonTag;
+            switch (args.Reason)
+            {
+                case EnrollmentTerminationReason.DecisionTerminalStage:
+                    reasonTag = "decision_terminal";
+                    break;
+                case EnrollmentTerminationReason.MaxLifetimeExceeded:
+                    reasonTag = "max_lifetime";
+                    break;
+                default:
+                    reasonTag = args.Reason.ToString();
+                    break;
+            }
+
             EmitEventSafe(new EnrollmentEvent
             {
                 SessionId = _configuration.SessionId,
@@ -739,10 +780,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                 Severity = EventSeverity.Info,
                 Source = "EnrollmentTerminationHandler",
                 Phase = EnrollmentPhase.Unknown,
-                Message = $"Agent shutting down (reason={args.Reason}, outcome={args.Outcome}).",
+                Message = $"Agent shutting down (reason={reasonTag}, outcome={args.Outcome}).",
                 Data = new Dictionary<string, object>
                 {
-                    { "reason", args.Reason.ToString() },
+                    { "reason", reasonTag },
                     { "outcome", args.Outcome.ToString() },
                     { "stage", args.StageName ?? string.Empty },
                     { "uptimeMinutes", uptimeMinutes },

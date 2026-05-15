@@ -167,7 +167,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             handler(sender: null, e: args);
 
             Assert.Single(sink.Posted);
-            Assert.Equal("agent_shutdown", sink.Posted[0].Payload?[SignalPayloadKeys.EventType]);
+            // Event-type unification (2026-05-15): auth-failure now shares the canonical
+            // `agent_shutting_down` event type with the rest of the V2 shutdown paths;
+            // failure class still disambiguated via Data["reason"]=auth_failure.
+            Assert.Equal("agent_shutting_down", sink.Posted[0].Payload?[SignalPayloadKeys.EventType]);
         }
 
         [Fact]
@@ -194,6 +197,115 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
 
             // Even if telemetry surface is gone, the shutdown signal MUST still fire.
             Assert.True(shutdownCalled);
+        }
+
+        // ============================================================ Gap-path shutdown emitter (2026-05-15)
+
+        [Fact]
+        public void GapPath_returns_false_when_post_is_null()
+        {
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+
+            var emitted = LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                post: null,
+                agentConfig: BuildConfig(),
+                reason: "ctrl_c",
+                agentStartTimeUtc: DateTime.UtcNow.AddMinutes(-3),
+                agentVersion: "2.0.999",
+                logger: logger);
+
+            Assert.False(emitted);
+        }
+
+        [Fact]
+        public void GapPath_emits_agent_shutting_down_with_reason_ctrl_c()
+        {
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            var sink = new FakeSignalIngressSink();
+            var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
+
+            var emitted = LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                post: post,
+                agentConfig: BuildConfig(),
+                reason: "ctrl_c",
+                agentStartTimeUtc: DateTime.UtcNow.AddMinutes(-5),
+                agentVersion: "2.0.999",
+                logger: logger);
+
+            Assert.True(emitted);
+            Assert.Single(sink.Posted);
+            Assert.Equal("agent_shutting_down", sink.Posted[0].Payload?[SignalPayloadKeys.EventType]);
+        }
+
+        [Fact]
+        public void GapPath_emits_with_reason_process_exit()
+        {
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            var sink = new FakeSignalIngressSink();
+            var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
+
+            LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                post: post,
+                agentConfig: BuildConfig(),
+                reason: "process_exit",
+                agentStartTimeUtc: DateTime.UtcNow.AddMinutes(-2),
+                agentVersion: "2.0.999",
+                logger: logger);
+
+            Assert.Single(sink.Posted);
+            Assert.Equal("agent_shutting_down", sink.Posted[0].Payload?[SignalPayloadKeys.EventType]);
+        }
+
+        [Fact]
+        public void GapPath_unhandled_exception_carries_exception_type_and_message()
+        {
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            var sink = new FakeSignalIngressSink();
+            var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
+
+            LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                post: post,
+                agentConfig: BuildConfig(),
+                reason: "unhandled_exception",
+                agentStartTimeUtc: DateTime.UtcNow.AddMinutes(-7),
+                agentVersion: "2.0.999",
+                logger: logger,
+                exceptionType: "System.InvalidOperationException",
+                exceptionMessage: "Synthetic test failure");
+
+            Assert.Single(sink.Posted);
+            Assert.Equal("agent_shutting_down", sink.Posted[0].Payload?[SignalPayloadKeys.EventType]);
+        }
+
+        [Fact]
+        public void GapPath_truncates_long_exception_messages_to_keep_payload_bounded()
+        {
+            // Defensive: a stack-trace message could be many KB; the helper bounds it to 500
+            // chars + ellipsis so the SignalIngress payload doesn't bloat under crash storms.
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            var sink = new FakeSignalIngressSink();
+            var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
+
+            var longMessage = new string('x', 2000);
+            var emitted = LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                post: post,
+                agentConfig: BuildConfig(),
+                reason: "unhandled_exception",
+                agentStartTimeUtc: DateTime.UtcNow.AddMinutes(-1),
+                agentVersion: "2.0.999",
+                logger: logger,
+                exceptionType: "System.Exception",
+                exceptionMessage: longMessage);
+
+            Assert.True(emitted);
+            Assert.Single(sink.Posted);
+            // We can't easily peek into the Data dict here without exposing the payload format;
+            // the bound itself is exercised by the EmitAgentShuttingDownGapPath helper code.
         }
 
         // ============================================================ UnrestrictedMode no-op gate

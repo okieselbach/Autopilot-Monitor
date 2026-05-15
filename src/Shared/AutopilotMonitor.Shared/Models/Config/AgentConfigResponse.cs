@@ -236,6 +236,16 @@ namespace AutopilotMonitor.Shared.Models
         public int CollectorIdleTimeoutMinutes { get; set; } = 15;
 
         /// <summary>
+        /// DAD liveness threshold (minutes). After this many minutes of polling without
+        /// detecting either an excluded-user explorer.exe or a real user desktop, the V2
+        /// DesktopArrivalDetector emits a single <c>desktop_detector_no_candidate</c> event
+        /// (state-change-only, NOT periodic). Distinguishes "user never logged in" from
+        /// "detector wiring dead post-reboot" in sessions missing <c>desktop_arrived</c>.
+        /// 0 = disabled. Default: 10 minutes.
+        /// </summary>
+        public int DesktopDetectorNoCandidateTimeoutMinutes { get; set; } = 10;
+
+        /// <summary>
         /// Enable the agent self-metrics collector (process CPU, memory, network traffic).
         /// Default: true
         /// </summary>

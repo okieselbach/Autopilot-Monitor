@@ -238,7 +238,7 @@ export function SectionAgentInternals() {
             ["Upload", "UploadIntervalSeconds, MaxBatchSize, MaxRetryAttempts", "30s, 100, 5"],
             ["Collector Toggles", "EnablePerformanceCollector, EnableAgentSelfMetrics, EnableDeliveryOptimization", "varies"],
             ["Collector Timing", "PerformanceIntervalSeconds, AgentSelfMetricsIntervalSeconds, DOIntervalSeconds", "30s, 60s, 5s"],
-            ["Idle Management", "CollectorIdleTimeoutMinutes", "15 min"],
+            ["Idle Management", "CollectorIdleTimeoutMinutes, DesktopDetectorNoCandidateTimeoutMinutes", "15 min, 10 min"],
             ["Logging", "LogLevel, SendTraceEvents", "Info, true"],
             ["Geo / Time", "EnableGeoLocation, EnableTimezoneAutoSet, NtpServer", "true, false, time.windows.com"],
             ["Diagnostics", "DiagnosticsUploadEnabled, DiagnosticsUploadMode, DiagnosticsLogPaths", "false, Off, []"],
@@ -883,7 +883,7 @@ export function SectionAgentInternals() {
             headers={["Event Type", "Source", "Description"]}
             rows={[
               ["agent_started", "MonitoringService", "Agent started (version, config, previous exit type)"],
-              ["agent_shutdown", "MonitoringService", "Graceful shutdown"],
+              ["agent_shutdown / agent_shutting_down", "MonitoringService / Agent", "Graceful shutdown. V1 emits agent_shutdown; V2 emits agent_shutting_down with reason= decision_terminal | max_lifetime | auth_failure | ctrl_c | process_exit | unhandled_exception"],
               ["agent_trace", "Various", "Decision tracing (verbose diagnostics)"],
               ["agent_version_check", "MonitoringService", "Version check outcome (up_to_date / updated / skipped / check_failed) - emitted every startup, session-scoped dedup for up_to_date"],
               ["system_reboot_detected", "MonitoringService", "Reboot detected between sessions"],

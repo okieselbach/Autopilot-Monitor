@@ -75,6 +75,17 @@ namespace AutopilotMonitor.Shared.Models
         public int CollectorIdleTimeoutMinutes { get; set; } = 15;
 
         /// <summary>
+        /// DAD liveness threshold in minutes. When the V2 DesktopArrivalDetector polls for
+        /// this duration without detecting either an excluded-user explorer.exe or a real
+        /// user desktop, it emits a single <c>desktop_detector_no_candidate</c> observability
+        /// event. State-change-only — NOT a periodic heartbeat; max 1 event per detector
+        /// lifetime. Used to distinguish "user never logged in" from "detector wiring dead
+        /// post-reboot" in sessions where <c>desktop_arrived</c> is missing.
+        /// 0 = disabled (event never fires). Default: 10 minutes.
+        /// </summary>
+        public int DesktopDetectorNoCandidateTimeoutMinutes { get; set; } = 10;
+
+        /// <summary>
         /// Maintenance alarm threshold: sessions with more events than this value trigger an
         /// ExcessiveSessionEvents ops alert (dispatched to Telegram/Teams).
         /// 0 = disabled. Default: 2000 (largest real sessions observed are ~500).
@@ -442,6 +453,7 @@ namespace AutopilotMonitor.Shared.Models
                 GlobalAdminRateLimitRequestsPerMinute = 600,
                 PlatformStatsBlobSasUrl = string.Empty,
                 CollectorIdleTimeoutMinutes = 15,
+                DesktopDetectorNoCandidateTimeoutMinutes = 10,
                 MaxSessionWindowHours = 24,
                 MaintenanceBlockDurationHours = 12
             };

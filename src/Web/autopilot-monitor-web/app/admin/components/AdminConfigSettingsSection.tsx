@@ -12,6 +12,8 @@ interface AdminConfigSettingsSectionProps {
   setPlatformStatsBlobSasUrl: (value: string) => void;
   collectorIdleTimeoutMinutes: number;
   setCollectorIdleTimeoutMinutes: (value: number) => void;
+  desktopDetectorNoCandidateTimeoutMinutes: number;
+  setDesktopDetectorNoCandidateTimeoutMinutes: (value: number) => void;
   slaNotificationCooldownHours: number;
   setSlaNotificationCooldownHours: (value: number) => void;
   allowAgentDowngrade: boolean;
@@ -36,6 +38,8 @@ export function AdminConfigSettingsSection({
   setPlatformStatsBlobSasUrl,
   collectorIdleTimeoutMinutes,
   setCollectorIdleTimeoutMinutes,
+  desktopDetectorNoCandidateTimeoutMinutes,
+  setDesktopDetectorNoCandidateTimeoutMinutes,
   slaNotificationCooldownHours,
   setSlaNotificationCooldownHours,
   allowAgentDowngrade,
@@ -123,6 +127,25 @@ export function AdminConfigSettingsSection({
                   max="120"
                   value={collectorIdleTimeoutMinutes}
                   onChange={(e) => setCollectorIdleTimeoutMinutes(parseInt(e.target.value) || 0)}
+                  className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                />
+              </label>
+            </div>
+
+            <div>
+              <label className="block">
+                <span className="text-indigo-900 dark:text-indigo-100 font-medium">Desktop Detector No-Candidate Timeout (Minutes)</span>
+                <p className="text-sm text-indigo-800 dark:text-gray-300 mb-2">
+                  The V2 agent&apos;s Desktop Arrival Detector emits a single <code className="text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">desktop_detector_no_candidate</code> observability event after this many minutes of polling without detecting either an excluded-user explorer.exe or a real user desktop.
+                  State-change-only (NOT a periodic heartbeat) &mdash; fires at most once per agent run. Used to distinguish &quot;user never logged in&quot; from &quot;detector wiring dead post-reboot&quot; in sessions missing <code className="text-xs bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-200 px-1 rounded">desktop_arrived</code>.
+                  Set to <strong>0</strong> to disable. Default: <strong>10</strong>. Range: 0&ndash;60.
+                </p>
+                <input
+                  type="number"
+                  min="0"
+                  max="60"
+                  value={desktopDetectorNoCandidateTimeoutMinutes}
+                  onChange={(e) => setDesktopDetectorNoCandidateTimeoutMinutes(parseInt(e.target.value) || 0)}
                   className="mt-1 block w-full px-4 py-2 border border-indigo-300 dark:border-indigo-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                 />
               </label>

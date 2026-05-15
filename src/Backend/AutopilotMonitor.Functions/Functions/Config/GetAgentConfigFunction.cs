@@ -156,6 +156,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 EnablePerformanceCollector = tenantConfig.EnablePerformanceCollector,
                 PerformanceIntervalSeconds = tenantConfig.PerformanceCollectorIntervalSeconds,
                 CollectorIdleTimeoutMinutes = adminConfig.CollectorIdleTimeoutMinutes,
+                DesktopDetectorNoCandidateTimeoutMinutes = adminConfig.DesktopDetectorNoCandidateTimeoutMinutes,
                 HelloWaitTimeoutSeconds = tenantConfig.HelloWaitTimeoutSeconds,
                 AgentMaxLifetimeMinutes = tenantConfig.AgentMaxLifetimeMinutes ?? 360,
                 ModernDeploymentHarmlessEventIds = adminConfig.GetModernDeploymentHarmlessEventIds().ToArray()
@@ -180,7 +181,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new AgentConfigResponse
             {
-                ConfigVersion = 27, // ModernDeployment harmless EventID 1010 added to default noise list
+                ConfigVersion = 28, // V2 DAD-liveness threshold (DesktopDetectorNoCandidateTimeoutMinutes, default 10 min); admin-config global setting
                 UploadIntervalSeconds = 10,
                 SelfDestructOnComplete = tenantConfig.SelfDestructOnComplete ?? true,
                 KeepLogFile = tenantConfig.KeepLogFile ?? false,

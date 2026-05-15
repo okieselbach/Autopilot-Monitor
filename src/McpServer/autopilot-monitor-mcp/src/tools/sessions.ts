@@ -20,7 +20,7 @@ const KEY_EVENT_TYPES = new Set([
   'app_tracking_summary', 'error_detected',
   'enrollment_complete', 'enrollment_failed', 'completion_check',
   'desktop_arrived', 'hello_policy_detected', 'waiting_for_hello', 'hello_completion_timeout',
-  'agent_started', 'agent_shutdown', 'trace_event',
+  'agent_started', 'agent_shutdown', 'agent_shutting_down', 'trace_event',
   'script_started', 'script_completed', 'script_failed', 'vulnerability_report',
 ]);
 const SEVERITY_RANK: Record<string, number> = { Trace: -1, Debug: 0, Info: 1, Warning: 2, Error: 3, Critical: 4 };

@@ -24,6 +24,8 @@ interface AdminConfigContextValue {
   setPlatformStatsBlobSasUrl: (value: string) => void;
   collectorIdleTimeoutMinutes: number;
   setCollectorIdleTimeoutMinutes: (value: number) => void;
+  desktopDetectorNoCandidateTimeoutMinutes: number;
+  setDesktopDetectorNoCandidateTimeoutMinutes: (value: number) => void;
   maxSessionWindowHours: number;
   setMaxSessionWindowHours: (value: number) => void;
   maintenanceBlockDurationHours: number;
@@ -111,6 +113,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   const [globalRateLimit, setGlobalRateLimit] = useState(100);
   const [platformStatsBlobSasUrl, setPlatformStatsBlobSasUrl] = useState("");
   const [collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes] = useState(15);
+  const [desktopDetectorNoCandidateTimeoutMinutes, setDesktopDetectorNoCandidateTimeoutMinutes] = useState(10);
   const [maxSessionWindowHours, setMaxSessionWindowHours] = useState(24);
   const [maintenanceBlockDurationHours, setMaintenanceBlockDurationHours] = useState(12);
   const [opsEventRetentionDays, setOpsEventRetentionDays] = useState(90);
@@ -166,6 +169,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         setGlobalRateLimit(data.globalRateLimitRequestsPerMinute);
         setPlatformStatsBlobSasUrl(data.platformStatsBlobSasUrl ?? "");
         setCollectorIdleTimeoutMinutes(data.collectorIdleTimeoutMinutes ?? 15);
+        setDesktopDetectorNoCandidateTimeoutMinutes(data.desktopDetectorNoCandidateTimeoutMinutes ?? 10);
         setMaxSessionWindowHours(data.maxSessionWindowHours ?? 24);
         setMaintenanceBlockDurationHours(data.maintenanceBlockDurationHours ?? 12);
         setOpsEventRetentionDays(data.opsEventRetentionDays ?? 90);
@@ -262,6 +266,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
         globalRateLimitRequestsPerMinute: globalRateLimit,
         platformStatsBlobSasUrl: platformStatsBlobSasUrl.trim(),
         collectorIdleTimeoutMinutes,
+        desktopDetectorNoCandidateTimeoutMinutes,
         maxSessionWindowHours,
         maintenanceBlockDurationHours,
         opsEventRetentionDays,
@@ -296,7 +301,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingConfig(false);
     }
-  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, slaNotificationCooldownHours, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, sessionDeletionKillSwitch, getAccessToken]);
+  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, desktopDetectorNoCandidateTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, slaNotificationCooldownHours, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, sessionDeletionKillSwitch, getAccessToken]);
 
   // Reset admin config
   const handleResetAdminConfig = useCallback(() => {
@@ -304,6 +309,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     setGlobalRateLimit(adminConfig.globalRateLimitRequestsPerMinute);
     setPlatformStatsBlobSasUrl(adminConfig.platformStatsBlobSasUrl ?? "");
     setCollectorIdleTimeoutMinutes(adminConfig.collectorIdleTimeoutMinutes ?? 15);
+    setDesktopDetectorNoCandidateTimeoutMinutes(adminConfig.desktopDetectorNoCandidateTimeoutMinutes ?? 10);
     setMaxSessionWindowHours(adminConfig.maxSessionWindowHours ?? 24);
     setMaintenanceBlockDurationHours(adminConfig.maintenanceBlockDurationHours ?? 12);
     setOpsEventRetentionDays(adminConfig.opsEventRetentionDays ?? 90);
@@ -431,6 +437,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
       globalRateLimit, setGlobalRateLimit,
       platformStatsBlobSasUrl, setPlatformStatsBlobSasUrl,
       collectorIdleTimeoutMinutes, setCollectorIdleTimeoutMinutes,
+      desktopDetectorNoCandidateTimeoutMinutes, setDesktopDetectorNoCandidateTimeoutMinutes,
       maxSessionWindowHours, setMaxSessionWindowHours,
       maintenanceBlockDurationHours, setMaintenanceBlockDurationHours,
       opsEventRetentionDays, setOpsEventRetentionDays,

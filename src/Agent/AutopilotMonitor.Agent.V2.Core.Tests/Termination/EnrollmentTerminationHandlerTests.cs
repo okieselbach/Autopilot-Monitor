@@ -150,6 +150,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             public IReadOnlyList<string> PromotionReturnValue { get; set; } = Array.Empty<string>();
             public List<string> TerminationActionLog { get; } = new List<string>();
             public TimeSpan SpoolDrainPeriodOverride { get; set; } = TimeSpan.Zero;
+            // Shutdown-gap closure (2026-05-15) — when set, the constructed handler shares
+            // this gate with the cross-path idempotency check. Tests that don't set this
+            // get null = legacy always-emit behaviour (preserved).
+            public Func<bool>? TryClaimShutdownEventOverride;
 
             public EnrollmentTerminationHandler Build(AgentConfiguration? config = null) =>
                 BuildCore(config, agentVersion: null);
@@ -205,7 +209,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                     {
                         PromotionCalls.Add((failureType, message));
                         return PromotionReturnValue;
-                    });
+                    },
+                    tryClaimShutdownEvent: TryClaimShutdownEventOverride);
             }
 
             public void Dispose() => Tmp.Dispose();
@@ -509,7 +514,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
             Assert.NotNull(data);
             Assert.Equal(EnrollmentTerminationOutcome.Succeeded.ToString(), (string)data!["outcome"]);
-            Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage.ToString(), (string)data["reason"]);
+            // Event-type unification (2026-05-15): the reason tag is now the unified
+            // lowercased vocabulary shared with the AgentRuntimeHost gap-paths.
+            Assert.Equal("decision_terminal", (string)data["reason"]);
         }
 
         [Fact]
@@ -529,7 +536,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
             Assert.NotNull(data);
-            Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage.ToString(), (string)data!["reason"]);
+            Assert.Equal("decision_terminal", (string)data!["reason"]);
         }
 
         [Fact]
@@ -554,6 +561,42 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
         }
 
         [Fact]
+        public void Handle_skips_agent_shutting_down_emit_when_gate_already_claimed()
+        {
+            // Shutdown-gap closure (2026-05-15): when AgentRuntimeHost's gap path (Ctrl+C,
+            // ProcessExit, unhandled_exception) emitted first and claimed the cross-path
+            // gate, the Terminated-driven handler must NOT emit a second agent_shutting_down
+            // event. Idempotency is critical because Ctrl+C followed by a real Terminated
+            // transition is a normal sequence in dev/console mode.
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+            rig.TryClaimShutdownEventOverride = () => false; // slot already claimed by gap path
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            // Cleanup + other lifecycle still runs — only the agent_shutting_down emit is
+            // suppressed.
+            Assert.Equal(1, rig.CleanupService.Invocations);
+            Assert.DoesNotContain(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void Handle_emits_agent_shutting_down_when_gate_grants_slot()
+        {
+            // Symmetric counterpart — when the gate returns true (handler is first to claim),
+            // the emit happens as usual.
+            using var rig = new Rig();
+            rig.State = new DecisionStateBuilder(DecisionState.CreateInitial("S1", "T1")) { Stage = SessionStage.Completed }.Build();
+            rig.TryClaimShutdownEventOverride = () => true;
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            Assert.Contains(Constants.EventTypes.AgentShuttingDown, rig.EmittedEventTypes);
+        }
+
+        [Fact]
         public void Handle_propagates_max_lifetime_reason_in_agent_shutting_down_data()
         {
             using var rig = new Rig();
@@ -564,7 +607,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             var data = rig.DataOf(Constants.EventTypes.AgentShuttingDown);
             Assert.NotNull(data);
-            Assert.Equal(EnrollmentTerminationReason.MaxLifetimeExceeded.ToString(), (string)data!["reason"]);
+            Assert.Equal("max_lifetime", (string)data!["reason"]);
             Assert.Equal(EnrollmentTerminationOutcome.Failed.ToString(), (string)data["outcome"]);
         }
 
