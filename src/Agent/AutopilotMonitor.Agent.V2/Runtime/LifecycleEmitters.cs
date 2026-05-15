@@ -402,6 +402,21 @@ namespace AutopilotMonitor.Agent.V2.Runtime
         // ====================================================== Cross-path shutdown emit helper
 
         /// <summary>
+        /// Outcome of <see cref="EmitAgentShuttingDownGapPath"/>. Drives the caller's
+        /// gate-release decision: <see cref="NoPost"/> means no emit was attempted (ingress
+        /// not yet wired), so the cross-path idempotency slot should be released for a later
+        /// fallback to retry; <see cref="Success"/> and <see cref="EmitFailed"/> both consume
+        /// the slot (we tried — either it landed, or the ingress is faulted and a retry won't
+        /// help).
+        /// </summary>
+        public enum AgentShuttingDownEmitResult
+        {
+            Success,
+            NoPost,
+            EmitFailed,
+        }
+
+        /// <summary>
         /// Shutdown-gap closure (2026-05-15) — emits a single
         /// <c>agent_shutting_down</c> event from one of the non-Terminated exit paths the
         /// V2 runtime had previously left silent (Ctrl+C, ProcessExit, unhandled exception
@@ -416,9 +431,17 @@ namespace AutopilotMonitor.Agent.V2.Runtime
         /// the same gate via its <c>tryClaimShutdownEvent</c> constructor parameter so
         /// double-emit cannot happen when, say, Ctrl+C races a real Terminated transition.
         /// </para>
+        /// <para>
+        /// <b>Gate-release (P2 fix 2026-05-15):</b> when this method returns
+        /// <see cref="AgentShuttingDownEmitResult.NoPost"/> the caller MUST release the slot
+        /// (Volatile.Write 0) so the next attempt (e.g. the finally fallback after
+        /// onIngressReady fires) can still surface the event. <see cref="AgentShuttingDownEmitResult.EmitFailed"/>
+        /// is treated as "we tried" — releasing on emit-thrown would risk producing
+        /// duplicate events under racing paths once the ingress recovers.
+        /// </para>
         /// </summary>
-        /// <param name="post">Live <see cref="InformationalEventPost"/>. Null is treated as
-        /// "ingress not ready"; the call logs and returns false without emitting.</param>
+        /// <param name="post">Live <see cref="InformationalEventPost"/>. Null returns
+        /// <see cref="AgentShuttingDownEmitResult.NoPost"/> without emitting.</param>
         /// <param name="agentConfig">Carries SessionId / TenantId / agent build version.</param>
         /// <param name="reason">Discriminator stored in <c>data["reason"]</c>. Allowed values:
         /// <c>ctrl_c</c>, <c>process_exit</c>, <c>unhandled_exception</c>,
@@ -431,9 +454,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
         /// caller is the unhandled-exception path.</param>
         /// <param name="exceptionMessage">Optional .NET exception message (truncated to
         /// 500 chars on the wire to keep payload size bounded).</param>
-        /// <returns>true if the event was posted; false if <paramref name="post"/> was null
-        /// or the emit threw.</returns>
-        public static bool EmitAgentShuttingDownGapPath(
+        public static AgentShuttingDownEmitResult EmitAgentShuttingDownGapPath(
             InformationalEventPost post,
             AgentConfiguration agentConfig,
             string reason,
@@ -446,7 +467,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             if (post == null)
             {
                 logger?.Warning($"agent_shutting_down (reason={reason}) suppressed — ingress not ready.");
-                return false;
+                return AgentShuttingDownEmitResult.NoPost;
             }
 
             try
@@ -487,12 +508,12 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     Data = data,
                     ImmediateUpload = true,
                 });
-                return true;
+                return AgentShuttingDownEmitResult.Success;
             }
             catch (Exception ex)
             {
                 logger?.Warning($"agent_shutting_down (reason={reason}) emission failed: {ex.Message}");
-                return false;
+                return AgentShuttingDownEmitResult.EmitFailed;
             }
         }
 
@@ -571,11 +592,28 @@ namespace AutopilotMonitor.Agent.V2.Runtime
             Func<InformationalEventPost> getLifecyclePost,
             AgentConfiguration agentConfig,
             Action signalShutdown,
-            AgentLogger logger)
+            AgentLogger logger,
+            Func<bool> tryClaimShutdownEvent = null,
+            Action releaseShutdownEventClaim = null)
         {
             return (s, e) =>
             {
                 logger.Error($"Auth-failure threshold exceeded ({e.Reason}) — initiating shutdown.");
+
+                // Cross-path shutdown gate (P1 fix 2026-05-15): auth-failure now participates
+                // in the same idempotency gate as the other agent_shutting_down emitters so a
+                // Terminated transition or a Ctrl+C racing this watchdog cannot produce two
+                // events on the wire. When the host did not wire a gate (legacy callers / tests
+                // that exercise the emit in isolation), the parameter is null = always-claim.
+                bool gateClaimed = tryClaimShutdownEvent == null || tryClaimShutdownEvent();
+
+                if (!gateClaimed)
+                {
+                    logger.Debug("agent_shutting_down (auth_failure) suppressed — gate already claimed by another path.");
+                    signalShutdown();
+                    return;
+                }
+
                 var post = getLifecyclePost();
                 if (post != null)
                 {
@@ -614,11 +652,18 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     catch (Exception emitEx)
                     {
                         logger.Warning($"agent_shutting_down (auth_failure) emission failed: {emitEx.Message}");
+                        // post.Emit threw — we still consumed the gate slot (we did our best).
+                        // No release: a later fallback can't sensibly retry an
+                        // already-faulted ingress.
                     }
                 }
                 else
                 {
+                    // P2 fix: ingress is not ready yet, so no emit was actually attempted.
+                    // Release the gate so the finally-block fallback (runtime_host_exit)
+                    // can still surface the shutdown on the wire after we've signalled exit.
                     logger.Warning("agent_shutting_down (auth_failure) suppressed — ingress not ready.");
+                    releaseShutdownEventClaim?.Invoke();
                 }
 
                 signalShutdown();

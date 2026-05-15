@@ -338,6 +338,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         /// <summary>
         /// Gets the owner of a process using WMI (Win32_Process.GetOwner).
         /// Returns "DOMAIN\User" or "User" string, or null on failure.
+        /// <para>
+        /// P3 fix (2026-05-15): WMI exceptions are caught here AND bumped onto
+        /// <see cref="_wmiErrorCountSinceStart"/> so the first_poll / no_candidate
+        /// observability events report the real error rate. Previously the outer
+        /// poll catch only counted top-level errors (Process.GetProcessesByName etc.),
+        /// leaving GetOwner-specific failures invisible.
+        /// </para>
         /// </summary>
         private string GetProcessOwner(int processId)
         {
@@ -356,11 +363,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                             var domain = outParams[1]?.ToString();
                             return string.IsNullOrEmpty(domain) ? user : $"{domain}\\{user}";
                         }
+                        // WMI returned a non-zero ManagementBaseObject.InvokeMethod result —
+                        // count it as an error so the liveness payload reflects the failure
+                        // rate. Common causes: PID just exited, owner ACL refused.
+                        _wmiErrorCountSinceStart++;
                     }
                 }
             }
             catch (Exception ex)
             {
+                _wmiErrorCountSinceStart++;
                 _logger.Debug($"DesktopArrivalDetector: WMI GetOwner failed for PID {processId}: {ex.Message}");
             }
 

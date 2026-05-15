@@ -202,12 +202,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
         // ============================================================ Gap-path shutdown emitter (2026-05-15)
 
         [Fact]
-        public void GapPath_returns_false_when_post_is_null()
+        public void GapPath_returns_NoPost_when_post_is_null()
         {
             using var tmp = new TempDirectory();
             var logger = NewLogger(tmp.Path);
 
-            var emitted = LifecycleEmitters.EmitAgentShuttingDownGapPath(
+            var result = LifecycleEmitters.EmitAgentShuttingDownGapPath(
                 post: null,
                 agentConfig: BuildConfig(),
                 reason: "ctrl_c",
@@ -215,18 +215,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
                 agentVersion: "2.0.999",
                 logger: logger);
 
-            Assert.False(emitted);
+            // P2 fix (2026-05-15): NoPost is the signal to the caller to RELEASE the gate
+            // so a later fallback (typically the finally block once onIngressReady has
+            // fired) can still surface the event. Tests must key on the enum value, not a
+            // plain bool, so a future EmitFailed regression doesn't get classified as NoPost.
+            Assert.Equal(LifecycleEmitters.AgentShuttingDownEmitResult.NoPost, result);
         }
 
         [Fact]
-        public void GapPath_emits_agent_shutting_down_with_reason_ctrl_c()
+        public void GapPath_returns_Success_when_emit_lands()
         {
             using var tmp = new TempDirectory();
             var logger = NewLogger(tmp.Path);
             var sink = new FakeSignalIngressSink();
             var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
 
-            var emitted = LifecycleEmitters.EmitAgentShuttingDownGapPath(
+            var result = LifecycleEmitters.EmitAgentShuttingDownGapPath(
                 post: post,
                 agentConfig: BuildConfig(),
                 reason: "ctrl_c",
@@ -234,7 +238,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
                 agentVersion: "2.0.999",
                 logger: logger);
 
-            Assert.True(emitted);
+            Assert.Equal(LifecycleEmitters.AgentShuttingDownEmitResult.Success, result);
             Assert.Single(sink.Posted);
             Assert.Equal("agent_shutting_down", sink.Posted[0].Payload?[SignalPayloadKeys.EventType]);
         }
@@ -292,7 +296,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
             var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
 
             var longMessage = new string('x', 2000);
-            var emitted = LifecycleEmitters.EmitAgentShuttingDownGapPath(
+            var result = LifecycleEmitters.EmitAgentShuttingDownGapPath(
                 post: post,
                 agentConfig: BuildConfig(),
                 reason: "unhandled_exception",
@@ -302,10 +306,108 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Program
                 exceptionType: "System.Exception",
                 exceptionMessage: longMessage);
 
-            Assert.True(emitted);
+            Assert.Equal(LifecycleEmitters.AgentShuttingDownEmitResult.Success, result);
             Assert.Single(sink.Posted);
-            // We can't easily peek into the Data dict here without exposing the payload format;
-            // the bound itself is exercised by the EmitAgentShuttingDownGapPath helper code.
+        }
+
+        // -------- AuthFailure gate participation (P1 fix 2026-05-15) --------
+
+        [Fact]
+        public void AuthThreshold_handler_skips_emit_when_gate_already_claimed()
+        {
+            // P1 fix: the auth-failure path now participates in the cross-path idempotency
+            // gate. If a Ctrl+C / ProcessExit / Terminated path already claimed the slot,
+            // the auth-failure emit MUST suppress to avoid double-emitting agent_shutting_down.
+            // signalShutdown still fires — the watchdog's primary job (initiate exit) is
+            // independent of telemetry.
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            var sink = new FakeSignalIngressSink();
+            var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
+
+            var shutdownCalled = false;
+            var handler = LifecycleEmitters.CreateAuthThresholdHandler(
+                getLifecyclePost: () => post,
+                agentConfig: BuildConfig(),
+                signalShutdown: () => shutdownCalled = true,
+                logger: logger,
+                tryClaimShutdownEvent: () => false, // gate already taken by another path
+                releaseShutdownEventClaim: null);
+
+            var args = new AuthFailureThresholdEventArgs(
+                consecutiveFailures: 3,
+                firstFailureUtc: DateTime.UtcNow.AddMinutes(-2),
+                lastOperation: "Telemetry",
+                lastStatusCode: 401,
+                reason: "consecutive_failures");
+
+            handler(sender: null, e: args);
+
+            Assert.True(shutdownCalled);
+            Assert.Empty(sink.Posted); // emit suppressed under claimed gate
+        }
+
+        [Fact]
+        public void AuthThreshold_handler_emits_when_gate_grants_slot()
+        {
+            // Symmetric counterpart: when the gate grants the slot the handler emits as usual.
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+            var sink = new FakeSignalIngressSink();
+            var post = new InformationalEventPost(sink, SystemClock.Instance, logger);
+
+            var handler = LifecycleEmitters.CreateAuthThresholdHandler(
+                getLifecyclePost: () => post,
+                agentConfig: BuildConfig(),
+                signalShutdown: () => { },
+                logger: logger,
+                tryClaimShutdownEvent: () => true,
+                releaseShutdownEventClaim: null);
+
+            handler(sender: null, e: new AuthFailureThresholdEventArgs(
+                consecutiveFailures: 3,
+                firstFailureUtc: DateTime.UtcNow.AddMinutes(-2),
+                lastOperation: "Telemetry",
+                lastStatusCode: 401,
+                reason: "consecutive_failures"));
+
+            Assert.Single(sink.Posted);
+            Assert.Equal("agent_shutting_down", sink.Posted[0].Payload?[SignalPayloadKeys.EventType]);
+        }
+
+        [Fact]
+        public void AuthThreshold_handler_releases_gate_when_post_is_null()
+        {
+            // P2 fix: when auth-failure fires before onIngressReady, the handler claimed the
+            // gate but cannot actually emit. It MUST release the slot so the later finally
+            // fallback (runtime_host_exit) can still surface the shutdown event on the wire.
+            using var tmp = new TempDirectory();
+            var logger = NewLogger(tmp.Path);
+
+            int claimed = 0;
+            var released = false;
+
+            var handler = LifecycleEmitters.CreateAuthThresholdHandler(
+                getLifecyclePost: () => null, // ingress not ready yet
+                agentConfig: BuildConfig(),
+                signalShutdown: () => { },
+                logger: logger,
+                tryClaimShutdownEvent: () =>
+                {
+                    if (claimed == 1) return false;
+                    claimed = 1;
+                    return true;
+                },
+                releaseShutdownEventClaim: () => released = true);
+
+            handler(sender: null, e: new AuthFailureThresholdEventArgs(
+                consecutiveFailures: 3,
+                firstFailureUtc: DateTime.UtcNow,
+                lastOperation: "Telemetry",
+                lastStatusCode: 401,
+                reason: "consecutive_failures"));
+
+            Assert.True(released, "auth_failure must release the gate when ingress was not ready so a later fallback can retry.");
         }
 
         // ============================================================ UnrestrictedMode no-op gate

@@ -164,6 +164,42 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     bool TryClaimAgentShuttingDownEmit() =>
                         Interlocked.Exchange(ref agentShuttingDownEmitted, 1) == 0;
 
+                    // P2 fix (2026-05-15): release the gate when an emit attempt did NOT
+                    // actually reach the ingress (post == null because onIngressReady has
+                    // not fired yet). Lets a later fallback (typically the finally block)
+                    // still surface the event once the post is wired. Not released on
+                    // EmitFailed — that path consumed the slot intentionally.
+                    void ReleaseShutdownEventClaim() =>
+                        System.Threading.Volatile.Write(ref agentShuttingDownEmitted, 0);
+
+                    // Wrapper used by the gap-closure paths (L1 Ctrl+C, L2 ProcessExit,
+                    // L3 unhandled exception, L4 finally fallback). Atomically claims the
+                    // gate, emits, and releases if the emit was never attempted (NoPost).
+                    bool TryEmitAgentShuttingDownGap(
+                        string reason,
+                        string exceptionType = null,
+                        string exceptionMessage = null)
+                    {
+                        if (!TryClaimAgentShuttingDownEmit()) return false;
+
+                        var result = LifecycleEmitters.EmitAgentShuttingDownGapPath(
+                            post: lifecyclePost,
+                            agentConfig: agentConfig,
+                            reason: reason,
+                            agentStartTimeUtc: agentStartTimeUtc,
+                            agentVersion: agentVersion,
+                            logger: logger,
+                            exceptionType: exceptionType,
+                            exceptionMessage: exceptionMessage);
+
+                        if (result == LifecycleEmitters.AgentShuttingDownEmitResult.NoPost)
+                        {
+                            ReleaseShutdownEventClaim();
+                            return false;
+                        }
+                        return true;
+                    }
+
                     ConsoleCancelEventHandler cancelHandler = (s, e) =>
                     {
                         e.Cancel = true;
@@ -172,17 +208,10 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         // L1 gap-closure: previously the cancelHandler only signalled
                         // shutdown.Set(), leaving the timeline without an explicit
                         // agent_shutting_down event. Emit here so dev/console-mode exits are
-                        // distinguishable from silent process death.
-                        if (TryClaimAgentShuttingDownEmit())
-                        {
-                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
-                                post: lifecyclePost,
-                                agentConfig: agentConfig,
-                                reason: "ctrl_c",
-                                agentStartTimeUtc: agentStartTimeUtc,
-                                agentVersion: agentVersion,
-                                logger: logger);
-                        }
+                        // distinguishable from silent process death. The wrapper releases
+                        // the gate if onIngressReady hasn't fired yet so the finally
+                        // fallback can retry.
+                        TryEmitAgentShuttingDownGap(reason: "ctrl_c");
 
                         shutdown.Set();
                     };
@@ -197,16 +226,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         // orchestrator.Stop's DrainAllAsync. Under a hard Windows shutdown
                         // race the event may end up persisted-but-not-uploaded; even then it
                         // surfaces in the next session's diag ZIP (if upload is on).
-                        if (TryClaimAgentShuttingDownEmit())
-                        {
-                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
-                                post: lifecyclePost,
-                                agentConfig: agentConfig,
-                                reason: "process_exit",
-                                agentStartTimeUtc: agentStartTimeUtc,
-                                agentVersion: agentVersion,
-                                logger: logger);
-                        }
+                        TryEmitAgentShuttingDownGap(reason: "process_exit");
 
                         shutdown.Set();
                     };
@@ -237,11 +257,21 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     };
                     orchestrator.Terminated += terminatedDispatch;
 
+                    // P1 fix (2026-05-15): wire the auth-failure handler through the same
+                    // cross-path idempotency gate as the other agent_shutting_down emitters.
+                    // Previously the auth-failure path emitted unconditionally, which let
+                    // the finally-fallback (runtime_host_exit) also emit when the watchdog
+                    // claim+signalShutdown fell through to the runtime exit — producing two
+                    // events on the wire. The releaseShutdownEventClaim is also wired so an
+                    // auth-failure that fires before onIngressReady can yield to the later
+                    // fallback emit instead of consuming the slot.
                     var authThresholdHandler = LifecycleEmitters.CreateAuthThresholdHandler(
                         getLifecyclePost: () => lifecyclePost,
                         agentConfig: agentConfig,
                         signalShutdown: () => shutdown.Set(),
-                        logger: logger);
+                        logger: logger,
+                        tryClaimShutdownEvent: TryClaimAgentShuttingDownEmit,
+                        releaseShutdownEventClaim: ReleaseShutdownEventClaim);
                     auth.AuthFailureTracker.ThresholdExceeded += authThresholdHandler;
 
                     // Death-Rattle (Plan §B, 2026-05-03): capture the prior run's last
@@ -541,18 +571,10 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         // logs + WriteCrashLog but emits no timeline event — the session
                         // looked like silent process death. Emit before re-throwing so the
                         // crash is visible on the wire.
-                        if (TryClaimAgentShuttingDownEmit())
-                        {
-                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
-                                post: lifecyclePost,
-                                agentConfig: agentConfig,
-                                reason: "unhandled_exception",
-                                agentStartTimeUtc: agentStartTimeUtc,
-                                agentVersion: agentVersion,
-                                logger: logger,
-                                exceptionType: runtimeEx.GetType().FullName,
-                                exceptionMessage: runtimeEx.Message);
-                        }
+                        TryEmitAgentShuttingDownGap(
+                            reason: "unhandled_exception",
+                            exceptionType: runtimeEx.GetType().FullName,
+                            exceptionMessage: runtimeEx.Message);
                         throw;
                     }
                     finally
@@ -566,19 +588,12 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         // L4 gap-closure (2026-05-15): defensive fallback emit for any path
                         // that returned to finally without claiming the gate — e.g. a future
                         // direct shutdown.Set() from a server-action handler that bypasses
-                        // both Terminated AND the cancel/processExit closures. Best-effort:
-                        // the gate is already claimed by Terminated / Ctrl+C / ProcessExit /
-                        // AuthFailure / L3 in every known path, so this rarely fires.
-                        if (TryClaimAgentShuttingDownEmit())
-                        {
-                            LifecycleEmitters.EmitAgentShuttingDownGapPath(
-                                post: lifecyclePost,
-                                agentConfig: agentConfig,
-                                reason: "runtime_host_exit",
-                                agentStartTimeUtc: agentStartTimeUtc,
-                                agentVersion: agentVersion,
-                                logger: logger);
-                        }
+                        // both Terminated AND the cancel/processExit closures, or a Ctrl+C
+                        // that claimed the gate but couldn't emit because onIngressReady
+                        // hadn't fired yet (P2 release-on-NoPost). The gate is already
+                        // claimed by Terminated / AuthFailure / L3 in every known happy
+                        // path, so this rarely fires.
+                        TryEmitAgentShuttingDownGap(reason: "runtime_host_exit");
 
                         TerminationPipeline.Run(
                             orchestrator: orchestrator,
