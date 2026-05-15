@@ -507,8 +507,8 @@ namespace AutopilotMonitor.Functions.Services
         /// Enumerates every row in <paramref name="tableName"/> with
         /// <c>PartitionKey == {tenantId}_{sessionId}</c> and deletes them via
         /// <see cref="DeleteByExactKeysInBatchesAsync"/>. Used for PK_BY_SESSION-class cascade
-        /// targets when the caller does not yet have a manifest in hand (e.g. legacy direct-delete
-        /// paths or test fixtures); the §1 P6 cascade worker passes manifest keys to
+        /// targets when the caller does not yet have a manifest in hand (e.g. test fixtures);
+        /// the §1 P6 cascade worker passes manifest keys to
         /// <see cref="DeleteByExactKeysInBatchesAsync"/> directly.
         /// </summary>
         private async Task<DeletionBatchResult> DeletePkBySessionAsync(

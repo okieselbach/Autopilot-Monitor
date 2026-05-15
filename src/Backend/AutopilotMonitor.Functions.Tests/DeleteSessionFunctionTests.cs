@@ -8,16 +8,11 @@ using Xunit;
 namespace AutopilotMonitor.Functions.Tests;
 
 /// <summary>
-/// Thin HTTP-layer tests for <see cref="DeleteSessionFunction"/> (plan §5 PR5). Mirrors the
-/// <see cref="RestoreSessionFunctionTests"/> pattern: verifies the policy-catalog registration
-/// and the public status-mapping / body-shape helpers without touching <c>HttpRequestData</c>.
-/// <para>
-/// The end-to-end coordination (kill-switch → 503, locked → 409, flag toggle → V2/legacy)
-/// is covered by the producer test suite (PR3) for the V2 outcomes, the worker tests (PR4)
-/// for cascade behaviour, and the §18.4 internal-tenant integration run before any tenant
-/// flag flip. There is intentionally NO HttpRequestData mock here — the production code is
-/// the same shell wrapped around <see cref="DeleteSessionFunction.MapEnqueueOutcomeToStatus"/>.
-/// </para>
+/// HTTP-layer tests for <see cref="DeleteSessionFunction"/>. Verifies the policy-catalog
+/// registration, the public status-mapping / body-shape helpers, and the single pre-dispatch
+/// kill-switch gate without touching <c>HttpRequestData</c>. Everything else (existence check,
+/// lock-state mapping, recovery resume) is owned by the producer and covered by
+/// <see cref="SessionDeletionProducer"/> tests.
 /// </summary>
 public class DeleteSessionFunctionTests
 {
@@ -135,6 +130,31 @@ public class DeleteSessionFunctionTests
 
         AssertProperty(body, "hint", "kill_switch_active");
         Assert.False(HasProperty(body, "manifestId"));
+    }
+
+    // ── EvaluateAdminDeleteGates (kill-switch short-circuit) ──────────────────────────────
+
+    [Fact]
+    public void Gates_killSwitch_active_short_circuits_to_503()
+    {
+        var gate = DeleteSessionFunction.EvaluateAdminDeleteGates(killSwitchActive: true);
+
+        Assert.NotNull(gate);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, gate!.Value.Status);
+        AssertProperty(gate.Value.Body, "hint", "kill_switch_active");
+        // The kill-switch body must NOT carry a manifestId so the UI doesn't render a
+        // "track this cascade" link for a request that was refused.
+        Assert.False(HasProperty(gate.Value.Body, "manifestId"));
+    }
+
+    [Fact]
+    public void Gates_killSwitch_inactive_returns_null_so_producer_is_invoked()
+    {
+        // The happy path: producer handles existence (404), lock-state (409), and recovery
+        // resume (202 for Queued/Preparing+Snapshot). Function must NOT short-circuit those.
+        var gate = DeleteSessionFunction.EvaluateAdminDeleteGates(killSwitchActive: false);
+
+        Assert.Null(gate);
     }
 
     // ── Anonymous-object reflection helpers ───────────────────────────────────────────────

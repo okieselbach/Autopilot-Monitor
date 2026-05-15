@@ -153,13 +153,13 @@ namespace AutopilotMonitor.Functions.Services
         /// silently failed because the AuditLogs schema requires a non-null PartitionKey (tenantId).
         /// </summary>
         public Task RecordSessionDeletionMaintenanceCompletedAsync(
-            bool killSwitchActive, int tenantsProcessed, int sessionsEnqueued, int sessionsLegacyDeleted,
+            bool killSwitchActive, int tenantsProcessed, int sessionsEnqueued,
             int sessionsSkipped, int rateLimitedTenants, int blobsTtlGced, int preparingRowsCleared,
             int strandedQueuedDetected, int durationMs, bool abortedByKillSwitch)
             => WriteAsync(OpsEventCategory.Maintenance, "SessionDeletionMaintenanceCompleted", OpsEventSeverity.Info,
-                $"SessionDeletionMaintenance completed in {durationMs}ms — tenants={tenantsProcessed} enqueued={sessionsEnqueued} legacy={sessionsLegacyDeleted} skipped={sessionsSkipped} blobsTtlGced={blobsTtlGced} preparingCleared={preparingRowsCleared} stranded={strandedQueuedDetected} killSwitch={killSwitchActive}",
+                $"SessionDeletionMaintenance completed in {durationMs}ms — tenants={tenantsProcessed} enqueued={sessionsEnqueued} skipped={sessionsSkipped} blobsTtlGced={blobsTtlGced} preparingCleared={preparingRowsCleared} stranded={strandedQueuedDetected} killSwitch={killSwitchActive}",
                 null, "System.Maintenance", new {
-                    killSwitchActive, tenantsProcessed, sessionsEnqueued, sessionsLegacyDeleted,
+                    killSwitchActive, tenantsProcessed, sessionsEnqueued,
                     sessionsSkipped, rateLimitedTenants, blobsTtlGced, preparingRowsCleared,
                     strandedQueuedDetected, durationMs, abortedByKillSwitch,
                 });

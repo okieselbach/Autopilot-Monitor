@@ -246,13 +246,10 @@ export function AdminConfigSettingsSection({
                 <span>
                   <span className="text-red-900 dark:text-red-100 font-medium">Cascade-Delete Kill-Switch (emergency)</span>
                   <p className="text-sm text-red-800 dark:text-gray-300 mt-1">
-                    Global emergency stop for the V2 cascade-deletion subsystem. When <strong>on</strong>: the cascade producer
-                    returns <code className="text-xs bg-red-100 dark:bg-red-900 dark:text-red-200 px-1 rounded">503 Service Unavailable</code>,
-                    the legacy direct-delete path also returns 503 (so the switch is truly global, not just V2),
+                    Global emergency stop for the cascade-deletion subsystem. When <strong>on</strong>: the cascade producer
+                    returns <code className="text-xs bg-red-100 dark:bg-red-900 dark:text-red-200 px-1 rounded">503 Service Unavailable</code>
                     and the cascade worker pauses on entry. Flip on if a runaway cascade or storage incident requires
-                    halting all session-delete activity across all tenants. Independent of the per-tenant
-                    <code className="ml-1 text-xs bg-red-100 dark:bg-red-900 dark:text-red-200 px-1 rounded">EnableCascadeDeleteV2</code> flag —
-                    that selects the path, this halts both paths. Default <strong>off</strong>.
+                    halting all session-delete activity across all tenants. Default <strong>off</strong>.
                   </p>
                 </span>
               </label>

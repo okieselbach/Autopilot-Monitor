@@ -324,7 +324,6 @@ public class SessionDeletionMaintenanceFunctionTests
 
             Fanout = new Mock<SessionRetentionFanoutService>(
                 maintRepo.Object,
-                Mock.Of<ISessionRepository>(),
                 new Mock<TenantConfigurationService>(Mock.Of<IConfigRepository>(), NullLogger<TenantConfigurationService>.Instance, memCache).Object,
                 Mock.Of<ISessionDeletionEnqueuer>(),
                 AdminConfig.Object,

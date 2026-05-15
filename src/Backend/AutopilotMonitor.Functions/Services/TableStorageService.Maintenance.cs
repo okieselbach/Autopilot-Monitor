@@ -595,20 +595,6 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Deletes all app install summaries for a session
-        /// </summary>
-        public async Task<int> DeleteSessionAppInstallSummariesAsync(string tenantId, string sessionId)
-        {
-            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
-            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
-
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
-            // AppInstallSummaries PK=tenantId, so all filtered rows still share the same PK → batch-tx-safe.
-            var filter = $"PartitionKey eq '{tenantId}' and SessionId eq '{sessionId}'";
-            return await DeleteByFilterInBatchesAsync(tableClient, filter, $"app install summaries for session {sessionId}");
-        }
-
-        /// <summary>
         /// Deletes all entities matching the filter from the given table.
         /// Uses projected query (PK/RK only) to minimize payload, and submits 100-entity
         /// batch transactions in parallel (up to 4 in flight) for faster bulk delete.

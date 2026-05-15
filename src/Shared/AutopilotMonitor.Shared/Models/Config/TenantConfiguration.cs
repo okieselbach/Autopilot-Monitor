@@ -138,16 +138,6 @@ namespace AutopilotMonitor.Shared.Models
         public int DataRetentionDays { get; set; } = 90;
 
         /// <summary>
-        /// Per-tenant rollout flag for the V2 cascade-delete pipeline (Plan §1 P8 / §5 PR3 /
-        /// §9). When <c>true</c>, admin-delete and retention-cleanup paths build a manifest +
-        /// enqueue to the <c>session-deletion</c> queue; the worker (PR4) executes the cascade.
-        /// When <c>false</c> (default), the legacy direct-delete path runs for this tenant.
-        /// Per-tenant flag selects which PATH; the global
-        /// <see cref="AdminConfiguration.SessionDeletionKillSwitch"/> halts BOTH paths.
-        /// </summary>
-        public bool EnableCascadeDeleteV2 { get; set; } = false;
-
-        /// <summary>
         /// Session timeout in hours
         /// Sessions in "InProgress" status longer than this will be marked as "Failed - Timed Out"
         /// This prevents stalled sessions from running indefinitely and skewing statistics

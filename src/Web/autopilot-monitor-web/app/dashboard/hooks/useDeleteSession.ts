@@ -129,11 +129,6 @@ export function useDeleteSession(
           );
           return;
 
-        case 'immediate':
-          trackEvent("session_deleted", { inAdminMode: adminMode });
-          onSessionDeleted(action.sessionId);
-          return;
-
         case 'conflict':
           addNotification('warning', action.title, action.message, `session-delete-conflict-${action.sessionId}`);
           return;

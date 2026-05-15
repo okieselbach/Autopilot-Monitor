@@ -86,11 +86,10 @@ interface SessionTableProps {
   onColumnFiltersChange: (filters: Record<string, Set<string>>) => void;
   onDeleteSession: (sessionId: string, tenantId: string, deviceName?: string) => void;
   /**
-   * Sessions currently awaiting the V2 cascade worker's `sessionDeleted` SignalR notification.
-   * Plan §5 PR5 finding 3: when this set contains a session id, the action cell renders a
-   * spinner instead of the delete button so the user can see that the click was accepted and
-   * the row is being drained server-side. Empty by default; only V2-flagged tenants populate
-   * it (the legacy direct-delete returns 200 and removes the row immediately).
+   * Sessions currently awaiting the cascade worker's `sessionDeleted` SignalR notification.
+   * When this set contains a session id, the action cell renders a spinner instead of the
+   * delete button so the user can see that the click was accepted and the row is being
+   * drained server-side.
    */
   pendingDeletions: ReadonlySet<string>;
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;

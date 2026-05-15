@@ -54,7 +54,6 @@ namespace AutopilotMonitor.Shared.DataAccess
         // --- Cleanup ---
         Task<int> DeleteSessionEventsAsync(string tenantId, string sessionId);
         Task<int> DeleteSessionRuleResultsAsync(string tenantId, string sessionId);
-        Task<int> DeleteSessionAppInstallSummariesAsync(string tenantId, string sessionId);
 
         // --- Index Maintenance ---
         Task<int> BackfillSessionIndexAsync();

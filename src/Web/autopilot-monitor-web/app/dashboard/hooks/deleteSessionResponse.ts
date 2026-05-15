@@ -1,7 +1,7 @@
 /**
  * Pure response-classification logic extracted from `useDeleteSession` so the dispatch
- * branches (200 legacy / 202 V2 / 409 / 503 / other) can be unit-tested without React
- * rendering. Plan §5 PR5.
+ * branches (202 cascade enqueued / 409 / 503 / other) can be unit-tested without React
+ * rendering.
  *
  * The hook itself runs the side-effects (toast, SignalR group join, row removal); these
  * helpers describe *what* should happen for a given backend response.
@@ -28,7 +28,6 @@ export interface DeleteErrorBody {
 }
 
 export type DeleteResponseAction =
-  | { kind: "immediate"; sessionId: string }
   | { kind: "queued"; sessionId: string; tenantId: string; manifestId: string | null }
   | { kind: "conflict"; sessionId: string; title: string; message: string; hint: string | null }
   | { kind: "unavailable"; sessionId: string; message: string }
@@ -54,10 +53,6 @@ export async function classifyDeleteResponse(
       tenantId,
       manifestId: body?.manifestId ?? null,
     };
-  }
-
-  if (response.ok) {
-    return { kind: "immediate", sessionId };
   }
 
   const errorBody = await safeJson<DeleteErrorBody>(response);

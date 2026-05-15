@@ -46,9 +46,8 @@ export interface AdminConfiguration {
   enableIndexDualWrite?: boolean;
   /**
    * Global emergency kill-switch for the cascade-deletion subsystem (Plan §1 P8 / §9).
-   * When true: V2 cascade producers + legacy direct-delete return 503; cascade worker (PR4)
-   * pauses on entry. Independent of per-tenant EnableCascadeDeleteV2 (that selects path,
-   * this halts both). Default false.
+   * When true: cascade producers return 503 and the cascade worker pauses on entry.
+   * Default false.
    */
   sessionDeletionKillSwitch?: boolean;
 }

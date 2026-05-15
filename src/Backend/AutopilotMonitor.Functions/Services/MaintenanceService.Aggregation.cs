@@ -189,10 +189,9 @@ namespace AutopilotMonitor.Functions.Services
 
         // Plan §5 PR6 / §16 R14: the session retention loop that previously lived here is now
         // owned by SessionDeletionMaintenanceFunction (12h cadence, dedicated watchdog OpsEvents,
-        // V2 cascade vs legacy direct-delete dispatch via SessionRetentionFanoutService). The
-        // non-session tail of this method (UserUsageLog + RuleStats cleanup) was already a
-        // separate method (CleanupOldUsageDataAsync) and is now called directly from RunAllAsync
-        // and RunManualAsync.
+        // cascade-delete dispatch via SessionRetentionFanoutService). The non-session tail of
+        // this method (UserUsageLog + RuleStats cleanup) was already a separate method
+        // (CleanupOldUsageDataAsync) and is now called directly from RunAllAsync and RunManualAsync.
 
         /// <summary>
         /// Reconciles rule stats for a given date by computing global aggregate rows

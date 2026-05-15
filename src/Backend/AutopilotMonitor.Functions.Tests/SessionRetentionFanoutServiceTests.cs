@@ -15,8 +15,7 @@ using Xunit;
 namespace AutopilotMonitor.Functions.Tests;
 
 /// <summary>
-/// Per-tenant retention dispatch + rate-limit tests for <see cref="SessionRetentionFanoutService"/>
-/// (Plan §5 PR6 step 7).
+/// Per-tenant retention dispatch + rate-limit tests for <see cref="SessionRetentionFanoutService"/>.
 /// </summary>
 public class SessionRetentionFanoutServiceTests
 {
@@ -24,16 +23,15 @@ public class SessionRetentionFanoutServiceTests
     private const string TenantB = "22222222-2222-2222-2222-222222222222";
 
     [Fact]
-    public async Task RunAsync_dispatches_V2_path_when_EnableCascadeDeleteV2_is_true()
+    public async Task RunAsync_enqueues_v2_cascade_for_old_sessions()
     {
         var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 30, v2: true,
+        harness.WithTenant(TenantA, retentionDays: 30,
             sessions: new[] { Old("s1", 60), Old("s2", 45) });
 
         var result = await harness.Sut.RunAsync(CancellationToken.None);
 
         Assert.Equal(2, result.SessionsEnqueued);
-        Assert.Equal(0, result.SessionsLegacyDeleted);
         harness.Enqueuer.Verify(
             e => e.EnqueueAsync(TenantA, "s1", "retention_cutoff", It.Is<DeletionActor>(a => a.Type == "maintenance"), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()),
             Times.Once);
@@ -43,51 +41,13 @@ public class SessionRetentionFanoutServiceTests
     }
 
     [Fact]
-    public async Task RunAsync_falls_back_to_legacy_direct_delete_when_EnableCascadeDeleteV2_is_false()
-    {
-        var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 30, v2: false,
-            sessions: new[] { Old("s1", 60) });
-        harness.MaintenanceRepo
-            .Setup(m => m.DeleteSessionEventsAsync(TenantA, "s1"))
-            .ReturnsAsync(17);
-        harness.SessionRepo
-            .Setup(r => r.DeleteSessionAsync(TenantA, "s1"))
-            .ReturnsAsync(true);
-
-        var result = await harness.Sut.RunAsync(CancellationToken.None);
-
-        Assert.Equal(0, result.SessionsEnqueued);
-        Assert.Equal(1, result.SessionsLegacyDeleted);
-        harness.Enqueuer.Verify(
-            e => e.EnqueueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-        harness.SessionRepo.Verify(r => r.DeleteSessionAsync(TenantA, "s1"), Times.Once);
-    }
-
-    [Fact]
-    public async Task RunAsync_legacy_path_counts_DeleteSessionAsync_false_as_skip_not_delete()
-    {
-        // PR5 finding 2: DeleteSessionAsync returns false when a V2 cascade has claimed the row.
-        // The fanout must record that as a skip so the next maintenance tick retries.
-        var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 30, v2: false, sessions: new[] { Old("s1", 60) });
-        harness.SessionRepo.Setup(r => r.DeleteSessionAsync(TenantA, "s1")).ReturnsAsync(false);
-
-        var result = await harness.Sut.RunAsync(CancellationToken.None);
-
-        Assert.Equal(0, result.SessionsLegacyDeleted);
-        Assert.Equal(1, result.SessionsSkipped);
-    }
-
-    [Fact]
     public async Task RunAsync_handles_two_tenants_with_different_retentions()
     {
         var harness = new Harness();
         // Tenant A: 30d retention → eligible at 45d
-        harness.WithTenant(TenantA, retentionDays: 30, v2: true, sessions: new[] { Old("a1", 45) });
+        harness.WithTenant(TenantA, retentionDays: 30, sessions: new[] { Old("a1", 45) });
         // Tenant B: 120d retention → 45d-old session is NOT eligible (only 200d-old is)
-        harness.WithTenant(TenantB, retentionDays: 120, v2: true, sessions: new[] { Old("b1", 45), Old("b2", 200) });
+        harness.WithTenant(TenantB, retentionDays: 120, sessions: new[] { Old("b1", 45), Old("b2", 200) });
 
         // The repo only returns sessions older than each cutoff. Wire each tenant's mock to honor that.
         harness.MaintenanceRepo.Setup(m => m.GetSessionsOlderThanAsync(TenantA, It.IsAny<DateTime>()))
@@ -112,7 +72,7 @@ public class SessionRetentionFanoutServiceTests
         var many = new List<SessionSummary>();
         for (int i = 0; i < SessionRetentionFanoutService.MaxEnqueuesPerTenantPerRun + 25; i++)
             many.Add(Summary(TenantA, $"s{i:000}"));
-        harness.WithTenantOverride(TenantA, retentionDays: 30, v2: true, sessions: many);
+        harness.WithTenantOverride(TenantA, retentionDays: 30, sessions: many);
 
         var result = await harness.Sut.RunAsync(CancellationToken.None);
 
@@ -128,60 +88,13 @@ public class SessionRetentionFanoutServiceTests
     public async Task RunAsync_skips_tenant_with_DataRetentionDays_zero()
     {
         var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 0, v2: true, sessions: new[] { Old("s1", 365) });
+        harness.WithTenant(TenantA, retentionDays: 0, sessions: new[] { Old("s1", 365) });
 
         var result = await harness.Sut.RunAsync(CancellationToken.None);
 
         Assert.Equal(0, result.SessionsEnqueued);
-        Assert.Equal(0, result.SessionsLegacyDeleted);
         // GetSessionsOlderThanAsync must not have been called for that tenant.
         harness.MaintenanceRepo.Verify(m => m.GetSessionsOlderThanAsync(TenantA, It.IsAny<DateTime>()), Times.Never);
-    }
-
-    // ────────────────────────────────────────────────────────────────────────── PR6 follow-up F1 ─
-    // Codex-followup: the ordering changed from "side-tables first, Sessions-CAS last" to
-    // "Sessions-CAS first, side-tables after". DeleteSessionAsync's internal ETag-CAS is now the
-    // single arbiter against in-flight V2 cascades — if it returns false (locked / 412 / 404),
-    // side-tables stay untouched. This closes the TOCTOU window the pre-read couldn't.
-
-    [Fact]
-    public async Task RunAsync_legacy_path_skips_side_tables_when_DeleteSessionAsync_refuses_locked_row()
-    {
-        // DeleteSessionAsync detects the V2 cascade lock internally and returns false. The fanout
-        // must record SessionsSkipped + leave side-tables intact so the V2 worker owns cleanup.
-        var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 30, v2: false, sessions: new[] { Old("s1", 60) });
-        harness.SessionRepo.Setup(r => r.DeleteSessionAsync(TenantA, "s1")).ReturnsAsync(false);
-
-        var result = await harness.Sut.RunAsync(CancellationToken.None);
-
-        Assert.Equal(1, result.SessionsSkipped);
-        Assert.Equal(0, result.SessionsLegacyDeleted);
-        harness.SessionRepo.Verify(r => r.DeleteSessionAsync(TenantA, "s1"), Times.Once);
-        // Side-tables MUST stay intact when DeleteSessionAsync refused.
-        harness.MaintenanceRepo.Verify(m => m.DeleteSessionEventsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-        harness.MaintenanceRepo.Verify(m => m.DeleteSessionRuleResultsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-        harness.MaintenanceRepo.Verify(m => m.DeleteSessionAppInstallSummariesAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task RunAsync_legacy_path_runs_side_tables_only_after_DeleteSessionAsync_succeeds()
-    {
-        // Sessions-first ordering: side-table helpers fire ONLY after DeleteSessionAsync returns
-        // true. No producer can claim a missing Sessions row, so side-table cleanup is race-free.
-        var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 30, v2: false, sessions: new[] { Old("s1", 60) });
-        harness.SessionRepo.Setup(r => r.DeleteSessionAsync(TenantA, "s1")).ReturnsAsync(true);
-        harness.MaintenanceRepo.Setup(m => m.DeleteSessionEventsAsync(TenantA, "s1")).ReturnsAsync(7);
-
-        var result = await harness.Sut.RunAsync(CancellationToken.None);
-
-        Assert.Equal(1, result.SessionsLegacyDeleted);
-        Assert.Equal(0, result.SessionsSkipped);
-        harness.SessionRepo.Verify(r => r.DeleteSessionAsync(TenantA, "s1"), Times.Once);
-        harness.MaintenanceRepo.Verify(m => m.DeleteSessionEventsAsync(TenantA, "s1"), Times.Once);
-        harness.MaintenanceRepo.Verify(m => m.DeleteSessionRuleResultsAsync(TenantA, "s1"), Times.Once);
-        harness.MaintenanceRepo.Verify(m => m.DeleteSessionAppInstallSummariesAsync(TenantA, "s1"), Times.Once);
     }
 
     // ────────────────────────────────────────────────────────────────────────── PR6 follow-up F2 ─
@@ -194,7 +107,7 @@ public class SessionRetentionFanoutServiceTests
         var harness = new Harness();
         var manySessions = new List<SessionSummary>();
         for (int i = 0; i < 5; i++) manySessions.Add(Summary(TenantA, $"s{i}"));
-        harness.WithTenantOverride(TenantA, retentionDays: 30, v2: true, sessions: manySessions);
+        harness.WithTenantOverride(TenantA, retentionDays: 30, sessions: manySessions);
 
         // First 2 calls return false (kill-switch off), then true → fanout aborts at the 3rd iteration.
         var calls = 0;
@@ -223,8 +136,8 @@ public class SessionRetentionFanoutServiceTests
     {
         // Kill-switch flips on between tenant A and tenant B → tenant B is never started.
         var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 30, v2: true, sessions: new[] { Old("a1", 60) });
-        harness.WithTenant(TenantB, retentionDays: 30, v2: true, sessions: new[] { Old("b1", 60) });
+        harness.WithTenant(TenantA, retentionDays: 30, sessions: new[] { Old("a1", 60) });
+        harness.WithTenant(TenantB, retentionDays: 30, sessions: new[] { Old("b1", 60) });
 
         var calls = 0;
         harness.AdminConfig.Setup(a => a.IsSessionDeletionKillSwitchActiveAsync())
@@ -244,13 +157,87 @@ public class SessionRetentionFanoutServiceTests
         harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantB, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task RunAsync_aborts_when_producer_reports_KillSwitchActive_outcome()
+    {
+        // Race scenario: pre-check (per-tenant + per-session) returns false because the
+        // operator hadn't flipped yet, the producer's own Step 0 check returns true because
+        // the flip landed in between. The fanout must NOT keep pushing the rest of the
+        // tenant's backlog through a producer that's already 503'ing every call.
+        var harness = new Harness();
+        var sessions = new List<SessionSummary>();
+        for (int i = 0; i < 4; i++) sessions.Add(Summary(TenantA, $"s{i}"));
+        harness.WithTenantOverride(TenantA, retentionDays: 30, sessions: sessions);
+
+        // First enqueue returns Enqueued, second returns KillSwitchActive (producer flipped).
+        var enqueueCalls = 0;
+        harness.Enqueuer.Setup(e => e.EnqueueAsync(TenantA, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                enqueueCalls++;
+                return enqueueCalls == 1
+                    ? new SessionDeletionEnqueueResult { Outcome = SessionDeletionEnqueueOutcome.Enqueued, ManifestId = "M" }
+                    : new SessionDeletionEnqueueResult { Outcome = SessionDeletionEnqueueOutcome.KillSwitchActive };
+            });
+
+        var result = await harness.Sut.RunAsync(CancellationToken.None);
+
+        Assert.True(result.AbortedByKillSwitch);
+        Assert.Equal(1, result.SessionsEnqueued);
+        Assert.Equal(1, result.SessionsSkipped); // the KillSwitchActive session counts as skipped
+        // s2 and s3 must NOT be enqueued — inner loop broke at s1.
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantA, "s2", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Never);
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantA, "s3", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_aborts_outer_loop_when_producer_reports_KillSwitchActive_for_tenant_A()
+    {
+        // Two-tenant regression: tenant A's second enqueue returns KillSwitchActive. The
+        // outer loop must NOT advance to tenant B — that would push at least one more
+        // request through the producer despite the authoritative fail-closed outcome.
+        var harness = new Harness();
+        harness.WithTenantOverride(TenantA, retentionDays: 30, sessions: new List<SessionSummary>
+        {
+            Summary(TenantA, "a0"),
+            Summary(TenantA, "a1"),
+        });
+        harness.WithTenant(TenantB, retentionDays: 30, sessions: new[] { Old("b0", 60) });
+
+        // Tenant A: first enqueue Enqueued, second KillSwitchActive.
+        // Tenant B: would-be Enqueued (default) — must NEVER be called.
+        var aCalls = 0;
+        harness.Enqueuer.Setup(e => e.EnqueueAsync(TenantA, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                aCalls++;
+                return aCalls == 1
+                    ? new SessionDeletionEnqueueResult { Outcome = SessionDeletionEnqueueOutcome.Enqueued, ManifestId = "M" }
+                    : new SessionDeletionEnqueueResult { Outcome = SessionDeletionEnqueueOutcome.KillSwitchActive };
+            });
+
+        var result = await harness.Sut.RunAsync(CancellationToken.None);
+
+        Assert.True(result.AbortedByKillSwitch);
+        Assert.Equal(1, result.TenantsProcessed); // tenant A completed its RunForTenantAsync; B never started
+        Assert.Equal(1, result.SessionsEnqueued);
+
+        // Tenant B must NEVER have been touched — neither config-read nor enqueue.
+        harness.Enqueuer.Verify(e => e.EnqueueAsync(TenantB, It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        harness.MaintenanceRepo.Verify(m => m.GetSessionsOlderThanAsync(TenantB, It.IsAny<DateTime>()), Times.Never);
+    }
+
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task RunAsync_counts_AlreadyInFlight_outcome_as_skip()
     {
         var harness = new Harness();
-        harness.WithTenant(TenantA, retentionDays: 30, v2: true, sessions: new[] { Old("s1", 60) });
+        harness.WithTenant(TenantA, retentionDays: 30, sessions: new[] { Old("s1", 60) });
         // Another producer already claimed this session — fanout must not double-count.
         harness.Enqueuer.Setup(e => e.EnqueueAsync(TenantA, "s1", It.IsAny<string>(), It.IsAny<DeletionActor>(), It.IsAny<DeletionRetentionContext?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SessionDeletionEnqueueResult
@@ -285,7 +272,6 @@ public class SessionRetentionFanoutServiceTests
     private sealed class Harness
     {
         public Mock<IMaintenanceRepository> MaintenanceRepo { get; }
-        public Mock<ISessionRepository> SessionRepo { get; }
         public Mock<TenantConfigurationService> TenantConfig { get; }
         public Mock<ISessionDeletionEnqueuer> Enqueuer { get; }
         public Mock<AdminConfigurationService> AdminConfig { get; }
@@ -296,17 +282,10 @@ public class SessionRetentionFanoutServiceTests
         public Harness()
         {
             MaintenanceRepo = new Mock<IMaintenanceRepository>();
-            SessionRepo = new Mock<ISessionRepository>();
             var memCache = new MemoryCache(new MemoryCacheOptions());
             TenantConfig = new Mock<TenantConfigurationService>(
                 Mock.Of<IConfigRepository>(), NullLogger<TenantConfigurationService>.Instance, memCache);
             Enqueuer = new Mock<ISessionDeletionEnqueuer>();
-
-            // PR6 follow-up F1: legacy path now pre-reads the Sessions row via ISessionRepository
-            // to check DeletionState. Default: row exists with DeletionState=None so legacy proceeds.
-            SessionRepo.Setup(r => r.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>()))
-                .Returns<string, string>((tenant, sid) => Task.FromResult<SessionSummary?>(
-                    new SessionSummary { TenantId = tenant, SessionId = sid, DeletionState = SessionDeletionState.None }));
 
             // PR6 follow-up F2: per-session kill-switch check inside the fanout loop.
             AdminConfig = new Mock<AdminConfigurationService>(
@@ -332,26 +311,26 @@ public class SessionRetentionFanoutServiceTests
             // Use internal ctor to inject a no-op throttle so the rate-limit test runs in real-time
             // (50ms × 100 = 5s otherwise).
             Sut = new SessionRetentionFanoutService(
-                MaintenanceRepo.Object, SessionRepo.Object, TenantConfig.Object, Enqueuer.Object,
+                MaintenanceRepo.Object, TenantConfig.Object, Enqueuer.Object,
                 AdminConfig.Object,
                 NullLogger<SessionRetentionFanoutService>.Instance,
                 throttle: (_, _) => Task.CompletedTask);
         }
 
-        public void WithTenant(string tenantId, int retentionDays, bool v2, SessionSummary[] sessions)
+        public void WithTenant(string tenantId, int retentionDays, SessionSummary[] sessions)
         {
             _tenantIds.Add(tenantId);
             TenantConfig.Setup(t => t.GetConfigurationAsync(tenantId))
-                .ReturnsAsync(new TenantConfiguration { TenantId = tenantId, DataRetentionDays = retentionDays, EnableCascadeDeleteV2 = v2 });
+                .ReturnsAsync(new TenantConfiguration { TenantId = tenantId, DataRetentionDays = retentionDays });
             MaintenanceRepo.Setup(m => m.GetSessionsOlderThanAsync(tenantId, It.IsAny<DateTime>()))
                 .ReturnsAsync(new List<SessionSummary>(WithTenantId(tenantId, sessions)));
         }
 
-        public void WithTenantOverride(string tenantId, int retentionDays, bool v2, List<SessionSummary> sessions)
+        public void WithTenantOverride(string tenantId, int retentionDays, List<SessionSummary> sessions)
         {
             _tenantIds.Add(tenantId);
             TenantConfig.Setup(t => t.GetConfigurationAsync(tenantId))
-                .ReturnsAsync(new TenantConfiguration { TenantId = tenantId, DataRetentionDays = retentionDays, EnableCascadeDeleteV2 = v2 });
+                .ReturnsAsync(new TenantConfiguration { TenantId = tenantId, DataRetentionDays = retentionDays });
             foreach (var s in sessions) s.TenantId = tenantId;
             MaintenanceRepo.Setup(m => m.GetSessionsOlderThanAsync(tenantId, It.IsAny<DateTime>())).ReturnsAsync(sessions);
         }

@@ -6,10 +6,9 @@ import {
 } from "@/app/dashboard/hooks/deleteSessionResponse";
 
 /**
- * Pure-logic tests for the response classifier extracted from `useDeleteSession`. Plan §5 PR5
- * wires the V2 cascade enqueue (202) alongside the legacy direct-delete (200); these tests
- * pin the per-status branches so the UX hint string the backend sends never silently changes
- * shape on the frontend.
+ * Pure-logic tests for the response classifier extracted from `useDeleteSession`. The backend
+ * only emits 202 (cascade enqueued), 404, 409, 503, or 5xx; these tests pin the per-status
+ * branches so the UX hint string the backend sends never silently changes shape on the frontend.
  *
  * No React rendering — the hook composes these helpers with `useSignalR` for the side-effects
  * (toast, joinGroup, row removal); the helpers are the testable contract.
@@ -47,19 +46,6 @@ describe("classifyDeleteResponse", () => {
       tenantId: TENANT_ID,
       manifestId: "01J0ABCDEFG",
     });
-  });
-
-  it("classifies 200 as immediate (legacy direct-delete path)", async () => {
-    const r = jsonResponse(200, {
-      success: true,
-      eventsDeleted: 17,
-      ruleResultsDeleted: 4,
-      appInstallSummariesDeleted: 2,
-    });
-
-    const action = await classifyDeleteResponse(r, SESSION_ID, TENANT_ID);
-
-    expect(action).toEqual({ kind: "immediate", sessionId: SESSION_ID });
   });
 
   it("classifies 409 already-in-flight with the right title", async () => {

@@ -61,8 +61,6 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// </summary>
         Task<SessionStats> GetAllSessionStatsAsync(string? tenantIdFilter, int days);
 
-        Task<bool> DeleteSessionAsync(string tenantId, string sessionId);
-
         // --- Session Updates ---
         Task<bool> UpdateSessionStatusAsync(
             string tenantId, string sessionId, SessionStatus status,

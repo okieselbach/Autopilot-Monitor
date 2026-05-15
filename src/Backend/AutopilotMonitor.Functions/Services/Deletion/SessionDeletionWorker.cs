@@ -37,13 +37,6 @@ namespace AutopilotMonitor.Functions.Services.Deletion
     ///       The Sessions row's <c>DeletionState</c> is NOT auto-cleared — operator action via
     ///       restore-from-poisoned (§13, PR4b) is required.</item>
     /// </list>
-    /// <para>
-    /// <b>The worker is NOT registered in <c>Program.cs</c> in PR4</b> — that wires up in PR5
-    /// alongside the flag-gated <c>DeleteSessionFunction</c> changes. Without the producer
-    /// emitting envelopes (gated by <c>TenantConfiguration.EnableCascadeDeleteV2</c>, default
-    /// false), having the worker idle on an empty queue is harmless; we hold off so the worker's
-    /// poll-loop doesn't appear in production telemetry until the cutover.
-    /// </para>
     /// </summary>
     public sealed class SessionDeletionWorker : BackgroundService
     {

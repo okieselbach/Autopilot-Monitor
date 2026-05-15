@@ -52,9 +52,6 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<SessionStats> GetAllSessionStatsAsync(string? tenantIdFilter, int days)
             => _storage.GetAllSessionStatsAsync(tenantIdFilter, days);
 
-        public Task<bool> DeleteSessionAsync(string tenantId, string sessionId)
-            => _storage.DeleteSessionAsync(tenantId, sessionId);
-
         public Task<bool> UpdateSessionStatusAsync(
             string tenantId, string sessionId, SessionStatus status,
             EnrollmentPhase? currentPhase = null, string? failureReason = null,

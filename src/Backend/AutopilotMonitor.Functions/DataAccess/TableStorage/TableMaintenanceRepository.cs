@@ -65,9 +65,6 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<int> DeleteSessionRuleResultsAsync(string tenantId, string sessionId)
             => _storage.DeleteSessionRuleResultsAsync(tenantId, sessionId);
 
-        public Task<int> DeleteSessionAppInstallSummariesAsync(string tenantId, string sessionId)
-            => _storage.DeleteSessionAppInstallSummariesAsync(tenantId, sessionId);
-
         public Task<int> BackfillSessionIndexAsync()
             => _storage.BackfillSessionIndexAsync();
 

@@ -21,10 +21,10 @@ namespace AutopilotMonitor.Functions.Functions.Maintenance
     ///   <item><b>Manifest-blob-TTL sweep</b> — defence-in-depth against a misconfigured Lifecycle policy.</item>
     ///   <item><b>Stale-<c>Preparing</c> GC</b> — clear rows stuck in <c>Preparing</c> for &gt; 1h with no progress blob.</item>
     ///   <item><b>Stranded-<c>Queued</c> detection</b> — alert (no auto-clear) when a queued envelope hasn't been picked up in &gt; 30min.</item>
-    ///   <item><b>Retention fanout</b> — per-tenant DataRetentionDays sweep, dispatched to V2 or legacy via <see cref="SessionRetentionFanoutService"/>.</item>
+    ///   <item><b>Retention fanout</b> — per-tenant DataRetentionDays sweep via <see cref="SessionRetentionFanoutService"/>.</item>
     /// </list>
     /// <para>
-    /// Independent cadence from the legacy 2h <c>Maintenance</c> function so cascade-lifecycle
+    /// Independent cadence from the 2h <c>Maintenance</c> function so cascade-lifecycle
     /// work cannot starve rule-stats aggregation / cert-expiry checks, and operators get a
     /// dedicated OpsEvent stream (<see cref="OpsEventService.RecordSessionDeletionMaintenanceLongRunningAsync"/>
     /// + siblings) wired to Telegram via the standard alert-rules UI.
@@ -167,7 +167,7 @@ namespace AutopilotMonitor.Functions.Functions.Maintenance
                 {
                     fanoutResult = await _fanout.RunAsync(cancellationToken);
                     tenantsProcessedSoFar = fanoutResult.TenantsProcessed;
-                    sessionsEnqueuedSoFar = fanoutResult.SessionsEnqueued + fanoutResult.SessionsLegacyDeleted;
+                    sessionsEnqueuedSoFar = fanoutResult.SessionsEnqueued;
                 }
 
                 // (5) Completion OpsEvent — same shape regardless of kill-switch state, so dashboards
@@ -176,7 +176,6 @@ namespace AutopilotMonitor.Functions.Functions.Maintenance
                     killSwitchActive: killSwitchActive,
                     tenantsProcessed: fanoutResult?.TenantsProcessed ?? 0,
                     sessionsEnqueued: fanoutResult?.SessionsEnqueued ?? 0,
-                    sessionsLegacyDeleted: fanoutResult?.SessionsLegacyDeleted ?? 0,
                     sessionsSkipped: fanoutResult?.SessionsSkipped ?? 0,
                     rateLimitedTenants: fanoutResult?.RateLimitedTenants ?? 0,
                     blobsTtlGced: blobsTtlGced,
@@ -186,11 +185,10 @@ namespace AutopilotMonitor.Functions.Functions.Maintenance
                     abortedByKillSwitch: fanoutResult?.AbortedByKillSwitch ?? false);
 
                 _logger.LogInformation(
-                    "SessionDeletionMaintenance: completed in {Ms}ms — killSwitch={KillSwitch} tenants={Tenants} enqueued={Enqueued} legacy={Legacy} skipped={Skipped} blobs={Blobs} preparing={Preparing} stranded={Stranded} tombstones={Tombstones}",
+                    "SessionDeletionMaintenance: completed in {Ms}ms — killSwitch={KillSwitch} tenants={Tenants} enqueued={Enqueued} skipped={Skipped} blobs={Blobs} preparing={Preparing} stranded={Stranded} tombstones={Tombstones}",
                     sw.ElapsedMilliseconds, killSwitchActive,
                     fanoutResult?.TenantsProcessed ?? 0,
                     fanoutResult?.SessionsEnqueued ?? 0,
-                    fanoutResult?.SessionsLegacyDeleted ?? 0,
                     fanoutResult?.SessionsSkipped ?? 0,
                     blobsTtlGced, preparingRowsCleared, strandedQueuedDetected, tombstonesPruned);
             }
