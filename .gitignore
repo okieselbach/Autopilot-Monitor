@@ -25,6 +25,7 @@ bld/
 *.user
 *.userosscache
 *.sln.docstates
+*.csproj.lscache
 
 # Build Results
 *.dll
