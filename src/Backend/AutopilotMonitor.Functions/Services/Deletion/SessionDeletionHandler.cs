@@ -276,7 +276,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                 action: "deletion_completed",
                 entityType: "Session",
                 entityId: sessionId,
-                performedBy: "system",
+                performedBy: FormatCompletedPerformer(manifest.CreatedBy),
                 details: BuildCompletedDetails(manifestId, manifest, sw.ElapsedMilliseconds))
                 .ConfigureAwait(false);
 
@@ -645,6 +645,28 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                 ["stepsCount"] = manifest.Steps.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["schemaHash"] = manifest.SchemaHash,
             };
+        }
+
+        /// <summary>
+        /// Surfaces the original cascade trigger on the <c>deletion_completed</c> audit row so a
+        /// GA can tell admin-triggered deletes apart from retention-cutoff sweeps at a glance,
+        /// without having to cross-reference the (suppressed-for-retention) <c>deletion_started</c>
+        /// entry.
+        /// <list type="bullet">
+        ///   <item><c>admin</c> path → <c>"system (admin: {user})"</c> — same UPN that's on deletion_started.</item>
+        ///   <item><c>maintenance</c> path → <c>"system (maintenance)"</c> — distinct from the raw
+        ///       <c>"System.Maintenance"</c> string that the suppression filter still matches on, so this
+        ///       audit row stays visible in the human-facing list.</item>
+        /// </list>
+        /// </summary>
+        private static string FormatCompletedPerformer(DeletionActor createdBy)
+        {
+            if (string.Equals(createdBy.Type, "maintenance", StringComparison.OrdinalIgnoreCase))
+                return "system (maintenance)";
+            if (string.Equals(createdBy.Type, "admin", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(createdBy.Actor))
+                return $"system (admin: {createdBy.Actor})";
+            return "system";
         }
 
         private void LogStepFailed(
