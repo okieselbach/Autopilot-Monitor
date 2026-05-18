@@ -52,15 +52,21 @@ namespace AutopilotMonitor.Agent.Core.Security
                         }
                         else
                         {
-                            // Auto-detect MDM certificate by issuer and EKU
+                            // Auto-detect MDM certificate by issuer and EKU.
+                            // Match ONLY "CN=Microsoft Intune MDM Device CA" — NOT
+                            // "CN=Microsoft Intune Device Management Device CA" (MMP-C stack),
+                            // which is co-installed on dual-enrolled devices and chains to a
+                            // different intermediate the backend does not pin. A broader
+                            // substring match on "Microsoft Intune" would let the MMP-C cert
+                            // win the NotAfter tiebreaker and produce ChainFailed at the backend.
                             var mdmCerts = store.Certificates
                                 .OfType<X509Certificate2>()
                                 .Where(c =>
                                 {
-                                    // Check issuer (Microsoft Intune MDM Device CA or similar)
-                                    var issuerContainsMdm = c.Issuer.Contains("Microsoft Intune", StringComparison.OrdinalIgnoreCase) ||
-                                                           c.Issuer.Contains("MDM Device CA", StringComparison.OrdinalIgnoreCase) ||
-                                                           c.Issuer.Contains("Microsoft Device CA", StringComparison.OrdinalIgnoreCase);
+                                    var issuerIsMdm = string.Equals(
+                                        c.Issuer,
+                                        "CN=Microsoft Intune MDM Device CA",
+                                        StringComparison.OrdinalIgnoreCase);
 
                                     // Check Enhanced Key Usage for Client Authentication (1.3.6.1.5.5.7.3.2)
                                     var hasClientAuth = c.Extensions
@@ -69,7 +75,7 @@ namespace AutopilotMonitor.Agent.Core.Security
                                             .OfType<Oid>()
                                             .Any(oid => oid.Value == "1.3.6.1.5.5.7.3.2"));
 
-                                    return issuerContainsMdm && hasClientAuth;
+                                    return issuerIsMdm && hasClientAuth;
                                 })
                                 .OrderByDescending(c => c.NotAfter) // Prefer certs with longer validity
                                 .ToList();
