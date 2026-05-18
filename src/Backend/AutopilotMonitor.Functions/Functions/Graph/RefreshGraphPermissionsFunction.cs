@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services.GraphResolution;
+using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -18,13 +20,16 @@ public class RefreshGraphPermissionsFunction
 {
     private readonly ILogger<RefreshGraphPermissionsFunction> _logger;
     private readonly IGraphFeatureDetector _detector;
+    private readonly TelemetryClient _telemetry;
 
     public RefreshGraphPermissionsFunction(
         ILogger<RefreshGraphPermissionsFunction> logger,
-        IGraphFeatureDetector detector)
+        IGraphFeatureDetector detector,
+        TelemetryClient telemetry)
     {
         _logger = logger;
         _detector = detector;
+        _telemetry = telemetry;
     }
 
     [Function("RefreshGraphPermissions")]
@@ -39,6 +44,22 @@ public class RefreshGraphPermissionsFunction
             _detector.InvalidateTenant(requestCtx.TargetTenantId);
             _logger.LogInformation("Graph-permissions cache invalidated for tenant {Tenant} by request",
                 requestCtx.TargetTenantId);
+
+            try
+            {
+                // High-signal event: admin just ran the grant script and asked us to pick
+                // up the new appRoleAssignment. Pulses cluster around tenants newly opting in.
+                _telemetry.TrackEvent("GraphAddOnRefreshTriggered", new Dictionary<string, string>
+                {
+                    ["TenantId"] = requestCtx.TargetTenantId,
+                    ["UserId"] = requestCtx.UserPrincipalName,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "GraphAddOnRefreshTriggered telemetry emit failed");
+            }
+
             return await req.OkAsync(new { success = true });
         }
         catch (Exception ex)

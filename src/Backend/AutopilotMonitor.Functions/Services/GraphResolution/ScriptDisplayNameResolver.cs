@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -8,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models.Graph;
+using Microsoft.ApplicationInsights;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
@@ -42,14 +44,16 @@ public sealed class ScriptDisplayNameResolver : IScriptDisplayNameResolver
     private readonly IScriptNameCacheRepository _cache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ScriptDisplayNameResolver> _logger;
+    private readonly TelemetryClient _telemetry;
     private readonly TimeProvider _time;
 
     public ScriptDisplayNameResolver(
         IGraphFeatureDetector detector,
         IScriptNameCacheRepository cache,
         IHttpClientFactory httpClientFactory,
-        ILogger<ScriptDisplayNameResolver> logger)
-        : this(detector, cache, httpClientFactory, logger, TimeProvider.System)
+        ILogger<ScriptDisplayNameResolver> logger,
+        TelemetryClient telemetry)
+        : this(detector, cache, httpClientFactory, logger, telemetry, TimeProvider.System)
     {
     }
 
@@ -59,12 +63,14 @@ public sealed class ScriptDisplayNameResolver : IScriptDisplayNameResolver
         IScriptNameCacheRepository cache,
         IHttpClientFactory httpClientFactory,
         ILogger<ScriptDisplayNameResolver> logger,
+        TelemetryClient telemetry,
         TimeProvider time)
     {
         _detector = detector;
         _cache = cache;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _telemetry = telemetry;
         _time = time;
     }
 
@@ -113,11 +119,14 @@ public sealed class ScriptDisplayNameResolver : IScriptDisplayNameResolver
             cached = new Dictionary<ScriptRef, ScriptDisplayNameEntry>();
         }
 
+        var cacheHits = 0;
         foreach (var kv in cached)
         {
             if (!kv.Value.IsNotFound) result[kv.Key] = kv.Value.DisplayName;
             // NotFound rows: leave result[ref] = null (already initialised).
+            cacheHits++;
         }
+        var triggeredFullPull = false;
 
         var missing = refs.Where(r => !cached.ContainsKey(r)).ToList();
         if (missing.Count == 0) return result;
@@ -137,6 +146,7 @@ public sealed class ScriptDisplayNameResolver : IScriptDisplayNameResolver
 
             if (metaStale)
             {
+                triggeredFullPull = true;
                 try
                 {
                     await FullPullAsync(tenantId, kind, ctx.AccessToken, result, budget).ConfigureAwait(false);
@@ -219,7 +229,33 @@ public sealed class ScriptDisplayNameResolver : IScriptDisplayNameResolver
             }
         }
 
+        // Usage telemetry — fires only when the optional permission was active AND the
+        // resolver actually did work. Volume = once per session-view that has scripts,
+        // which is a meaningful "tenant is using this feature" pulse.
+        EmitResolved(tenantId, refs.Count, result, cacheHits, triggeredFullPull);
+
         return result;
+    }
+
+    private void EmitResolved(string tenantId, int refsRequested, Dictionary<ScriptRef, string?> result, int cacheHits, bool triggeredFullPull)
+    {
+        try
+        {
+            var resolved = 0;
+            foreach (var v in result.Values) { if (v != null) resolved++; }
+            _telemetry.TrackEvent("ScriptDisplayNamesResolved", new Dictionary<string, string>
+            {
+                ["TenantId"] = tenantId,
+                ["RefsRequested"] = refsRequested.ToString(CultureInfo.InvariantCulture),
+                ["RefsResolved"] = resolved.ToString(CultureInfo.InvariantCulture),
+                ["CacheHits"] = cacheHits.ToString(CultureInfo.InvariantCulture),
+                ["TriggeredFullPull"] = triggeredFullPull.ToString(CultureInfo.InvariantCulture),
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "ScriptDisplayNamesResolved telemetry emit failed");
+        }
     }
 
     // ── Graph HTTP plumbing ──────────────────────────────────────────────────

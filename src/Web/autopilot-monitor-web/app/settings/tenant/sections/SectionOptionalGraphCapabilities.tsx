@@ -5,6 +5,7 @@ import { useAuth } from "../../../../contexts/AuthContext";
 import { useTenant } from "../../../../contexts/TenantContext";
 import { api } from "@/lib/api";
 import { authenticatedFetch } from "@/lib/authenticatedFetch";
+import { trackEvent } from "@/lib/appInsights";
 
 interface FeatureStatus {
   name: string;
@@ -44,6 +45,15 @@ export function SectionOptionalGraphCapabilities() {
       }
       const body = (await response.json()) as StatusResponse;
       setStatus(body);
+      // Tracks distinct admins/tenants looking at the capability page. The
+      // backend's GraphAddOnStatusChecked event covers the same signal server-side
+      // (more authoritative), but the client-side flavour also captures admins who
+      // bounce off the page before the round-trip lands.
+      trackEvent("GraphAddOnStatusViewed", {
+        isTransient: !!body.isTransient,
+        scriptDisplayNamesGranted: !!body.features.find(f => f.name === "ScriptDisplayNames")?.granted,
+        grantedRoleCount: body.grantedRoles?.length ?? 0,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load status.");
       setStatus(null);
@@ -82,6 +92,8 @@ export function SectionOptionalGraphCapabilities() {
       await navigator.clipboard.writeText(text);
       setCopied(label);
       window.setTimeout(() => setCopied(null), 2000);
+      // High-intent signal: admin is about to run (or share) the grant command.
+      trackEvent("GraphAddOnGrantCommandCopied", { kind: label });
     } catch {
       // Older browsers / iframes — best effort only.
     }

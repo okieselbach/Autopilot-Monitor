@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Services.GraphResolution;
 using AutopilotMonitor.Shared.Models.Graph;
+using Microsoft.ApplicationInsights;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
@@ -38,15 +41,18 @@ public class GetGraphPermissionsStatusFunction
     private readonly ILogger<GetGraphPermissionsStatusFunction> _logger;
     private readonly IGraphFeatureDetector _detector;
     private readonly IConfiguration _configuration;
+    private readonly TelemetryClient _telemetry;
 
     public GetGraphPermissionsStatusFunction(
         ILogger<GetGraphPermissionsStatusFunction> logger,
         IGraphFeatureDetector detector,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        TelemetryClient telemetry)
     {
         _logger = logger;
         _detector = detector;
         _configuration = configuration;
+        _telemetry = telemetry;
     }
 
     [Function("GetGraphPermissionsStatus")]
@@ -79,6 +85,8 @@ public class GetGraphPermissionsStatusFunction
                 requiredPermissions = GraphFeatureCatalog.RequiredPermissions(featureName),
             }).ToList();
 
+            EmitStatusChecked(requestCtx.TargetTenantId, requestCtx.UserPrincipalName, snapshot);
+
             return await req.OkAsync(new
             {
                 clientId = _configuration["EntraId:ClientId"] ?? string.Empty,
@@ -91,6 +99,26 @@ public class GetGraphPermissionsStatusFunction
         {
             return await req.InternalServerErrorAsync(_logger, ex,
                 $"Get graph-permissions status for tenant '{tenantId}'");
+        }
+    }
+
+    private void EmitStatusChecked(string tenantId, string userPrincipalName, GraphPermissionSnapshot snapshot)
+    {
+        try
+        {
+            _telemetry.TrackEvent("GraphAddOnStatusChecked", new Dictionary<string, string>
+            {
+                ["TenantId"] = tenantId,
+                ["UserId"] = userPrincipalName,
+                ["IsTransient"] = snapshot.IsTransient.ToString(CultureInfo.InvariantCulture),
+                ["ScriptDisplayNamesGranted"] = GraphFeatureCatalog
+                    .IsFeatureGranted(GraphFeatureCatalog.FeatureScriptDisplayNames, snapshot.GrantedRoles)
+                    .ToString(CultureInfo.InvariantCulture),
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GraphAddOnStatusChecked telemetry emit failed");
         }
     }
 }

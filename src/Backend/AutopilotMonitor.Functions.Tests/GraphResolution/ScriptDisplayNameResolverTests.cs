@@ -4,6 +4,8 @@ using System.Net;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Services.GraphResolution;
 using AutopilotMonitor.Shared.Models.Graph;
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -246,6 +248,7 @@ public class ScriptDisplayNameResolverTests
             Sut = new ScriptDisplayNameResolver(
                 Detector, Repo, HttpFactory,
                 NullLogger<ScriptDisplayNameResolver>.Instance,
+                new TelemetryClient(new TelemetryConfiguration()),
                 new FakeTimeProvider(FixedNow));
         }
 

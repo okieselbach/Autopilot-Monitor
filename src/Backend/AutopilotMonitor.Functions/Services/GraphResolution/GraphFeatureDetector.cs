@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Functions.Security;
+using AutopilotMonitor.Shared.Models.Graph;
+using Microsoft.ApplicationInsights;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
@@ -24,13 +27,15 @@ public sealed class GraphFeatureDetector : IGraphFeatureDetector
     private readonly GraphTokenService _tokenService;
     private readonly IMemoryCache _cache;
     private readonly ILogger<GraphFeatureDetector> _logger;
+    private readonly TelemetryClient _telemetry;
     private readonly TimeProvider _time;
 
     public GraphFeatureDetector(
         GraphTokenService tokenService,
         IMemoryCache cache,
-        ILogger<GraphFeatureDetector> logger)
-        : this(tokenService, cache, logger, TimeProvider.System)
+        ILogger<GraphFeatureDetector> logger,
+        TelemetryClient telemetry)
+        : this(tokenService, cache, logger, telemetry, TimeProvider.System)
     {
     }
 
@@ -39,11 +44,13 @@ public sealed class GraphFeatureDetector : IGraphFeatureDetector
         GraphTokenService tokenService,
         IMemoryCache cache,
         ILogger<GraphFeatureDetector> logger,
+        TelemetryClient telemetry,
         TimeProvider time)
     {
         _tokenService = tokenService;
         _cache = cache;
         _logger = logger;
+        _telemetry = telemetry;
         _time = time;
     }
 
@@ -127,7 +134,32 @@ public sealed class GraphFeatureDetector : IGraphFeatureDetector
         _logger.LogDebug(
             "GraphFeatureDetector: cached token for tenant {TenantId} with {RoleCount} roles, TTL={Ttl}",
             tenantId, roles.Count, ttl);
+
+        // Telemetry: fires only on FRESH acquire (cache miss). Frequency is bounded by the
+        // cache TTL (~55 min per tenant), so this is the right pulse for "which tenants
+        // currently have the optional Graph permissions on" without spamming AppInsights.
+        EmitPermissionsDetected(tenantId, roles, ttl);
         return (ctx, false);
+    }
+
+    private void EmitPermissionsDetected(string tenantId, IReadOnlySet<string> roles, TimeSpan ttl)
+    {
+        try
+        {
+            _telemetry.TrackEvent("GraphAddOnPermissionsDetected", new Dictionary<string, string>
+            {
+                ["TenantId"] = tenantId,
+                ["GrantedRoleCount"] = roles.Count.ToString(CultureInfo.InvariantCulture),
+                ["HasScriptDisplayNames"] = roles.Contains(GraphAppPermissions.DeviceManagementScriptsReadAll)
+                    .ToString(CultureInfo.InvariantCulture),
+                ["TokenCacheTtlMinutes"] = ((int)ttl.TotalMinutes).ToString(CultureInfo.InvariantCulture),
+            });
+        }
+        catch (Exception ex)
+        {
+            // Never let a telemetry failure poison the acquire hot path.
+            _logger.LogDebug(ex, "GraphAddOnPermissionsDetected telemetry emit failed");
+        }
     }
 
     public void InvalidateTenant(string tenantId)
