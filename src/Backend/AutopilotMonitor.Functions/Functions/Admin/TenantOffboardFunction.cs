@@ -19,15 +19,18 @@ public class TenantOffboardFunction
 {
     private readonly ILogger<TenantOffboardFunction> _logger;
     private readonly IMaintenanceRepository _maintenanceRepo;
+    private readonly IConfigRepository _configRepo;
     private readonly OpsEventService _opsEventService;
 
     public TenantOffboardFunction(
         ILogger<TenantOffboardFunction> logger,
         IMaintenanceRepository maintenanceRepo,
+        IConfigRepository configRepo,
         OpsEventService opsEventService)
     {
         _logger = logger;
         _maintenanceRepo = maintenanceRepo;
+        _configRepo = configRepo;
         _opsEventService = opsEventService;
     }
 
@@ -65,6 +68,19 @@ public class TenantOffboardFunction
 
         var result = new OffboardResult { TenantId = requestCtx.TargetTenantId, InitiatedBy = upn!, InitiatedAt = DateTime.UtcNow };
 
+        // Capture domain name BEFORE deletion — tenant config is wiped by DeleteAllTenantDataAsync,
+        // and the ops alert / Telegram message is friendlier with the domain than the bare GUID.
+        string? domainName = null;
+        try
+        {
+            var tenantConfig = await _configRepo.GetTenantConfigurationAsync(requestCtx.TargetTenantId);
+            domainName = tenantConfig?.DomainName;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read tenant config for {TenantId} before offboard; proceeding without domain name", requestCtx.TargetTenantId);
+        }
+
         try
         {
             var deletedCounts = await _maintenanceRepo.DeleteAllTenantDataAsync(requestCtx.TargetTenantId);
@@ -87,7 +103,7 @@ public class TenantOffboardFunction
                 upn!,
                 details);
 
-            await _opsEventService.RecordTenantOffboardedAsync(requestCtx.TargetTenantId, upn!, deletedCounts);
+            await _opsEventService.RecordTenantOffboardedAsync(requestCtx.TargetTenantId, upn!, deletedCounts, domainName);
 
             var okResponse = req.CreateResponse(HttpStatusCode.OK);
             await okResponse.WriteAsJsonAsync(result);

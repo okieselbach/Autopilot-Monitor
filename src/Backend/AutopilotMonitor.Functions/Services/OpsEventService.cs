@@ -256,10 +256,24 @@ namespace AutopilotMonitor.Functions.Services
 
         // ── Tenant ─────────────────────────────────────────────────────────────
 
-        public Task RecordTenantOffboardedAsync(string tenantId, string performedBy, Dictionary<string, int> deletedCounts)
-            => WriteAsync(OpsEventCategory.Tenant, "TenantOffboarded", OpsEventSeverity.Warning,
-                $"Tenant {tenantId} offboarded — all data deleted",
-                tenantId, performedBy, deletedCounts);
+        public Task RecordTenantOffboardedAsync(string tenantId, string performedBy, Dictionary<string, int> deletedCounts, string? domainName = null)
+        {
+            var tenantLabel = string.IsNullOrWhiteSpace(domainName)
+                ? tenantId
+                : $"{domainName} ({tenantId})";
+
+            // Wrap deletedCounts + domainName so the OpsEvents details panel still surfaces the
+            // per-table counts AND the domain (needed because Table Storage is gone by emit time).
+            var details = new Dictionary<string, object?>
+            {
+                ["domainName"] = domainName,
+                ["deletedCounts"] = deletedCounts,
+            };
+
+            return WriteAsync(OpsEventCategory.Tenant, "TenantOffboarded", OpsEventSeverity.Warning,
+                $"Tenant {tenantLabel} offboarded — all data deleted",
+                tenantId, performedBy, details);
+        }
 
         // ── Agent ──────────────────────────────────────────────────────────────
 
