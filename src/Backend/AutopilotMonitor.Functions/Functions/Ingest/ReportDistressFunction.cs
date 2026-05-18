@@ -40,11 +40,17 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         private readonly IHardwareRejectionNotificationTracker _hardwareBellTracker;
         private readonly TenantNotificationService _tenantNotificationService;
 
-        // Strict limits for the unauthenticated endpoint
-        internal const int MaxContentLength = 1024;
+        // Strict limits for the unauthenticated endpoint.
+        // MaxContentLength bumped from 1024 -> 1536 to accommodate the V2 cert-context fields
+        // (Thumbprint + Subject + Issuer + NotBefore/After + SourceState ~430 bytes worst-case).
+        // Rate-limiting (per-IP + per-tenant + global circuit breaker) remains the primary
+        // DoS defense — the size cap is a payload-shape gate, not the throttle.
+        internal const int MaxContentLength = 1536;
         internal const int MaxStringField64 = 64;
         internal const int MaxStringField32 = 32;
         internal const int MaxMessageLength = 256;
+        internal const int MaxCertDnLength = 96;
+        internal const int CertThumbprintLength = 40;
         internal static readonly TimeSpan MaxTimestampAge = TimeSpan.FromHours(24);
         internal static readonly TimeSpan MaxTimestampFuture = TimeSpan.FromMinutes(5);
 
@@ -54,6 +60,11 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         // Simple GUID format check (avoids injection)
         internal static readonly Regex GuidPattern = new Regex(
             @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            RegexOptions.Compiled);
+
+        // SHA-1 thumbprint: exactly 40 hex chars
+        internal static readonly Regex ThumbprintPattern = new Regex(
+            @"^[0-9A-Fa-f]{40}$",
             RegexOptions.Compiled);
 
         public ReportDistressFunction(
@@ -147,20 +158,53 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 var agentVersion = Sanitize(report.AgentVersion, MaxStringField32);
                 var message = Sanitize(report.Message, MaxMessageLength);
 
+                // V2 cert-context (optional, all UNVERIFIED).
+                // - CertSourceState: enum validated with IsDefined; unknown values are dropped to null
+                //   so we never persist arbitrary integers.
+                // - CertThumbprint: strict hex pattern (exactly 40 chars); anything else dropped.
+                // - CertSubject/CertIssuer: sanitized + hard-capped to MaxCertDnLength.
+                // - CertNotBefore/After: same past/future bounds as the report Timestamp; out-of-range
+                //   values are dropped (prevents DateTime.MinValue/Epoch nonsense entering storage).
+                string? certSourceState = null;
+                if (report.CertSourceState.HasValue
+                    && Enum.IsDefined(typeof(DistressCertSourceState), report.CertSourceState.Value)
+                    && report.CertSourceState.Value != DistressCertSourceState.Unknown)
+                {
+                    certSourceState = report.CertSourceState.Value.ToString();
+                }
+
+                string? certThumbprint = null;
+                if (!string.IsNullOrEmpty(report.CertThumbprint)
+                    && ThumbprintPattern.IsMatch(report.CertThumbprint))
+                {
+                    certThumbprint = report.CertThumbprint.ToUpperInvariant();
+                }
+
+                var certSubject = Sanitize(report.CertSubject, MaxCertDnLength);
+                var certIssuer = Sanitize(report.CertIssuer, MaxCertDnLength);
+                var certNotBefore = SanitizeCertDate(report.CertNotBefore, DateTime.UtcNow);
+                var certNotAfter = SanitizeCertDate(report.CertNotAfter, DateTime.UtcNow);
+
                 // Persist to Table Storage
                 var entry = new DistressReportEntry
                 {
-                    TenantId       = tenantId,
-                    ErrorType      = report.ErrorType.ToString(),
-                    Manufacturer   = manufacturer,
-                    Model          = model,
-                    SerialNumber   = serialNumber,
-                    AgentVersion   = agentVersion,
-                    HttpStatusCode = report.HttpStatusCode,
-                    Message        = message,
-                    AgentTimestamp = report.Timestamp,
-                    IngestedAt     = DateTime.UtcNow,
-                    SourceIp       = clientIp,
+                    TenantId        = tenantId,
+                    ErrorType       = report.ErrorType.ToString(),
+                    Manufacturer    = manufacturer,
+                    Model           = model,
+                    SerialNumber    = serialNumber,
+                    AgentVersion    = agentVersion,
+                    HttpStatusCode  = report.HttpStatusCode,
+                    Message         = message,
+                    AgentTimestamp  = report.Timestamp,
+                    IngestedAt      = DateTime.UtcNow,
+                    SourceIp        = clientIp,
+                    CertSourceState = certSourceState,
+                    CertThumbprint  = certThumbprint,
+                    CertSubject     = certSubject,
+                    CertIssuer      = certIssuer,
+                    CertNotBefore   = certNotBefore,
+                    CertNotAfter    = certNotAfter,
                 };
 
                 await _repository.SaveDistressReportAsync(tenantId, entry);
@@ -216,24 +260,30 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
                 // Structured log (Warning, not Critical — data is unverified)
                 _logger.LogWarning(
-                    "AgentDistress [{ErrorType}] tenant={TenantId} mfr={Manufacturer} model={Model} sn={SerialNumber} http={HttpStatusCode} ver={AgentVersion}: {Message}",
+                    "AgentDistress [{ErrorType}] tenant={TenantId} mfr={Manufacturer} model={Model} sn={SerialNumber} http={HttpStatusCode} ver={AgentVersion} certState={CertSourceState} thumbprint={CertThumbprint}: {Message}",
                     report.ErrorType, tenantId, manufacturer, model, serialNumber,
-                    report.HttpStatusCode, agentVersion, message);
+                    report.HttpStatusCode, agentVersion, certSourceState ?? "n/a", certThumbprint ?? "n/a", message);
 
                 // Custom event for KQL queries:
                 //   customEvents | where name == "AgentDistressReport" | order by timestamp desc
                 _telemetryClient.TrackEvent("AgentDistressReport", new Dictionary<string, string>
                 {
-                    ["TenantId"]       = tenantId,
-                    ["ErrorType"]      = report.ErrorType.ToString(),
-                    ["Manufacturer"]   = manufacturer ?? string.Empty,
-                    ["Model"]          = model ?? string.Empty,
-                    ["SerialNumber"]   = serialNumber ?? string.Empty,
-                    ["AgentVersion"]   = agentVersion ?? string.Empty,
-                    ["HttpStatusCode"] = report.HttpStatusCode?.ToString() ?? string.Empty,
-                    ["Message"]        = message ?? string.Empty,
+                    ["TenantId"]        = tenantId,
+                    ["ErrorType"]       = report.ErrorType.ToString(),
+                    ["Manufacturer"]    = manufacturer ?? string.Empty,
+                    ["Model"]           = model ?? string.Empty,
+                    ["SerialNumber"]    = serialNumber ?? string.Empty,
+                    ["AgentVersion"]    = agentVersion ?? string.Empty,
+                    ["HttpStatusCode"]  = report.HttpStatusCode?.ToString() ?? string.Empty,
+                    ["Message"]         = message ?? string.Empty,
                     ["AgentTimestamp"]  = report.Timestamp.ToString("O"),
-                    ["SourceIp"]       = clientIp ?? string.Empty,
+                    ["SourceIp"]        = clientIp ?? string.Empty,
+                    ["CertSourceState"] = certSourceState ?? string.Empty,
+                    ["CertThumbprint"]  = certThumbprint ?? string.Empty,
+                    ["CertSubject"]     = certSubject ?? string.Empty,
+                    ["CertIssuer"]      = certIssuer ?? string.Empty,
+                    ["CertNotBefore"]   = certNotBefore?.ToString("O") ?? string.Empty,
+                    ["CertNotAfter"]    = certNotAfter?.ToString("O") ?? string.Empty,
                 });
 
                 return req.CreateResponse(HttpStatusCode.OK);
@@ -308,6 +358,24 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             var clean = ControlChars.Replace(value, string.Empty).Trim();
             // Truncate
             return clean.Length <= maxLength ? clean : clean.Substring(0, maxLength);
+        }
+
+        /// <summary>
+        /// Rejects implausible cert NotBefore/NotAfter values to keep DateTime.MinValue,
+        /// Epoch, and arbitrary-future-junk out of storage. Accepts dates within 50 years
+        /// of <paramref name="utcNow"/> in either direction — wide enough for legitimate
+        /// long-lived MDM certs, narrow enough to drop obvious clock-skew artifacts.
+        /// </summary>
+        internal static DateTime? SanitizeCertDate(DateTime? value, DateTime utcNow)
+        {
+            if (!value.HasValue) return null;
+            var dt = value.Value;
+            if (dt.Kind != DateTimeKind.Utc)
+                dt = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            var lowerBound = utcNow.AddYears(-50);
+            var upperBound = utcNow.AddYears(50);
+            if (dt < lowerBound || dt > upperBound) return null;
+            return dt;
         }
     }
 }

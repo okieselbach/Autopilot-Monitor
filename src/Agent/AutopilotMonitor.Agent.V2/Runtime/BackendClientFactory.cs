@@ -101,7 +101,8 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 model: hardware.Model,
                 serialNumber: hardware.SerialNumber,
                 agentVersion: agentVersion,
-                logger: logger);
+                logger: logger,
+                clientCertificate: clientCertificate);
 
             var emergencyReporter = new EmergencyReporter(
                 apiClient: backendApiClient,

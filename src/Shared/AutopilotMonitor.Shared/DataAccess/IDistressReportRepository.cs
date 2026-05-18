@@ -29,5 +29,14 @@ namespace AutopilotMonitor.Shared.DataAccess
         public DateTime AgentTimestamp { get; set; }
         public DateTime IngestedAt { get; set; }
         public string? SourceIp { get; set; }
+
+        // Cert-context fields (V2 agents only). All optional; legacy entries leave these null.
+        // Format-validated and length-capped at ingest; treat as UNVERIFIED claims.
+        public string? CertSourceState { get; set; }
+        public string? CertThumbprint { get; set; }
+        public string? CertSubject { get; set; }
+        public string? CertIssuer { get; set; }
+        public DateTime? CertNotBefore { get; set; }
+        public DateTime? CertNotAfter { get; set; }
     }
 }

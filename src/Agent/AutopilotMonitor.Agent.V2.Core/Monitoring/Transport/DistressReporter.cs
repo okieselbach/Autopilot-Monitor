@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +40,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
         private readonly string _agentVersion;
         private readonly AgentLogger _logger;
 
+        // Cert context captured once at construction. Used to enrich every outgoing distress
+        // report with the agent's view of the client cert (UNVERIFIED on the backend; corroborates
+        // / contradicts the server-side cert chain it actually saw). All-null when the agent
+        // started without a client cert — that itself is the diagnostic signal.
+        private readonly DistressCertSourceState _capturedCertState;
+        private readonly string _capturedCertThumbprint;
+        private readonly string _capturedCertSubject;
+        private readonly string _capturedCertIssuer;
+        private readonly DateTime? _capturedCertNotBefore;
+        private readonly DateTime? _capturedCertNotAfter;
+
         private readonly HashSet<string> _reportedKeys = new HashSet<string>();
         private readonly object _antiFloodLock = new object();
         private DateTime? _lastReportTime;
@@ -51,7 +63,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
             string model,
             string serialNumber,
             string agentVersion,
-            AgentLogger logger)
+            AgentLogger logger,
+            X509Certificate2 clientCertificate = null)
         {
             _tenantId = tenantId;
             _manufacturer = manufacturer;
@@ -59,6 +72,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
             _serialNumber = serialNumber;
             _agentVersion = agentVersion;
             _logger = logger;
+
+            // Capture cert context. Each field is independently nullable so the backend can tell
+            // "agent had no cert at all" (NoCertInStore + all-null fields) from "agent had a cert
+            // but the backend rejected it" (Found + populated fields).
+            if (clientCertificate != null)
+            {
+                _capturedCertThumbprint = clientCertificate.Thumbprint;
+                _capturedCertSubject = clientCertificate.Subject;
+                _capturedCertIssuer = clientCertificate.Issuer;
+                _capturedCertNotBefore = clientCertificate.NotBefore.ToUniversalTime();
+                _capturedCertNotAfter = clientCertificate.NotAfter.ToUniversalTime();
+
+                var now = DateTime.UtcNow;
+                if (now > _capturedCertNotAfter || now < _capturedCertNotBefore)
+                    _capturedCertState = DistressCertSourceState.FoundExpired;
+                else if (!clientCertificate.HasPrivateKey)
+                    _capturedCertState = DistressCertSourceState.FoundMissingPrivateKey;
+                else
+                    _capturedCertState = DistressCertSourceState.Found;
+            }
+            else
+            {
+                _capturedCertState = DistressCertSourceState.NoCertInStore;
+            }
 
             var cleanBaseUrl = baseUrl?.TrimEnd('/') ?? Constants.ApiBaseUrl;
             _distressUrl = $"{cleanBaseUrl}{Constants.ApiEndpoints.ReportDistress}";
@@ -131,7 +168,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
                 AgentVersion = _agentVersion,
                 HttpStatusCode = httpStatusCode,
                 Message = Truncate(message, 256),
-                Timestamp = DateTime.UtcNow
+                Timestamp = DateTime.UtcNow,
+                CertSourceState = _capturedCertState,
+                CertThumbprint = _capturedCertThumbprint,
+                CertSubject = Truncate(_capturedCertSubject, 96),
+                CertIssuer = Truncate(_capturedCertIssuer, 96),
+                CertNotBefore = _capturedCertNotBefore,
+                CertNotAfter = _capturedCertNotAfter,
             };
 
             try

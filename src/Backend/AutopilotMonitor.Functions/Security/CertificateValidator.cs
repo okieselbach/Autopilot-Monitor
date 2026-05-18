@@ -61,6 +61,22 @@ namespace AutopilotMonitor.Functions.Security
         }
 
         /// <summary>
+        /// Stable rejection-reason codes emitted in the <c>AgentCertRejected</c> structured log.
+        /// Keep these strings stable — operators query them by exact match in KQL
+        /// (<c>customDimensions.Reason == "ChainFailed"</c>).
+        /// </summary>
+        internal static class RejectReason
+        {
+            public const string NoCertProvided = "NoCertProvided";
+            public const string ParseError = "ParseError";
+            public const string NotYetValid = "NotYetValid";
+            public const string Expired = "Expired";
+            public const string NoTrustAnchor = "NoTrustAnchor";
+            public const string ChainFailed = "ChainFailed";
+            public const string MissingClientAuthEku = "MissingClientAuthEku";
+        }
+
+        /// <summary>
         /// Validates a client certificate from HTTP request header
         /// </summary>
         /// <param name="certificateBase64">Base64-encoded certificate from X-Client-Certificate header</param>
@@ -70,6 +86,9 @@ namespace AutopilotMonitor.Functions.Security
         {
             if (string.IsNullOrEmpty(certificateBase64))
             {
+                logger?.LogWarning(
+                    "AgentCertRejected reason={Reason} thumbprint={Thumbprint} subject={Subject} issuer={Issuer} notBefore={NotBefore} notAfter={NotAfter} error={Error}",
+                    RejectReason.NoCertProvided, "n/a", "n/a", "n/a", "n/a", "n/a", "header empty");
                 return new CertificateValidationResult
                 {
                     IsValid = false,
@@ -119,6 +138,10 @@ namespace AutopilotMonitor.Functions.Security
                 var notAfterUtc = certificate.NotAfter.ToUniversalTime();
                 if (now < notBeforeUtc || now > notAfterUtc)
                 {
+                    var lifecycleReason = now < notBeforeUtc ? RejectReason.NotYetValid : RejectReason.Expired;
+                    logger?.LogWarning(
+                        "AgentCertRejected reason={Reason} thumbprint={Thumbprint} subject={Subject} issuer={Issuer} notBefore={NotBefore:u} notAfter={NotAfter:u} error={Error}",
+                        lifecycleReason, thumbprint, certificate.Subject, certificate.Issuer, notBeforeUtc, notAfterUtc, "cert lifecycle outside window");
                     return new CertificateValidationResult
                     {
                         IsValid = false,
@@ -140,6 +163,9 @@ namespace AutopilotMonitor.Functions.Security
                 if (roots.Length == 0)
                 {
                     logger?.LogError("No embedded Intune root certificates loaded - failing closed");
+                    logger?.LogWarning(
+                        "AgentCertRejected reason={Reason} thumbprint={Thumbprint} subject={Subject} issuer={Issuer} notBefore={NotBefore:u} notAfter={NotAfter:u} error={Error}",
+                        RejectReason.NoTrustAnchor, thumbprint, certificate.Subject, certificate.Issuer, notBeforeUtc, notAfterUtc, "no embedded Intune roots");
                     return new CertificateValidationResult
                     {
                         IsValid = false,
@@ -171,8 +197,8 @@ namespace AutopilotMonitor.Functions.Security
                 {
                     var chainErrors = string.Join(", ", chain.ChainStatus.Select(s => s.StatusInformation));
                     logger?.LogWarning(
-                        "Certificate chain validation failed: {ChainErrors} (LeafSubject={Subject}, LeafIssuer={Issuer}, Thumbprint={Thumbprint})",
-                        chainErrors, certificate.Subject, certificate.Issuer, thumbprint);
+                        "AgentCertRejected reason={Reason} thumbprint={Thumbprint} subject={Subject} issuer={Issuer} notBefore={NotBefore:u} notAfter={NotAfter:u} error={Error}",
+                        RejectReason.ChainFailed, thumbprint, certificate.Subject, certificate.Issuer, notBeforeUtc, notAfterUtc, chainErrors);
 
                     return new CertificateValidationResult
                     {
@@ -196,6 +222,9 @@ namespace AutopilotMonitor.Functions.Security
 
                 if (!hasClientAuth)
                 {
+                    logger?.LogWarning(
+                        "AgentCertRejected reason={Reason} thumbprint={Thumbprint} subject={Subject} issuer={Issuer} notBefore={NotBefore:u} notAfter={NotAfter:u} error={Error}",
+                        RejectReason.MissingClientAuthEku, thumbprint, certificate.Subject, certificate.Issuer, notBeforeUtc, notAfterUtc, "client-auth EKU missing");
                     return new CertificateValidationResult
                     {
                         IsValid = false,
@@ -228,6 +257,9 @@ namespace AutopilotMonitor.Functions.Security
             catch (Exception ex)
             {
                 logger?.LogError(ex, "Error validating certificate");
+                logger?.LogWarning(
+                    "AgentCertRejected reason={Reason} thumbprint={Thumbprint} subject={Subject} issuer={Issuer} notBefore={NotBefore} notAfter={NotAfter} error={Error}",
+                    RejectReason.ParseError, "n/a", "n/a", "n/a", "n/a", "n/a", ex.GetType().Name + ": " + ex.Message);
                 return new CertificateValidationResult
                 {
                     IsValid = false,

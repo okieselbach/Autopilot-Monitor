@@ -411,9 +411,12 @@ public class DistressValidationTests
     // =========================================================================
 
     [Fact]
-    public void Constants_MaxContentLength_Is1024()
+    public void Constants_MaxContentLength_Is1536()
     {
-        Assert.Equal(1024, ReportDistressFunction.MaxContentLength);
+        // Bumped from 1024 to 1536 to accommodate V2 cert-context fields (Thumbprint, Subject,
+        // Issuer, NotBefore/After, SourceState). Rate-limit + sanitize + truncate + enum-validation
+        // remain the primary DoS defenses; the size cap is a payload-shape gate, not the throttle.
+        Assert.Equal(1536, ReportDistressFunction.MaxContentLength);
     }
 
     [Fact]

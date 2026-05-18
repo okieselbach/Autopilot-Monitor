@@ -235,6 +235,9 @@ namespace AutopilotMonitor.Functions.Security
             var certValidation = CertificateValidator.ValidateCertificate(certHeader, _logger);
             if (!certValidation.IsValid)
             {
+                LogRequestRejection("cert", tenantId, req, sessionId,
+                    extraReason: certValidation.ErrorMessage,
+                    thumbprint: certValidation.Thumbprint);
                 return new SecurityValidationResult
                 {
                     IsValid = false,
@@ -283,6 +286,9 @@ namespace AutopilotMonitor.Functions.Security
 
             if (!hardwareValidation.IsValid)
             {
+                LogRequestRejection("hardware", tenantId, req, sessionId,
+                    extraReason: hardwareValidation.ErrorMessage,
+                    thumbprint: certValidation.Thumbprint);
                 return new SecurityValidationResult
                 {
                     IsValid = false,
@@ -353,6 +359,9 @@ namespace AutopilotMonitor.Functions.Security
                     };
                 }
 
+                LogRequestRejection("device", tenantId, req, sessionId,
+                    extraReason: deviceValidationError,
+                    thumbprint: certValidation.Thumbprint);
                 return new SecurityValidationResult
                 {
                     IsValid = false,
@@ -407,6 +416,28 @@ namespace AutopilotMonitor.Functions.Security
             };
         }
 
+        /// <summary>
+        /// Emits a structured warning with request-side context (path, hardware headers, agent
+        /// version) at every fail-fast rejection point. Pairs with the cert-side warnings emitted
+        /// inside <see cref="CertificateValidator"/> via shared <c>thumbprint</c> + correlates 1:1
+        /// with <c>AgentDistressReport</c> events on <c>TenantId</c>+<c>SerialNumber</c>+timestamp.
+        /// </summary>
+        private void LogRequestRejection(string stage, string tenantId, HttpRequestData req, string? sessionId, string? extraReason, string? thumbprint)
+        {
+            string GetHeader(string name) => req.Headers.Contains(name)
+                ? (req.Headers.GetValues(name).FirstOrDefault() ?? "n/a")
+                : "n/a";
+
+            var path = req.Url?.AbsolutePath ?? "n/a";
+            var manufacturer = GetHeader("X-Device-Manufacturer");
+            var model = GetHeader("X-Device-Model");
+            var serial = GetHeader("X-Device-SerialNumber");
+            var agentVersion = GetHeader("X-Agent-Version");
+
+            _logger.LogWarning(
+                "AgentRequestRejected stage={Stage} tenant={TenantId} path={Path} session={SessionId} thumbprint={Thumbprint} mfr={Manufacturer} model={Model} serial={SerialNumber} ver={AgentVersion} reason={Reason}",
+                stage, tenantId, path, sessionId ?? "n/a", thumbprint ?? "n/a", manufacturer, model, serial, agentVersion, extraReason ?? "n/a");
+        }
     }
 
     /// <summary>

@@ -33,16 +33,22 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 
             var entity = new TableEntity(pk, rk)
             {
-                ["ErrorType"]      = Truncate(entry.ErrorType, 64),
-                ["Manufacturer"]   = Truncate(entry.Manufacturer, 64),
-                ["Model"]          = Truncate(entry.Model, 64),
-                ["SerialNumber"]   = Truncate(entry.SerialNumber, 64),
-                ["AgentVersion"]   = Truncate(entry.AgentVersion, 32),
-                ["HttpStatusCode"] = entry.HttpStatusCode,
-                ["Message"]        = Truncate(entry.Message, 256),
+                ["ErrorType"]       = Truncate(entry.ErrorType, 64),
+                ["Manufacturer"]    = Truncate(entry.Manufacturer, 64),
+                ["Model"]           = Truncate(entry.Model, 64),
+                ["SerialNumber"]    = Truncate(entry.SerialNumber, 64),
+                ["AgentVersion"]    = Truncate(entry.AgentVersion, 32),
+                ["HttpStatusCode"]  = entry.HttpStatusCode,
+                ["Message"]         = Truncate(entry.Message, 256),
                 ["AgentTimestamp"]  = entry.AgentTimestamp,
-                ["IngestedAt"]     = entry.IngestedAt,
-                ["SourceIp"]       = Truncate(entry.SourceIp, 45), // max IPv6 length
+                ["IngestedAt"]      = entry.IngestedAt,
+                ["SourceIp"]        = Truncate(entry.SourceIp, 45), // max IPv6 length
+                ["CertSourceState"] = Truncate(entry.CertSourceState, 32),
+                ["CertThumbprint"]  = Truncate(entry.CertThumbprint, 40),
+                ["CertSubject"]     = Truncate(entry.CertSubject, 96),
+                ["CertIssuer"]      = Truncate(entry.CertIssuer, 96),
+                ["CertNotBefore"]   = entry.CertNotBefore,
+                ["CertNotAfter"]    = entry.CertNotAfter,
             };
 
             await _table.UpsertEntityAsync(entity);
@@ -108,17 +114,23 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         {
             return new DistressReportEntry
             {
-                TenantId       = entity.PartitionKey,
-                ErrorType      = entity.GetString("ErrorType") ?? string.Empty,
-                Manufacturer   = entity.GetString("Manufacturer"),
-                Model          = entity.GetString("Model"),
-                SerialNumber   = entity.GetString("SerialNumber"),
-                AgentVersion   = entity.GetString("AgentVersion"),
-                HttpStatusCode = entity.GetInt32("HttpStatusCode"),
-                Message        = entity.GetString("Message"),
-                AgentTimestamp = entity.GetDateTimeOffset("AgentTimestamp")?.UtcDateTime ?? DateTime.MinValue,
-                IngestedAt     = entity.GetDateTimeOffset("IngestedAt")?.UtcDateTime ?? DateTime.MinValue,
-                SourceIp       = entity.GetString("SourceIp"),
+                TenantId        = entity.PartitionKey,
+                ErrorType       = entity.GetString("ErrorType") ?? string.Empty,
+                Manufacturer    = entity.GetString("Manufacturer"),
+                Model           = entity.GetString("Model"),
+                SerialNumber    = entity.GetString("SerialNumber"),
+                AgentVersion    = entity.GetString("AgentVersion"),
+                HttpStatusCode  = entity.GetInt32("HttpStatusCode"),
+                Message         = entity.GetString("Message"),
+                AgentTimestamp  = entity.GetDateTimeOffset("AgentTimestamp")?.UtcDateTime ?? DateTime.MinValue,
+                IngestedAt      = entity.GetDateTimeOffset("IngestedAt")?.UtcDateTime ?? DateTime.MinValue,
+                SourceIp        = entity.GetString("SourceIp"),
+                CertSourceState = entity.GetString("CertSourceState"),
+                CertThumbprint  = entity.GetString("CertThumbprint"),
+                CertSubject     = entity.GetString("CertSubject"),
+                CertIssuer      = entity.GetString("CertIssuer"),
+                CertNotBefore   = entity.GetDateTimeOffset("CertNotBefore")?.UtcDateTime,
+                CertNotAfter    = entity.GetDateTimeOffset("CertNotAfter")?.UtcDateTime,
             };
         }
 
