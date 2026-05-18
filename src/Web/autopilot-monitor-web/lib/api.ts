@@ -115,6 +115,19 @@ export const api = {
       `${API_BASE_URL}/api/config/latest-versions${qs({ refresh: opts?.refresh ? "true" : undefined })}`,
   },
 
+  // ── Graph add-on permissions (optional capabilities) ─────────────────────
+  graphPermissions: {
+    /** GET status of optional Graph add-on permissions for the tenant (admin-only). */
+    status: (tenantId: string) =>
+      `${API_BASE_URL}/api/tenants/${tenantId}/graph-permissions/status`,
+    /** POST to invalidate the backend's cached roles after a grant script run. */
+    refresh: (tenantId: string) =>
+      `${API_BASE_URL}/api/tenants/${tenantId}/graph-permissions/refresh`,
+    /** POST endpoint to resolve Intune script display names; body carries the refs array. */
+    scriptDisplayNames: (tenantId: string) =>
+      `${API_BASE_URL}/api/tenants/${tenantId}/scripts/display-names`,
+  },
+
   // ── Global Config (global admin) ──────────────────────────────────────────
   globalConfig: {
     get: () => `${API_BASE_URL}/api/global/config`,

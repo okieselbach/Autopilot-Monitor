@@ -12,6 +12,7 @@ import DownloadProgress from '../../../components/DownloadProgress';
 import InstallProgress from '../../../components/InstallProgress';
 import ScriptExecutions from '../../../components/ScriptExecutions';
 import { useLatestVersions } from '@/lib/useLatestVersions';
+import { useScriptDisplayNames } from '@/lib/scriptDisplayNames';
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 
@@ -104,6 +105,11 @@ export default function SessionDetailPage() {
   // Convenience local aliases (keeps the JSX below readable, matches previous names)
   const { session, setSession, sessionTenantId, loading } = detail;
   const events = eventsApi.events;
+
+  // Resolves Intune script display names via the optional Graph add-on permission.
+  // Returns an empty map when the tenant hasn't granted DeviceManagementScripts.Read.All.
+  // Map keys are "{Kind}:{Id}" -- the renderer uses lookupScriptDisplayName to read them.
+  const scriptDisplayNamesByRefKey = useScriptDisplayNames(sessionTenantId ?? tenantId, events, getAccessToken);
   const { analysisResults, loadingAnalysis, vulnerabilityReport, fetchAnalysisResults, fetchVulnerabilityReport, persistFailureRuleIds } = analysis;
   const { showScriptOutput, enableSoftwareInventoryAnalyzer, enableIntegrityBypassAnalyzer } = tenantConfig;
   const {
@@ -560,6 +566,7 @@ export default function SessionDetailPage() {
               )}
               showScriptOutput={showScriptOutput}
               latestBootstrapVersion={latestBootstrapVersion}
+              displayNamesByRefKey={scriptDisplayNamesByRefKey}
             />
             </div>
           )}

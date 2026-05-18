@@ -51,6 +51,9 @@ namespace AutopilotMonitor.Functions.DataAccess
             // AnalyzeRules / ImeLogPatterns rows that were wiped during Phase 2.D-archive,
             // surfaced via the Global Admin /admin/customs-archive page.
             services.AddSingleton<ITenantCustomsArchiveRepository, TableTenantCustomsArchiveRepository>();
+
+            // Graph add-on permission feature: per-tenant cache of Intune script display names.
+            services.AddSingleton<IScriptNameCacheRepository, TableScriptNameCacheRepository>();
             return services;
         }
 

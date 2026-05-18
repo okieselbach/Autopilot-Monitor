@@ -194,6 +194,17 @@ public static class EndpointAccessPolicyCatalog
         new("POST",   "config/{tenantId}/autopilot-device-validation/consent-success", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("POST",   "config/{tenantId}/test-notification",                           EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
 
+        // ── Graph add-on permissions ────────────────────────────────────────
+        // Script display-name resolution is a *read* surface available to every tenant
+        // member — Member-tier callers benefit from the resolved names in the session
+        // timeline. The Admin UI controls (status + refresh) stay Admin/GA because they
+        // expose ClientId and invalidate caches.
+        // POST (not GET) so payloads with 100+ script refs comfortably fit in the request
+        // body without hitting URL-length limits in browsers / Azure Functions front door.
+        new("POST",   "tenants/{tenantId}/scripts/display-names",     EndpointPolicy.MemberRead, TenantScoping.RouteParam),
+        new("GET",    "tenants/{tenantId}/graph-permissions/status",  EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("POST",   "tenants/{tenantId}/graph-permissions/refresh", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+
         // ── BootstrapManagerOrGA ────────────────────────────────────────
         new("GET",    "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA, TenantScoping.QueryParam),
         new("POST",   "bootstrap/sessions",        EndpointPolicy.BootstrapManagerOrGA, TenantScoping.QueryParam),

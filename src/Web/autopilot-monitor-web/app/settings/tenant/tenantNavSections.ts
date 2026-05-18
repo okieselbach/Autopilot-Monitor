@@ -5,6 +5,7 @@ export const TENANT_NAV_SECTIONS = [
   { id: "notifications", label: "Notifications", description: "Webhook notification configuration" },
   { id: "sla-targets", label: "SLA Targets", description: "SLA targets and breach notification settings" },
   { id: "bootstrap-sessions", label: "Bootstrap Sessions", description: "Create and manage bootstrap tokens" },
+  { id: "graph-permissions", label: "Optional Graph capabilities", description: "Grant additional Microsoft Graph permissions for optional features" },
   { id: "support", label: "Submit Logs", description: "Send diagnostic files to the Autopilot Monitor team" },
 ] as const;
 

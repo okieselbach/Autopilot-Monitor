@@ -1,0 +1,96 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Services.GraphResolution;
+using AutopilotMonitor.Shared.Models.Graph;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+
+namespace AutopilotMonitor.Functions.Functions.Graph;
+
+/// <summary>
+/// <c>GET /api/tenants/{tenantId}/graph-permissions/status</c> — drives the "Optional Graph
+/// capabilities" section of the Admin Settings UI. Returns the currently-granted Microsoft
+/// Graph roles on the Autopilot Monitor service principal in this tenant plus a per-feature
+/// "granted/not-granted" verdict computed against <see cref="GraphFeatureCatalog"/>.
+/// <para>
+/// Also returns the AutopilotMonitor app's ClientId so the UI can render a copy-paste-ready
+/// PS one-liner for the grant script without having to hard-code or surface configuration on
+/// the client side.
+/// </para>
+/// <para>
+/// The endpoint applies its own short token-acquire budget (<see cref="StatusBudget"/>) so the
+/// admin click cannot get stuck in <see cref="Security.GraphTokenService"/>'s long retry chain
+/// (5 + 15 + 30 s on consent-propagation paths). On budget exhaustion or any transient failure
+/// the payload sets <c>isTransient: true</c> and the UI renders "try again" rather than a
+/// misleading "0 of 0 granted" verdict.
+/// </para>
+/// </summary>
+public class GetGraphPermissionsStatusFunction
+{
+    /// <summary>Hard wall on the token acquire used for status — admin clicks must feel responsive.</summary>
+    internal static readonly TimeSpan StatusBudget = TimeSpan.FromSeconds(4);
+
+    private readonly ILogger<GetGraphPermissionsStatusFunction> _logger;
+    private readonly IGraphFeatureDetector _detector;
+    private readonly IConfiguration _configuration;
+
+    public GetGraphPermissionsStatusFunction(
+        ILogger<GetGraphPermissionsStatusFunction> logger,
+        IGraphFeatureDetector detector,
+        IConfiguration configuration)
+    {
+        _logger = logger;
+        _detector = detector;
+        _configuration = configuration;
+    }
+
+    [Function("GetGraphPermissionsStatus")]
+    public async Task<HttpResponseData> Run(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get",
+            Route = "tenants/{tenantId}/graph-permissions/status")] HttpRequestData req,
+        string tenantId)
+    {
+        try
+        {
+            var requestCtx = req.GetRequestContext();
+
+            using var budgetCts = new CancellationTokenSource(StatusBudget);
+            GraphPermissionSnapshot snapshot;
+            try
+            {
+                snapshot = await _detector.GetSnapshotAsync(requestCtx.TargetTenantId, budgetCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                snapshot = new GraphPermissionSnapshot { IsTransient = true };
+            }
+
+            var features = GraphFeatureCatalog.Features.Select(featureName => new
+            {
+                name = featureName,
+                granted = snapshot.IsTransient
+                    ? (bool?)null
+                    : GraphFeatureCatalog.IsFeatureGranted(featureName, snapshot.GrantedRoles),
+                requiredPermissions = GraphFeatureCatalog.RequiredPermissions(featureName),
+            }).ToList();
+
+            return await req.OkAsync(new
+            {
+                clientId = _configuration["EntraId:ClientId"] ?? string.Empty,
+                isTransient = snapshot.IsTransient,
+                grantedRoles = snapshot.GrantedRoles.ToArray(),
+                features,
+            });
+        }
+        catch (Exception ex)
+        {
+            return await req.InternalServerErrorAsync(_logger, ex,
+                $"Get graph-permissions status for tenant '{tenantId}'");
+        }
+    }
+}

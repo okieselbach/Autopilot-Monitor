@@ -294,6 +294,14 @@ builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.GraphTokenServ
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.AutopilotDeviceValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.CorporateIdentifierValidator>();
 builder.Services.AddSingleton<AutopilotMonitor.Functions.Security.DeviceAssociationValidator>();
+
+// Graph add-on permission detection + script display-name resolution.
+// Detector parses the `roles` claim of the SP access token; Resolver fetches
+// Intune script display names from Graph beta, cached per tenant.
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.GraphResolution.IGraphFeatureDetector,
+    AutopilotMonitor.Functions.Services.GraphResolution.GraphFeatureDetector>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.GraphResolution.IScriptDisplayNameResolver,
+    AutopilotMonitor.Functions.Services.GraphResolution.ScriptDisplayNameResolver>();
 builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications.WebhookNotificationService>()
     .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
     {

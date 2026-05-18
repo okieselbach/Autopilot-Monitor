@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Caching.Memory;
@@ -35,7 +36,7 @@ namespace AutopilotMonitor.Functions.Security
             _configuration = configuration;
         }
 
-        public async Task<GraphConsentStatusResult> GetConsentStatusAsync(string tenantId)
+        public async Task<GraphConsentStatusResult> GetConsentStatusAsync(string tenantId, CancellationToken ct = default)
         {
             var cacheKey = $"graph-consent-status:{tenantId}";
             if (_cache.TryGetValue(cacheKey, out GraphConsentStatusResult? cached) && cached != null)
@@ -43,7 +44,7 @@ namespace AutopilotMonitor.Functions.Security
                 return cached;
             }
 
-            var tokenResult = await GetAccessTokenAsync(tenantId);
+            var tokenResult = await GetAccessTokenAsync(tenantId, ct);
             var result = new GraphConsentStatusResult
             {
                 IsConsented = !string.IsNullOrWhiteSpace(tokenResult.AccessToken),
@@ -73,7 +74,7 @@ namespace AutopilotMonitor.Functions.Security
             return result;
         }
 
-        public async Task<GraphTokenResult> GetAccessTokenAsync(string tenantId)
+        public async Task<GraphTokenResult> GetAccessTokenAsync(string tenantId, CancellationToken ct = default)
         {
             var clientId = _configuration["EntraId:ClientId"];
             var clientSecret = _configuration["EntraId:ClientSecret"];
@@ -90,6 +91,8 @@ namespace AutopilotMonitor.Functions.Security
             // Retry with backoff to handle Azure AD consent propagation delays.
             // After admin consent is granted, the service principal may not be immediately
             // available in the tenant — Azure AD typically propagates within 30-90 seconds.
+            // Optional-feature callers should pass a CancellationToken with a tight budget
+            // so the long retry chain (5+15+30 s) cannot block the UI for a minute.
             var retryDelays = new[] { TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30) };
             string? responseBody = null;
             int attempt = 0;
@@ -97,6 +100,12 @@ namespace AutopilotMonitor.Functions.Security
 
             while (true)
             {
+                if (ct.IsCancellationRequested)
+                {
+                    // Caller's budget exhausted — treat as transient so we never cache "no consent"
+                    // for a tenant just because the optional path timed out.
+                    return GraphTokenResult.TransientFailure();
+                }
                 try
                 {
                     var tokenClient = _httpClientFactory.CreateClient();
@@ -108,8 +117,8 @@ namespace AutopilotMonitor.Functions.Security
                         ["grant_type"] = "client_credentials"
                     });
 
-                    var response = await tokenClient.PostAsync(tokenUrl, body);
-                    responseBody = await response.Content.ReadAsStringAsync();
+                    var response = await tokenClient.PostAsync(tokenUrl, body, ct);
+                    responseBody = await response.Content.ReadAsStringAsync(ct);
 
                     if (response.IsSuccessStatusCode)
                     {
@@ -166,12 +175,17 @@ namespace AutopilotMonitor.Functions.Security
                         retryDelays.Length + 1,
                         delay.TotalSeconds);
 
-                    await Task.Delay(delay);
+                    await Task.Delay(delay, ct);
                     attempt++;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // Caller budget exhausted between retries — transient by definition.
+                    return GraphTokenResult.TransientFailure();
                 }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
                 {
-                    // Network errors and timeouts are transient
+                    // Network errors and HttpClient-side timeouts are transient
                     if (attempt >= retryDelays.Length)
                     {
                         _logger.LogWarning(ex,
@@ -185,7 +199,11 @@ namespace AutopilotMonitor.Functions.Security
                         "Graph token acquisition for tenant {TenantId} network error (attempt {Attempt}/{MaxAttempts}). Retrying in {Delay}s",
                         tenantId, attempt + 1, retryDelays.Length + 1, delay.TotalSeconds);
 
-                    await Task.Delay(delay);
+                    try { await Task.Delay(delay, ct); }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        return GraphTokenResult.TransientFailure();
+                    }
                     attempt++;
                 }
             }

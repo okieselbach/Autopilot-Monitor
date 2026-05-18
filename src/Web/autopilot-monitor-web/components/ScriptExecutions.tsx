@@ -17,14 +17,26 @@ import {
   type ScriptInputEvent,
   type ScriptItem,
 } from "@/lib/scriptExecutions";
+import { lookupScriptDisplayName, type DisplayNamesByRefKey } from "@/lib/scriptDisplayNames";
 
 interface ScriptExecutionsProps {
   events: ScriptInputEvent[];
   showScriptOutput?: boolean;
   latestBootstrapVersion?: string | null;
+  /**
+   * Optional "{Kind}:{Id}" → Intune display name lookup. Populated by the parent via
+   * `useScriptDisplayNames` once the backend resolver returns. When present, the row
+   * label gains a subtle " · {displayName}" suffix so users see e.g.
+   * "Platform Script · Bootstrap.ps1" without losing the headline category.
+   * Tenants without the optional Graph permission see only the category — falling
+   * back to the canonical UI is the natural degraded state.
+   * Key shape preserves ScriptKind so the same id under Platform and Remediation
+   * stay distinct (rare in practice but never silently collide).
+   */
+  displayNamesByRefKey?: DisplayNamesByRefKey;
 }
 
-export default function ScriptExecutions({ events, showScriptOutput, latestBootstrapVersion }: ScriptExecutionsProps) {
+export default function ScriptExecutions({ events, showScriptOutput, latestBootstrapVersion, displayNamesByRefKey }: ScriptExecutionsProps) {
   const cards = useMemo(() => groupScriptItems(reduceScriptEvents(events)), [events]);
 
   const [expanded, setExpanded] = useState(true);
@@ -98,6 +110,7 @@ export default function ScriptExecutions({ events, showScriptOutput, latestBoots
               card={card}
               showScriptOutput={showScriptOutput}
               latestBootstrapVersion={latestBootstrapVersion}
+              displayNamesByRefKey={displayNamesByRefKey}
             />
           ))}
         </div>
@@ -145,7 +158,7 @@ function cardStatusTextColor(state: ScriptCard["headerState"]): string {
  * the parent header + nested phase rows under it; platform / single-phase remediation
  * cards collapse the parent header into the single phase row (no nesting).
  */
-function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion }: { card: ScriptCard; showScriptOutput?: boolean; latestBootstrapVersion?: string | null }) {
+function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion, displayNamesByRefKey }: { card: ScriptCard; showScriptOutput?: boolean; latestBootstrapVersion?: string | null; displayNamesByRefKey?: DisplayNamesByRefKey }) {
   // Cycles default to COLLAPSED so a session with many remediation policies stays
   // scannable — the header carries the cycle-level outcome which is the at-a-glance
   // signal the user wants first. Click the chevron to drill into per-phase details.
@@ -158,6 +171,7 @@ function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion }: { ca
         item={card.phases[0]}
         showScriptOutput={showScriptOutput}
         latestBootstrapVersion={latestBootstrapVersion}
+        displayName={lookupScriptDisplayName(displayNamesByRefKey, card.phases[0].scriptType, card.phases[0].policyId)}
       />
     );
   }
@@ -174,6 +188,7 @@ function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion }: { ca
   const meta = card.phases.find(p => p.runContext) ?? card.phases[0];
   const remediationStatus = card.phases.map(p => p.remediationStatus).find(s => s != null);
   const remediationStatusLabel = mapRemediationStatus(remediationStatus);
+  const cardDisplayName = lookupScriptDisplayName(displayNamesByRefKey, card.scriptType, card.policyId);
 
   return (
     <div className={`rounded-lg ${containerClass}`}>
@@ -185,6 +200,9 @@ function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion }: { ca
         <div className="flex items-center space-x-2 min-w-0">
           <CardIcon state={card.headerState} className={iconColor} />
           <span className="text-sm font-medium text-gray-900 truncate">Remediation</span>
+          {cardDisplayName && (
+            <span className="text-sm text-gray-600 truncate" title={cardDisplayName}>· {cardDisplayName}</span>
+          )}
           <span className="text-xs font-mono text-gray-500">{shortId}…</span>
           <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">
             cycle · {card.phases.length} phases
@@ -216,6 +234,7 @@ function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion }: { ca
               item={phase}
               showScriptOutput={showScriptOutput}
               latestBootstrapVersion={latestBootstrapVersion}
+              displayName={lookupScriptDisplayName(displayNamesByRefKey, phase.scriptType, phase.policyId)}
               nested
             />
           ))}
@@ -255,7 +274,7 @@ function CardIcon({ state, className }: { state: ScriptCard["headerState"]; clas
   );
 }
 
-function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion, nested }: { item: ScriptItem; showScriptOutput?: boolean; latestBootstrapVersion?: string | null; nested?: boolean }) {
+function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion, nested, displayName }: { item: ScriptItem; showScriptOutput?: boolean; latestBootstrapVersion?: string | null; nested?: boolean; displayName?: string | null }) {
   const [showDetails, setShowDetails] = useState(false);
   // Re-render every 5s while in Running state so elapsed-time updates live.
   const [now, setNow] = useState(() => Date.now());
@@ -330,6 +349,10 @@ function ScriptItemRow({ item, showScriptOutput, latestBootstrapVersion, nested 
             </svg>
           )}
           <span className="text-sm font-medium text-gray-900 truncate">{label}</span>
+          {/* Intune display name from the optional Graph add-on permission (if granted). */}
+          {displayName && (
+            <span className="text-sm text-gray-600 truncate" title={displayName}>· {displayName}</span>
+          )}
           {/* shortId only on standalone rows — inside a cycle the parent header already shows it. */}
           {!nested && (
             intuneUrl ? (

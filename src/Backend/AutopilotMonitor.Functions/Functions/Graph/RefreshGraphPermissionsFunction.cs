@@ -1,0 +1,50 @@
+using System;
+using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Services.GraphResolution;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
+
+namespace AutopilotMonitor.Functions.Functions.Graph;
+
+/// <summary>
+/// <c>POST /api/tenants/{tenantId}/graph-permissions/refresh</c> — invalidates the
+/// detector's cached token/roles for the tenant so the next call re-acquires fresh from
+/// Azure AD. Triggered by the Admin UI right after the customer ran the grant script, to
+/// avoid a 1h wait before the new permissions show up.
+/// </summary>
+public class RefreshGraphPermissionsFunction
+{
+    private readonly ILogger<RefreshGraphPermissionsFunction> _logger;
+    private readonly IGraphFeatureDetector _detector;
+
+    public RefreshGraphPermissionsFunction(
+        ILogger<RefreshGraphPermissionsFunction> logger,
+        IGraphFeatureDetector detector)
+    {
+        _logger = logger;
+        _detector = detector;
+    }
+
+    [Function("RefreshGraphPermissions")]
+    public async Task<HttpResponseData> Run(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post",
+            Route = "tenants/{tenantId}/graph-permissions/refresh")] HttpRequestData req,
+        string tenantId)
+    {
+        try
+        {
+            var requestCtx = req.GetRequestContext();
+            _detector.InvalidateTenant(requestCtx.TargetTenantId);
+            _logger.LogInformation("Graph-permissions cache invalidated for tenant {Tenant} by request",
+                requestCtx.TargetTenantId);
+            return await req.OkAsync(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            return await req.InternalServerErrorAsync(_logger, ex,
+                $"Refresh graph permissions for tenant '{tenantId}'");
+        }
+    }
+}

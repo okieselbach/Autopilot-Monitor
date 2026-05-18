@@ -512,6 +512,11 @@ namespace AutopilotMonitor.Shared
             // Lives forever; cleanup is operator-driven via the admin UI.
             public const string TenantOffboardingCustomsArchive = "TenantOffboardingCustomsArchive";
 
+            // Graph add-on permission feature — cache for Intune script display names.
+            // PartitionKey = tenantId, RowKey = "{Kind}_{ScriptId}" or "{Kind}_$meta".
+            // Daily cleanup function evicts entries older than the TTL.
+            public const string ScriptNameCache = "ScriptNameCache";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -567,7 +572,8 @@ namespace AutopilotMonitor.Shared
                 ClassifierVerdictsByIdLevel,
                 SignalsByKind,
                 OffboardingAudit,
-                TenantOffboardingCustomsArchive
+                TenantOffboardingCustomsArchive,
+                ScriptNameCache,
             };
         }
 
