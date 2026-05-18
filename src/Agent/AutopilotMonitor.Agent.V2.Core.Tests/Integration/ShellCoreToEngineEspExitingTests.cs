@@ -87,7 +87,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
             var espExiting = ingress.Posted.FirstOrDefault(p => p.Kind == DecisionSignalKind.EspExiting);
             Assert.NotNull(espExiting);
 
-            // Build a Classic state already at AccountSetup so the EspExiting guard unlocks.
+            // Build a Classic state already at AccountSetup AND with the strong post-AccountSetup
+            // gate satisfied (session 330f73f3 fix) so the EspExiting guard unlocks. Pre-fix this
+            // worked with only AccountSetupEnteredUtc; the new gate requires AccountSetupProvisioningSucceededUtc.
             var engine = new DecisionEngine();
             var seed = DecisionState.CreateInitial("S1", "T1", agentBootUtc: sourceTime.AddMinutes(-5))
                 .ToBuilder()
@@ -95,6 +97,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
                 .WithStepIndex(2)
                 .WithLastAppliedSignalOrdinal(1);
             seed.AccountSetupEnteredUtc = new SignalFact<DateTime>(sourceTime.AddMinutes(-2), 1);
+            seed.AccountSetupProvisioningSucceededUtc = new SignalFact<DateTime>(sourceTime.AddMinutes(-1).AddSeconds(-30), 1);
             var state = seed.Build();
 
             // Re-wrap the adapter-posted signal with the ordinal the engine expects.
@@ -220,6 +223,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Integration
                 .WithStepIndex(2)
                 .WithLastAppliedSignalOrdinal(1);
             seed.AccountSetupEnteredUtc = new SignalFact<DateTime>(sourceTime.AddMinutes(-2), 1);
+            seed.AccountSetupProvisioningSucceededUtc = new SignalFact<DateTime>(sourceTime.AddMinutes(-1).AddSeconds(-30), 1);
             var state = seed.Build();
 
             var enriched = new DecisionSignal(

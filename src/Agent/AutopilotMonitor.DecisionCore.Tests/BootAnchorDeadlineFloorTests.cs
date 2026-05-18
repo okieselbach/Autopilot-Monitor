@@ -42,9 +42,11 @@ namespace AutopilotMonitor.DecisionCore.Tests
         [Fact]
         public void HelloSafety_armed_from_replayed_EspExiting_floors_at_AgentBootUtc()
         {
-            // Setup: state already in EspAccountSetup so EspExiting takes the AwaitingHello
-            // path. Build it with a non-replayed AccountSetup signal so the boot-anchor floor
-            // only matters for the EspExiting arming step.
+            // Setup: state already in EspAccountSetup with the strong post-AccountSetup gate
+            // satisfied so EspExiting takes the AwaitingHello path (session 330f73f3 fix:
+            // AccountSetupEntered alone is no longer sufficient — need AccountSetupProvisioningSucceeded).
+            // Build it with non-replayed signals so the boot-anchor floor only matters for the
+            // EspExiting arming step.
             var engine = new DecisionEngine();
             var state = FreshAtBoot();
             state = engine.Reduce(state,
@@ -52,9 +54,11 @@ namespace AutopilotMonitor.DecisionCore.Tests
             state = engine.Reduce(state,
                 MakeSignal(1, DecisionSignalKind.EspPhaseChanged, AgentBoot.AddSeconds(1),
                     new Dictionary<string, string> { [SignalPayloadKeys.EspPhase] = "AccountSetup" })).NewState;
+            state = engine.Reduce(state,
+                MakeSignal(2, DecisionSignalKind.AccountSetupProvisioningComplete, AgentBoot.AddSeconds(2))).NewState;
 
             // Replayed CMTrace EspExiting from before the agent booted.
-            var replayed = MakeSignal(2, DecisionSignalKind.EspExiting, LogPast);
+            var replayed = MakeSignal(3, DecisionSignalKind.EspExiting, LogPast);
             var step = engine.Reduce(state, replayed);
 
             var helloSafety = Assert.Single(step.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
@@ -150,6 +154,7 @@ namespace AutopilotMonitor.DecisionCore.Tests
                 deviceSetupEnteredUtc: null,
                 accountSetupEnteredUtc: null,
                 finalizingEnteredUtc: null,
+                accountSetupProvisioningSucceededUtc: null,
                 espFinalExitUtc: null,
                 desktopArrivedUtc: null,
                 helloResolvedUtc: null,

@@ -1,0 +1,9 @@
+# AccountSetupProvisioningComplete v1 — session 330f73f3 fix (2026-05-18).
+# Posted by ProvisioningStatusTracker (via EspAndHelloTrackerAdapter in production) once
+# AccountSetupCategory.Status registry resolves to categorySucceeded=true, or when the
+# fallback fires after 30 s of all subcategories sitting at succeeded/notRequired without
+# Windows ever flipping the boolean (same fallback shape as DeviceSetup).
+# Reducer: HandleAccountSetupProvisioningCompleteV1 → records AccountSetupProvisioningSucceededUtc.
+# If EspExiting has already been recorded (intermediate exit was ignored on the way in),
+# also performs the deferred promotion to AwaitingHello + arms HelloSafety.
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"AccountSetupProvisioningComplete","KindSchemaVersion":1,"OccurredAtUtc":"2026-05-18T07:30:00.0000000Z","SourceOrigin":"EspAndHelloTracker","Evidence":{"Kind":"Derived","Identifier":"esp-and-hello-tracker-v1","Summary":"AccountSetupCategory provisioning completed (coordinator-forwarded)","DerivationInputs":{"subSource":"ProvisioningStatusTracker","accountSetupResolved":"true"}},"Payload":{"accountSetupResolved":"true"}}

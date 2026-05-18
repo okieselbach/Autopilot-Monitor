@@ -101,7 +101,9 @@ namespace AutopilotMonitor.DecisionCore.Tests
             // The c117946b debrief (2026-05-12) added `lastFailureTrigger` so the
             // EnrollmentTerminationHandler can discriminate which Failed pathway fired
             // and only promote in-flight installs on ESP-Apps timeout → 12 slots.
-            Assert.Equal(12, facts.Count);
+            // Session 330f73f3 fix (2026-05-18) added `accountSetupProvisioningSucceededUtc`
+            // as the strong post-AccountSetup gate → 13 slots.
+            Assert.Equal(13, facts.Count);
             Assert.All(facts.Values, v => Assert.Null(v));
         }
 
@@ -211,10 +213,11 @@ namespace AutopilotMonitor.DecisionCore.Tests
             // PR-B (2026-05-04): 11 SignalFact properties on DecisionState (was 15;
             // the 4 WG-Part-2 facts were removed). c117946b debrief (2026-05-12):
             // `lastFailureTrigger` added for the EnrollmentTerminationHandler's
-            // 4-check discriminator → 12. If this number ever changes, both the
-            // count expectation AND the actual snapshot output need to evolve in
-            // lockstep.
-            Assert.Equal(12, expectedFactKeys.Count);
+            // 4-check discriminator → 12. Session 330f73f3 fix (2026-05-18) added
+            // `accountSetupProvisioningSucceededUtc` as the strong post-AccountSetup
+            // gate → 13. If this number ever changes, both the count expectation AND
+            // the actual snapshot output need to evolve in lockstep.
+            Assert.Equal(13, expectedFactKeys.Count);
 
             var snapshot = DecisionStateSnapshotBuilder.Build(DecisionState.CreateInitial("s", "t"));
             var facts = (Dictionary<string, object?>)snapshot["facts"]!;

@@ -26,6 +26,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
     ///   <item><c>WhiteGloveCompleted</c> → <see cref="DecisionSignalKind.WhiteGloveShellCoreSuccess"/></item>
     ///   <item><c>EspFailureDetected</c> → <see cref="DecisionSignalKind.EspTerminalFailure"/> (merged aus ShellCore + Provisioning)</item>
     ///   <item><c>DeviceSetupProvisioningComplete</c> → <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/></item>
+    ///   <item><c>AccountSetupProvisioningComplete</c> → <see cref="DecisionSignalKind.AccountSetupProvisioningComplete"/> (session 330f73f3 fix — strong AccountSetup-done gate)</item>
     ///   <item><c>EspExited</c> → <see cref="DecisionSignalKind.EspExiting"/> (no dedup — every 62407 forwarded; reducer guard decides)</item>
     /// </list>
     /// </para>
@@ -50,6 +51,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private bool _whiteGloveSuccessPosted;
         private bool _espFailurePosted;
         private bool _deviceSetupCompletePosted;
+        private bool _accountSetupCompletePosted;
         private bool _helloPolicyPosted;
 
         /// <summary>Tracked HelloOutcome (read via event; coordinator exposes property).</summary>
@@ -67,6 +69,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _coordinator.WhiteGloveCompleted += OnWhiteGloveCompleted;
             _coordinator.EspFailureDetected += OnEspFailure;
             _coordinator.DeviceSetupProvisioningComplete += OnDeviceSetupComplete;
+            _coordinator.AccountSetupProvisioningComplete += OnAccountSetupComplete;
             _coordinator.HelloPolicyDetected += OnHelloPolicyDetected;
             _coordinator.EspExited += OnEspExited;
         }
@@ -78,6 +81,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _coordinator.WhiteGloveCompleted -= OnWhiteGloveCompleted;
             _coordinator.EspFailureDetected -= OnEspFailure;
             _coordinator.DeviceSetupProvisioningComplete -= OnDeviceSetupComplete;
+            _coordinator.AccountSetupProvisioningComplete -= OnAccountSetupComplete;
             _coordinator.HelloPolicyDetected -= OnHelloPolicyDetected;
             _coordinator.EspExited -= OnEspExited;
         }
@@ -87,6 +91,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private void OnWhiteGloveCompleted(object sender, EventArgs e) => EmitWhiteGlove();
         private void OnEspFailure(object sender, string failureType) => EmitEspFailure(failureType);
         private void OnDeviceSetupComplete(object sender, EventArgs e) => EmitDeviceSetupComplete();
+        private void OnAccountSetupComplete(object sender, EventArgs e) => EmitAccountSetupComplete();
         private void OnHelloPolicyDetected(bool helloEnabled, string source) => EmitHelloPolicy(helloEnabled, source);
         private void OnEspExited(object sender, EspExitedEventArgs args) => EmitEspExiting();
 
@@ -95,6 +100,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         internal void TriggerWhiteGloveFromTest() => EmitWhiteGlove();
         internal void TriggerEspFailureFromTest(string failureType) => EmitEspFailure(failureType);
         internal void TriggerDeviceSetupCompleteFromTest() => EmitDeviceSetupComplete();
+        internal void TriggerAccountSetupCompleteFromTest() => EmitAccountSetupComplete();
         internal void TriggerHelloPolicyDetectedFromTest(bool helloEnabled, string source) => EmitHelloPolicy(helloEnabled, source);
         internal void TriggerEspExitingFromTest() => EmitEspExiting();
 
@@ -347,6 +353,45 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 payload: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["deviceSetupResolved"] = deviceSetupResolved,
+                });
+        }
+
+        /// <summary>
+        /// Session 330f73f3 fix: emits the strong post-AccountSetup gate signal. Coordinator
+        /// already deduped at the tracker layer; this method's own flag is a second-line
+        /// defense against duplicate Subscribe calls.
+        /// </summary>
+        private void EmitAccountSetupComplete()
+        {
+            if (_accountSetupCompletePosted) return;
+            _accountSetupCompletePosted = true;
+
+            var snapshot = _coordinator.GetProvisioningCategorySnapshot();
+            var accountSetupResolved =
+                snapshot.TryGetValue("AccountSetupCategory.Status", out var asState) && asState.HasValue
+                    ? asState.Value.ToString().ToLowerInvariant()
+                    : "unknown";
+            var now = ResolveOccurredAt(out var derivedFromClock);
+
+            var derivationInputs = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["subSource"] = "ProvisioningStatusTracker",
+                ["accountSetupResolved"] = accountSetupResolved,
+            };
+            TagDerivedTimestamp(derivationInputs, derivedFromClock);
+
+            _ingress.Post(
+                kind: DecisionSignalKind.AccountSetupProvisioningComplete,
+                occurredAtUtc: now,
+                sourceOrigin: SourceOrigin,
+                evidence: new Evidence(
+                    kind: EvidenceKind.Derived,
+                    identifier: DetectorId,
+                    summary: "AccountSetupCategory provisioning completed (coordinator-forwarded)",
+                    derivationInputs: derivationInputs),
+                payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["accountSetupResolved"] = accountSetupResolved,
                 });
         }
     }

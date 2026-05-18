@@ -72,6 +72,9 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 // ----- SelfDeploying + Device-Only (DecisionEngine.SelfDeploying.cs) -----
                 (DecisionSignalKind.DeviceSetupProvisioningComplete, 1) => HandleDeviceSetupProvisioningCompleteV1(state, signal),
 
+                // ----- AccountSetup completion gate (DecisionEngine.Shared.cs) — session 330f73f3 fix -----
+                (DecisionSignalKind.AccountSetupProvisioningComplete, 1) => HandleAccountSetupProvisioningCompleteV1(state, signal),
+
                 // ----- WhiteGlove Part 1 (DecisionEngine.WhiteGlove.cs) -----
                 (DecisionSignalKind.WhiteGloveShellCoreSuccess, 1)         => HandleWhiteGloveShellCoreSuccessV1(state, signal),
                 (DecisionSignalKind.WhiteGloveSealingPatternDetected, 1)   => HandleWhiteGloveSealingPatternDetectedV1(state, signal),

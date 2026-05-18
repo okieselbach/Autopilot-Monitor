@@ -39,8 +39,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
         /// <summary>
         /// Build a compact snapshot dictionary for the given <paramref name="state"/>.
-        /// All 15 <see cref="SignalFact{T}"/> properties of <see cref="DecisionState"/>
-        /// are serialized under <c>facts</c>; absent facts appear as JSON <c>null</c>.
+        /// All <see cref="SignalFact{T}"/> properties of <see cref="DecisionState"/> are
+        /// serialized under <c>facts</c>; absent facts appear as JSON <c>null</c>.
         /// </summary>
         public static Dictionary<string, object?> Build(DecisionState state)
         {
@@ -51,6 +51,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 ["currentEnrollmentPhase"]         = SerializeFact(state.CurrentEnrollmentPhase, v => v.ToString()),
                 ["deviceSetupEnteredUtc"]          = SerializeFact(state.DeviceSetupEnteredUtc, FormatUtc),
                 ["accountSetupEnteredUtc"]         = SerializeFact(state.AccountSetupEnteredUtc, FormatUtc),
+                ["accountSetupProvisioningSucceededUtc"] = SerializeFact(state.AccountSetupProvisioningSucceededUtc, FormatUtc),
                 ["finalizingEnteredUtc"]           = SerializeFact(state.FinalizingEnteredUtc, FormatUtc),
                 ["espFinalExitUtc"]                = SerializeFact(state.EspFinalExitUtc, FormatUtc),
                 ["desktopArrivedUtc"]              = SerializeFact(state.DesktopArrivedUtc, FormatUtc),

@@ -40,6 +40,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
     {
         internal const string ProvisioningStatusRegistryPath = @"SOFTWARE\Microsoft\Provisioning\AutopilotSettings";
         internal const int DeviceSetupFallbackDelaySeconds = 30;
+        // Same fallback window as DeviceSetup, applied to AccountSetup. Session 330f73f3 fix:
+        // some Windows builds never set AccountSetupCategory.Status.categorySucceeded even when
+        // all subcategories resolve to succeeded/notRequired; without a fallback the strong
+        // post-AccountSetup gate (AccountSetupProvisioningSucceededUtc) would never be set and
+        // the reducer would never promote to AwaitingHello.
+        internal const int AccountSetupFallbackDelaySeconds = 30;
         internal const int ProvisioningDebounceMilliseconds = 1000;
 
         private static readonly string[] ProvisioningCategoryNames =
@@ -58,6 +64,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private Timer _provisioningWatcherRetryTimer;
         private Timer _provisioningDebounceTimer;
         private Timer _deviceSetupFallbackTimer;
+        private Timer _accountSetupFallbackTimer;
 
         // Track the raw JSON per category — used to detect any changes at all
         private Dictionary<string, string> _lastProvisioningJson;
@@ -73,6 +80,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private Dictionary<string, Dictionary<string, string>> _lastSubcategoryStates;
         // Fire-once guard for DeviceSetupProvisioningComplete event
         private bool _deviceSetupProvisioningCompleteFired;
+        // Fire-once guard for AccountSetupProvisioningComplete event (session 330f73f3 fix)
+        private bool _accountSetupProvisioningCompleteFired;
         // WhiteGlove confirmation: DeviceSetup registry contains SaveWhiteGloveSuccessResult=succeeded
         private bool _saveWhiteGloveSuccessResultSeen;
         // Track SaveWhiteGloveSuccessResult state transitions for observability (null → notStarted → succeeded)
@@ -81,6 +90,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         public event EventHandler<string> EspFailureDetected;
         public event EventHandler DeviceSetupProvisioningComplete;
+        /// <summary>
+        /// Fires once when <c>AccountSetupCategory.Status</c> resolves to
+        /// <c>categorySucceeded=true</c>, or when the fallback fires (all subcategories
+        /// succeeded/notRequired but Windows never set the boolean — same fallback shape as
+        /// DeviceSetup). Session 330f73f3 fix: this is the strong "User-ESP truly finished"
+        /// signal that gates the reducer's promotion to <c>AwaitingHello</c>; without it the
+        /// reducer ignores intermediate Shell-Core 62407 events.
+        /// </summary>
+        public event EventHandler AccountSetupProvisioningComplete;
 
         public ProvisioningStatusTracker(
             string sessionId,
@@ -219,6 +237,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             _lastSubcategoryStates = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
             _deviceSetupProvisioningCompleteFired = false;
             _deviceSetupFallbackTimer = null;
+            _accountSetupProvisioningCompleteFired = false;
+            _accountSetupFallbackTimer = null;
 
             // Try to start immediately; if key doesn't exist yet, retry every 2s
             if (!TryStartWatcher())
@@ -251,6 +271,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
                 _deviceSetupFallbackTimer?.Dispose();
                 _deviceSetupFallbackTimer = null;
+
+                _accountSetupFallbackTimer?.Dispose();
+                _accountSetupFallbackTimer = null;
 
                 if (_provisioningWatcher != null)
                 {
@@ -418,6 +441,39 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                                 TimeSpan.FromSeconds(DeviceSetupFallbackDelaySeconds),
                                 Timeout.InfiniteTimeSpan);
                         }
+
+                        // Session 330f73f3 fix: same flow for AccountSetup. Fires
+                        // AccountSetupProvisioningComplete when the category resolves with
+                        // success, or when the fallback confirms all subcategories
+                        // succeeded/notRequired but categorySucceeded was never set.
+                        if (!_accountSetupProvisioningCompleteFired
+                            && _lastCategorySucceeded.TryGetValue("AccountSetupCategory.Status", out var asSucceeded)
+                            && asSucceeded == true)
+                        {
+                            _accountSetupProvisioningCompleteFired = true;
+                            _logger.Info("Provisioning status: AccountSetup succeeded — firing AccountSetupProvisioningComplete");
+                            try { AccountSetupProvisioningComplete?.Invoke(this, EventArgs.Empty); }
+                            catch (Exception ex) { _logger.Error("AccountSetupProvisioningComplete handler failed", ex); }
+                        }
+
+                        if (!_accountSetupProvisioningCompleteFired
+                            && _accountSetupFallbackTimer == null
+                            && _lastCategorySucceeded.TryGetValue("AccountSetupCategory.Status", out var asFallbackState)
+                            && asFallbackState == null
+                            && _lastSubcategoryStates.TryGetValue("AccountSetupCategory.Status", out var asFallbackSubStates)
+                            && asFallbackSubStates.Count > 0
+                            && asFallbackSubStates.Values.All(s =>
+                                string.Equals(s, "succeeded", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(s, "notRequired", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            _logger.Info($"Provisioning status: AccountSetup — all {asFallbackSubStates.Count} subcategories succeeded " +
+                                         $"but categorySucceeded not set by Windows — starting {AccountSetupFallbackDelaySeconds}s fallback timer");
+                            _accountSetupFallbackTimer = new Timer(
+                                OnAccountSetupFallbackTimerExpired,
+                                null,
+                                TimeSpan.FromSeconds(AccountSetupFallbackDelaySeconds),
+                                Timeout.InfiniteTimeSpan);
+                        }
                     }
                 }
             }
@@ -427,6 +483,189 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             }
         }
 
+        /// <summary>
+        /// Session 330f73f3 fix: AccountSetup-side mirror of <see cref="OnDeviceSetupFallbackTimerExpired"/>.
+        /// Confirms via a fresh registry read that all subcategories are still
+        /// succeeded/notRequired and categorySucceeded is still unset, then fires
+        /// <see cref="AccountSetupProvisioningComplete"/>. If Windows wrote a real
+        /// categorySucceeded value in the meantime, the normal path re-runs and handles it.
+        /// <para>
+        /// On every abort path the timer field is reset to <c>null</c> so a later
+        /// <c>CheckProvisioningStatus</c> can re-arm the fallback when the "all subcategories
+        /// succeeded" condition is re-satisfied (transient flicker race: a subcategory briefly
+        /// drops to in_progress between fallback arm and timer fire, the callback aborts —
+        /// without resetting the field, a re-stabilised state could never re-arm and the
+        /// strong-gate fact never gets posted).
+        /// </para>
+        /// </summary>
+        private void OnAccountSetupFallbackTimerExpired(object state)
+        {
+            try
+            {
+                lock (_stateLock)
+                {
+                    if (_accountSetupProvisioningCompleteFired)
+                    {
+                        _logger.Debug("AccountSetup fallback timer expired but AccountSetupProvisioningComplete already fired — ignoring");
+                        // No timer-field reset needed: re-arm is gated on _accountSetupProvisioningCompleteFired too.
+                        return;
+                    }
+
+                    string registryJson = null;
+                    using (var key = Registry.LocalMachine.OpenSubKey(ProvisioningStatusRegistryPath, writable: false))
+                    {
+                        registryJson = key?.GetValue("AccountSetupCategory.Status")?.ToString();
+                    }
+
+                    if (string.IsNullOrEmpty(registryJson))
+                    {
+                        _logger.Warning("AccountSetup fallback timer: registry value not found — aborting fallback");
+                        ResetAccountSetupFallbackTimer();
+                        return;
+                    }
+
+                    bool? categorySucceeded = null;
+                    List<SubcategoryInfo> subcategories = null;
+                    try
+                    {
+                        using (var doc = JsonDocument.Parse(registryJson))
+                        {
+                            categorySucceeded = SafeGetBool(doc.RootElement, "categorySucceeded");
+                            subcategories = ParseSubcategories(doc.RootElement);
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.Warning($"AccountSetup fallback timer: failed to parse registry JSON — aborting fallback: {ex.Message}");
+                        ResetAccountSetupFallbackTimer();
+                        return;
+                    }
+
+                    if (categorySucceeded.HasValue)
+                    {
+                        _logger.Info($"AccountSetup fallback timer: categorySucceeded is now {categorySucceeded.Value} — normal path will handle this");
+                        ResetAccountSetupFallbackTimer();
+                        CheckProvisioningStatus();
+                        return;
+                    }
+
+                    if (subcategories == null || subcategories.Count == 0)
+                    {
+                        _logger.Warning("AccountSetup fallback timer: no subcategories found — aborting fallback");
+                        ResetAccountSetupFallbackTimer();
+                        return;
+                    }
+
+                    var nonSucceeded = subcategories.Where(s =>
+                        !string.Equals(s.State, "succeeded", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(s.State, "notRequired", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (nonSucceeded.Count > 0)
+                    {
+                        _logger.Warning($"AccountSetup fallback timer: {nonSucceeded.Count} subcategory/ies not succeeded " +
+                                        $"({string.Join(", ", nonSucceeded.Select(s => $"{s.Name}={s.State}"))}) — aborting fallback");
+                        ResetAccountSetupFallbackTimer();
+                        return;
+                    }
+
+                    EmitRawRegistryDump("AccountSetup", registryJson, "fallback_confirmed");
+
+                    _logger.Warning($"AccountSetup fallback: all {subcategories.Count} subcategories succeeded but " +
+                                    $"categorySucceeded was not set by Windows after {AccountSetupFallbackDelaySeconds}s — treating as complete");
+
+                    var subcatData = new Dictionary<string, object>();
+                    foreach (var sub in subcategories)
+                    {
+                        subcatData[sub.Name] = new Dictionary<string, string>
+                        {
+                            { "state", sub.State },
+                            { "statusText", sub.StatusText }
+                        };
+                    }
+
+                    _post.Emit(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = Constants.EventTypes.EspProvisioningStatus,
+                        Severity = EventSeverity.Warning,
+                        Source = "EspAndHelloTracker",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"ESP provisioning status: AccountSetup — all {subcategories.Count} subcategories succeeded " +
+                                  $"but categorySucceeded was not confirmed by Windows — treating as complete (fallback after {AccountSetupFallbackDelaySeconds}s)",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "category", "AccountSetup" },
+                            { "categorySucceeded", "in_progress" },
+                            { "fallbackApplied", true },
+                            { "fallbackReason", "all_subcategories_succeeded_category_unresolved" },
+                            { "fallbackDelaySeconds", AccountSetupFallbackDelaySeconds },
+                            { "subcategoryCount", subcategories.Count },
+                            { "subcategories", subcatData }
+                        }
+                    });
+
+                    // Fired success path: dispose + null the timer so Stop() doesn't redundantly
+                    // dispose it. Re-arm is also gated on _accountSetupProvisioningCompleteFired so
+                    // null-ing here is correctness-neutral on the start-condition side.
+                    ResetAccountSetupFallbackTimer();
+                    _accountSetupProvisioningCompleteFired = true;
+                    try { AccountSetupProvisioningComplete?.Invoke(this, EventArgs.Empty); }
+                    catch (Exception ex) { _logger.Error("AccountSetupProvisioningComplete handler failed (fallback path)", ex); }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"AccountSetup fallback timer callback failed: {ex.Message}", ex);
+                // Defensive re-arm-blocker cleanup. If the inner block threw before any of the
+                // explicit Reset paths ran (e.g. registry open / Emit / Invoke failure), the
+                // timer field would otherwise stay non-null and CheckProvisioningStatus' start
+                // condition could never re-arm a re-stabilised "all subcategories succeeded"
+                // state. The lock is re-entrant — safe to re-acquire here.
+                try
+                {
+                    lock (_stateLock)
+                    {
+                        ResetAccountSetupFallbackTimer();
+                    }
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.Error("AccountSetup fallback timer reset on exception path failed", cleanupEx);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reset the AccountSetup fallback timer field after the callback consumes it. Required
+        /// because the start condition in <see cref="CheckProvisioningStatus"/> gates re-arming
+        /// on <c>_accountSetupFallbackTimer == null</c>; without this reset a transient flicker
+        /// (subcategory briefly drops to in_progress between arm and timer fire → callback
+        /// aborts) would permanently prevent re-arming even when the state re-stabilises.
+        /// Caller already holds <see cref="_stateLock"/>.
+        /// </summary>
+        private void ResetAccountSetupFallbackTimer()
+        {
+            _accountSetupFallbackTimer?.Dispose();
+            _accountSetupFallbackTimer = null;
+        }
+
+        /// <summary>
+        /// DeviceSetup mirror of <see cref="ResetAccountSetupFallbackTimer"/>. Same re-arm-blocker
+        /// concern, same fix. Caller already holds <see cref="_stateLock"/>.
+        /// </summary>
+        private void ResetDeviceSetupFallbackTimer()
+        {
+            _deviceSetupFallbackTimer?.Dispose();
+            _deviceSetupFallbackTimer = null;
+        }
+
+        /// <summary>
+        /// Parity with <see cref="OnAccountSetupFallbackTimerExpired"/> — every abort path
+        /// resets <see cref="_deviceSetupFallbackTimer"/> to <c>null</c> so a transient
+        /// subcategory flicker that aborts the callback cannot permanently block a re-arm
+        /// from <see cref="CheckProvisioningStatus"/>.
+        /// </summary>
         private void OnDeviceSetupFallbackTimerExpired(object state)
         {
             try
@@ -436,6 +675,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     if (_deviceSetupProvisioningCompleteFired)
                     {
                         _logger.Debug("DeviceSetup fallback timer expired but DeviceSetupProvisioningComplete already fired — ignoring");
+                        // No timer-field reset needed: re-arm is gated on _deviceSetupProvisioningCompleteFired too.
                         return;
                     }
 
@@ -448,6 +688,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     if (string.IsNullOrEmpty(registryJson))
                     {
                         _logger.Warning("DeviceSetup fallback timer: registry value not found — aborting fallback");
+                        ResetDeviceSetupFallbackTimer();
                         return;
                     }
 
@@ -464,12 +705,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     catch (JsonException ex)
                     {
                         _logger.Warning($"DeviceSetup fallback timer: failed to parse registry JSON — aborting fallback: {ex.Message}");
+                        ResetDeviceSetupFallbackTimer();
                         return;
                     }
 
                     if (categorySucceeded.HasValue)
                     {
                         _logger.Info($"DeviceSetup fallback timer: categorySucceeded is now {categorySucceeded.Value} — normal path will handle this");
+                        ResetDeviceSetupFallbackTimer();
                         CheckProvisioningStatus();
                         return;
                     }
@@ -477,6 +720,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     if (subcategories == null || subcategories.Count == 0)
                     {
                         _logger.Warning("DeviceSetup fallback timer: no subcategories found — aborting fallback");
+                        ResetDeviceSetupFallbackTimer();
                         return;
                     }
 
@@ -488,6 +732,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     {
                         _logger.Warning($"DeviceSetup fallback timer: {nonSucceeded.Count} subcategory/ies not succeeded " +
                                         $"({string.Join(", ", nonSucceeded.Select(s => $"{s.Name}={s.State}"))}) — aborting fallback");
+                        ResetDeviceSetupFallbackTimer();
                         return;
                     }
 
@@ -528,6 +773,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                         }
                     });
 
+                    // Fired success path: dispose + null the timer so Stop() doesn't redundantly
+                    // dispose it. Re-arm is also gated on _deviceSetupProvisioningCompleteFired so
+                    // null-ing here is correctness-neutral on the start-condition side.
+                    ResetDeviceSetupFallbackTimer();
                     _deviceSetupProvisioningCompleteFired = true;
                     try { DeviceSetupProvisioningComplete?.Invoke(this, EventArgs.Empty); }
                     catch (Exception ex) { _logger.Error("DeviceSetupProvisioningComplete handler failed (fallback path)", ex); }
@@ -536,6 +785,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             catch (Exception ex)
             {
                 _logger.Error($"DeviceSetup fallback timer callback failed: {ex.Message}", ex);
+                // Mirror of AccountSetup defensive cleanup: if the inner block threw before any
+                // of the explicit Reset paths ran, the timer field would otherwise stay non-null
+                // and CheckProvisioningStatus' start condition could never re-arm. Lock is
+                // re-entrant — safe to re-acquire.
+                try
+                {
+                    lock (_stateLock)
+                    {
+                        ResetDeviceSetupFallbackTimer();
+                    }
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.Error("DeviceSetup fallback timer reset on exception path failed", cleanupEx);
+                }
             }
         }
 

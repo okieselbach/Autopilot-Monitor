@@ -80,6 +80,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         /// </summary>
         public event EventHandler DeviceSetupProvisioningComplete;
 
+        /// <summary>
+        /// Session 330f73f3 fix: fired when AccountSetup provisioning resolves with success
+        /// (or the fallback confirmed). Forwarded from <see cref="ProvisioningStatusTracker"/>;
+        /// the V2 adapter posts it as <c>DecisionSignalKind.AccountSetupProvisioningComplete</c>
+        /// so the reducer's <c>ShouldTransitionToAwaitingHello</c> gate has the strong
+        /// post-AccountSetup fact and stops promoting on intermediate Shell-Core 62407 events.
+        /// </summary>
+        public event EventHandler AccountSetupProvisioningComplete;
+
         // PR4 (882fef64 debrief) — coordinator-forwarded copy of <see cref="HelloTracker.HelloPolicyDetected"/>.
         // Args: (helloEnabled, source). Subscribed by EspAndHelloTrackerAdapter to post a
         // DecisionSignalKind.HelloPolicyDetected signal.
@@ -250,6 +259,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 _logger);
             _provisioningTracker.EspFailureDetected += OnEspFailureDetected;
             _provisioningTracker.DeviceSetupProvisioningComplete += OnDeviceSetupProvisioningComplete;
+            _provisioningTracker.AccountSetupProvisioningComplete += OnAccountSetupProvisioningComplete;
             _provisioningTracker.Start();
 
             if (_modernDeploymentWatcherEnabled)
@@ -315,6 +325,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             {
                 _provisioningTracker.EspFailureDetected -= OnEspFailureDetected;
                 _provisioningTracker.DeviceSetupProvisioningComplete -= OnDeviceSetupProvisioningComplete;
+                _provisioningTracker.AccountSetupProvisioningComplete -= OnAccountSetupProvisioningComplete;
                 _provisioningTracker.Stop("tracker_stopped");
             }
             catch (Exception ex) { _logger.Error("Error stopping provisioning status tracker", ex); }
@@ -469,6 +480,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             LastEventOccurredAtUtc = null;
             try { DeviceSetupProvisioningComplete?.Invoke(this, EventArgs.Empty); }
             catch (Exception ex) { _logger.Error("Error forwarding DeviceSetupProvisioningComplete", ex); }
+        }
+
+        private void OnAccountSetupProvisioningComplete(object sender, EventArgs e)
+        {
+            // Mirror of DeviceSetup path. Adapter falls back to clock for the signal timestamp.
+            LastEventOccurredAtUtc = null;
+            try { AccountSetupProvisioningComplete?.Invoke(this, EventArgs.Empty); }
+            catch (Exception ex) { _logger.Error("Error forwarding AccountSetupProvisioningComplete", ex); }
         }
 
         private void OnEspExited(object sender, EspExitedEventArgs args)

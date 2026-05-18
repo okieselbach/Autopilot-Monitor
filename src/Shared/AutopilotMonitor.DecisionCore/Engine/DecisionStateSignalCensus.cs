@@ -81,6 +81,15 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 timestamps["accountSetupEntered"] = FormatUtc(state.AccountSetupEnteredUtc.Value);
                 evidence["accountSetupEntered"] = TimestampedEvidence(state.AccountSetupEnteredUtc);
             }
+            // Session 330f73f3 fix — strong post-AccountSetup gate. Included in the census so
+            // enrollment_complete audit + final-status.json show whether the genuine
+            // AccountSetup-done observation was present when the session terminated.
+            if (state.AccountSetupProvisioningSucceededUtc != null)
+            {
+                seen.Add("account_setup_provisioning_complete");
+                timestamps["accountSetupProvisioningComplete"] = FormatUtc(state.AccountSetupProvisioningSucceededUtc.Value);
+                evidence["accountSetupProvisioningComplete"] = TimestampedEvidence(state.AccountSetupProvisioningSucceededUtc);
+            }
 
             // WhiteGlove Part-1 sealing observations — engine-internal, no UTC fact.
             var obs = state.ScenarioObservations;

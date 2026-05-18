@@ -238,7 +238,9 @@ namespace AutopilotMonitor.DecisionCore.Tests
         /// <summary>
         /// Reaches the typical post-AccountSetup state for a Classic-v1 + Hello-disabled
         /// enrollment: SessionStarted, ESP DeviceSetup → AccountSetup, HelloPolicyDetected
-        /// (helloEnabled=false). No EspExiting yet.
+        /// (helloEnabled=false), and AccountSetupProvisioningComplete (session 330f73f3 fix —
+        /// the strong post-AccountSetup gate that <see cref="DecisionEngine"/>.<c>ShouldTransitionToAwaitingHello</c>
+        /// requires before a subsequent EspExiting promotes to AwaitingHello). No EspExiting yet.
         /// </summary>
         private static DecisionState ProgressToAccountSetupWithHelloDisabled(DecisionEngine engine)
         {
@@ -250,6 +252,8 @@ namespace AutopilotMonitor.DecisionCore.Tests
                 new Dictionary<string, string> { [SignalPayloadKeys.HelloEnabled] = "false" })).NewState;
             state = engine.Reduce(state, MakeSignal(3, DecisionSignalKind.EspPhaseChanged, T0.AddMinutes(3),
                 new Dictionary<string, string> { [SignalPayloadKeys.EspPhase] = "AccountSetup" })).NewState;
+            state = engine.Reduce(state, MakeSignal(4, DecisionSignalKind.AccountSetupProvisioningComplete,
+                T0.AddMinutes(4).AddSeconds(30), null)).NewState;
             return state;
         }
 

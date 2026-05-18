@@ -688,9 +688,125 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// </summary>
         private static bool ShouldTransitionToAwaitingHello(DecisionState state)
         {
-            if (state.AccountSetupEnteredUtc != null) return true;
+            // Session 330f73f3 fix (2026-05-18): entering AccountSetup is no longer sufficient.
+            // Shell-Core event 62407 (CommercialOOBE_ESPProgress_Page_Exiting) fires at every
+            // ESP-page transition — the first occurrence is the Device→Account handoff, NOT
+            // the genuine final exit. Promoting on AccountSetupEnteredUtc alone armed
+            // HelloSafety against the wrong baseline; HelloSafety then fired its 5-min synthetic
+            // timeout while ESP AccountSetup and app installs were still in progress, and
+            // FinalizingGrace marked the session terminal mid-flight.
+            //
+            // The strong post-AccountSetup gate is now <see cref="DecisionState.AccountSetupProvisioningSucceededUtc"/>,
+            // posted by ProvisioningStatusTracker once <c>AccountSetupCategory.Status</c> resolves
+            // to <c>categorySucceeded=true</c> (or the fallback fires — analog to DeviceSetup).
+            if (state.AccountSetupProvisioningSucceededUtc != null) return true;
+            // SkipUser flow — no User-ESP page runs; the first esp_exiting IS the genuine final
+            // exit. Existing observation contract preserved.
             if (state.ScenarioObservations.SkipUserEsp?.Value == true) return true;
             return false;
+        }
+
+        /// <summary>
+        /// Handle <see cref="DecisionSignalKind.AccountSetupProvisioningComplete"/>. Records
+        /// <see cref="DecisionState.AccountSetupProvisioningSucceededUtc"/> for the
+        /// <see cref="ShouldTransitionToAwaitingHello"/> guard.
+        /// <para>
+        /// Two arrival orderings are handled:
+        /// <list type="bullet">
+        ///   <item><b>ESP terminal-handoff signal arrives later (typical):</b> stage unchanged
+        ///         here. The next <see cref="DecisionSignalKind.EspExiting"/> or
+        ///         <see cref="DecisionSignalKind.EspPhaseChanged"/>(FinalizingSetup) reads the
+        ///         new fact via <see cref="ShouldTransitionToAwaitingHello"/> and promotes.</item>
+        ///   <item><b>ESP terminal-handoff signal already arrived (session 330f73f3 ordering):</b>
+        ///         either the intermediate Device→Account 62407 was ignored at the time
+        ///         (<see cref="DecisionState.EspFinalExitUtc"/> set), OR an
+        ///         <c>EspPhaseChanged(FinalizingSetup)</c> from <c>ShellCoreTracker</c>'s
+        ///         <c>FinalizingSetupPhaseTriggered</c> already landed
+        ///         (<see cref="DecisionState.FinalizingEnteredUtc"/> set) but the guard
+        ///         blocked the stage transition and the adapter's fire-once flag means no
+        ///         second copy will arrive. With the strong gate now satisfied we perform
+        ///         the deferred promotion here — transition to
+        ///         <see cref="SessionStage.AwaitingHello"/> and arm the Hello-safety deadline —
+        ///         using the AccountSetupSucceeded instant as the deadline base (NOT the
+        ///         historical, ignored EspFinalExitUtc / FinalizingEnteredUtc — that would
+        ///         immediately fire the 5-min window).</item>
+        /// </list>
+        /// Set-once on the fact: re-posts only update bookkeeping.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleAccountSetupProvisioningCompleteV1(DecisionState state, DecisionSignal signal)
+        {
+            var nextStep = state.StepIndex + 1;
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+
+            var alreadyRecorded = state.AccountSetupProvisioningSucceededUtc != null;
+            if (!alreadyRecorded)
+            {
+                builder.AccountSetupProvisioningSucceededUtc =
+                    new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+            }
+
+            // Deferred-promotion path. Activates only when:
+            //   1. This is the first time we record the fact (avoid double-arming on replay).
+            //   2. Some ESP terminal-handoff signal already landed but was guard-blocked:
+            //      EspFinalExitUtc (intermediate EspExiting was ignored) OR
+            //      FinalizingEnteredUtc (EspPhaseChanged(FinalizingSetup) arrived first; the
+            //      ShellCoreTracker adapter fire-once-dedupes this so no replay will come).
+            //   3. We are still parked in an ESP stage waiting on the strong gate.
+            //   4. SkipUserEsp is NOT observed (that path is handled by the existing
+            //      ShouldTransitionToAwaitingHello short-circuit).
+            var shouldPromote = !alreadyRecorded
+                && (state.EspFinalExitUtc != null || state.FinalizingEnteredUtc != null)
+                && (state.Stage == SessionStage.EspDeviceSetup
+                    || state.Stage == SessionStage.EspAccountSetup
+                    || state.Stage == SessionStage.SessionStarted)
+                && state.ScenarioObservations.SkipUserEsp?.Value != true;
+
+            if (!shouldPromote)
+            {
+                var newState = builder.Build();
+                var transition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.AccountSetupProvisioningComplete));
+                return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+            }
+
+            // Mirror of HandleEspExitingV1's promote branch, using this signal's instant as
+            // the deadline base. EffectiveDeadlineBase still floors at AgentBootUtc to keep
+            // the replay-safety guarantee.
+            var dueAtUtc = EffectiveDeadlineBase(state, signal).Add(s_helloSafetyWindow);
+            var helloSafety = new ActiveDeadline(
+                name: DeadlineNames.HelloSafety,
+                dueAtUtc: dueAtUtc,
+                firesSignalKind: DecisionSignalKind.DeadlineFired,
+                firesPayload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.Deadline] = DeadlineNames.HelloSafety,
+                });
+
+            builder = builder
+                .WithStage(SessionStage.AwaitingHello)
+                .AddDeadline(helloSafety);
+
+            var promotedState = builder.Build();
+            var promotedTransition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: SessionStage.AwaitingHello,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.AccountSetupProvisioningComplete) + ":DeferredPromote");
+
+            var promotedEffects = new[]
+            {
+                new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: helloSafety),
+            };
+
+            return new DecisionStep(promotedState, promotedTransition, promotedEffects);
         }
 
         /// <summary>

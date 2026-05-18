@@ -18,6 +18,15 @@ namespace AutopilotMonitor.DecisionCore.Signals
         HelloResolved,
         ImeUserSessionCompleted,
         DeviceSetupProvisioningComplete,
+        // Session 330f73f3 fix (2026-05-18) — strong "AccountSetup truly succeeded" fact.
+        // Posted by ProvisioningStatusTracker once AccountSetupCategory.Status resolves to
+        // categorySucceeded=true OR the fallback fires (all subcategories succeeded/notRequired
+        // but Windows never set the boolean — analog to the existing DeviceSetup fallback).
+        // Consumed by <c>ShouldTransitionToAwaitingHello</c>: entering AccountSetup is no longer
+        // sufficient on its own, because Shell-Core event 62407 fires at every ESP-page
+        // transition and the first occurrence (Device→Account handoff) is NOT the genuine
+        // final exit.
+        AccountSetupProvisioningComplete,
         AppInstallCompleted,
         AppInstallFailed,
         WhiteGloveShellCoreSuccess,

@@ -41,6 +41,7 @@ namespace AutopilotMonitor.DecisionCore.State
             SignalFact<DateTime>? deviceSetupEnteredUtc,
             SignalFact<DateTime>? accountSetupEnteredUtc,
             SignalFact<DateTime>? finalizingEnteredUtc,
+            SignalFact<DateTime>? accountSetupProvisioningSucceededUtc,
             SignalFact<DateTime>? espFinalExitUtc,
             SignalFact<DateTime>? desktopArrivedUtc,
             SignalFact<DateTime>? helloResolvedUtc,
@@ -77,6 +78,7 @@ namespace AutopilotMonitor.DecisionCore.State
             DeviceSetupEnteredUtc = deviceSetupEnteredUtc;
             AccountSetupEnteredUtc = accountSetupEnteredUtc;
             FinalizingEnteredUtc = finalizingEnteredUtc;
+            AccountSetupProvisioningSucceededUtc = accountSetupProvisioningSucceededUtc;
             EspFinalExitUtc = espFinalExitUtc;
             DesktopArrivedUtc = desktopArrivedUtc;
             HelloResolvedUtc = helloResolvedUtc;
@@ -114,6 +116,19 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<DateTime>? AccountSetupEnteredUtc { get; }
 
         public SignalFact<DateTime>? FinalizingEnteredUtc { get; }
+
+        /// <summary>
+        /// Set when the ESP <c>AccountSetupCategory.Status</c> registry resolves to
+        /// <c>categorySucceeded=true</c>, or when the fallback fires (all subcategories
+        /// succeeded/notRequired but Windows never set the boolean — analog to the existing
+        /// DeviceSetup fallback). This is the strong "User-ESP is genuinely finished" fact;
+        /// <see cref="AccountSetupEnteredUtc"/> only signals page-entry and is not sufficient.
+        /// Posted via <see cref="Signals.DecisionSignalKind.AccountSetupProvisioningComplete"/>.
+        /// Null while AccountSetup is still in_progress, missing entirely on flows that skip
+        /// AccountSetup (handled by the <c>SkipUserEsp</c> observation in
+        /// <see cref="ScenarioObservations"/>).
+        /// </summary>
+        public SignalFact<DateTime>? AccountSetupProvisioningSucceededUtc { get; }
 
         // --- Signal-induced facts (with source ordinal for evidence trace) ---
         public SignalFact<DateTime>? EspFinalExitUtc { get; }
@@ -243,6 +258,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 deviceSetupEnteredUtc: null,
                 accountSetupEnteredUtc: null,
                 finalizingEnteredUtc: null,
+                accountSetupProvisioningSucceededUtc: null,
                 espFinalExitUtc: null,
                 desktopArrivedUtc: null,
                 helloResolvedUtc: null,

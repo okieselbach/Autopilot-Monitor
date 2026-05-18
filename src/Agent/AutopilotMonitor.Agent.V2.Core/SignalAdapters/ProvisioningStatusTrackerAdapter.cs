@@ -9,12 +9,13 @@ using AutopilotMonitor.DecisionCore.Signals;
 namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
 {
     /// <summary>
-    /// Adapter for <see cref="ProvisioningStatusTracker"/> → 2 DecisionSignalKinds.
+    /// Adapter for <see cref="ProvisioningStatusTracker"/> → 3 DecisionSignalKinds.
     /// Plan §2.1a / §2.2.
     /// <para>
     /// Event mapping:
     /// <list type="bullet">
     ///   <item><c>DeviceSetupProvisioningComplete</c> → <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/></item>
+    ///   <item><c>AccountSetupProvisioningComplete</c> → <see cref="DecisionSignalKind.AccountSetupProvisioningComplete"/> (session 330f73f3 fix)</item>
     ///   <item><c>EspFailureDetected</c> → <see cref="DecisionSignalKind.EspTerminalFailure"/></item>
     /// </list>
     /// </para>
@@ -32,6 +33,7 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private readonly IClock _clock;
 
         private bool _deviceSetupCompletePosted;
+        private bool _accountSetupCompletePosted;
         private bool _espFailurePosted;
 
         public ProvisioningStatusTrackerAdapter(
@@ -44,19 +46,23 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
 
             _tracker.DeviceSetupProvisioningComplete += OnDeviceSetupComplete;
+            _tracker.AccountSetupProvisioningComplete += OnAccountSetupComplete;
             _tracker.EspFailureDetected += OnEspFailure;
         }
 
         public void Dispose()
         {
             _tracker.DeviceSetupProvisioningComplete -= OnDeviceSetupComplete;
+            _tracker.AccountSetupProvisioningComplete -= OnAccountSetupComplete;
             _tracker.EspFailureDetected -= OnEspFailure;
         }
 
         private void OnDeviceSetupComplete(object sender, EventArgs e) => EmitDeviceSetupComplete();
+        private void OnAccountSetupComplete(object sender, EventArgs e) => EmitAccountSetupComplete();
         private void OnEspFailure(object sender, string failureType) => EmitEspFailure(failureType);
 
         internal void TriggerDeviceSetupCompleteFromTest() => EmitDeviceSetupComplete();
+        internal void TriggerAccountSetupCompleteFromTest() => EmitAccountSetupComplete();
         internal void TriggerEspFailureFromTest(string failureType) => EmitEspFailure(failureType);
 
         private void EmitDeviceSetupComplete()
@@ -85,6 +91,35 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 payload: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["deviceSetupResolved"] = deviceSetupResolved,
+                });
+        }
+
+        private void EmitAccountSetupComplete()
+        {
+            if (_accountSetupCompletePosted) return;
+            _accountSetupCompletePosted = true;
+
+            var snapshot = _tracker.GetProvisioningCategorySnapshot();
+            var accountSetupResolved = snapshot.TryGetValue("AccountSetupCategory.Status", out var asState) && asState.HasValue
+                ? asState.Value.ToString().ToLowerInvariant()
+                : "unknown";
+
+            _ingress.Post(
+                kind: DecisionSignalKind.AccountSetupProvisioningComplete,
+                occurredAtUtc: _clock.UtcNow,
+                sourceOrigin: "ProvisioningStatusTracker",
+                evidence: new Evidence(
+                    kind: EvidenceKind.Derived,
+                    identifier: "provisioning-status-tracker-v1",
+                    summary: "AccountSetupCategory provisioning completed",
+                    derivationInputs: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["registrySource"] = @"HKLM\SOFTWARE\Microsoft\Provisioning\AutopilotSettings\AccountSetupCategory.Status",
+                        ["accountSetupResolved"] = accountSetupResolved,
+                    }),
+                payload: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["accountSetupResolved"] = accountSetupResolved,
                 });
         }
 

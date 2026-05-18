@@ -27,6 +27,7 @@ namespace AutopilotMonitor.DecisionCore.State
             DeviceSetupEnteredUtc = source.DeviceSetupEnteredUtc;
             AccountSetupEnteredUtc = source.AccountSetupEnteredUtc;
             FinalizingEnteredUtc = source.FinalizingEnteredUtc;
+            AccountSetupProvisioningSucceededUtc = source.AccountSetupProvisioningSucceededUtc;
             EspFinalExitUtc = source.EspFinalExitUtc;
             DesktopArrivedUtc = source.DesktopArrivedUtc;
             HelloResolvedUtc = source.HelloResolvedUtc;
@@ -54,6 +55,7 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<DateTime>? DeviceSetupEnteredUtc { get; set; }
         public SignalFact<DateTime>? AccountSetupEnteredUtc { get; set; }
         public SignalFact<DateTime>? FinalizingEnteredUtc { get; set; }
+        public SignalFact<DateTime>? AccountSetupProvisioningSucceededUtc { get; set; }
         public SignalFact<DateTime>? EspFinalExitUtc { get; set; }
         public SignalFact<DateTime>? DesktopArrivedUtc { get; set; }
         public SignalFact<DateTime>? HelloResolvedUtc { get; set; }
@@ -181,6 +183,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 deviceSetupEnteredUtc: DeviceSetupEnteredUtc,
                 accountSetupEnteredUtc: AccountSetupEnteredUtc,
                 finalizingEnteredUtc: FinalizingEnteredUtc,
+                accountSetupProvisioningSucceededUtc: AccountSetupProvisioningSucceededUtc,
                 espFinalExitUtc: EspFinalExitUtc,
                 desktopArrivedUtc: DesktopArrivedUtc,
                 helloResolvedUtc: HelloResolvedUtc,
