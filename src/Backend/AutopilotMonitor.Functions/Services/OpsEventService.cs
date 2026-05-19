@@ -256,6 +256,29 @@ namespace AutopilotMonitor.Functions.Services
 
         // ── Tenant ─────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Fired when a departing admin submits free-form feedback in the offboarding
+        /// drain-barrier banner. Information-tier — not actionable in itself, but the kind
+        /// of signal product wants to be notified about so feedback gets read promptly.
+        /// </summary>
+        public Task RecordOffboardingFeedbackReceivedAsync(
+            string tenantId, string submittedBy, string? domainName, string historyRowKey)
+        {
+            var tenantLabel = string.IsNullOrWhiteSpace(domainName)
+                ? tenantId
+                : $"{domainName} ({tenantId})";
+
+            var details = new Dictionary<string, object?>
+            {
+                ["domainName"] = domainName,
+                ["historyRowKey"] = historyRowKey,
+            };
+
+            return WriteAsync(OpsEventCategory.Tenant, "OffboardingFeedbackReceived", OpsEventSeverity.Info,
+                $"Offboarding feedback received from {tenantLabel}",
+                tenantId, submittedBy, details);
+        }
+
         public Task RecordTenantOffboardedAsync(string tenantId, string performedBy, Dictionary<string, int> deletedCounts, string? domainName = null)
         {
             var tenantLabel = string.IsNullOrWhiteSpace(domainName)

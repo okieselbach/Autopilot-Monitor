@@ -47,6 +47,7 @@ public class TenantOffboardFunction
     private readonly IMaintenanceRepository _maintenanceRepo;
     private readonly IOffboardingAuditRepository _offboardingRepo;
     private readonly ITenantOffboardingEnqueuer _offboardingEnqueuer;
+    private readonly PreviewWhitelistService _previewWhitelistService;
 
     public TenantOffboardFunction(
         ILogger<TenantOffboardFunction> logger,
@@ -54,7 +55,8 @@ public class TenantOffboardFunction
         TenantConfigurationService tenantConfigService,
         IMaintenanceRepository maintenanceRepo,
         IOffboardingAuditRepository offboardingRepo,
-        ITenantOffboardingEnqueuer offboardingEnqueuer)
+        ITenantOffboardingEnqueuer offboardingEnqueuer,
+        PreviewWhitelistService previewWhitelistService)
     {
         _logger = logger;
         _configRepo = configRepo;
@@ -62,6 +64,7 @@ public class TenantOffboardFunction
         _maintenanceRepo = maintenanceRepo;
         _offboardingRepo = offboardingRepo;
         _offboardingEnqueuer = offboardingEnqueuer;
+        _previewWhitelistService = previewWhitelistService;
     }
 
     /// <summary>
@@ -114,6 +117,14 @@ public class TenantOffboardFunction
                 normalizedTenantId);
         }
 
+        // 2.b — Capture the Preview-Notification-Email before Phase 2.D wipes the
+        // PreviewWhitelist table. Stored on the OffboardingHistory row (survives the wipe)
+        // and consumed by the post-completion farewell-email side-effect in
+        // TenantOffboardingHandler (currently disarmed by ResendEmailService's
+        // OffboardFarewellEmailArmed gate). Fail-soft: null on lookup failure — the
+        // farewell email is a courtesy, not a correctness contract.
+        var notificationEmail = await CaptureNotificationEmailAsync(normalizedTenantId);
+
         // 3. Idempotency: if an active marker exists, replay the queue-enqueue defensively
         //    when the offboarding is still in-flight. The previous implementation returned
         //    200 unconditionally, which left the tenant stuck whenever the first enqueue
@@ -160,6 +171,7 @@ public class TenantOffboardFunction
             EarliestProcessingAt = earliestProcessingAt,
             Status = "Initiated",
             RetryCount = 0,
+            NotificationEmail = notificationEmail,
         };
 
         try
@@ -639,6 +651,25 @@ public class TenantOffboardFunction
             DrainPollCount = 0,
         };
         return _offboardingEnqueuer.EnqueueAsync(envelope, visibilityDelay);
+    }
+
+    // Reads the tenant's Preview-Notification-Email at Phase 1, BEFORE Phase 2.D wipes
+    // the PreviewWhitelist table. Fail-soft: any lookup exception returns null + warn log
+    // (the farewell email is a courtesy side-effect, not part of the correctness contract).
+    // Internal so unit tests can drive the capture path without going through HttpRequestData.
+    internal async Task<string?> CaptureNotificationEmailAsync(string normalizedTenantId)
+    {
+        try
+        {
+            return await _previewWhitelistService.GetNotificationEmailAsync(normalizedTenantId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to read preview notification email for {TenantId} before offboard; farewell email will be skipped",
+                normalizedTenantId);
+            return null;
+        }
     }
 
     // Plan §4.4 read-modify-write CAS-loop. Bounded retry; throws on exhaustion so the

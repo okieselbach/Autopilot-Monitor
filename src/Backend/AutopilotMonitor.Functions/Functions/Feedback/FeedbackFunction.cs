@@ -22,7 +22,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
         private readonly TenantAdminsService _tenantAdminsService;
         private readonly TelegramNotificationService _telegramNotificationService;
         private readonly ISessionRepository _sessionRepo;
-        private readonly IConfigRepository _configRepo;
+        private readonly IFeedbackRepository _feedbackRepo;
 
         public FeedbackFunction(
             ILogger<FeedbackFunction> logger,
@@ -31,7 +31,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
             TenantAdminsService tenantAdminsService,
             TelegramNotificationService telegramNotificationService,
             ISessionRepository sessionRepo,
-            IConfigRepository configRepo)
+            IFeedbackRepository feedbackRepo)
         {
             _logger = logger;
             _tenantConfigService = tenantConfigService;
@@ -39,7 +39,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
             _tenantAdminsService = tenantAdminsService;
             _telegramNotificationService = telegramNotificationService;
             _sessionRepo = sessionRepo;
-            _configRepo = configRepo;
+            _feedbackRepo = feedbackRepo;
         }
 
         /// <summary>
@@ -69,7 +69,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                 var roleTask = _tenantAdminsService.GetMemberRoleAsync(tenantId, upn);
                 var tenantConfigTask = _tenantConfigService.GetConfigurationAsync(tenantId);
                 var sessionsTask = _sessionRepo.GetSessionsPageAsync(tenantId, days: null, pageSize: 1, continuation: null);
-                var feedbackTask = _configRepo.GetFeedbackEntryAsync(upn);
+                var feedbackTask = _feedbackRepo.GetInAppFeedbackAsync(upn);
 
                 await Task.WhenAll(roleTask, tenantConfigTask, sessionsTask, feedbackTask);
 
@@ -165,7 +165,7 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                     comment = comment.Substring(0, 500);
 
                 // Upsert feedback record
-                await _configRepo.SaveFeedbackEntryAsync(new FeedbackEntry
+                await _feedbackRepo.SaveInAppFeedbackAsync(new FeedbackEntry
                 {
                     Upn = upn,
                     TenantId = tenantId,
@@ -210,9 +210,10 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
         {
             try
             {
-                var allEntries = await _configRepo.GetAllFeedbackEntriesAsync();
+                var allEntries = await _feedbackRepo.GetAllAsync();
                 var entries = allEntries.Select(e => new
                 {
+                    type = e.Type,
                     upn = e.Upn,
                     tenantId = e.TenantId,
                     displayName = e.DisplayName,
@@ -220,7 +221,9 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                     comment = e.Comment,
                     dismissed = e.Dismissed,
                     submitted = e.Submitted,
-                    interactedAt = e.InteractedAt?.ToString("o")
+                    interactedAt = e.InteractedAt?.ToString("o"),
+                    historyRowKey = e.HistoryRowKey,
+                    domainName = e.DomainName,
                 }).ToList();
 
                 return await WriteJson(req, new { feedback = entries });

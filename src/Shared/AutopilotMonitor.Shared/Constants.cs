@@ -407,6 +407,14 @@ namespace AutopilotMonitor.Shared
             public const string PreviewWhitelist = "PreviewWhitelist";
             public const string PreviewConfig    = "PreviewConfig";
 
+            // User-submitted feedback. Survives tenant offboarding by design (NOT in any
+            // wipe list) — feedback from offboarded tenants is exactly the data we want to
+            // keep for product learning. Two partition layouts share this table:
+            //   PK="InApp",       RK=upn               → in-app star rating + comment.
+            //   PK="Offboarding", RK=historyRowKey     → free-form farewell comment
+            //                                            captured during the drain barrier.
+            public const string Feedback         = "Feedback";
+
             // Device blocking
             public const string BlockedDevices = "BlockedDevices";
 
@@ -542,6 +550,7 @@ namespace AutopilotMonitor.Shared
                 McpUsers,
                 PreviewWhitelist,
                 PreviewConfig,
+                Feedback,
                 BlockedDevices,
                 BlockedVersions,
                 SessionReports,

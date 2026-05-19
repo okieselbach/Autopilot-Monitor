@@ -93,11 +93,15 @@ namespace AutopilotMonitor.Functions.Services.Offboarding
 
         // Plan §6.3.1 — Variant B (Discriminator + TenantId property).
         // (table, discriminator)
+        //
+        // Note: (PreviewConfig, "Feedback") was removed 2026-05-19 when user feedback moved
+        // out of PreviewConfig into the dedicated Feedback table. Feedback now intentionally
+        // SURVIVES tenant offboarding — comments from offboarded tenants are exactly the
+        // signal we want to keep for product learning.
         private static readonly (string Table, string Discriminator)[] DiscriminatorTables =
         {
             (Constants.TableNames.BootstrapSessions, "CodeLookup"),
             (Constants.TableNames.SessionReports, "reports"),
-            (Constants.TableNames.PreviewConfig, "Feedback"),
         };
 
         // Plan §6.3.2 — Variant C (TenantId property only).
@@ -137,6 +141,7 @@ namespace AutopilotMonitor.Functions.Services.Offboarding
         private readonly ITenantOffboardingEnqueuer _reEnqueuer;
         private readonly OpsEventService _opsEvents;
         private readonly ITenantCustomsArchiveRepository _customsArchive;
+        private readonly IOffboardFarewellEmailSender _farewellEmail;
         private readonly ILogger<TenantOffboardingHandler> _logger;
 
         public TenantOffboardingHandler(
@@ -151,6 +156,7 @@ namespace AutopilotMonitor.Functions.Services.Offboarding
             ITenantOffboardingEnqueuer reEnqueuer,
             OpsEventService opsEvents,
             ITenantCustomsArchiveRepository customsArchive,
+            IOffboardFarewellEmailSender farewellEmail,
             ILogger<TenantOffboardingHandler> logger)
         {
             _auditRepo = auditRepo;
@@ -164,6 +170,7 @@ namespace AutopilotMonitor.Functions.Services.Offboarding
             _reEnqueuer = reEnqueuer;
             _opsEvents = opsEvents;
             _customsArchive = customsArchive;
+            _farewellEmail = farewellEmail;
             _logger = logger;
         }
 
@@ -669,6 +676,27 @@ namespace AutopilotMonitor.Functions.Services.Offboarding
             // idempotently (duplicate audit/OpsEvent emit is preferable to dangling state).
             history.Status = "Completed";
             await _auditRepo.UpsertHistoryAsync(history, ct);
+
+            // Side-effect 6: post-completion farewell email to the captured Preview-Notification-
+            // Email. Disarmed by default via ResendEmailService.OffboardFarewellEmailArmed —
+            // template + feedback-form copy still TBD. Fail-soft: any sender exception MUST NOT
+            // propagate, the offboarding correctness contract is independent of email delivery
+            // and the History row is already Completed. Skips silently when no email was
+            // captured at Phase 1 (tenant never set a preview notification address).
+            if (!string.IsNullOrWhiteSpace(history.NotificationEmail))
+            {
+                try
+                {
+                    await _farewellEmail.SendAsync(
+                        history.NotificationEmail!, history.DomainName ?? string.Empty, tenantId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Offboard farewell email send threw for tenant={Tenant} — ignored (best-effort)",
+                        tenantId);
+                }
+            }
 
             // ── 2.F-final — TenantConfiguration delete (PR3.B Codex Finding 2 reorder) ──
             //

@@ -188,6 +188,7 @@ public static class EndpointAccessPolicyCatalog
         new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/enable",      EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("PATCH",  "tenants/{tenantId}/admins/{adminUpn}/permissions", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("DELETE", "tenants/{tenantId}/offboard", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
+        new("POST",   "tenants/{tenantId}/offboard/feedback", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("GET",    "config/{tenantId}/autopilot-device-validation/consent-url",     EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("GET",    "config/{tenantId}/autopilot-device-validation/consent-status",  EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),
         new("POST",   "config/{tenantId}/autopilot-device-validation/consent-failure", EndpointPolicy.TenantAdminOrGA, TenantScoping.RouteParam),

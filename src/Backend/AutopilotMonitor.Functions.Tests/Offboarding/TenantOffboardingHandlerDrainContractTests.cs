@@ -450,6 +450,7 @@ public class TenantOffboardingHandlerDrainContractTests
                 h.ReEnqueuer.Object,
                 opsService,
                 Mock.Of<ITenantCustomsArchiveRepository>(),
+                new FakeOffboardFarewellEmailSender(),
                 NullLogger<TenantOffboardingHandler>.Instance);
 
             return h;
@@ -621,9 +622,10 @@ public class TenantOffboardingHandlerDrainContractTests
             ITenantOffboardingEnqueuer reEnqueuer,
             OpsEventService opsEvents,
             ITenantCustomsArchiveRepository customsArchive,
+            IOffboardFarewellEmailSender farewellEmail,
             ILogger<TenantOffboardingHandler> logger)
             : base(auditRepo, enumerator, cascadeEnqueuer, expectations, drainProbe, safeWipe,
-                   storage, maintenance, reEnqueuer, opsEvents, customsArchive, logger)
+                   storage, maintenance, reEnqueuer, opsEvents, customsArchive, farewellEmail, logger)
         {
         }
 

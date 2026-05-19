@@ -69,7 +69,25 @@ public sealed class TenantOffboardFunctionTests
             tenantConfigService: service,
             maintenanceRepo: Mock.Of<IMaintenanceRepository>(),
             offboardingRepo: repo,
-            offboardingEnqueuer: enqueuer);
+            offboardingEnqueuer: enqueuer,
+            previewWhitelistService: BuildPreviewWhitelistService(configRepoMock));
+    }
+
+    /// <summary>
+    /// Builds a real <see cref="PreviewWhitelistService"/> wired to the supplied
+    /// <see cref="IConfigRepository"/> mock. Tests that exercise the Phase 1 notification-
+    /// email capture set up <c>configRepoMock.Setup(r =&gt; r.GetNotificationEmailAsync(...))</c>
+    /// to drive the captured value. Resume-path tests don't care — the mock returns null by
+    /// default which surfaces as a null email on the History row.
+    /// </summary>
+    private static PreviewWhitelistService BuildPreviewWhitelistService(Mock<IConfigRepository> configRepoMock)
+    {
+        var cache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
+            new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        return new PreviewWhitelistService(
+            configRepoMock.Object,
+            cache,
+            NullLogger<PreviewWhitelistService>.Instance);
     }
 
     /// <summary>
@@ -113,9 +131,56 @@ public sealed class TenantOffboardFunctionTests
             tenantConfigService: service,
             maintenanceRepo: Mock.Of<IMaintenanceRepository>(),
             offboardingRepo: new FakeOffboardingAuditRepository(),
-            offboardingEnqueuer: new RecordingEnqueuer());
+            offboardingEnqueuer: new RecordingEnqueuer(),
+            previewWhitelistService: BuildPreviewWhitelistService(configRepoMock));
 
         return (sut, configRepoMock, cache, service);
+    }
+
+    // ── CaptureNotificationEmailAsync ────────────────────────────────────────
+
+    [Fact]
+    public async Task CaptureNotificationEmail_ReturnsValue_WhenPreviewEmailSet()
+    {
+        // Phase 1 must snapshot the Preview-Notification-Email into OffboardingHistory
+        // BEFORE Phase 2.D wipes the PreviewWhitelist table. This test pins that contract.
+        var (sut, configRepoMock, _, _) = BuildWithConfigService();
+        configRepoMock
+            .Setup(r => r.GetNotificationEmailAsync(TenantId))
+            .ReturnsAsync("ops@contoso.invalid");
+
+        var captured = await sut.CaptureNotificationEmailAsync(TenantId);
+
+        Assert.Equal("ops@contoso.invalid", captured);
+    }
+
+    [Fact]
+    public async Task CaptureNotificationEmail_ReturnsNull_WhenTenantNeverSetEmail()
+    {
+        // The farewell-send skip-gate in TenantOffboardingHandler depends on null-vs-set.
+        var (sut, configRepoMock, _, _) = BuildWithConfigService();
+        configRepoMock
+            .Setup(r => r.GetNotificationEmailAsync(TenantId))
+            .ReturnsAsync((string?)null);
+
+        var captured = await sut.CaptureNotificationEmailAsync(TenantId);
+
+        Assert.Null(captured);
+    }
+
+    [Fact]
+    public async Task CaptureNotificationEmail_FailSoftReturnsNull_OnRepoException()
+    {
+        // The farewell email is a courtesy, not a correctness contract. A storage hiccup
+        // on the email lookup must NOT block the offboarding itself.
+        var (sut, configRepoMock, _, _) = BuildWithConfigService();
+        configRepoMock
+            .Setup(r => r.GetNotificationEmailAsync(TenantId))
+            .ThrowsAsync(new InvalidOperationException("simulated table-storage outage"));
+
+        var captured = await sut.CaptureNotificationEmailAsync(TenantId);
+
+        Assert.Null(captured);
     }
 
     // ── UpsertPointerWithCasAsync ────────────────────────────────────────────
@@ -778,7 +843,8 @@ public sealed class TenantOffboardFunctionTests
             tenantConfigService: tenantConfigService,
             maintenanceRepo: Mock.Of<IMaintenanceRepository>(),
             offboardingRepo: repo,
-            offboardingEnqueuer: enqueuer);
+            offboardingEnqueuer: enqueuer,
+            previewWhitelistService: BuildPreviewWhitelistService(configRepoMock));
 
         var marker = new OffboardingMarkerEntry
         {
@@ -870,7 +936,8 @@ public sealed class TenantOffboardFunctionTests
             tenantConfigService: tenantConfigService,
             maintenanceRepo: Mock.Of<IMaintenanceRepository>(),
             offboardingRepo: repo,
-            offboardingEnqueuer: enqueuer);
+            offboardingEnqueuer: enqueuer,
+            previewWhitelistService: BuildPreviewWhitelistService(configRepoMock));
 
         var marker = new OffboardingMarkerEntry
         {
@@ -944,7 +1011,8 @@ public sealed class TenantOffboardFunctionTests
             tenantConfigService: tenantConfigService,
             maintenanceRepo: Mock.Of<IMaintenanceRepository>(),
             offboardingRepo: repo,
-            offboardingEnqueuer: enqueuer);
+            offboardingEnqueuer: enqueuer,
+            previewWhitelistService: BuildPreviewWhitelistService(configRepoMock));
 
         var marker = new OffboardingMarkerEntry
         {

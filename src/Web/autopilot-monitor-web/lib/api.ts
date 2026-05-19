@@ -146,6 +146,8 @@ export const api = {
       `${API_BASE_URL}/api/tenants/${tenantId}/admins/${encodeURIComponent(adminUpn)}/permissions`,
     offboard: (tenantId: string) =>
       `${API_BASE_URL}/api/tenants/${tenantId}/offboard`,
+    offboardFeedback: (tenantId: string) =>
+      `${API_BASE_URL}/api/tenants/${tenantId}/offboard/feedback`,
   },
 
   // ── Devices ───────────────────────────────────────────────────────────────

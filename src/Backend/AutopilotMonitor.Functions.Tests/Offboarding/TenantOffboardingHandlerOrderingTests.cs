@@ -198,6 +198,70 @@ public class TenantOffboardingHandlerOrderingTests
         await harness.Sut.MarkEnvelopeFailedFromPoisonAsync(harness.Envelope(), dequeueCount: 5);
     }
 
+    // ── Side-effect 6 — Post-completion farewell email ──────────────────────────
+
+    [Fact]
+    public async Task PostDrain_FarewellEmail_SentExactlyOnce_WithCapturedAddress_AfterHistoryCompleted()
+    {
+        // The farewell send sits AFTER the History → Completed terminal write so the audit
+        // state is already final by the time the (best-effort) email fires.
+        var harness = Harness.New();
+        harness.Repo.History[HistoryRowKey].NotificationEmail = "ops@contoso.invalid";
+
+        await harness.Sut.HandleAsync(harness.Envelope());
+
+        Assert.Equal("Completed", harness.Repo.History[HistoryRowKey].Status);
+        var call = Assert.Single(harness.FarewellEmail.Calls);
+        Assert.Equal("ops@contoso.invalid", call.ToEmail);
+        Assert.Equal("contoso.invalid", call.DomainName);
+        Assert.Equal(TenantId, call.TenantId);
+    }
+
+    [Fact]
+    public async Task PostDrain_FarewellEmail_Skipped_WhenNotificationEmailNull()
+    {
+        // Tenants that never set a preview-notification email get null capture; the handler
+        // skip-gates the send so no Resend call is even attempted.
+        var harness = Harness.New();
+        Assert.Null(harness.Repo.History[HistoryRowKey].NotificationEmail);
+
+        await harness.Sut.HandleAsync(harness.Envelope());
+
+        Assert.Equal("Completed", harness.Repo.History[HistoryRowKey].Status);
+        Assert.Empty(harness.FarewellEmail.Calls);
+    }
+
+    [Fact]
+    public async Task PostDrain_FarewellEmail_Skipped_WhenNotificationEmailWhitespace()
+    {
+        // Defensive: legacy History rows may have a non-null empty/whitespace value. Treat
+        // these as "no email captured" so we never call Resend with a useless string.
+        var harness = Harness.New();
+        harness.Repo.History[HistoryRowKey].NotificationEmail = "   ";
+
+        await harness.Sut.HandleAsync(harness.Envelope());
+
+        Assert.Equal("Completed", harness.Repo.History[HistoryRowKey].Status);
+        Assert.Empty(harness.FarewellEmail.Calls);
+    }
+
+    [Fact]
+    public async Task PostDrain_FarewellEmail_SenderThrows_HandlerSurvives_HistoryStillCompleted()
+    {
+        // The send is best-effort. A Resend outage / template bug / serializer crash must
+        // NOT propagate to the queue worker — that would re-poison a Completed offboard.
+        var harness = Harness.New();
+        harness.Repo.History[HistoryRowKey].NotificationEmail = "ops@contoso.invalid";
+        harness.FarewellEmail.ThrowOnSend = new InvalidOperationException("simulated Resend outage");
+
+        await harness.Sut.HandleAsync(harness.Envelope());
+
+        // History stayed Completed (terminal write happens BEFORE the send) — invariant.
+        Assert.Equal("Completed", harness.Repo.History[HistoryRowKey].Status);
+        // Sender was attempted exactly once and threw; handler swallowed the exception.
+        Assert.Single(harness.FarewellEmail.Calls);
+    }
+
     // ── Harness (copied minimal — only what these tests need) ───────────────────
 
     private sealed class Harness
@@ -211,6 +275,7 @@ public class TenantOffboardingHandlerOrderingTests
         public Mock<OffboardingSessionEnumerator> Enumerator { get; }
         public CountingSafeWipeService SafeWipeProbe { get; } = new();
         public Mock<IMaintenanceRepository> Maintenance { get; } = new();
+        public FakeOffboardFarewellEmailSender FarewellEmail { get; } = new();
         public List<string> EnumeratorYields { get; } = new();
 
         private Harness()
@@ -262,6 +327,7 @@ public class TenantOffboardingHandlerOrderingTests
                 h.ReEnqueuer.Object,
                 BuildOpsService(),
                 Mock.Of<ITenantCustomsArchiveRepository>(),
+                h.FarewellEmail,
                 NullLogger<TenantOffboardingHandler>.Instance);
 
             return h;
@@ -358,8 +424,9 @@ public class TenantOffboardingHandlerOrderingTests
             IOffboardingAuditRepository a, OffboardingSessionEnumerator e, ISessionDeletionEnqueuer c,
             IOffboardingExpectationsStore exp, IDeletionProgressDrainProbe d, SafeWipeService sw,
             TableStorageService s, IMaintenanceRepository m, ITenantOffboardingEnqueuer re,
-            OpsEventService o, ITenantCustomsArchiveRepository ca, ILogger<TenantOffboardingHandler> log)
-            : base(a, e, c, exp, d, sw, s, m, re, o, ca, log) { }
+            OpsEventService o, ITenantCustomsArchiveRepository ca, IOffboardFarewellEmailSender fe,
+            ILogger<TenantOffboardingHandler> log)
+            : base(a, e, c, exp, d, sw, s, m, re, o, ca, fe, log) { }
 
         internal override Task ArchiveAndWipeRulesTableAsync(
             string tableName, string tenantId, string historyRowKey, CancellationToken ct)

@@ -313,6 +313,7 @@ builder.Services.AddHttpClient<AutopilotMonitor.Functions.Services.Notifications
 builder.Services.AddHttpClient<TelegramNotificationService>()
     .AddPolicyHandler((sp, _) => sp.GetRequiredService<ResiliencePolicies>().Notification);
 builder.Services.AddSingleton<ResendEmailService>();
+builder.Services.AddSingleton<IOffboardFarewellEmailSender>(sp => sp.GetRequiredService<ResendEmailService>());
 builder.Services.AddSingleton<GlobalNotificationService>();
 builder.Services.AddSingleton<TenantNotificationService>();
 

@@ -9,6 +9,52 @@ public static class EmailTemplates
 {
     public const string PreviewApprovedSubject = "Your Autopilot Monitor Private Preview is ready!";
 
+    // ── Offboarding farewell email ────────────────────────────────────────────
+    //
+    // PLACEHOLDER ONLY. The actual subject + HTML body must be written before flipping
+    // ResendEmailService.OffboardFarewellEmailArmed to true. The [DRAFT] prefix on the
+    // subject + the explicit "TEMPLATE NOT FINALISED" body are deliberate safety nets so
+    // an accidental arm-flip cannot ship a polished-looking email.
+    //
+    // TODO(offboard-farewell-email): write the final copy. Open items for the author:
+    //   1. Tone — apologetic / matter-of-fact / curious? "Sorry to see you go" feedback ask?
+    //   2. Feedback form — Tally / Typeform / GitHub-Issue link? Embed or just link?
+    //   3. Re-onboarding link / docs link?
+    //   4. Localisation — single English version for now, or per-tenant locale lookup?
+    //   5. Unsubscribe / one-time-mail disclaimer (this is the LAST mail we send this tenant).
+
+    public const string OffboardingFarewellSubject = "[DRAFT] Sorry to see you go";
+
+    /// <summary>
+    /// Placeholder offboarding-farewell HTML body. Returns a clearly marked TODO block
+    /// so an accidental arm-flip is visually unmistakeable. Replace with the real copy
+    /// before arming.
+    /// </summary>
+    public static string GetOffboardingFarewellHtml(string domainName)
+    {
+        var displayDomain = string.IsNullOrWhiteSpace(domainName) ? "your organization" : domainName;
+
+        return $@"
+<!DOCTYPE html>
+<html>
+<head><meta charset=""utf-8""></head>
+<body style=""margin:0; padding:32px; background-color:#fef2f2; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"">
+  <table width=""600"" cellpadding=""0"" cellspacing=""0"" style=""margin:0 auto; background-color:#ffffff; border:2px dashed #dc2626; border-radius:12px;"">
+    <tr><td style=""padding:32px;"">
+      <h1 style=""color:#dc2626; margin:0 0 16px; font-size:20px;"">[DRAFT] TEMPLATE NOT FINALISED</h1>
+      <p style=""color:#374151; font-size:15px; line-height:1.6; margin:0 0 12px;"">
+        This is a placeholder for the post-offboarding farewell email for <strong>{displayDomain}</strong>.
+      </p>
+      <p style=""color:#374151; font-size:15px; line-height:1.6; margin:0;"">
+        TODO before arming: final copy, feedback-form link, re-onboarding link. The arm-switch
+        lives at <code>ResendEmailService.OffboardFarewellEmailArmed</code>.
+      </p>
+    </td></tr>
+  </table>
+</body>
+</html>";
+    }
+
     /// <summary>
     /// Returns the HTML body for the Private Preview approval welcome email.
     /// </summary>

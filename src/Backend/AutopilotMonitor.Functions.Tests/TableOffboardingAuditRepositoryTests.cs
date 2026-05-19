@@ -118,6 +118,7 @@ public class TableOffboardingAuditRepositoryTests
             CustomGatherRulesArchived = 5,
             CustomAnalyzeRulesArchived = 3,
             ImeLogPatternOverridesArchived = 2,
+            NotificationEmail = "ops@contoso.invalid",
         };
 
         await harness.Sut.UpsertHistoryAsync(history);
@@ -132,6 +133,33 @@ public class TableOffboardingAuditRepositoryTests
         Assert.Equal(5, fetched.CustomGatherRulesArchived);
         Assert.Equal(3, fetched.CustomAnalyzeRulesArchived);
         Assert.Equal(2, fetched.ImeLogPatternOverridesArchived);
+        Assert.Equal("ops@contoso.invalid", fetched.NotificationEmail);
+    }
+
+    [Fact]
+    public async Task History_RoundTrips_NullNotificationEmail()
+    {
+        // Tenants that never set a Preview-Notification-Email must round-trip as null
+        // (NOT empty string) so the farewell-send skip-gate in TenantOffboardingHandler
+        // fires correctly.
+        var harness = new Harness();
+        var history = new OffboardingHistoryEntry
+        {
+            PartitionKey = Constants.OffboardingPartitionKeys.History,
+            RowKey = HistoryRowKey,
+            TenantId = TenantId,
+            DomainName = "contoso.invalid",
+            InitiatedBy = "alice@contoso.invalid",
+            OffboardedAt = DateTime.UtcNow,
+            Status = "Initiated",
+            NotificationEmail = null,
+        };
+
+        await harness.Sut.UpsertHistoryAsync(history);
+        var fetched = await harness.Sut.TryGetHistoryAsync(HistoryRowKey);
+
+        Assert.NotNull(fetched);
+        Assert.Null(fetched!.NotificationEmail);
     }
 
     [Fact]

@@ -133,6 +133,7 @@ internal sealed class FakeOffboardingAuditRepository : IOffboardingAuditReposito
         OffboardedAt = h.OffboardedAt, CompletedAt = h.CompletedAt,
         EarliestProcessingAt = h.EarliestProcessingAt,
         Status = h.Status,
+        NotificationEmail = h.NotificationEmail,
         DeletedRowCountsJson = h.DeletedRowCountsJson, TotalRowsDeleted = h.TotalRowsDeleted,
         DeletedBlobCount = h.DeletedBlobCount, CascadeSessionsEnqueued = h.CascadeSessionsEnqueued,
         ErrorMessage = h.ErrorMessage, RetryCount = h.RetryCount,

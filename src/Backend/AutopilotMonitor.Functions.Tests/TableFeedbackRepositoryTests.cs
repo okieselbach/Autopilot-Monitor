@@ -1,0 +1,306 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using AutopilotMonitor.Functions.DataAccess.TableStorage;
+using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.DataAccess;
+using Azure;
+using Azure.Data.Tables;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Xunit;
+
+namespace AutopilotMonitor.Functions.Tests;
+
+/// <summary>
+/// Round-trip + shape-guard coverage for the two partitions in the new <c>Feedback</c>
+/// table. Per memory <c>feedback_table_storage_serialization</c>: every new field in
+/// <see cref="FeedbackEntry"/> MUST be exercised here so silent drops surface in tests,
+/// not in production.
+/// <para>
+/// The table is intentionally NOT in any offboarding-wipe list — these tests are also the
+/// canonical "this storage survives offboarding" contract; if anyone later wires Feedback
+/// into <c>TenantOffboardingHandler.DiscriminatorTables</c>, the In-App-survives-offboarding
+/// guarantee breaks and the user-feedback Reports tab loses history.
+/// </para>
+/// </summary>
+public class TableFeedbackRepositoryTests
+{
+    private const string TenantId = "88888888-8888-8888-8888-888888888888";
+    private const string Upn = "alice@contoso.invalid";
+    private const string HistoryRowKey = "20260519091523123_88888888-8888-8888-8888-888888888888";
+
+    [Fact]
+    public async Task InApp_RoundTrips_AllFields()
+    {
+        var harness = new Harness();
+        var entry = new FeedbackEntry
+        {
+            Upn = Upn,
+            TenantId = TenantId,
+            DisplayName = "Alice (Contoso)",
+            Rating = 4,
+            Comment = "Mostly good — desktop arrival detection is a bit slow.",
+            Dismissed = false,
+            Submitted = true,
+            InteractedAt = new DateTime(2026, 5, 19, 9, 15, 23, DateTimeKind.Utc),
+        };
+
+        await harness.Sut.SaveInAppFeedbackAsync(entry);
+
+        var fetched = await harness.Sut.GetInAppFeedbackAsync(Upn);
+        Assert.NotNull(fetched);
+        Assert.Equal(FeedbackEntryType.InApp, fetched!.Type);
+        Assert.Equal(Upn, fetched.Upn);
+        Assert.Equal(TenantId, fetched.TenantId);
+        Assert.Equal("Alice (Contoso)", fetched.DisplayName);
+        Assert.Equal(4, fetched.Rating);
+        Assert.Equal("Mostly good — desktop arrival detection is a bit slow.", fetched.Comment);
+        Assert.False(fetched.Dismissed);
+        Assert.True(fetched.Submitted);
+        Assert.Equal(entry.InteractedAt, fetched.InteractedAt);
+    }
+
+    [Fact]
+    public async Task InApp_Save_LowercasesUpn_ForRowKey()
+    {
+        var harness = new Harness();
+        await harness.Sut.SaveInAppFeedbackAsync(new FeedbackEntry
+        {
+            Upn = "Alice@Contoso.Invalid",
+            TenantId = TenantId,
+            DisplayName = "Alice",
+            Rating = 5,
+            Submitted = true,
+            InteractedAt = DateTime.UtcNow,
+        });
+
+        // Get by lowercased upn must hit. Different-case lookup hits the same row because the
+        // function-side endpoint forwards the auth-claim upn verbatim while storage
+        // normalises — pin both halves of that contract here.
+        var fetchedLower = await harness.Sut.GetInAppFeedbackAsync("alice@contoso.invalid");
+        var fetchedMixed = await harness.Sut.GetInAppFeedbackAsync("Alice@Contoso.Invalid");
+        Assert.NotNull(fetchedLower);
+        Assert.NotNull(fetchedMixed);
+    }
+
+    [Fact]
+    public async Task InApp_Dismissed_RoundTrips_NullRatingAndNullComment()
+    {
+        var harness = new Harness();
+        await harness.Sut.SaveInAppFeedbackAsync(new FeedbackEntry
+        {
+            Upn = Upn,
+            TenantId = TenantId,
+            DisplayName = "Alice",
+            Rating = null,
+            Comment = null,
+            Dismissed = true,
+            Submitted = false,
+            InteractedAt = DateTime.UtcNow,
+        });
+
+        var fetched = await harness.Sut.GetInAppFeedbackAsync(Upn);
+        Assert.NotNull(fetched);
+        Assert.Null(fetched!.Rating);
+        Assert.Null(fetched.Comment);
+        Assert.True(fetched.Dismissed);
+        Assert.False(fetched.Submitted);
+    }
+
+    [Fact]
+    public async Task InApp_Get_404_ReturnsNull()
+    {
+        var harness = new Harness();
+        Assert.Null(await harness.Sut.GetInAppFeedbackAsync(Upn));
+    }
+
+    [Fact]
+    public async Task Offboarding_RoundTrips_AllFields()
+    {
+        var harness = new Harness();
+        var entry = new FeedbackEntry
+        {
+            HistoryRowKey = HistoryRowKey,
+            TenantId = TenantId,
+            Upn = Upn,
+            DisplayName = "Alice (Contoso)",
+            DomainName = "contoso.invalid",
+            Comment = "Pricing was too high for our use case.",
+            InteractedAt = new DateTime(2026, 5, 19, 9, 20, 0, DateTimeKind.Utc),
+        };
+
+        await harness.Sut.SaveOffboardingFeedbackAsync(entry);
+
+        var fetched = await harness.Sut.GetOffboardingFeedbackAsync(HistoryRowKey);
+        Assert.NotNull(fetched);
+        Assert.Equal(FeedbackEntryType.Offboarding, fetched!.Type);
+        Assert.Equal(HistoryRowKey, fetched.HistoryRowKey);
+        Assert.Equal(TenantId, fetched.TenantId);
+        Assert.Equal(Upn, fetched.Upn);
+        Assert.Equal("contoso.invalid", fetched.DomainName);
+        Assert.Equal("Pricing was too high for our use case.", fetched.Comment);
+        Assert.Equal(entry.InteractedAt, fetched.InteractedAt);
+    }
+
+    [Fact]
+    public async Task Offboarding_Save_RejectsMissingHistoryRowKey()
+    {
+        var harness = new Harness();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            harness.Sut.SaveOffboardingFeedbackAsync(new FeedbackEntry
+            {
+                TenantId = TenantId,
+                Upn = Upn,
+                Comment = "no historyRowKey set",
+            }));
+    }
+
+    [Fact]
+    public async Task Offboarding_Get_RejectsEmptyHistoryRowKey()
+    {
+        var harness = new Harness();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            harness.Sut.GetOffboardingFeedbackAsync(string.Empty));
+    }
+
+    [Fact]
+    public async Task Save_Stamps_TypeDiscriminator_RegardlessOfCallerSetting()
+    {
+        // Defensive: callers may forget to set Type; the repo MUST stamp the partition's own
+        // discriminator on every save so a misrouted Save can never poison the other partition.
+        var harness = new Harness();
+        await harness.Sut.SaveInAppFeedbackAsync(new FeedbackEntry
+        {
+            Type = "WRONG",  // caller error
+            Upn = Upn,
+            TenantId = TenantId,
+            DisplayName = "Alice",
+            Rating = 5,
+            Submitted = true,
+            InteractedAt = DateTime.UtcNow,
+        });
+        var fetched = await harness.Sut.GetInAppFeedbackAsync(Upn);
+        Assert.Equal(FeedbackEntryType.InApp, fetched!.Type);
+
+        await harness.Sut.SaveOffboardingFeedbackAsync(new FeedbackEntry
+        {
+            Type = "WRONG",
+            HistoryRowKey = HistoryRowKey,
+            TenantId = TenantId,
+            Upn = Upn,
+            Comment = "x",
+            InteractedAt = DateTime.UtcNow,
+        });
+        var offb = await harness.Sut.GetOffboardingFeedbackAsync(HistoryRowKey);
+        Assert.Equal(FeedbackEntryType.Offboarding, offb!.Type);
+    }
+
+    [Fact]
+    public async Task GetAllAsync_ReturnsBothPartitions_WithDiscriminator()
+    {
+        // Reports page reads via GetAllAsync and filters client-side by Type. Confirm the
+        // mixed-partition return shape works end-to-end.
+        var harness = new Harness();
+
+        await harness.Sut.SaveInAppFeedbackAsync(new FeedbackEntry
+        {
+            Upn = "alice@contoso.invalid",
+            TenantId = TenantId,
+            DisplayName = "Alice",
+            Rating = 5,
+            Submitted = true,
+            InteractedAt = DateTime.UtcNow,
+        });
+        await harness.Sut.SaveInAppFeedbackAsync(new FeedbackEntry
+        {
+            Upn = "bob@fabrikam.invalid",
+            TenantId = "99999999-9999-9999-9999-999999999999",
+            DisplayName = "Bob",
+            Rating = null,
+            Dismissed = true,
+            InteractedAt = DateTime.UtcNow,
+        });
+        await harness.Sut.SaveOffboardingFeedbackAsync(new FeedbackEntry
+        {
+            HistoryRowKey = HistoryRowKey,
+            TenantId = TenantId,
+            Upn = "alice@contoso.invalid",
+            DisplayName = "Alice",
+            DomainName = "contoso.invalid",
+            Comment = "Pricing too high.",
+            InteractedAt = DateTime.UtcNow,
+        });
+
+        var all = await harness.Sut.GetAllAsync();
+
+        var inApp = all.Where(e => e.Type == FeedbackEntryType.InApp).ToList();
+        var offb = all.Where(e => e.Type == FeedbackEntryType.Offboarding).ToList();
+
+        Assert.Equal(2, inApp.Count);
+        Assert.Single(offb);
+        Assert.Equal("contoso.invalid", offb[0].DomainName);
+        Assert.Equal(HistoryRowKey, offb[0].HistoryRowKey);
+    }
+
+    // ── Harness — minimal TableClient mock with a (PK,RK) → TableEntity store ──
+
+    private sealed class Harness
+    {
+        public TableFeedbackRepository Sut { get; }
+
+        private readonly Dictionary<(string Pk, string Rk), TableEntity> _store = new();
+
+        public Harness()
+        {
+            var mockTableClient = new Mock<TableClient>();
+
+            mockTableClient
+                .Setup(c => c.UpsertEntityAsync(
+                    It.IsAny<TableEntity>(),
+                    It.IsAny<TableUpdateMode>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<TableEntity, TableUpdateMode, CancellationToken>((e, _, _) =>
+                {
+                    _store[(e.PartitionKey, e.RowKey)] = e;
+                    return Task.FromResult(new Mock<Response>().Object);
+                });
+
+            mockTableClient
+                .Setup(c => c.GetEntityAsync<TableEntity>(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<IEnumerable<string>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, IEnumerable<string>, CancellationToken>((pk, rk, _, _) =>
+                {
+                    if (!_store.TryGetValue((pk, rk), out var entity))
+                        throw new RequestFailedException(404, "NotFound", "ResourceNotFound", null);
+                    return Task.FromResult(Response.FromValue(entity, new Mock<Response>().Object));
+                });
+
+            // QueryAsync — no filter, returns all stored entities.
+            mockTableClient
+                .Setup(c => c.QueryAsync<TableEntity>(
+                    It.IsAny<string>(),
+                    It.IsAny<int?>(),
+                    It.IsAny<IEnumerable<string>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(() => AsyncPageable<TableEntity>.FromPages(new[]
+                {
+                    Page<TableEntity>.FromValues(_store.Values.ToList(), null, new Mock<Response>().Object),
+                }));
+
+            var mockServiceClient = new Mock<TableServiceClient>();
+            mockServiceClient.Setup(s => s.GetTableClient(It.IsAny<string>()))
+                .Returns(mockTableClient.Object);
+
+            var storage = new TableStorageService(
+                mockServiceClient.Object,
+                NullLogger<TableStorageService>.Instance);
+            Sut = new TableFeedbackRepository(storage, NullLogger<TableFeedbackRepository>.Instance);
+        }
+    }
+}

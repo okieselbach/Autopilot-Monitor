@@ -48,7 +48,10 @@ const OPS_EVENT_TYPES: Record<string, string[]> = {
   // closed (drain timeout, KillSwitch active, Poisoned session, ETag/CAS exhaustion, SafeWipe verify
   // abort, etc.). Marker remains in Failed state until operator action — this event is the
   // Telegram-routable signal that something needs human attention. Plan Rev-4 Q2 + Rev-9 §11 PR3.
-  Tenant: ["TenantOffboarded", "TenantOffboardingFailed"],
+  // OffboardingFeedbackReceived fires when a departing admin submits free-form feedback
+  // in the drain-barrier banner. Information-tier — wire Telegram to get pinged when
+  // someone leaves a comment so you can read it promptly.
+  Tenant: ["TenantOffboarded", "TenantOffboardingFailed", "OffboardingFeedbackReceived"],
   Agent: ["BlobStorageMissing", "BlobStorageUnreachable", "NewImeVersionDetected", "ExcessiveSessionEvents"],
 };
 

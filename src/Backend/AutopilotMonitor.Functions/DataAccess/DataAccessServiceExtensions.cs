@@ -30,6 +30,7 @@ namespace AutopilotMonitor.Functions.DataAccess
             services.AddSingleton<IVulnerabilityRepository, TableVulnerabilityRepository>();
             services.AddSingleton<IAdminRepository, TableAdminRepository>();
             services.AddSingleton<IConfigRepository, TableConfigRepository>();
+            services.AddSingleton<IFeedbackRepository, TableFeedbackRepository>();
             services.AddSingleton<IBootstrapRepository, TableBootstrapRepository>();
             services.AddSingleton<INotificationRepository, TableNotificationRepository>();
             services.AddSingleton<ITenantNotificationRepository, TableTenantNotificationRepository>();
