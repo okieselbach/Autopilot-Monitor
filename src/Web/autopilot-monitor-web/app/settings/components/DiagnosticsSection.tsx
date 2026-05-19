@@ -107,7 +107,7 @@ export default function DiagnosticsSection({
             <label
               data-testid="diagnostics-destination-hosted"
               className={`flex-1 flex items-start gap-2 cursor-pointer rounded-lg border p-3 transition-colors ${
-                isHosted ? "border-red-400 bg-red-50" : "border-gray-200 hover:border-gray-300"
+                isHosted ? "border-sky-400 bg-sky-50" : "border-gray-200 hover:border-gray-300"
               }`}
             >
               <input
@@ -116,13 +116,13 @@ export default function DiagnosticsSection({
                 value="Hosted"
                 checked={isHosted}
                 onChange={() => setDiagnosticsUploadDestination("Hosted")}
-                className="mt-1 text-red-600 focus:ring-red-500"
+                className="mt-1 text-sky-600 focus:ring-sky-500"
               />
               <div className="min-w-0">
                 <p className="font-medium text-gray-900 text-sm flex items-center gap-1.5">
                   Hosted storage
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-800">
-                    data leaves your tenant
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-sky-100 text-sky-800">
+                    managed for you
                   </span>
                 </p>
                 <p className="text-xs text-gray-500 mt-0.5">
@@ -199,20 +199,20 @@ export default function DiagnosticsSection({
           </>
         )}
 
-        {/* Hosted branch: prominent disclosure block in place of the SAS input. */}
+        {/* Hosted branch: friendly informational block in place of the SAS input. */}
         {isHosted && (
-          <div data-testid="diagnostics-hosted-block" className="bg-red-50 border border-red-300 rounded-lg p-4">
-            <p className="font-semibold text-red-900 text-sm mb-2 flex items-center gap-1.5">
+          <div data-testid="diagnostics-hosted-block" className="bg-sky-50 border border-sky-200 rounded-lg p-4">
+            <p className="font-medium text-sky-900 text-sm mb-2 flex items-center gap-1.5">
               <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Hosted storage — data leaves your tenant
+              Hosted storage
             </p>
-            <p className="text-sm text-red-900 mb-2">
-              By switching to Hosted, your diagnostics packages will be uploaded to the AutopilotMonitor backend's Azure Storage (operated by the Autopilot Monitor Team), not your own tenant. Blobs are isolated per tenant via a <code className="font-mono text-xs bg-red-100 px-1 rounded">&#123;tenantId&#125;/</code> prefix and short-lived, blob-scoped upload tokens (15-min, write-only).
+            <p className="text-sm text-sky-900 mb-2">
+              Diagnostics packages are uploaded to the AutopilotMonitor backend's Azure Storage (operated by the Autopilot Monitor Team). Blobs are isolated per tenant via a <code className="font-mono text-xs bg-sky-100 px-1 rounded">&#123;tenantId&#125;/</code> prefix, and each upload uses a fresh blob-scoped, write-only token (15-min TTL).
             </p>
-            <p className="text-xs text-red-800">
-              Retention follows your tenant's <strong>Data Retention Days</strong> setting and is enforced by the cascade-delete pipeline. Review the diagnostics paths section below to see what is collected before enabling.
+            <p className="text-xs text-sky-800">
+              Heads-up: with this option, uploaded contents leave your own Azure tenant boundary. Retention follows your tenant's <strong>Data Retention Days</strong> setting and is enforced by the cascade-delete pipeline — old packages are removed automatically. Review the diagnostics paths section below to see what is collected.
             </p>
           </div>
         )}
