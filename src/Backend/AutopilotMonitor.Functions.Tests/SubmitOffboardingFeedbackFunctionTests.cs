@@ -59,15 +59,19 @@ public sealed class SubmitOffboardingFeedbackFunctionTests
     }
 
     [Fact]
-    public async Task Submit_TrimsAndTruncatesComment_To500Chars()
+    public async Task Submit_TrimsAndTruncatesComment_To4096Chars()
     {
+        // Departing tenants often have more context to share than the in-app 500-char
+        // limit allows; the offboarding endpoint accepts up to 4096 chars (still well
+        // under the Azure Tables 64 KB property cap). Anything beyond is silently
+        // truncated rather than rejected so the user's submit doesn't fail outright.
         var h = Harness.WithInProgressMarker();
-        var longComment = new string('x', 600);
+        var longComment = new string('x', 5000);
 
         var result = await h.Sut.ProcessSubmitAsync(TenantId, Upn, DisplayName, "   " + longComment + "   ");
 
         Assert.Equal(SubmitOutcome.Ok, result.Outcome);
-        Assert.Equal(500, h.Repo.PersistedOffboardingFeedback!.Comment!.Length);
+        Assert.Equal(4096, h.Repo.PersistedOffboardingFeedback!.Comment!.Length);
         Assert.DoesNotContain(" ", h.Repo.PersistedOffboardingFeedback.Comment!.Substring(0, 1));
     }
 

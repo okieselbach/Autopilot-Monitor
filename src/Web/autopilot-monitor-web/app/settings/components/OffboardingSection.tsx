@@ -39,7 +39,7 @@ interface OffboardingSectionProps {
  *  (re-onboard → offboard) gets a fresh prompt each time. */
 const FEEDBACK_SUBMITTED_KEY_PREFIX = "offboard-feedback-submitted:";
 
-const FEEDBACK_MAX_CHARS = 500;
+const FEEDBACK_MAX_CHARS = 4096;
 
 function formatRemaining(totalSeconds: number): string {
   if (totalSeconds <= 0) return "0 min";

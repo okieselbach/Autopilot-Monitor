@@ -159,10 +159,12 @@ namespace AutopilotMonitor.Functions.Functions.Feedback
                     return badRequest;
                 }
 
-                // Trim comment
+                // Trim comment. Aligned with the offboarding-feedback endpoint at 4096 chars
+                // so users have room for a substantive comment without hitting a tight limit;
+                // Azure Tables caps a single property at 64 KB so this stays well within.
                 var comment = body.Comment?.Trim();
-                if (comment?.Length > 500)
-                    comment = comment.Substring(0, 500);
+                if (comment?.Length > 4096)
+                    comment = comment.Substring(0, 4096);
 
                 // Upsert feedback record
                 await _feedbackRepo.SaveInAppFeedbackAsync(new FeedbackEntry

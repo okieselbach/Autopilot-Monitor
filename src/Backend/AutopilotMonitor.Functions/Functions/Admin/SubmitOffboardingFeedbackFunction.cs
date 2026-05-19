@@ -32,7 +32,11 @@ namespace AutopilotMonitor.Functions.Functions.Admin;
 /// </summary>
 public class SubmitOffboardingFeedbackFunction
 {
-    private const int MaxCommentLength = 500;
+    // Departing tenants often have more context to share than the in-app 500-char limit
+    // allows. Azure Table Storage caps a single string property at 64 KB, so 4096 chars
+    // (max ~16 KB UTF-8) sits well within both the table and the 16 KB request-body
+    // guard above.
+    private const int MaxCommentLength = 4096;
 
     private readonly ILogger<SubmitOffboardingFeedbackFunction> _logger;
     private readonly IOffboardingAuditRepository _offboardingRepo;
@@ -72,10 +76,12 @@ public class SubmitOffboardingFeedbackFunction
         }
 
         // Reject oversized bodies before parsing — defense against accidental clipboard-paste
-        // of huge logs into the textarea.
+        // of huge logs into the textarea. 64 KB is the Azure Table Storage single-property
+        // cap, which gives 4096 chars (max ~16 KB UTF-8) plus JSON envelope plenty of room
+        // while still bouncing pathological multi-MB pastes before we read them.
         if (req.Headers.TryGetValues("Content-Length", out var clValues)
             && long.TryParse(clValues.FirstOrDefault(), out var contentLength)
-            && contentLength > 16_384)
+            && contentLength > 65_536)
         {
             return await BadRequest(req, "Request body too large");
         }
