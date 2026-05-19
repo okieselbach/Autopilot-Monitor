@@ -22,7 +22,26 @@ public sealed class GraphFeatureDetector : IGraphFeatureDetector
 {
     private static readonly TimeSpan MaxCacheTtl = TimeSpan.FromMinutes(55);
     private static readonly TimeSpan ExpirySafetyMargin = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// TTL for the "no Graph permissions in this tenant" verdict. Global Admins viewing
+    /// cross-tenant sessions repeatedly land on the same not-granted tenants; without this
+    /// each visit pays the full 5+15+30 s consent-propagation retry chain. Kept well below
+    /// the success-cache TTL so a freshly-granted permission lights up promptly, and the
+    /// admin "Refresh" button calls <see cref="InvalidateTenant"/> for instant clearance.
+    /// </summary>
+    internal static readonly TimeSpan NegativeCacheTtl = TimeSpan.FromMinutes(10);
+
     private static readonly IReadOnlySet<string> EmptyRoles = new HashSet<string>();
+
+    /// <summary>
+    /// Sentinel cached when token acquire returns a definitive "no consent / no SP" verdict.
+    /// Distinct type so the cache-lookup branch can pattern-match it apart from a real token.
+    /// </summary>
+    private sealed class NegativeAcquireMarker
+    {
+        public static readonly NegativeAcquireMarker Instance = new();
+    }
 
     private readonly GraphTokenService _tokenService;
     private readonly IMemoryCache _cache;
@@ -93,10 +112,18 @@ public sealed class GraphFeatureDetector : IGraphFeatureDetector
         if (string.IsNullOrWhiteSpace(tenantId)) return (null, false);
 
         var cacheKey = BuildCacheKey(tenantId);
-        if (_cache.TryGetValue(cacheKey, out GraphTenantTokenContext? cached) && cached != null
-            && cached.ExpiresAt > _time.GetUtcNow() + ExpirySafetyMargin)
+        if (_cache.TryGetValue(cacheKey, out object? cached) && cached != null)
         {
-            return (cached, false);
+            if (cached is NegativeAcquireMarker)
+            {
+                // Definitive "no consent / no SP in this tenant" verdict from a recent attempt.
+                return (null, false);
+            }
+            if (cached is GraphTenantTokenContext cachedCtx
+                && cachedCtx.ExpiresAt > _time.GetUtcNow() + ExpirySafetyMargin)
+            {
+                return (cachedCtx, false);
+            }
         }
 
         GraphTokenResult tokenResult;
@@ -112,10 +139,19 @@ public sealed class GraphFeatureDetector : IGraphFeatureDetector
         }
 
         if (tokenResult.IsTransient) return (null, true);
-        if (string.IsNullOrEmpty(tokenResult.AccessToken)) return (null, false);
+        if (string.IsNullOrEmpty(tokenResult.AccessToken))
+        {
+            // PermanentFailure: tenant has not consented to the multi-tenant app, the SP was
+            // revoked, or the app credentials are misconfigured. Cache the verdict briefly so
+            // repeated cross-tenant clicks don't keep replaying the consent-propagation
+            // retry chain for the same dead-end tenant.
+            CacheNegativeVerdict(cacheKey);
+            return (null, false);
+        }
 
         if (!TryParseToken(tokenResult.AccessToken!, out var roles, out var expiresAt))
         {
+            // Pathological — AAD returned a non-JWT. Leave uncached so a retry can recover.
             _logger.LogWarning("Graph access token for tenant {TenantId} could not be parsed as JWT; skipping role detection.", tenantId);
             return (null, false);
         }
@@ -165,8 +201,21 @@ public sealed class GraphFeatureDetector : IGraphFeatureDetector
     public void InvalidateTenant(string tenantId)
     {
         if (string.IsNullOrWhiteSpace(tenantId)) return;
+        // Single cache key carries both the success token AND the negative marker, so one
+        // Remove call clears whichever verdict is currently in flight.
         _cache.Remove(BuildCacheKey(tenantId));
         _logger.LogInformation("GraphFeatureDetector: cache invalidated for tenant {TenantId}", tenantId);
+    }
+
+    private void CacheNegativeVerdict(string cacheKey)
+    {
+        _cache.Set(cacheKey, NegativeAcquireMarker.Instance, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = NegativeCacheTtl,
+        });
+        _logger.LogDebug(
+            "GraphFeatureDetector: negative verdict cached at key={CacheKey} for TTL={Ttl}",
+            cacheKey, NegativeCacheTtl);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

@@ -74,7 +74,7 @@ namespace AutopilotMonitor.Functions.Security
             return result;
         }
 
-        public async Task<GraphTokenResult> GetAccessTokenAsync(string tenantId, CancellationToken ct = default)
+        public virtual async Task<GraphTokenResult> GetAccessTokenAsync(string tenantId, CancellationToken ct = default)
         {
             var clientId = _configuration["EntraId:ClientId"];
             var clientSecret = _configuration["EntraId:ClientSecret"];

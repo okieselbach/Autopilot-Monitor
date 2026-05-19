@@ -2,9 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services.GraphResolution;
 using AutopilotMonitor.Shared.Models.Graph;
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace AutopilotMonitor.Functions.Tests.GraphResolution;
@@ -205,5 +212,158 @@ public class GraphFeatureDetectorTests
             out GraphTenantTokenContext? roundtrip));
         Assert.Equal(tenantId, roundtrip!.TenantId);
         Assert.Contains(GraphAppPermissions.DeviceManagementScriptsReadAll, roundtrip.GrantedRoles);
+    }
+
+    // ── Negative caching: avoid replaying the AAD consent-propagation retry chain ─────
+    // for tenants where the multi-tenant app was never consented to (e.g. cross-tenant
+    // sessions a Global Admin keeps clicking through during agent triage).
+
+    [Fact]
+    public async Task PermanentFailure_caches_negative_verdict_and_short_circuits_next_call()
+    {
+        const string tenantId = "22222222-2222-2222-2222-222222222222";
+        var tokenService = new StubGraphTokenService();
+        var detector = NewDetector(tokenService, out var cache);
+
+        // First attempt: token service reports "no consent" definitively.
+        tokenService.NextResults.Enqueue(GraphTokenResult.PermanentFailure());
+        var first = await detector.TryGetTokenContextAsync(tenantId);
+
+        Assert.Null(first);
+        Assert.Equal(1, tokenService.CallCount);
+        // Cache now carries the negative marker (not visible as GraphTenantTokenContext).
+        Assert.True(cache.TryGetValue($"graph-feature-detector:{tenantId}", out object? cached));
+        Assert.NotNull(cached);
+        Assert.False(cached is GraphTenantTokenContext);
+
+        // Second attempt within the negative TTL: must NOT re-invoke the token service.
+        var second = await detector.TryGetTokenContextAsync(tenantId);
+        Assert.Null(second);
+        Assert.Equal(1, tokenService.CallCount);
+    }
+
+    [Fact]
+    public async Task PermanentFailure_negative_verdict_reports_not_transient_on_snapshot()
+    {
+        const string tenantId = "33333333-3333-3333-3333-333333333333";
+        var tokenService = new StubGraphTokenService();
+        var detector = NewDetector(tokenService, out _);
+
+        tokenService.NextResults.Enqueue(GraphTokenResult.PermanentFailure());
+        await detector.TryGetTokenContextAsync(tenantId); // primes negative cache
+
+        var snapshot = await detector.GetSnapshotAsync(tenantId);
+
+        // Verdict is definite — UI must NOT render "unknown / try again" on a negative cache
+        // hit (that's reserved for transient failures).
+        Assert.False(snapshot.IsTransient);
+        Assert.Empty(snapshot.GrantedRoles);
+        Assert.Equal(1, tokenService.CallCount);
+    }
+
+    [Fact]
+    public async Task TransientFailure_is_NOT_cached_and_retries_on_next_call()
+    {
+        const string tenantId = "44444444-4444-4444-4444-444444444444";
+        var tokenService = new StubGraphTokenService();
+        var detector = NewDetector(tokenService, out var cache);
+
+        tokenService.NextResults.Enqueue(GraphTokenResult.TransientFailure());
+        var first = await detector.TryGetTokenContextAsync(tenantId);
+        Assert.Null(first);
+        Assert.Equal(1, tokenService.CallCount);
+        // No entry persisted — transient failures must be retried.
+        Assert.False(cache.TryGetValue($"graph-feature-detector:{tenantId}", out object? _));
+
+        // Second attempt: now consent has propagated and the token comes back fine.
+        tokenService.NextResults.Enqueue(GraphTokenResult.Success(
+            BuildJwt(new[] { new Claim("roles", GraphAppPermissions.DeviceManagementScriptsReadAll) },
+                expires: DateTime.UtcNow.AddHours(1))));
+
+        var second = await detector.TryGetTokenContextAsync(tenantId);
+        Assert.NotNull(second);
+        Assert.Contains(GraphAppPermissions.DeviceManagementScriptsReadAll, second!.GrantedRoles);
+        Assert.Equal(2, tokenService.CallCount);
+    }
+
+    [Fact]
+    public async Task InvalidateTenant_clears_negative_marker_so_freshly_granted_tenant_lights_up()
+    {
+        const string tenantId = "55555555-5555-5555-5555-555555555555";
+        var tokenService = new StubGraphTokenService();
+        var detector = NewDetector(tokenService, out _);
+
+        // Step 1: tenant has not granted yet → negative cache.
+        tokenService.NextResults.Enqueue(GraphTokenResult.PermanentFailure());
+        await detector.TryGetTokenContextAsync(tenantId);
+        Assert.Equal(1, tokenService.CallCount);
+
+        // Step 2: admin runs the grant script then hits "Refresh" in the UI → InvalidateTenant.
+        detector.InvalidateTenant(tenantId);
+
+        // Step 3: next attempt MUST re-acquire (otherwise the customer would have to wait the
+        // full negative TTL despite explicitly asking for a fresh check).
+        tokenService.NextResults.Enqueue(GraphTokenResult.Success(
+            BuildJwt(new[] { new Claim("roles", GraphAppPermissions.DeviceManagementScriptsReadAll) },
+                expires: DateTime.UtcNow.AddHours(1))));
+
+        var refreshed = await detector.TryGetTokenContextAsync(tenantId);
+        Assert.NotNull(refreshed);
+        Assert.Contains(GraphAppPermissions.DeviceManagementScriptsReadAll, refreshed!.GrantedRoles);
+        Assert.Equal(2, tokenService.CallCount);
+    }
+
+    // ── Test seam: token service stub + detector factory ──────────────────────────────
+
+    /// <summary>
+    /// Subclass that bypasses the real AAD HTTP call so tests can drive the detector with
+    /// canned <see cref="GraphTokenResult"/> values. Base ctor dependencies are satisfied
+    /// but never touched (we override the only method the detector calls).
+    /// </summary>
+    private sealed class StubGraphTokenService : GraphTokenService
+    {
+        public Queue<GraphTokenResult> NextResults { get; } = new();
+        public int CallCount { get; private set; }
+
+        public StubGraphTokenService()
+            : base(
+                NullLogger<GraphTokenService>.Instance,
+                new NoopHttpClientFactory(),
+                new MemoryCache(new MemoryCacheOptions()),
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["EntraId:ClientId"] = "test-client-id",
+                        ["EntraId:ClientSecret"] = "test-secret",
+                    })
+                    .Build())
+        {
+        }
+
+        public override Task<GraphTokenResult> GetAccessTokenAsync(string tenantId, CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.FromResult(NextResults.Count > 0
+                ? NextResults.Dequeue()
+                : GraphTokenResult.PermanentFailure());
+        }
+    }
+
+    /// <summary>Placeholder factory — the detector never causes the base GraphTokenService HTTP path to run.</summary>
+    private sealed class NoopHttpClientFactory : System.Net.Http.IHttpClientFactory
+    {
+        public System.Net.Http.HttpClient CreateClient(string name) =>
+            throw new InvalidOperationException("HTTP path should not be exercised in detector tests");
+    }
+
+    private static GraphFeatureDetector NewDetector(StubGraphTokenService tokenService, out IMemoryCache cache)
+    {
+        cache = new MemoryCache(new MemoryCacheOptions());
+        var telemetry = new TelemetryClient(new TelemetryConfiguration { DisableTelemetry = true });
+        return new GraphFeatureDetector(
+            tokenService,
+            cache,
+            NullLogger<GraphFeatureDetector>.Instance,
+            telemetry);
     }
 }
