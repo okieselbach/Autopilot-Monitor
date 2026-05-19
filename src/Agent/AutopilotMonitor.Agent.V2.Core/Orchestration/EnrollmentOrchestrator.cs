@@ -814,6 +814,34 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             var hostCount = _collectorHosts?.Count ?? 0;
             var maxLifetimeMin = _agentMaxLifetime.HasValue ? _agentMaxLifetime.Value.TotalMinutes.ToString("F0") + "min" : "off";
             _logger.Info($"EnrollmentOrchestrator: started (sessionId={sessionShort}, initialStage={initialStage}, hosts={hostCount}, maxLifetime={maxLifetimeMin}).");
+
+            // 17) Terminal-stage-on-load recovery. When recovery yields an initialState whose
+            //     Stage is already terminal (Completed/Failed), no further reducer transition
+            //     fires, so the regular OnDecisionTerminalStage path on the DecisionStepProcessor
+            //     never triggers. Without this branch the agent would sit idle past completion
+            //     until the AgentMaxLifetime watchdog (default 6h) trips — emitting periodic
+            //     performance_snapshot / agent_metrics_snapshot events the whole time
+            //     (observed in session 17ef0e0e-… 2026-05-19). Symmetric to the WhiteGlove
+            //     Part-1 archive-and-reset at step 0: that path is handled there and the
+            //     snapshot is gone by the time we reach this point, so the Completed/Failed
+            //     check below is safe (cannot accidentally tear down a Part-2 resume).
+            //
+            //     We reuse OnDecisionTerminalStage rather than re-implementing the dispatch
+            //     so the existing _terminatedFired interlock, max-lifetime-timer disposal,
+            //     and Task.Run off-loader all apply. The Terminated handler (terminationHandler
+            //     in AgentRuntimeHost) is wired BEFORE Start() and the EnrollmentTerminationHandler
+            //     itself is constructed inside the onIngressReady hook (step 13b), which has
+            //     already fired by this point — so when our recovery-fire propagates through
+            //     Task.Run, the handler is fully wired.
+            if (initialState.Stage == SessionStage.Completed || initialState.Stage == SessionStage.Failed)
+            {
+                _logger.Warning(
+                    $"EnrollmentOrchestrator: post-recovery initialState already terminal " +
+                    $"(stage={initialState.Stage}, stepIndex={initialState.StepIndex}) — " +
+                    $"invoking OnDecisionTerminalStage directly. Prior run died before the " +
+                    $"normal termination handler could complete (no transition will fire on its own).");
+                OnDecisionTerminalStage(initialState);
+            }
         }
 
         /// <summary>

@@ -91,6 +91,7 @@ export default function SessionDetailPage() {
     sessionTenantIdFromSession: detail.session?.tenantId,
     globalAdminMode,
     sessionIdRef: detail.sessionIdRef,
+    sessionRef: detail.sessionRef,
     resolveEffectiveTenantId: detail.resolveEffectiveTenantId,
     signalR: { on, off, isConnected, joinGroup, leaveGroup },
     scheduleFetchEvents: eventsApi.scheduleFetchEvents,

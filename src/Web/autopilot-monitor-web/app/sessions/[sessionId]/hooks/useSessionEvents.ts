@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { extractContinuation, MAX_EAGER_PAGES } from "@/lib/paginationLink";
 import { isGuid } from "@/utils/inputValidation";
+import { isTerminalStatus } from "@/utils/sessionStatus";
 import { EnrollmentEvent, Session } from "@/types";
 import type { NotificationType } from "@/contexts/NotificationContext";
 
@@ -225,11 +226,16 @@ export function useSessionEvents({
   }, []);
 
   // Fallback polling only while SignalR is disconnected.
+  // Symmetric with the SignalR eventStream gate: once the session has reached a terminal
+  // status, suppress the 30s refetch loop too — late agent perf/metrics snapshots would
+  // otherwise still trigger refetches, defeating the SignalR-side gate.
   useEffect(() => {
     const effectiveTenantId = resolveEffectiveTenantId();
     if (!sessionId || !effectiveTenantId || isConnected) return;
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchEvents();
+      if (document.visibilityState !== "visible") return;
+      if (isTerminalStatus(sessionRef.current?.status)) return;
+      fetchEvents();
     }, 30_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps

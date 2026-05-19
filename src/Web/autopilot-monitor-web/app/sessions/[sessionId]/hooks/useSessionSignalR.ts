@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Session, RuleResult } from "@/types";
+import { isTerminalStatus } from "@/utils/sessionStatus";
 
 interface SignalRApi {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,6 +21,7 @@ interface UseSessionSignalRParams {
   sessionTenantIdFromSession: string | undefined;
   globalAdminMode: boolean;
   sessionIdRef: React.MutableRefObject<string>;
+  sessionRef: React.MutableRefObject<Session | null>;
   resolveEffectiveTenantId: () => string | null;
   signalR: SignalRApi;
   scheduleFetchEvents: (delayMs?: number) => void;
@@ -42,6 +44,7 @@ export function useSessionSignalR({
   sessionTenantIdFromSession,
   globalAdminMode,
   sessionIdRef,
+  sessionRef,
   resolveEffectiveTenantId,
   signalR,
   scheduleFetchEvents,
@@ -97,10 +100,19 @@ export function useSessionSignalR({
       console.log('Event stream signal received via SignalR:', data);
       if (data.sessionId !== sessionIdRef.current) return;
 
-      // Fetch full events from storage (single source of truth), but debounce bursts.
-      // Session updates arrive via the "newevents" message (tenant group) — no session
-      // object in this signal to keep payloads minimal.
-      scheduleFetchEvents();
+      // Skip the full event refetch once the session has reached a terminal status —
+      // agents in the post-completion grace period keep emitting performance/metrics
+      // snapshots every 15-30s, which would otherwise cause the timeline to thrash and
+      // scroll-jump while the user is reading. The initial page load already grabbed
+      // everything; the user can refresh manually if they want to see late trailing events.
+      // Rule-result + tenant-id side effects still run.
+      const status = sessionRef.current?.status;
+      if (!isTerminalStatus(status)) {
+        // Fetch full events from storage (single source of truth), but debounce bursts.
+        // Session updates arrive via the "newevents" message (tenant group) — no session
+        // object in this signal to keep payloads minimal.
+        scheduleFetchEvents();
+      }
 
       if (data.tenantId) {
         setSessionTenantId(prev => prev || data.tenantId);

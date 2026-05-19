@@ -829,5 +829,132 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             var task = (System.Threading.Tasks.Task<DrainResult>)method!.Invoke(sut, new object?[] { CancellationToken.None })!;
             return task.GetAwaiter().GetResult();
         }
+
+        // ============================================================ Terminal-stage-on-load recovery
+        //
+        // Bug captured in session 17ef0e0e-… (2026-05-19): an agent killed mid-shutdown
+        // restarts, RecoveryPath loads a snapshot already at Stage=Completed, but the
+        // DecisionStepProcessor's OnDecisionTerminalStage callback only fires on a real
+        // reducer TRANSITION into a terminal stage. A pre-terminal load produces no
+        // transition → no callback → EnrollmentTerminationHandler never runs → marker
+        // never written → SelfDestruct never invoked → agent idles for the full
+        // AgentMaxLifetime (default 6h) emitting periodic perf/metrics events.
+        //
+        // The fix at the end of EnrollmentOrchestrator.Start synthesises the missing
+        // invocation when initialState.Stage ∈ {Completed, Failed}, so the regular
+        // termination pipeline runs immediately.
+
+        [Fact]
+        public void Completed_snapshot_fires_Terminated_with_succeeded_outcome_on_start()
+        {
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            // Seed a snapshot whose Stage is already Completed — simulates an agent
+            // killed by reboot/Ctrl+C between agent_shutting_down and marker write.
+            var terminalState = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.Completed)
+                .WithStepIndex(42)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(terminalState);
+
+            var sut = rig.Build();
+
+            EnrollmentTerminatedEventArgs? captured = null;
+            using var fired = new ManualResetEventSlim(false);
+            sut.Terminated += (_, args) =>
+            {
+                captured = args;
+                fired.Set();
+            };
+
+            sut.Start();
+            try
+            {
+                Assert.True(fired.Wait(TimeSpan.FromSeconds(5)),
+                    "Terminated event did not fire within 5s after Start with terminal initial state.");
+                Assert.NotNull(captured);
+                Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage, captured!.Reason);
+                Assert.Equal(EnrollmentTerminationOutcome.Succeeded, captured.Outcome);
+                Assert.Equal(SessionStage.Completed.ToString(), captured.StageName);
+            }
+            finally { sut.Stop(); }
+        }
+
+        [Fact]
+        public void Failed_snapshot_fires_Terminated_with_failed_outcome_on_start()
+        {
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var terminalState = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.Failed)
+                .WithStepIndex(17)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(terminalState);
+
+            var sut = rig.Build();
+
+            EnrollmentTerminatedEventArgs? captured = null;
+            using var fired = new ManualResetEventSlim(false);
+            sut.Terminated += (_, args) =>
+            {
+                captured = args;
+                fired.Set();
+            };
+
+            sut.Start();
+            try
+            {
+                Assert.True(fired.Wait(TimeSpan.FromSeconds(5)),
+                    "Terminated event did not fire within 5s after Start with Failed initial state.");
+                Assert.NotNull(captured);
+                Assert.Equal(EnrollmentTerminationReason.DecisionTerminalStage, captured!.Reason);
+                Assert.Equal(EnrollmentTerminationOutcome.Failed, captured.Outcome);
+                Assert.Equal(SessionStage.Failed.ToString(), captured.StageName);
+            }
+            finally { sut.Stop(); }
+        }
+
+        [Fact]
+        public void Non_terminal_snapshot_does_NOT_fire_Terminated_on_start()
+        {
+            // Negative control: a mid-enrollment snapshot must keep the normal recovery
+            // path (no synthetic Terminated fire). Without this guard the recovery hook
+            // would short-circuit legitimate in-flight sessions on every restart.
+            using var rig = new Rig();
+            Directory.CreateDirectory(rig.StateDir);
+
+            var midState = DecisionState.CreateInitial("S1", "T1")
+                .ToBuilder()
+                .WithStage(SessionStage.EspDeviceSetup)
+                .WithStepIndex(3)
+                .Build();
+            new SnapshotPersistence(
+                Path.Combine(rig.StateDir, "snapshot.json"),
+                () => rig.Clock.UtcNow).Save(midState);
+
+            var sut = rig.Build();
+
+            using var fired = new ManualResetEventSlim(false);
+            sut.Terminated += (_, _) => fired.Set();
+
+            sut.Start();
+            try
+            {
+                // 500ms is plenty: the recovery path fires synchronously off Task.Run.
+                // If it were going to fire, it would have hit within tens of milliseconds.
+                Assert.False(fired.Wait(TimeSpan.FromMilliseconds(500)),
+                    "Terminated event fired despite non-terminal initial state — recovery hook over-fires.");
+                Assert.Equal(SessionStage.EspDeviceSetup, sut.CurrentState.Stage);
+            }
+            finally { sut.Stop(); }
+        }
     }
 }
