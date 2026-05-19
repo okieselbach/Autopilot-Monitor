@@ -928,15 +928,42 @@ AdminConfiguration (global, single row in Azure Table)
 ### Architecture (Post-Refactor)
 
 - **Old:** Long-lived SAS URL stored in agent config → device stores in `remote-config.json`
-- **New:** `DiagnosticsUploadEnabled` boolean; agent calls `POST /api/agent/upload-url` just before upload
-- SAS URL never stored on device or in config, kept in memory only
+- **Newer:** Agent calls `POST /api/agent/upload-url` just before upload → SAS URL never stored on device, memory-only
+- **Latest:** Two destinations selectable per tenant via `TenantConfiguration.DiagnosticsUploadDestination`
+
+### Upload Destinations
+
+| Mode | Container | Blob path | SAS issuance | Default |
+|---|---|---|---|---|
+| `CustomerSas` | tenant's own storage account / container | `AgentDiagnostics-{sessionId}-{ts}.zip` (container root) | long-lived container SAS in `TenantConfiguration.DiagnosticsBlobSasUrl`, returned to the agent verbatim | **yes** — preserves prior behaviour |
+| `Hosted` | backend's own Functions storage account, container `diagnostics` | `{tenantId}/AgentDiagnostics-{sessionId}-{ts}.zip` | per-upload, 15-min, blob-scoped Write+Create-only SAS minted by the backend (`HostedDiagnosticsBlobService` — User Delegation under MI, account-key SAS under connection string) | opt-in via explicit admin click in tenant settings UI |
+
+`Session.DiagnosticsBlobDestination` is set per upload from the backend response and travels with the row, so the download path can route correctly even after a tenant later switches modes for new uploads.
 
 ### Upload Flow
 
-1. Agent creates ZIP: `sessioninfo.txt` + agent logs + IME logs + configured paths
-2. Agent calls `POST /api/agent/upload-url` → receives short-lived SAS URL (1h)
-3. Agent uploads via `PUT {blobUrl}` with `x-ms-blob-type: BlockBlob`
+1. Agent creates ZIP: `sessioninfo.txt` + agent logs + IME logs + configured paths + state/spool/markers (V2)
+2. Agent calls `POST /api/agent/upload-url` → backend branches on tenant destination:
+   - `CustomerSas`: returns the stored container SAS unchanged + `BlobName = {filename}`
+   - `Hosted`: mints a fresh blob-scoped SAS pinned to `{tenantId}/{filename}` + returns it + `BlobName = {tenantId}/{filename}`
+3. Agent uploads via `PUT {blobUrl}` with `x-ms-blob-type: BlockBlob`. URL construction is destination-aware (`BuildBlobUploadUrl`): Hosted SAS used as-is, CustomerSas SAS gets the blob name appended.
 4. 3 retries with exponential backoff (2s, 4s, 8s); 401/403 = non-retryable
+5. Agent reports `diagnostics_uploaded` event with `blobName` + `destination` in Data; backend stamps both onto the Sessions row
+
+### Download Flow
+
+`GET /api/diagnostics/download-url?tenantId=...&blobName=...` → `DiagnosticsDownloadFunction`:
+- Shape-classifies the blob name: contains `/` → Hosted; no slash → CustomerSas
+- Hosted: streams via the backend connection string against `diagnostics` container; cross-tenant prefix mismatch rejected (defence-in-depth on top of `TenantScoping` middleware)
+- CustomerSas: constructs blob URL from tenant SAS + streams (SAS never leaves the server)
+- Both paths share size guard (`AdminConfiguration.MaxDiagnosticsDownloadSizeMB`) and timeout
+
+### Cascade-Delete
+
+`SessionDeletionHandler` step §5b (`DiagnosticsBlobCascadeDeleter`):
+- `Hosted`: always deletes (we own the storage)
+- `CustomerSas`: deletes only when the SAS includes the `d` (Delete) permission (`SasPermissionParser.HasDelete`); otherwise log + skip — customer keeps lifecycle responsibility
+- Idempotent (`DeleteIfExistsAsync`) + 404-safe; outcome recorded in `DeletionProgress.DiagnosticsBlobDeleteDone`
 
 ### Diagnostics Log Paths
 
@@ -951,6 +978,12 @@ AdminConfiguration (global, single row in Azure Table)
 | `Off` (default) | Disabled |
 | `Always` | Upload on both success and failure |
 | `OnFailure` | Upload only on enrollment failure |
+
+Applies to both destinations. CustomerSas additionally requires `DiagnosticsBlobSasUrl` to be populated.
+
+### Remote-Config Fetch Resilience (V2)
+
+Initial `GetAgentConfig` fetch in V2 retries on transient errors (3 attempts, 10s/30s/60s linear backoff) — defends against Function App cold-starts post-deploy where a single-shot fetch would time out and silently strand the agent on built-in defaults. Auth failures (401/403) bail immediately. When the fallback path runs, the agent emits `agent_started` with `configVersion=0`/`remoteConfigFetched=false`/`remoteConfigOutcome=UsedDefaults|FromCache` and a dedicated `remote_config_fetch_failed` warning event — so a degraded run is visible on the wire, not just in the local agent log.
 
 ---
 
