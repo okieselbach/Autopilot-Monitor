@@ -601,6 +601,7 @@ public class SessionDeletionHandlerTests
             Sut = new SessionDeletionHandler(
                 Storage.Object, Blob.Object, Verifier.Object,
                 Maintenance.Object, SignalR,
+                new AutopilotMonitor.Functions.Tests.Helpers.NoOpDiagnosticsBlobCascadeDeleter(),
                 NullLogger<SessionDeletionHandler>.Instance);
         }
 

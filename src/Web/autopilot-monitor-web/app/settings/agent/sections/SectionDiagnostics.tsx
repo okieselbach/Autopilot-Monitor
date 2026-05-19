@@ -8,6 +8,7 @@ export function SectionDiagnostics() {
   const {
     diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl,
     diagnosticsUploadMode, setDiagnosticsUploadMode,
+    diagnosticsUploadDestination, setDiagnosticsUploadDestination,
     tenantDiagPaths, setTenantDiagPaths,
     globalDiagPaths,
     newDiagPath, setNewDiagPath,
@@ -25,6 +26,8 @@ export function SectionDiagnostics() {
         setDiagnosticsBlobSasUrl={setDiagnosticsBlobSasUrl}
         diagnosticsUploadMode={diagnosticsUploadMode}
         setDiagnosticsUploadMode={setDiagnosticsUploadMode}
+        diagnosticsUploadDestination={diagnosticsUploadDestination}
+        setDiagnosticsUploadDestination={setDiagnosticsUploadDestination}
         tenantDiagPaths={tenantDiagPaths}
         setTenantDiagPaths={setTenantDiagPaths}
         globalDiagPaths={globalDiagPaths}

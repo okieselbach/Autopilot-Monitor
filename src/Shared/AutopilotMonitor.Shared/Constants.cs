@@ -626,6 +626,18 @@ namespace AutopilotMonitor.Shared
             /// defense-in-depth second-pass.
             /// </summary>
             public const string OffboardingState = "offboarding-state";
+
+            /// <summary>
+            /// Hosted diagnostics destination: tenant agents may upload their diagnostics
+            /// package directly into the backend's own storage account when the tenant admin
+            /// opts in via <see cref="Models.TenantConfiguration.DiagnosticsUploadDestination"/>
+            /// = <c>"Hosted"</c>. Blobs are tenant-scoped via a <c>{tenantId}/</c> prefix
+            /// (<c>{tenantId}/AgentDiagnostics-{sessionId}-{ts}.zip</c>) so per-tenant
+            /// enumeration + retention deletion can iterate exactly one tenant without
+            /// cross-tenant exposure. The opposite destination, <c>"CustomerSas"</c>, leaves
+            /// the blob in the customer's own storage and never touches this container.
+            /// </summary>
+            public const string HostedDiagnostics = "diagnostics";
         }
 
         /// <summary>

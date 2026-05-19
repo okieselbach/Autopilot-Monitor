@@ -57,6 +57,9 @@ export interface TenantConfiguration {
   // Diagnostics package
   diagnosticsBlobSasUrl?: string;
   diagnosticsUploadMode?: string;
+  // "CustomerSas" (default — agents upload to the tenant's own SAS-backed container)
+  // or "Hosted" (opt-in — agents upload to the AutopilotMonitor backend's storage).
+  diagnosticsUploadDestination?: string;
   diagnosticsLogPathsJson?: string;
   // Enrollment summary dialog
   showEnrollmentSummary?: boolean;

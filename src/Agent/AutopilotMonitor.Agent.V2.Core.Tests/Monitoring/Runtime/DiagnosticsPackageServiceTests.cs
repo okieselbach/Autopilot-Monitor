@@ -226,6 +226,75 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Runtime
             return archive.Entries.Select(e => e.FullName).ToArray();
         }
 
+        // ── BuildBlobUploadUrl — destination-aware URL construction ─────────────────
+
+        [Theory]
+        [InlineData("Hosted")]
+        [InlineData("hosted")]
+        [InlineData("HOSTED")]
+        public void BuildBlobUploadUrl_HostedDestination_ReturnsSasUnchanged(string destination)
+        {
+            // Hosted SAS is already blob-scoped at {tenantId}/{filename}; the agent must
+            // PUT exactly to that URL. Appending the local filename would produce a
+            // double-name URL like .../diagnostics/{tenantId}/{filename}/{filename}.
+            const string hostedSas = "https://account.blob.core.windows.net/diagnostics/11111111-1111-1111-1111-111111111111/AgentDiagnostics-x.zip?sig=abc";
+            var result = DiagnosticsPackageService.BuildBlobUploadUrl(hostedSas, "AgentDiagnostics-x.zip", destination);
+            Assert.Equal(hostedSas, result);
+        }
+
+        [Fact]
+        public void BuildBlobUploadUrl_CustomerSas_AppendsBlobNameBeforeQuery()
+        {
+            const string containerSas = "https://customer.blob.core.windows.net/diagnostics?sv=2024-10-04&sig=xyz";
+            var result = DiagnosticsPackageService.BuildBlobUploadUrl(containerSas, "AgentDiagnostics-x.zip", "CustomerSas");
+            Assert.Equal(
+                "https://customer.blob.core.windows.net/diagnostics/AgentDiagnostics-x.zip?sv=2024-10-04&sig=xyz",
+                result);
+        }
+
+        [Fact]
+        public void BuildBlobUploadUrl_NullDestination_AppendsBlobName_LegacyBackendCompat()
+        {
+            // An older backend without the Destination field returns null. The agent must
+            // preserve the historical container-SAS append behaviour so CustomerSas
+            // uploads continue to work seamlessly after a backend rollout.
+            const string containerSas = "https://customer.blob.core.windows.net/diag?sig=abc";
+            var result = DiagnosticsPackageService.BuildBlobUploadUrl(containerSas, "diag.zip", null);
+            Assert.Equal("https://customer.blob.core.windows.net/diag/diag.zip?sig=abc", result);
+        }
+
+        [Fact]
+        public void BuildBlobUploadUrl_UnknownDestination_FallsBackToCustomerSasBehaviour()
+        {
+            // Defence-in-depth: an unrecognised destination string (server bug, manual
+            // edit) must NOT silently treat the SAS as blob-scoped — the agent would PUT
+            // to a container URL and Azure would reject. Append-blob-name is the safe
+            // default and matches CustomerSas behaviour.
+            const string containerSas = "https://customer.blob.core.windows.net/diag?sig=abc";
+            var result = DiagnosticsPackageService.BuildBlobUploadUrl(containerSas, "diag.zip", "Vendor");
+            Assert.EndsWith("/diag.zip?sig=abc", result);
+        }
+
+        [Fact]
+        public void BuildBlobUploadUrl_SasWithoutQueryString_AppendsBlobName()
+        {
+            // Defensive path — SAS without `?` is unlikely in practice but the helper
+            // mirrors the V1 behaviour for it. Confirms the no-query branch is taken.
+            const string noQuery = "https://customer.blob.core.windows.net/diag";
+            var result = DiagnosticsPackageService.BuildBlobUploadUrl(noQuery, "diag.zip", "CustomerSas");
+            Assert.Equal("https://customer.blob.core.windows.net/diag/diag.zip", result);
+        }
+
+        [Fact]
+        public void BuildBlobUploadUrl_HostedWithoutQueryString_StillReturnsUnchanged()
+        {
+            // Hosted SAS would always have `?sig=...` but the helper's branch order
+            // means Hosted wins before the query-string check.
+            const string hostedNoQuery = "https://account.blob.core.windows.net/diagnostics/tenant/x.zip";
+            var result = DiagnosticsPackageService.BuildBlobUploadUrl(hostedNoQuery, "x.zip", "Hosted");
+            Assert.Equal(hostedNoQuery, result);
+        }
+
         private static string ReadEntry(byte[] zipBytes, string entryName)
         {
             using var ms = new MemoryStream(zipBytes);

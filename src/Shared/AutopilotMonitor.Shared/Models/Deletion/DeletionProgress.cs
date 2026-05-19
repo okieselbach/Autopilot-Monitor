@@ -23,6 +23,18 @@ namespace AutopilotMonitor.Shared.Models.Deletion
         /// <summary>UTC timestamp once the FINAL tombstone step has completed; null while in flight.</summary>
         public DateTime? CompletedAt { get; set; }
 
+        /// <summary>
+        /// Plan §5b: set once the cascade has executed (or intentionally skipped) the
+        /// diagnostics-blob delete step. Idempotency marker so a retry after a partial
+        /// success doesn't issue a second DELETE. The step runs after verification +
+        /// before tombstone; on completion this flag flips true regardless of whether
+        /// the cascade actually issued a delete (Hosted/CustomerSas-with-permission) or
+        /// skipped (CustomerSas-without-permission/no-blob/legacy). Default false on
+        /// pre-§5b progress blobs — they re-enter the step on resume and do the right
+        /// thing (delete-if-exists is 404-safe; skip is a no-op).
+        /// </summary>
+        public bool DiagnosticsBlobDeleteDone { get; set; }
+
         // ============================================================ PR4c additions ====
         // Three additive fields close the per-key idempotency + tombstone-gap correctness holes
         // discovered by Codex review of PR4 + PR4b. All three default to safe values

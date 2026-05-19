@@ -265,6 +265,12 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Enrollment.Completion
             };
             if (uploadResult?.BlobName != null)
                 resultData["blobName"] = uploadResult.BlobName;
+            // Backend stamps Session.DiagnosticsBlobDestination from this so the download
+            // path can route correctly even after a future tenant destination switch.
+            // Omitted on legacy backend responses (Destination=null) — backend then falls
+            // back to treating the session as CustomerSas, which matches today's behaviour.
+            if (uploadResult?.Destination != null)
+                resultData["destination"] = uploadResult.Destination;
             if (uploadResult?.SasUrlPrefix != null)
                 resultData["sasUrl"] = uploadResult.SasUrlPrefix;
             if (uploadResult?.ErrorCode != null)

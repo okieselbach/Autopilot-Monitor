@@ -119,6 +119,10 @@ namespace AutopilotMonitor.Functions.Services
                 if (!string.IsNullOrEmpty(diagnosticsBlobName))
                     indexEntity["DiagnosticsBlobName"] = diagnosticsBlobName;
 
+                var diagnosticsBlobDestination = sessionEntity.GetString("DiagnosticsBlobDestination");
+                if (!string.IsNullOrEmpty(diagnosticsBlobDestination))
+                    indexEntity["DiagnosticsBlobDestination"] = diagnosticsBlobDestination;
+
                 var lastEventAt = sessionEntity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                 if (lastEventAt.HasValue)
                     indexEntity["LastEventAt"] = EnsureUtc(lastEventAt.Value);
@@ -210,6 +214,7 @@ namespace AutopilotMonitor.Functions.Services
                 DurationSeconds = ComputeEffectiveDuration(entity, status, startedAt, completedAt),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
+                DiagnosticsBlobDestination = entity.GetString("DiagnosticsBlobDestination"),
                 LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
                 IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
                 IsHybridJoin = entity.GetBoolean("IsHybridJoin") ?? false,
@@ -294,6 +299,7 @@ namespace AutopilotMonitor.Functions.Services
                 DateTime? lastEventAt = null;
                 int? durationSeconds = null;
                 string? diagnosticsBlobName = null;
+                string? diagnosticsBlobDestination = null;
                 DateTime? resumedAt = null;
                 DateTime? stalledAt = null;
                 string geoCountry = string.Empty;
@@ -330,6 +336,7 @@ namespace AutopilotMonitor.Functions.Services
                     lastEventAt = existingEntity.GetDateTimeOffset("LastEventAt")?.UtcDateTime;
                     durationSeconds = existingEntity.GetInt32("DurationSeconds");
                     diagnosticsBlobName = existingEntity.GetString("DiagnosticsBlobName");
+                    diagnosticsBlobDestination = existingEntity.GetString("DiagnosticsBlobDestination");
                     resumedAt = existingEntity.GetDateTimeOffset("ResumedAt")?.UtcDateTime;
                     stalledAt = existingEntity.GetDateTimeOffset("StalledAt")?.UtcDateTime;
                     geoCountry = existingEntity.GetString("GeoCountry") ?? string.Empty;
@@ -410,6 +417,9 @@ namespace AutopilotMonitor.Functions.Services
 
                 if (!string.IsNullOrWhiteSpace(diagnosticsBlobName))
                     entity["DiagnosticsBlobName"] = diagnosticsBlobName;
+
+                if (!string.IsNullOrWhiteSpace(diagnosticsBlobDestination))
+                    entity["DiagnosticsBlobDestination"] = diagnosticsBlobDestination;
 
                 if (resumedAt.HasValue)
                     entity["ResumedAt"] = EnsureUtc(resumedAt.Value);
@@ -1843,9 +1853,15 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Stores the diagnostics blob name on an existing session (Merge-mode, single field update).
+        /// Stores the diagnostics blob name + destination on an existing session
+        /// (Merge-mode, two-field update written together so the download path always
+        /// sees a consistent (name, destination) pair). Destination encodes whether the
+        /// blob lives in the customer's SAS-backed container or in the backend's hosted
+        /// container — required so that a later tenant switch from one destination to
+        /// the other doesn't break downloads for already-uploaded sessions.
         /// </summary>
-        public async Task UpdateSessionDiagnosticsBlobAsync(string tenantId, string sessionId, string blobName)
+        public async Task UpdateSessionDiagnosticsBlobAsync(
+            string tenantId, string sessionId, string blobName, string? destination = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
@@ -1860,13 +1876,20 @@ namespace AutopilotMonitor.Functions.Services
                     ["DiagnosticsBlobName"] = blobName
                 };
 
+                if (!string.IsNullOrWhiteSpace(destination))
+                {
+                    update["DiagnosticsBlobDestination"] = destination;
+                }
+
                 await tableClient.UpdateEntityAsync(update, entity.Value.ETag, Azure.Data.Tables.TableUpdateMode.Merge);
 
                 // Dual-write: merge into SessionsIndex
                 var indexRowKey = entity.Value.GetString("IndexRowKey");
                 await MergeSessionIndexAsync(tenantId, indexRowKey, update);
 
-                _logger.LogInformation($"Stored diagnostics blob name for session {sessionId}: {blobName}");
+                _logger.LogInformation(
+                    "Stored diagnostics blob name for session {SessionId}: {BlobName} (destination={Destination})",
+                    sessionId, blobName, destination ?? "(unchanged)");
             }
             catch (Exception ex)
             {
@@ -2094,6 +2117,9 @@ namespace AutopilotMonitor.Functions.Services
                 DurationSeconds = ComputeEffectiveDuration(entity, status, startedAt, completedAt),
                 EnrollmentType = entity.GetString("EnrollmentType") ?? "v1",
                 DiagnosticsBlobName = entity.GetString("DiagnosticsBlobName"),
+                // Legacy rows that predate this field surface as null → download path treats
+                // null as "CustomerSas" for back-compat.
+                DiagnosticsBlobDestination = entity.GetString("DiagnosticsBlobDestination"),
                 LastEventAt = SafeGetDateTime(entity, "LastEventAt"),
                 IsPreProvisioned = entity.GetBoolean("IsPreProvisioned") ?? false,
                 IsHybridJoin = entity.GetBoolean("IsHybridJoin") ?? false,

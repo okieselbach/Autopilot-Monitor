@@ -270,8 +270,13 @@ export function SectionSettings() {
 
       {/* Diagnostics Package */}
       <SettingsGroup title="Diagnostics Package" color="bg-amber-50 text-amber-900" borderColor="border-amber-200">
+        <SettingsRow name="Upload destination" defaultVal="Your own Azure Blob Storage">
+          Where diagnostics packages are uploaded:{" "}
+          <strong>Your own Azure Blob Storage</strong> (default) — agents upload to a container in your tenant via a Container SAS URL you provide; data never leaves your Azure tenant.{" "}
+          <strong>Hosted storage</strong> (opt-in) — agents upload to the AutopilotMonitor backend's Azure Storage under a per-tenant prefix, using short-lived (15 min), blob-scoped, write-only tokens minted per upload. No long-lived credentials are stored. Switching destinations requires an explicit admin click and a Save — never silent.
+        </SettingsRow>
         <SettingsRow name="Blob Storage Container SAS URL">
-          An Azure Blob Storage Container SAS URL used for diagnostics package uploads. The SAS URL must grant
+          Used only when the destination is <strong>Your own Azure Blob Storage</strong>. An Azure Blob Storage Container SAS URL used for diagnostics package uploads. The SAS URL must grant
           at minimum <strong>Read</strong>, <strong>Write</strong>, and <strong>Create</strong> permissions at the
           container level. The SAS URL is stored securely in the backend and never sent to devices — the agent
           requests a short-lived upload URL from the backend just before uploading. The portal shows an expiry
@@ -282,7 +287,7 @@ export function SectionSettings() {
           <strong>Off</strong> — never upload,{" "}
           <strong>Always</strong> — upload after every session,{" "}
           <strong>On Failure Only</strong> — upload only when the session ends in failure (recommended if storage costs
-          are a concern). Only available when a Blob Storage URL is configured.
+          are a concern). For the customer-SAS destination, a SAS URL must be configured before Upload Mode can be enabled.
         </SettingsRow>
         <SettingsRow name="Additional Log Paths">
           <span>

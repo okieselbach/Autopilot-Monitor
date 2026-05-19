@@ -225,6 +225,7 @@ public class SessionDeletionHandlerOrderingTests
             Sut = new SessionDeletionHandler(
                 storage.Object, blob.Object, verifier.Object,
                 maintenance.Object, signalR,
+                new AutopilotMonitor.Functions.Tests.Helpers.NoOpDiagnosticsBlobCascadeDeleter(),
                 NullLogger<SessionDeletionHandler>.Instance);
         }
 

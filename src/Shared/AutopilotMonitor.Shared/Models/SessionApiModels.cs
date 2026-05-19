@@ -163,6 +163,31 @@ namespace AutopilotMonitor.Shared.Models
         public string? UploadUrl { get; set; }
         public DateTime ExpiresAt { get; set; }
         public string? Message { get; set; }
+
+        /// <summary>
+        /// Canonical blob path the agent MUST persist as
+        /// <c>SessionSummary.DiagnosticsBlobName</c> after a successful upload. Encodes
+        /// the destination-specific path layout so the download path can find the blob
+        /// later without having to reconstruct it:
+        /// <list type="bullet">
+        ///   <item><c>CustomerSas</c>: equal to the request filename (e.g.
+        ///         <c>AgentDiagnostics-...zip</c>).</item>
+        ///   <item><c>Hosted</c>: tenant-prefixed (e.g.
+        ///         <c>{tenantId}/AgentDiagnostics-...zip</c>).</item>
+        /// </list>
+        /// Null for older backends that predate this field — the agent then falls back
+        /// to the request filename for back-compat.
+        /// </summary>
+        public string? BlobName { get; set; }
+
+        /// <summary>
+        /// Which destination minted the SAS in <see cref="UploadUrl"/>:
+        /// <c>"CustomerSas"</c> or <c>"Hosted"</c>. Surfaced so the agent's ingest path
+        /// can attach it to the next telemetry batch (the download path needs the
+        /// per-session destination, NOT the current tenant setting — those can diverge
+        /// if the admin switches modes after some sessions have already uploaded).
+        /// </summary>
+        public string? Destination { get; set; }
     }
 
     /// <summary>
@@ -219,9 +244,34 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Blob name of the uploaded diagnostics archive (null if not uploaded).
-        /// Used to construct a download URL via the tenant's Blob Storage SAS URL.
+        /// Used to construct a download URL.
+        /// <para>
+        /// Path semantics depend on <see cref="DiagnosticsBlobDestination"/>:
+        /// <list type="bullet">
+        ///   <item><c>CustomerSas</c>: blob name only (e.g. <c>AgentDiagnostics-...zip</c>);
+        ///         download builds the URL from the tenant's container SAS.</item>
+        ///   <item><c>Hosted</c>: full path including the <c>{tenantId}/</c> prefix
+        ///         (e.g. <c>{tenantId}/AgentDiagnostics-...zip</c>); download streams
+        ///         directly via the backend connection string.</item>
+        /// </list>
+        /// </para>
         /// </summary>
         public string DiagnosticsBlobName { get; set; } = default!;
+
+        /// <summary>
+        /// Where the diagnostics archive for THIS session was uploaded.
+        /// Frozen at upload time so the download path can route correctly even if the
+        /// tenant later switches <see cref="TenantConfiguration.DiagnosticsUploadDestination"/>.
+        /// <list type="bullet">
+        ///   <item><c>"CustomerSas"</c> — blob lives in the customer's storage; download uses
+        ///         the tenant's SAS URL (current behaviour).</item>
+        ///   <item><c>"Hosted"</c> — blob lives in the backend's storage under
+        ///         <c>{tenantId}/</c>; download streams via the Functions connection string.</item>
+        ///   <item><c>null</c> (legacy rows that predate this field) — treated as
+        ///         <c>"CustomerSas"</c> by the download path for back-compat.</item>
+        /// </list>
+        /// </summary>
+        public string? DiagnosticsBlobDestination { get; set; }
 
         /// <summary>
         /// Timestamp of the most recently received event for this session.

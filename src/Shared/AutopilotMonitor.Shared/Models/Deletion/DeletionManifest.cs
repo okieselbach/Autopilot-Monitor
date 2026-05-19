@@ -38,10 +38,23 @@ namespace AutopilotMonitor.Shared.Models.Deletion
         public Dictionary<string, int> PreflightCounts { get; set; } = new Dictionary<string, int>();
 
         /// <summary>
-        /// Customer-storage diagnostics blob name (informational only — cascade does NOT delete
-        /// the blob; customer owns the storage account). See plan §3 + §11.
+        /// Diagnostics blob name (e.g. <c>AgentDiagnostics-...zip</c> for CustomerSas, or
+        /// <c>{tenantId}/AgentDiagnostics-...zip</c> for Hosted). The cascade DOES delete
+        /// the blob when it's hosted in the backend's own storage; for CustomerSas it
+        /// only attempts deletion when the customer's SAS includes the <c>d</c>
+        /// permission (otherwise the customer's lifecycle rules remain the source of
+        /// truth). See plan §5b.
         /// </summary>
         public string? DiagnosticsBlobName { get; set; }
+
+        /// <summary>
+        /// Where the diagnostics blob lives: <c>"CustomerSas"</c>, <c>"Hosted"</c>, or
+        /// null on legacy sessions (treated as <c>"CustomerSas"</c> by the cascade for
+        /// back-compat). Captured at preflight from the Sessions row so the cascade
+        /// can route deletion to the right store even after a tenant has switched
+        /// destinations for new uploads.
+        /// </summary>
+        public string? DiagnosticsBlobDestination { get; set; }
 
         /// <summary>Ordered cascade steps. The worker executes them in <see cref="DeletionStep.Order"/> order.</summary>
         public List<DeletionStep> Steps { get; set; } = new List<DeletionStep>();
@@ -183,6 +196,15 @@ namespace AutopilotMonitor.Shared.Models.Deletion
     {
         public const string SoftwareInventoryDecrement = "SoftwareInventoryDecrement";
         public const string Tombstone                  = "Tombstone";
+
+        /// <summary>
+        /// Cascade-delete of the per-session diagnostics blob. Skips when
+        /// <see cref="DeletionManifest.DiagnosticsBlobName"/> is null/empty. For
+        /// <c>Hosted</c> destination the cascade always deletes (we own the storage);
+        /// for <c>CustomerSas</c> it deletes only when the SAS includes the Delete
+        /// permission. 404 from the storage layer is an idempotent no-op.
+        /// </summary>
+        public const string DiagnosticsBlob            = "DiagnosticsBlob";
     }
 
     /// <summary>

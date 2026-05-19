@@ -639,6 +639,7 @@ public class SessionDeletionWorkerTests
                 storageMock.Object, blobMock.Object, verifierMock.Object,
                 Mock.Of<IMaintenanceRepository>(),
                 new FakeSignalRNotificationService(),
+                new AutopilotMonitor.Functions.Tests.Helpers.NoOpDiagnosticsBlobCascadeDeleter(),
                 NullLogger<SessionDeletionHandler>.Instance);
             HandlerMock.Setup(h => h.HandleAsync(It.IsAny<SessionDeletionEnvelope>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);

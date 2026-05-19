@@ -340,6 +340,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 { "MaxBatchSize", config.MaxBatchSize },
                 { "DiagnosticsBlobSasUrl", config.DiagnosticsBlobSasUrl },
                 { "DiagnosticsUploadMode", config.DiagnosticsUploadMode },
+                { "DiagnosticsUploadDestination", config.DiagnosticsUploadDestination },
                 { "DiagnosticsLogPathsJson", config.DiagnosticsLogPathsJson },
                 { "TeamsWebhookUrl", config.TeamsWebhookUrl },
                 { "TeamsNotifyOnSuccess", config.TeamsNotifyOnSuccess },
@@ -422,6 +423,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 MaxBatchSize = entity.GetInt32("MaxBatchSize"),
                 DiagnosticsBlobSasUrl = entity.GetString("DiagnosticsBlobSasUrl"),
                 DiagnosticsUploadMode = entity.GetString("DiagnosticsUploadMode") ?? "Off",
+                // Default for legacy rows without the field: "CustomerSas" — preserves existing
+                // behaviour and ensures hosted mode is never silently enabled.
+                DiagnosticsUploadDestination = entity.GetString("DiagnosticsUploadDestination") ?? "CustomerSas",
                 DiagnosticsLogPathsJson = entity.GetString("DiagnosticsLogPathsJson"),
                 TeamsWebhookUrl = entity.GetString("TeamsWebhookUrl"),
                 TeamsNotifyOnSuccess = entity.GetBoolean("TeamsNotifyOnSuccess") ?? true,

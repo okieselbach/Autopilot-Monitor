@@ -86,12 +86,15 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             };
 
             // Step A — load the Sessions + SessionsIndex rows up front. Both are needed for the
-            // FINAL tombstone step; the Sessions row also gives us IndexRowKey + DiagnosticsBlobName.
+            // FINAL tombstone step; the Sessions row also gives us IndexRowKey + DiagnosticsBlobName
+            // + DiagnosticsBlobDestination (the destination travels with the manifest so the
+            // cascade can route deletion to the right store even if the tenant later switches modes).
             var sessionRow = await _reader.GetSessionRowAsync(tenantId, sessionId, cancellationToken);
             TableEntity? sessionsIndexRow = null;
             if (sessionRow != null)
             {
                 manifest.DiagnosticsBlobName = sessionRow.GetString("DiagnosticsBlobName");
+                manifest.DiagnosticsBlobDestination = sessionRow.GetString("DiagnosticsBlobDestination");
                 sessionsIndexRow = await ResolveSessionsIndexRowAsync(tenantId, sessionId, sessionRow, cancellationToken);
             }
 

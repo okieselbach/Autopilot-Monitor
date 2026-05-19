@@ -158,6 +158,8 @@ interface TenantConfigContextValue {
   setDiagnosticsBlobSasUrl: (v: string) => void;
   diagnosticsUploadMode: string;
   setDiagnosticsUploadMode: (v: string) => void;
+  diagnosticsUploadDestination: string;
+  setDiagnosticsUploadDestination: (v: string) => void;
   tenantDiagPaths: DiagnosticsLogPath[];
   setTenantDiagPaths: (v: DiagnosticsLogPath[]) => void;
   globalDiagPaths: DiagnosticsLogPath[];
@@ -321,6 +323,9 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
   // Diagnostics
   const [diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl] = useState("");
   const [diagnosticsUploadMode, setDiagnosticsUploadMode] = useState("Off");
+  // Destination defaults to "CustomerSas" so legacy rows behave exactly as before;
+  // Hosted requires an explicit admin click (no silent flip).
+  const [diagnosticsUploadDestination, setDiagnosticsUploadDestination] = useState("CustomerSas");
   const [tenantDiagPaths, setTenantDiagPaths] = useState<DiagnosticsLogPath[]>([]);
   const [globalDiagPaths, setGlobalDiagPaths] = useState<DiagnosticsLogPath[]>([]);
   const [newDiagPath, setNewDiagPath] = useState("");
@@ -429,6 +434,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         const sasUrl = data.diagnosticsBlobSasUrl ?? "";
         setDiagnosticsBlobSasUrl(sasUrl);
         setDiagnosticsUploadMode(data.diagnosticsUploadMode ?? "Off");
+        setDiagnosticsUploadDestination(data.diagnosticsUploadDestination ?? "CustomerSas");
         try {
           setTenantDiagPaths(data.diagnosticsLogPathsJson ? JSON.parse(data.diagnosticsLogPathsJson) : []);
         } catch {
@@ -626,6 +632,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
         slaConsecutiveFailureThreshold,
         diagnosticsBlobSasUrl: diagnosticsBlobSasUrl || undefined,
         diagnosticsUploadMode,
+        diagnosticsUploadDestination,
         diagnosticsLogPathsJson: tenantDiagPaths.length > 0 ? JSON.stringify(tenantDiagPaths) : "",
         enableLocalAdminAnalyzer,
         localAdminAllowedAccountsJson: localAdminAllowedAccounts.length > 0 ? JSON.stringify(localAdminAllowedAccounts) : "",
@@ -677,7 +684,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     slaTargetSuccessRate, slaTargetMaxDurationMinutes, slaTargetAppInstallSuccessRate,
     slaNotifyOnSuccessRateBreach, slaSuccessRateNotifyThreshold, slaNotifyOnDurationBreach,
     slaNotifyOnAppInstallBreach, slaNotifyOnConsecutiveFailures, slaConsecutiveFailureThreshold,
-    diagnosticsBlobSasUrl, diagnosticsUploadMode, tenantDiagPaths,
+    diagnosticsBlobSasUrl, diagnosticsUploadMode, diagnosticsUploadDestination, tenantDiagPaths,
     enableLocalAdminAnalyzer, localAdminAllowedAccounts, enableSoftwareInventoryAnalyzer,
     enableIntegrityBypassAnalyzer, unrestrictedMode,
   ]);
@@ -928,6 +935,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
     if (!config) return;
     setDiagnosticsBlobSasUrl(config.diagnosticsBlobSasUrl ?? "");
     setDiagnosticsUploadMode(config.diagnosticsUploadMode ?? "Off");
+    setDiagnosticsUploadDestination(config.diagnosticsUploadDestination ?? "CustomerSas");
     try {
       setTenantDiagPaths(config.diagnosticsLogPathsJson ? JSON.parse(config.diagnosticsLogPathsJson) : []);
     } catch { setTenantDiagPaths([]); }
@@ -1293,6 +1301,7 @@ export function TenantConfigProvider({ children }: { children: React.ReactNode }
       // Diagnostics
       diagnosticsBlobSasUrl, setDiagnosticsBlobSasUrl,
       diagnosticsUploadMode, setDiagnosticsUploadMode,
+      diagnosticsUploadDestination, setDiagnosticsUploadDestination,
       tenantDiagPaths, setTenantDiagPaths,
       globalDiagPaths,
       newDiagPath, setNewDiagPath,

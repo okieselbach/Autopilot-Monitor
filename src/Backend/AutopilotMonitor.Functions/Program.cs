@@ -215,6 +215,8 @@ builder.Services.AddSingleton<BlockedDeviceService>();
 builder.Services.AddSingleton<HardwareRejectionThrottleService>();
 builder.Services.AddSingleton<BlockedVersionService>();
 builder.Services.AddSingleton<BlobStorageService>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Diagnostics.HostedDiagnosticsBlobService>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Diagnostics.DiagnosticsBlobCascadeDeleter>();
 builder.Services.AddSingleton<SessionReportService>();
 builder.Services.AddSingleton<BootstrapSessionService>();
 

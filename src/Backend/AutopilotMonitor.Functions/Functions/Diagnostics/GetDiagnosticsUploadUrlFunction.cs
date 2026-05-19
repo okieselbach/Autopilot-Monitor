@@ -2,6 +2,7 @@ using System.Net;
 using System.Web;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Functions.Services.Diagnostics;
 using AutopilotMonitor.Shared.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -10,30 +11,40 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Diagnostics
 {
     /// <summary>
-    /// Returns the tenant's container SAS URL for diagnostics package upload.
-    /// Called by the agent just before uploading diagnostics — not at startup.
-    /// The SAS URL is never cached in the agent's config, reducing its exposure window.
+    /// Returns a short-lived upload URL for the agent's diagnostics package.
+    /// Routes to one of two destinations based on the tenant's
+    /// <see cref="TenantConfiguration.DiagnosticsUploadDestination"/>:
+    /// <list type="bullet">
+    ///   <item><c>CustomerSas</c> (default): returns the tenant's pre-configured long-lived
+    ///         container SAS URL stored in <see cref="TenantConfiguration.DiagnosticsBlobSasUrl"/>.
+    ///         Data stays in the customer's own storage account.</item>
+    ///   <item><c>Hosted</c> (opt-in): mints a freshly-stamped, 15-min, blob-scoped,
+    ///         Write+Create-only SAS pinned to <c>{tenantId}/{filename}</c> in the backend's
+    ///         own diagnostics container. Requires explicit admin opt-in via the UI; never
+    ///         silent.</item>
+    /// </list>
+    /// Called by the agent just before uploading — never at startup, never cached.
     /// Uses device authentication (client certificate), not JWT.
     ///
-    /// SECURITY NOTE — Accepted risk (container-scope SAS):
-    /// The SAS URL returned here is a long-lived, container-scoped token stored in
-    /// TenantConfiguration. Generating short-lived blob-scoped tokens would require
-    /// Managed Identity delegation on each tenant's storage account, which is not
-    /// feasible in a SaaS model where tenants self-configure their storage.
+    /// SECURITY NOTE — CustomerSas mode accepts a long-lived, container-scoped SAS as a
+    /// design trade-off (customer self-hosts their storage; we can't run MI-delegated SAS
+    /// across their accounts). Hosted mode has none of that exposure: the SAS is per-upload,
+    /// blob-scoped, and write-only.
     ///
-    /// Mitigations in place:
+    /// Mitigations regardless of mode:
     /// - Device authentication required (client certificate validated against Intune CA)
     /// - SAS URL never persisted on device (memory-only, discarded after upload)
     /// - SAS URL never logged
     /// - Rate-limited and hardware-whitelisted
     /// - Upload endpoint not accessible to web users (device auth only)
-    ///
-    /// If a future architecture change makes MI-based delegation feasible,
-    /// replace this with BlobStorageService.GetTenantUploadSasAsync() for
-    /// blob-scoped, 15-minute User Delegation SAS tokens.
     /// </summary>
     public class GetDiagnosticsUploadUrlFunction
     {
+        // Destination strings — kept here as the single source of truth and exposed
+        // internal so xUnit can reference the same constants without copy-pasting.
+        internal const string DestinationCustomerSas = "CustomerSas";
+        internal const string DestinationHosted = "Hosted";
+
         private readonly ILogger<GetDiagnosticsUploadUrlFunction> _logger;
         private readonly TenantConfigurationService _configService;
         private readonly RateLimitService _rateLimitService;
@@ -41,6 +52,7 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
         private readonly CorporateIdentifierValidator _corporateIdentifierValidator;
         private readonly DeviceAssociationValidator _deviceAssociationValidator;
         private readonly BootstrapSessionService _bootstrapSessionService;
+        private readonly HostedDiagnosticsBlobService _hostedDiagnostics;
 
         public GetDiagnosticsUploadUrlFunction(
             ILogger<GetDiagnosticsUploadUrlFunction> logger,
@@ -49,7 +61,8 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
             AutopilotDeviceValidator autopilotDeviceValidator,
             CorporateIdentifierValidator corporateIdentifierValidator,
             DeviceAssociationValidator deviceAssociationValidator,
-            BootstrapSessionService bootstrapSessionService)
+            BootstrapSessionService bootstrapSessionService,
+            HostedDiagnosticsBlobService hostedDiagnostics)
         {
             _logger = logger;
             _configService = configService;
@@ -58,6 +71,7 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
             _corporateIdentifierValidator = corporateIdentifierValidator;
             _deviceAssociationValidator = deviceAssociationValidator;
             _bootstrapSessionService = bootstrapSessionService;
+            _hostedDiagnostics = hostedDiagnostics;
         }
 
         [Function("GetDiagnosticsUploadUrl")]
@@ -115,39 +129,31 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
 
                 // Get tenant configuration
                 var tenantConfig = await _configService.GetConfigurationAsync(requestBody.TenantId);
+                var destination = NormalizeDestination(tenantConfig.DiagnosticsUploadDestination);
 
-                if (string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl))
+                if (destination == DestinationHosted)
                 {
-                    var notFound = req.CreateResponse(HttpStatusCode.NotFound);
-                    await notFound.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
-                    {
-                        Success = false,
-                        Message = "Diagnostics storage not configured for this tenant"
-                    });
-                    return notFound;
+                    return await IssueHostedSasAsync(req, requestBody);
                 }
 
-                // Parse expiry from the SAS URL's se= parameter
-                var sasExpiry = ParseSasExpiry(tenantConfig.DiagnosticsBlobSasUrl);
-
-                // Log the request — but never log the SAS URL itself
-                _logger.LogInformation(
-                    "GetDiagnosticsUploadUrl: Issuing upload URL for tenant {TenantId}, session {SessionId}, file {FileName}, SAS expires {ExpiresAt}",
-                    requestBody.TenantId,
-                    requestBody.SessionId,
-                    requestBody.FileName,
-                    sasExpiry?.ToString("O") ?? "unknown");
-
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+                if (destination == DestinationCustomerSas)
                 {
-                    Success = true,
-                    // Container-scoped SAS — accepted risk, see class docstring for rationale
-                    UploadUrl = tenantConfig.DiagnosticsBlobSasUrl,
-                    ExpiresAt = sasExpiry ?? DateTime.UtcNow.AddHours(1),
-                    Message = null
+                    return await IssueCustomerSasAsync(req, requestBody, tenantConfig);
+                }
+
+                // Defensive: an unknown destination string in the row (typo or manual edit)
+                // is treated as an error rather than silently falling back — fail loud so
+                // a misconfiguration surfaces immediately.
+                _logger.LogWarning(
+                    "GetDiagnosticsUploadUrl: tenant {TenantId} has unknown DiagnosticsUploadDestination={Destination}; rejecting",
+                    requestBody.TenantId, tenantConfig.DiagnosticsUploadDestination);
+                var unknownResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
+                await unknownResponse.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+                {
+                    Success = false,
+                    Message = "Diagnostics upload destination is misconfigured for this tenant"
                 });
-                return response;
+                return unknownResponse;
             }
             catch (Exception ex)
             {
@@ -160,6 +166,109 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                 });
                 return errorResp;
             }
+        }
+
+        private async Task<HttpResponseData> IssueCustomerSasAsync(
+            HttpRequestData req, GetDiagnosticsUploadUrlRequest requestBody, TenantConfiguration tenantConfig)
+        {
+            if (string.IsNullOrEmpty(tenantConfig.DiagnosticsBlobSasUrl))
+            {
+                var notFound = req.CreateResponse(HttpStatusCode.NotFound);
+                await notFound.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+                {
+                    Success = false,
+                    Message = "Diagnostics storage not configured for this tenant"
+                });
+                return notFound;
+            }
+
+            var sasExpiry = ParseSasExpiry(tenantConfig.DiagnosticsBlobSasUrl);
+
+            // Log the request — but never log the SAS URL itself
+            _logger.LogInformation(
+                "GetDiagnosticsUploadUrl: Issuing CustomerSas upload URL for tenant {TenantId}, session {SessionId}, file {FileName}, SAS expires {ExpiresAt}",
+                requestBody.TenantId, requestBody.SessionId, requestBody.FileName,
+                sasExpiry?.ToString("O") ?? "unknown");
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+            {
+                Success = true,
+                // Container-scoped SAS — accepted risk, see class docstring for rationale
+                UploadUrl = tenantConfig.DiagnosticsBlobSasUrl,
+                // CustomerSas blobs land at the container root; BlobName == request filename
+                BlobName = requestBody.FileName,
+                Destination = DestinationCustomerSas,
+                ExpiresAt = sasExpiry ?? DateTime.UtcNow.AddHours(1),
+                Message = null
+            });
+            return response;
+        }
+
+        private async Task<HttpResponseData> IssueHostedSasAsync(
+            HttpRequestData req, GetDiagnosticsUploadUrlRequest requestBody)
+        {
+            if (string.IsNullOrEmpty(requestBody.FileName))
+            {
+                var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                await badRequest.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+                {
+                    Success = false,
+                    Message = "fileName is required for hosted destination"
+                });
+                return badRequest;
+            }
+
+            HostedUploadSasResult sasResult;
+            try
+            {
+                sasResult = await _hostedDiagnostics.GenerateUploadSasAsync(
+                    requestBody.TenantId, requestBody.FileName);
+            }
+            catch (ArgumentException ex)
+            {
+                // Filename validation failed (path separator, traversal, oversize, etc.)
+                _logger.LogWarning(
+                    "GetDiagnosticsUploadUrl: rejecting hosted SAS for tenant {TenantId}, file {FileName}: {Reason}",
+                    requestBody.TenantId, requestBody.FileName, ex.Message);
+                var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                await badRequest.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+                {
+                    Success = false,
+                    Message = "Invalid file name"
+                });
+                return badRequest;
+            }
+
+            _logger.LogInformation(
+                "GetDiagnosticsUploadUrl: Issuing Hosted upload URL for tenant {TenantId}, session {SessionId}, blob {BlobPath}, SAS expires {ExpiresAt}",
+                requestBody.TenantId, requestBody.SessionId, sasResult.BlobPath, sasResult.ExpiresAt.ToString("O"));
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+            {
+                Success = true,
+                UploadUrl = sasResult.UploadUrl,
+                BlobName = sasResult.BlobPath, // {tenantId}/{filename} — agent persists this verbatim
+                Destination = DestinationHosted,
+                ExpiresAt = sasResult.ExpiresAt,
+                Message = null
+            });
+            return response;
+        }
+
+        /// <summary>
+        /// Normalizes the destination string from TenantConfiguration. Null/empty becomes
+        /// CustomerSas (preserves existing behaviour for tenants that predate this field).
+        /// Case-insensitive match against the two known values; unknown values pass through
+        /// so the caller can reject them with a 500.
+        /// </summary>
+        internal static string NormalizeDestination(string? raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return DestinationCustomerSas;
+            if (string.Equals(raw, DestinationHosted, StringComparison.OrdinalIgnoreCase)) return DestinationHosted;
+            if (string.Equals(raw, DestinationCustomerSas, StringComparison.OrdinalIgnoreCase)) return DestinationCustomerSas;
+            return raw; // unknown — let the caller decide what to do
         }
 
         /// <summary>

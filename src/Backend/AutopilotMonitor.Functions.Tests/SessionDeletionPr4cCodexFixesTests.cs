@@ -416,6 +416,7 @@ public class SessionDeletionPr4cCodexFixesTests
             Sut = new SessionDeletionHandler(
                 Storage.Object, Blob.Object, Verifier.Object,
                 Maintenance.Object, SignalR,
+                new AutopilotMonitor.Functions.Tests.Helpers.NoOpDiagnosticsBlobCascadeDeleter(),
                 NullLogger<SessionDeletionHandler>.Instance);
         }
 
@@ -634,6 +635,7 @@ public class SessionDeletionPr4cCodexFixesTests
                 StorageMock.Object, blobMock.Object, verifierMock.Object,
                 Mock.Of<IMaintenanceRepository>(),
                 new FakeSignalRNotificationService(),
+                new AutopilotMonitor.Functions.Tests.Helpers.NoOpDiagnosticsBlobCascadeDeleter(),
                 NullLogger<SessionDeletionHandler>.Instance);
             handlerMock.Setup(h => h.HandleAsync(It.IsAny<SessionDeletionEnvelope>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);

@@ -431,16 +431,23 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     .ContinueWith(t => _logger.LogWarning(t.Exception?.InnerException,
                         "Fire-and-forget RecordGatherRuleStatsAsync failed"), TaskContinuationOptions.OnlyOnFaulted);
 
-                // Store diagnostics blob name on session (if agent uploaded a diagnostics package)
+                // Store diagnostics blob name + destination on session (if agent uploaded a diagnostics package)
                 if (classification.DiagnosticsUploadedEvent != null)
                 {
-                    var blobName = classification.DiagnosticsUploadedEvent.Data?.ContainsKey("blobName") == true
-                        ? classification.DiagnosticsUploadedEvent.Data["blobName"]?.ToString()
+                    var data = classification.DiagnosticsUploadedEvent.Data;
+                    var blobName = data?.ContainsKey("blobName") == true
+                        ? data["blobName"]?.ToString()
+                        : null;
+                    // Older agents don't send `destination` — pass null, repo leaves the
+                    // column unchanged (legacy-row default at read-time is CustomerSas).
+                    var destination = data?.ContainsKey("destination") == true
+                        ? data["destination"]?.ToString()
                         : null;
                     if (!string.IsNullOrEmpty(blobName))
                     {
                         await _sessionRepo.UpdateSessionDiagnosticsBlobAsync(
-                            request.TenantId, request.SessionId, blobName);
+                            request.TenantId, request.SessionId, blobName,
+                            string.IsNullOrEmpty(destination) ? null : destination);
                     }
                 }
 

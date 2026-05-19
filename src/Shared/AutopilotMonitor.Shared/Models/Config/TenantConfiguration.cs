@@ -401,16 +401,34 @@ namespace AutopilotMonitor.Shared.Models
 
         /// <summary>
         /// Azure Blob Storage Container SAS URL for diagnostics package upload.
+        /// Used only when <see cref="DiagnosticsUploadDestination"/> is <c>"CustomerSas"</c>.
         /// Each tenant provides their own container — data stays in the customer's storage.
-        /// If null or empty, diagnostics upload is disabled.
+        /// If null or empty (and destination is CustomerSas), diagnostics upload is disabled.
         /// </summary>
         public string DiagnosticsBlobSasUrl { get; set; } = default!;
 
         /// <summary>
         /// When to upload diagnostics packages: "Off", "Always", "OnFailure".
-        /// Default: "Off"
+        /// Applies to both destinations. Default: "Off"
         /// </summary>
         public string DiagnosticsUploadMode { get; set; } = "Off";
+
+        /// <summary>
+        /// Where diagnostics packages should be uploaded:
+        /// <list type="bullet">
+        ///   <item><c>"CustomerSas"</c> (default) — customer's own storage account via the SAS URL
+        ///         in <see cref="DiagnosticsBlobSasUrl"/>. Preserves existing behaviour; no data
+        ///         leaves the customer's Azure tenant boundary.</item>
+        ///   <item><c>"Hosted"</c> — opt-in only. Blobs land in the backend's storage account
+        ///         under <c>{tenantId}/AgentDiagnostics-...zip</c> in the
+        ///         <see cref="Constants.BlobContainers.HostedDiagnostics"/> container. Requires
+        ///         an explicit admin click in the tenant settings UI with a clearly-marked
+        ///         "data leaves your tenant" disclosure — never set silently.</item>
+        /// </list>
+        /// Default <c>"CustomerSas"</c> so existing tenants without the field set behave
+        /// identically to today and customer data is never silently routed to hosted storage.
+        /// </summary>
+        public string DiagnosticsUploadDestination { get; set; } = "CustomerSas";
 
         // ===== TRACE EVENTS =====
 

@@ -82,8 +82,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 earliestEventTimestamp, latestEventTimestamp, currentPhase,
                 platformScriptIncrement, remediationScriptIncrement);
 
-        public Task UpdateSessionDiagnosticsBlobAsync(string tenantId, string sessionId, string blobName)
-            => _storage.UpdateSessionDiagnosticsBlobAsync(tenantId, sessionId, blobName);
+        public Task UpdateSessionDiagnosticsBlobAsync(
+            string tenantId, string sessionId, string blobName, string? destination = null)
+            => _storage.UpdateSessionDiagnosticsBlobAsync(tenantId, sessionId, blobName, destination);
 
         public Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned,
             SessionStatus? status = null, bool? isUserDriven = null)

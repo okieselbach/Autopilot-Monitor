@@ -76,7 +76,8 @@ namespace AutopilotMonitor.Shared.DataAccess
             DateTime? earliestEventTimestamp = null, DateTime? latestEventTimestamp = null,
             EnrollmentPhase? currentPhase = null,
             int platformScriptIncrement = 0, int remediationScriptIncrement = 0);
-        Task UpdateSessionDiagnosticsBlobAsync(string tenantId, string sessionId, string blobName);
+        Task UpdateSessionDiagnosticsBlobAsync(
+            string tenantId, string sessionId, string blobName, string? destination = null);
         Task SetSessionPreProvisionedAsync(string tenantId, string sessionId, bool isPreProvisioned,
             SessionStatus? status = null, bool? isUserDriven = null);
         Task UpdateSessionGeoAsync(string tenantId, string sessionId,

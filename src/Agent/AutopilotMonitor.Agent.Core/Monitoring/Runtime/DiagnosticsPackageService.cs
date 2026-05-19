@@ -27,6 +27,17 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
         public string BlobName { get; set; }
 
         /// <summary>
+        /// Where the blob was uploaded: <c>"CustomerSas"</c> or <c>"Hosted"</c>. Verbatim
+        /// from the backend's upload-url response. Surfaced into the
+        /// <c>diagnostics_uploaded</c> event so the backend can stamp it on the
+        /// <c>Sessions</c> row alongside the blob name — the download path then knows
+        /// which storage to fetch from, even if the tenant later switches destinations.
+        /// Null when the upload was skipped or against a legacy backend that doesn't
+        /// return the field.
+        /// </summary>
+        public string Destination { get; set; }
+
+        /// <summary>
         /// First part of the SAS URL (up to and including the first query param) with the token truncated,
         /// so the event shows the target container without leaking the full signature.
         /// Example: "https://account.blob.core.windows.net/diagnostics?sp=(truncated)"
@@ -185,15 +196,39 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
 
                 var sasUrlPrefix = BuildSasUrlPrefix(uploadUrlResponse.UploadUrl);
 
+                // Resolve the final PUT target: Hosted SAS is already blob-scoped at
+                // {tenantId}/{filename} and must be used as-is; CustomerSas (or a null
+                // Destination from an older backend) is container-scoped and we append
+                // the blob filename ourselves.
+                var blobUploadUrl = BuildBlobUploadUrl(uploadUrlResponse.UploadUrl, zipFileName, uploadUrlResponse.Destination);
+
+                // BlobName for the Sessions row: prefer the backend-supplied path because
+                // it encodes destination-specific layout (e.g. tenant-prefix for Hosted).
+                // Fall back to the local filename so the agent still works against older
+                // backends that don't return BlobName.
+                var persistedBlobName = !string.IsNullOrEmpty(uploadUrlResponse.BlobName)
+                    ? uploadUrlResponse.BlobName
+                    : zipFileName;
+
                 // Upload to Blob Storage using the freshly obtained URL
-                var (uploaded, uploadErrorCode) = await UploadToBlobStorageAsync(zipFileName, zipBytes, uploadUrlResponse.UploadUrl);
+                var (uploaded, uploadErrorCode) = await UploadToBlobStorageAsync(zipFileName, zipBytes, blobUploadUrl);
                 if (uploaded)
                 {
-                    _logger.Info($"Diagnostics package uploaded successfully: {zipFileName}");
-                    return new DiagnosticsUploadResult { BlobName = zipFileName, SasUrlPrefix = sasUrlPrefix };
+                    _logger.Info($"Diagnostics package uploaded successfully: {persistedBlobName}");
+                    return new DiagnosticsUploadResult
+                    {
+                        BlobName = persistedBlobName,
+                        Destination = uploadUrlResponse.Destination,
+                        SasUrlPrefix = sasUrlPrefix,
+                    };
                 }
 
-                return new DiagnosticsUploadResult { SasUrlPrefix = sasUrlPrefix, ErrorCode = uploadErrorCode };
+                return new DiagnosticsUploadResult
+                {
+                    Destination = uploadUrlResponse.Destination,
+                    SasUrlPrefix = sasUrlPrefix,
+                    ErrorCode = uploadErrorCode,
+                };
             }
             catch (Exception ex)
             {
@@ -293,27 +328,47 @@ namespace AutopilotMonitor.Agent.Core.Monitoring.Runtime
         }
 
         /// <summary>
-        /// Uploads the ZIP bytes to Azure Blob Storage via PUT with the provided container SAS URL.
-        /// Container SAS URL format: https://account.blob.core.windows.net/container?sv=...&sig=...
-        /// Blob URL is constructed by inserting the blob name before the query string.
-        /// Returns (success, errorCode) — errorCode is null on success, otherwise the last HTTP error.
+        /// Resolves the final blob PUT URL based on the destination advertised by the
+        /// backend. Pure helper, internal-static so the V1 test suite can pin both
+        /// branches without exercising any HTTP transport:
+        /// <list type="bullet">
+        ///   <item><b>Hosted</b> (or any case-insensitive match): the SAS is already
+        ///         blob-scoped at <c>{tenantId}/{filename}</c> and must be used as-is.
+        ///         Appending the local filename would produce a double-name URL.</item>
+        ///   <item><b>CustomerSas</b> / null / unknown (legacy backend without the
+        ///         field): the SAS is container-scoped; insert the blob filename
+        ///         before the query string. Preserves prior behaviour.</item>
+        /// </list>
         /// </summary>
-        private async Task<(bool success, string errorCode)> UploadToBlobStorageAsync(string blobName, byte[] data, string containerSasUrl)
+        internal static string BuildBlobUploadUrl(string sasUrl, string blobFileName, string destination)
         {
-            // Build blob URL: split at '?' to insert blob name
-            var questionMarkIndex = containerSasUrl.IndexOf('?');
-            string blobUrl;
+            if (!string.IsNullOrEmpty(destination)
+                && string.Equals(destination, "Hosted", StringComparison.OrdinalIgnoreCase))
+            {
+                return sasUrl;
+            }
+
+            // CustomerSas or null/unknown — container-scoped SAS, insert blob name.
+            var questionMarkIndex = sasUrl.IndexOf('?');
             if (questionMarkIndex >= 0)
             {
-                var basePath = containerSasUrl.Substring(0, questionMarkIndex).TrimEnd('/');
-                var queryString = containerSasUrl.Substring(questionMarkIndex);
-                blobUrl = $"{basePath}/{blobName}{queryString}";
+                var basePath = sasUrl.Substring(0, questionMarkIndex).TrimEnd('/');
+                var queryString = sasUrl.Substring(questionMarkIndex);
+                return $"{basePath}/{blobFileName}{queryString}";
             }
-            else
-            {
-                // No query string (unlikely for SAS but handle gracefully)
-                blobUrl = $"{containerSasUrl.TrimEnd('/')}/{blobName}";
-            }
+            return $"{sasUrl.TrimEnd('/')}/{blobFileName}";
+        }
+
+        /// <summary>
+        /// Uploads the ZIP bytes to Azure Blob Storage via PUT to the pre-built
+        /// <paramref name="blobUploadUrl"/>. The URL is destination-aware (built by
+        /// <see cref="BuildBlobUploadUrl"/>) and ready to PUT without further mutation.
+        /// <paramref name="blobName"/> is kept for log lines only.
+        /// Returns (success, errorCode) — errorCode is null on success, otherwise the last HTTP error.
+        /// </summary>
+        private async Task<(bool success, string errorCode)> UploadToBlobStorageAsync(string blobName, byte[] data, string blobUploadUrl)
+        {
+            var blobUrl = blobUploadUrl;
 
             const int maxRetries = 3;
             string lastErrorCode = null;

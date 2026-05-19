@@ -614,6 +614,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     Data = new Dictionary<string, object>
                     {
                         { "blobName", result.BlobName ?? string.Empty },
+                        // Tells the backend which storage the blob landed in so it can
+                        // stamp Session.DiagnosticsBlobDestination and route downloads
+                        // even after a future tenant destination switch. Empty when the
+                        // backend predates the field (agent falls through harmlessly).
+                        { "destination", result.Destination ?? string.Empty },
                         { "sasUrlPrefix", result.SasUrlPrefix ?? string.Empty },
                     },
                     ImmediateUpload = true,
@@ -636,6 +641,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     {
                         { "errorCode", errorCode },
                         { "blobName", result?.BlobName ?? string.Empty },
+                        { "destination", result?.Destination ?? string.Empty },
                     },
                     ImmediateUpload = true,
                 });

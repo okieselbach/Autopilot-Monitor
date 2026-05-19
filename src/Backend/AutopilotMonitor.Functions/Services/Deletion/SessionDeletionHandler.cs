@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Azure;
+using AutopilotMonitor.Functions.Services.Diagnostics;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models.Deletion;
@@ -51,6 +52,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
         private readonly CascadeVerificationService _verifier;
         private readonly IMaintenanceRepository _maintenanceRepo;
         private readonly ISignalRNotificationService _signalR;
+        private readonly Diagnostics.DiagnosticsBlobCascadeDeleter _diagnosticsBlobDeleter;
         private readonly ILogger<SessionDeletionHandler> _logger;
 
         public SessionDeletionHandler(
@@ -59,6 +61,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             CascadeVerificationService verifier,
             IMaintenanceRepository maintenanceRepo,
             ISignalRNotificationService signalR,
+            Diagnostics.DiagnosticsBlobCascadeDeleter diagnosticsBlobDeleter,
             ILogger<SessionDeletionHandler> logger)
         {
             _storage = storage;
@@ -66,6 +69,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             _verifier = verifier;
             _maintenanceRepo = maintenanceRepo;
             _signalR = signalR;
+            _diagnosticsBlobDeleter = diagnosticsBlobDeleter;
             _logger = logger;
         }
 
@@ -233,6 +237,45 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                     tenantId, sessionId, manifestId, progress, etag,
                     mutate: p => p.VerificationDone = true,
                     isAlreadyApplied: p => p.VerificationDone,
+                    cancellationToken);
+            }
+
+            // (5b) Diagnostics-blob delete (plan §5b). Idempotent + 404-safe. The deleter
+            //      itself routes by manifest.DiagnosticsBlobDestination (Hosted=always,
+            //      CustomerSas=only if SAS has 'd'); a real storage error propagates so the
+            //      cascade poisons. The DiagnosticsBlobDeleteDone flag in progress is the
+            //      idempotency marker — set unconditionally after the step completes so
+            //      retries skip the step regardless of which branch executed.
+            if (!progress.DiagnosticsBlobDeleteDone)
+            {
+                DiagnosticsBlobDeleteOutcome outcome;
+                try
+                {
+                    outcome = await _diagnosticsBlobDeleter.DeleteAsync(manifest, cancellationToken);
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException))
+                {
+                    LogDiagBlobStepFailed(tenantId, sessionId, manifestId, ex);
+                    (progress, etag) = await TryPersistFailureContextAsync(
+                        tenantId, sessionId, manifestId, progress, etag,
+                        failureType: "step_exception",
+                        failureMessage: $"diagnostics blob delete: {ex.GetType().Name}: {ex.Message}",
+                        observedResidualCount: null,
+                        residualSampleJson: null,
+                        cancellationToken);
+                    throw;
+                }
+
+                _logger.LogInformation(
+                    "SessionDeletionHandler diagnostics blob step: tenant={TenantId} session={SessionId} manifestId={ManifestId} outcome={Outcome} blob={Blob} destination={Destination}",
+                    tenantId, sessionId, manifestId, outcome,
+                    manifest.DiagnosticsBlobName ?? string.Empty,
+                    manifest.DiagnosticsBlobDestination ?? string.Empty);
+
+                (progress, etag) = await UpdateProgressWithRetryAsync(
+                    tenantId, sessionId, manifestId, progress, etag,
+                    mutate: p => p.DiagnosticsBlobDeleteDone = true,
+                    isAlreadyApplied: p => p.DiagnosticsBlobDeleteDone,
                     cancellationToken);
             }
 
@@ -688,6 +731,14 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                 "SessionDeletionHandler step failed: tenant={TenantId} session={SessionId} manifestId={ManifestId} stepOrder={StepOrder} class={Class} table={Table} exceptionType={ExceptionType}",
                 tenantId, sessionId, manifestId, step.Order, step.Class, step.Table ?? string.Empty,
                 ex.GetType().FullName ?? "Unknown");
+        }
+
+        private void LogDiagBlobStepFailed(
+            string tenantId, string sessionId, string manifestId, Exception ex)
+        {
+            _logger.LogError(ex,
+                "SessionDeletionHandler diagnostics-blob step failed: tenant={TenantId} session={SessionId} manifestId={ManifestId} exceptionType={ExceptionType}",
+                tenantId, sessionId, manifestId, ex.GetType().FullName ?? "Unknown");
         }
     }
 }
