@@ -168,6 +168,11 @@ namespace AutopilotMonitor.SummaryDialog
 
                 var pid = Process.GetCurrentProcess().Id;
 
+                // PowerShell single-quoted strings only need ' escaped as ''. Defends against
+                // staging paths containing apostrophes; without escaping such a path breaks
+                // out of the string literal in EncodedCommand.
+                var safeExeDir = exeDir.Replace("'", "''");
+
                 // PowerShell Wait-Process: waits for our actual process exit (no polling),
                 // then short delay for file handle cleanup, then Remove-Item.
                 // Retry loop handles transient file locks (AV scanners, OS handle cleanup).
@@ -176,9 +181,9 @@ namespace AutopilotMonitor.SummaryDialog
                 var psScript = $"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue; " +
                                $"for ($i = 0; $i -lt 3; $i++) {{ " +
                                $"Start-Sleep -Seconds 2; " +
-                               $"Remove-Item -LiteralPath '{exeDir}' -Recurse -Force -ErrorAction SilentlyContinue; " +
-                               $"Remove-Item -LiteralPath '{exeDir}' -Force -ErrorAction SilentlyContinue; " +
-                               $"if (-not (Test-Path -LiteralPath '{exeDir}')) {{ break }} " +
+                               $"Remove-Item -LiteralPath '{safeExeDir}' -Recurse -Force -ErrorAction SilentlyContinue; " +
+                               $"Remove-Item -LiteralPath '{safeExeDir}' -Force -ErrorAction SilentlyContinue; " +
+                               $"if (-not (Test-Path -LiteralPath '{safeExeDir}')) {{ break }} " +
                                $"}}";
                 var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
 

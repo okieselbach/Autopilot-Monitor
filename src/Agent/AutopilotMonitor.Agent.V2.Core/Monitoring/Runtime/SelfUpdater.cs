@@ -601,10 +601,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             var pid = Process.GetCurrentProcess().Id;
             var agentExePath = Path.Combine(agentDir, "AutopilotMonitor.Agent.exe");
 
+            // PowerShell single-quoted strings only need ' escaped as ''. Defends against
+            // paths containing apostrophes (redirected ProgramData, OEM-customized roots);
+            // without escaping such a path breaks out of the string literal in EncodedCommand.
+            var safeAgentExePath = agentExePath.Replace("'", "''");
+
             // PowerShell Wait-Process: waits for our process to actually exit (no polling),
             // then immediately starts the new agent. 30s timeout as safety net.
             var psScript = $"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue; " +
-                           $"& '{agentExePath}'";
+                           $"& '{safeAgentExePath}'";
             var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
 
             var psi = new ProcessStartInfo
