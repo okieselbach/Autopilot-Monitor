@@ -146,6 +146,13 @@ namespace AutopilotMonitor.Shared
         public const string AgentUpdateStagingDir = @"%ProgramData%\AutopilotMonitor\Agent-Update";
 
         /// <summary>
+        /// Download cache for the self-update ZIP. Lives under ProgramData (SYSTEM/Admin
+        /// ACL) so non-admin local users cannot plant a junction at the ZIP path between
+        /// pre-cleanup and FileStream open.
+        /// </summary>
+        public const string AgentUpdateDownloadDir = @"%ProgramData%\AutopilotMonitor\Updates";
+
+        /// <summary>
         /// Agent binary directory
         /// </summary>
         public const string AgentDirectory = @"%ProgramData%\AutopilotMonitor\Agent";

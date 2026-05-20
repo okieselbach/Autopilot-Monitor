@@ -206,7 +206,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 }
 
                 // Step 3: Download ZIP (timeout = downloadTimeoutMs)
-                var zipPath = Path.Combine(Path.GetTempPath(), "AutopilotMonitor-Agent-Update.zip");
+                // ZIP lives under %ProgramData% (SYSTEM/Admin ACL) instead of C:\Windows\Temp so
+                // a non-admin local user cannot plant a junction at the ZIP filename.
+                var zipDir = Environment.ExpandEnvironmentVariables(Constants.AgentUpdateDownloadDir);
+                Directory.CreateDirectory(zipDir);
+                var zipPath = Path.Combine(zipDir, "AutopilotMonitor-Agent-Update.zip");
                 var downloadTimerSw = Stopwatch.StartNew();
                 var downloadOk = await DownloadZipAsync(zipPath, downloadTimeoutMs, log);
                 downloadTimerSw.Stop();
@@ -463,7 +467,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             {
                 var zipUrl = $"{Constants.AgentBlobBaseUrl}/{Constants.AgentZipFileNameForLine(2)}";
 
-                // Clean up any previous download
+                // Clean up any previous download (fragment from aborted run, or symlink/junction).
+                // Pre-delete + FileMode.CreateNew below: CreateNew refuses to open an existing
+                // entry (incl. reparse points), so a planted junction surviving the Delete fails
+                // fast instead of letting the write follow the reparse target.
                 if (File.Exists(zipPath))
                     File.Delete(zipPath);
 
@@ -473,7 +480,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                     using (var response = await client.GetAsync(zipUrl))
                     {
                         response.EnsureSuccessStatusCode();
-                        using (var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        using (var fileStream = new FileStream(zipPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                         {
                             await response.Content.CopyToAsync(fileStream);
                         }
@@ -499,6 +506,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 
         /// <summary>
         /// Extracts the ZIP to the staging directory. Returns false on failure.
+        ///
+        /// Zip-Slip hardening: pre-KB-4534974 .NET Framework 4.8 patch levels honour ".." path
+        /// segments in <see cref="ZipArchiveEntry.FullName"/>, so a malicious ZIP could escape
+        /// the staging dir (e.g. ..\..\System32\evil.dll). We iterate entries manually and
+        /// reject any whose resolved absolute path falls outside the staging root.
         /// </summary>
         private static bool ExtractToStaging(string zipPath, string stagingDir, Action<string> log)
         {
@@ -507,9 +519,49 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 // Clean up any previous staging
                 if (Directory.Exists(stagingDir))
                     Directory.Delete(stagingDir, true);
+                Directory.CreateDirectory(stagingDir);
 
-                ZipFile.ExtractToDirectory(zipPath, stagingDir);
-                log($"Self-update: ZIP extracted to staging ({Directory.GetFiles(stagingDir).Length} files)");
+                // Normalise staging root for path-traversal validation. The trailing separator is
+                // required so "C:\stage" does not falsely match "C:\stage-evil\…".
+                var stagingRoot = Path.GetFullPath(stagingDir);
+                if (!stagingRoot.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+                    stagingRoot += Path.DirectorySeparatorChar;
+
+                int fileCount = 0;
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    foreach (var entry in archive.Entries)
+                    {
+                        // Reject absolute paths up-front; Path.Combine would otherwise honour them
+                        // and discard the staging prefix.
+                        if (Path.IsPathRooted(entry.FullName))
+                        {
+                            log($"Self-update: ZIP extraction rejected — entry has absolute path: {entry.FullName}");
+                            return false;
+                        }
+
+                        var destFullPath = Path.GetFullPath(Path.Combine(stagingDir, entry.FullName));
+                        if (!destFullPath.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            log($"Self-update: ZIP extraction rejected — entry escapes staging dir: {entry.FullName}");
+                            return false;
+                        }
+
+                        // Directory entries (zip convention: name ends with "/")
+                        if (entry.FullName.EndsWith("/", StringComparison.Ordinal) ||
+                            entry.FullName.EndsWith("\\", StringComparison.Ordinal))
+                        {
+                            Directory.CreateDirectory(destFullPath);
+                            continue;
+                        }
+
+                        Directory.CreateDirectory(Path.GetDirectoryName(destFullPath));
+                        entry.ExtractToFile(destFullPath, overwrite: false);
+                        fileCount++;
+                    }
+                }
+
+                log($"Self-update: ZIP extracted to staging ({fileCount} files)");
                 return true;
             }
             catch (Exception ex)
