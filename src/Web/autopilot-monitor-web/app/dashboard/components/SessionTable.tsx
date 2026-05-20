@@ -232,6 +232,11 @@ export function SessionTable({
       .slice(0, 8);
   }, [deferredTenantIdFilter, tenantList]);
 
+  const tenantDomainById = useMemo(
+    () => new Map(tenantList.map((t) => [t.tenantId, t.domainName])),
+    [tenantList],
+  );
+
   // Persist visible columns to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([...visibleColumns]));
@@ -789,6 +794,7 @@ export function SessionTable({
                     onDeleteSession={onDeleteSession}
                     isDeletionPending={pendingDeletions.has(session.sessionId)}
                     onBlockDevice={onBlockDevice}
+                    tenantDomainById={tenantDomainById}
                   />
                 ))}
               </tr>
@@ -845,6 +851,7 @@ function SessionCell({
   onDeleteSession,
   isDeletionPending,
   onBlockDevice,
+  tenantDomainById,
 }: {
   columnKey: string;
   session: Session;
@@ -856,6 +863,7 @@ function SessionCell({
   /** True when the V2 cascade has been queued for this session and we're awaiting `sessionDeleted`. */
   isDeletionPending: boolean;
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
+  tenantDomainById: Map<string, string>;
 }) {
   switch (columnKey) {
     case "device":
@@ -870,7 +878,8 @@ function SessionCell({
         </td>
       );
 
-    case "tenantId":
+    case "tenantId": {
+      const tenantDomain = tenantDomainById.get(session.tenantId);
       return (
         <td className="px-6 py-4 whitespace-nowrap">
           <button
@@ -886,8 +895,17 @@ function SessionCell({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
           </button>
+          {tenantDomain && (
+            <div
+              className="mt-0.5 text-xs text-gray-500 truncate max-w-[220px]"
+              title={tenantDomain}
+            >
+              {tenantDomain}
+            </div>
+          )}
         </td>
       );
+    }
 
     case "model":
       return (
