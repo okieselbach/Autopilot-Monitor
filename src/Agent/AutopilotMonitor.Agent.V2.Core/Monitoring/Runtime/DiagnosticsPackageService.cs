@@ -587,6 +587,39 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         }
 
         /// <summary>
+        /// Suffix allowlist for the Azure Blob Storage hosts the agent is permitted to PUT
+        /// the diagnostics ZIP to. Anything outside this list is rejected before the upload
+        /// so a tampered or mis-configured <c>uploadUrlResponse.UploadUrl</c> cannot redirect
+        /// the diag-ZIP (hostname/serial/UPN-bearing logs) to an attacker endpoint.
+        /// </summary>
+        private static readonly string[] AllowedBlobHostSuffixes =
+        {
+            ".blob.core.windows.net",        // Azure Public
+            ".blob.core.usgovcloudapi.net",  // Azure US Government
+            ".blob.core.chinacloudapi.cn",   // Azure China
+            ".blob.core.cloudapi.de",        // Azure Germany (legacy)
+        };
+
+        /// <summary>
+        /// Returns true iff <paramref name="url"/> is a syntactically valid absolute URI with
+        /// scheme <c>https</c> and a host that ends with one of <see cref="AllowedBlobHostSuffixes"/>.
+        /// Internal-static so the V2 test suite can pin accept/reject paths without HTTP.
+        /// </summary>
+        internal static bool IsAllowedBlobUploadUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+            if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return false;
+            var host = uri.Host;
+            foreach (var suffix in AllowedBlobHostSuffixes)
+            {
+                if (host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Resolves the final blob PUT URL based on the destination advertised by the
         /// backend. Pure helper, internal-static so the V2 test suite can pin both
         /// branches without exercising any HTTP transport:
@@ -627,6 +660,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         /// </summary>
         private async Task<(bool success, string errorCode)> UploadToBlobStorageAsync(string blobName, byte[] data, string blobUploadUrl)
         {
+            // Pre-flight: refuse to PUT diag-ZIP to anything outside the Azure Blob Storage
+            // host allowlist (incl. wrong scheme). Permanent failure — no retry could fix it.
+            if (!IsAllowedBlobUploadUrl(blobUploadUrl))
+            {
+                _logger.Warning(
+                    $"Blob upload rejected: URL is not an allowed Azure Blob Storage endpoint " +
+                    $"(expected https://*.blob.core.windows.net or sovereign-cloud equivalent). " +
+                    $"URL prefix: {BuildSasUrlPrefix(blobUploadUrl)}");
+                return (false, "url_host_rejected");
+            }
+
             var blobUrl = blobUploadUrl;
 
             const int maxRetries = 3;

@@ -239,11 +239,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
                 if (!Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                // SECURITY: Never persist UnrestrictedMode to disk — require live backend auth
-                var liveValue = config.UnrestrictedMode;
+                // SECURITY: Never persist security-sensitive fields to disk — they must come
+                // from a live backend fetch each cold boot. A one-time MITM during OOBE could
+                // otherwise plant attacker-controlled values that survive forever.
+                //   - UnrestrictedMode: gate for agent privileged paths
+                //   - AllowAgentDowngrade: gate for installing a lower agent version
+                //   - LatestAgentExeSha256: backend-advertised EXE hash for runtime integrity
+                //     check; a bad cached value would trigger a force-update to attacker bins
+                var liveUnrestricted = config.UnrestrictedMode;
+                var liveAllowDowngrade = config.AllowAgentDowngrade;
+                var liveExeHash = config.LatestAgentExeSha256;
                 config.UnrestrictedMode = false;
+                config.AllowAgentDowngrade = false;
+                config.LatestAgentExeSha256 = null;
                 var json = JsonConvert.SerializeObject(config, Formatting.Indented);
-                config.UnrestrictedMode = liveValue;
+                config.UnrestrictedMode = liveUnrestricted;
+                config.AllowAgentDowngrade = liveAllowDowngrade;
+                config.LatestAgentExeSha256 = liveExeHash;
 
                 File.WriteAllText(_cacheFilePath, json);
                 _logger.Debug("Remote config cached to disk");
@@ -265,8 +277,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Configuration
                     var config = JsonConvert.DeserializeObject<AgentConfigResponse>(json);
                     if (config != null)
                     {
-                        // SECURITY: Never trust cached UnrestrictedMode — always require live backend auth
+                        // SECURITY: Never trust cached security-sensitive fields — always require
+                        // a live backend fetch. Defence-in-depth on top of the write-side strip
+                        // in CacheConfig so older cache files (or attacker-planted files written
+                        // out-of-band) cannot leak attacker-controlled values into runtime.
                         config.UnrestrictedMode = false;
+                        config.AllowAgentDowngrade = false;
+                        config.LatestAgentExeSha256 = null;
                     }
                     return config;
                 }
