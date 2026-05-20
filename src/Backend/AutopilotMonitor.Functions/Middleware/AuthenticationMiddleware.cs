@@ -217,8 +217,9 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                     return matchedKeys.Any() ? matchedKeys : openIdConfig.SigningKeys;
                 },
 
-                // Set algorithm validators to ensure we only accept RS256
-                ValidAlgorithms = new[] { "RS256" }
+                // Algorithm whitelist: RS256 today, PS256 for Entra's announced rollout.
+                // Hard-blocks HS-family and "none" (algorithm-confusion defence).
+                ValidAlgorithms = new[] { "RS256", "PS256" }
             };
 
             var principal = _tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
