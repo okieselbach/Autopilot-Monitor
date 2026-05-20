@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Middleware;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,10 @@ public class CorrelationIdMiddleware : IFunctionsWorkerMiddleware
 {
     private const string HeaderName = "X-Correlation-ID";
     private const string ItemsKey = "CorrelationId";
+
+    // Strict allow-list gate against CRLF / log-forgery / App-Insights row-injection via inbound header.
+    private static readonly Regex CorrelationIdPattern = new("^[A-Za-z0-9_-]{1,128}$", RegexOptions.Compiled);
+
     private readonly ILogger<CorrelationIdMiddleware> _logger;
 
     public CorrelationIdMiddleware(ILogger<CorrelationIdMiddleware> logger)
@@ -29,7 +34,8 @@ public class CorrelationIdMiddleware : IFunctionsWorkerMiddleware
         string correlationId;
         if (httpContext != null
             && httpContext.Request.Headers.TryGetValue(HeaderName, out var existingId)
-            && !string.IsNullOrEmpty(existingId))
+            && !string.IsNullOrEmpty(existingId)
+            && CorrelationIdPattern.IsMatch(existingId.ToString()))
         {
             correlationId = existingId.ToString();
         }

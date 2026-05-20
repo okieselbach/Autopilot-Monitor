@@ -29,6 +29,10 @@ builder.ConfigureFunctionsWebApplication();
 builder.UseMiddleware<RequestTelemetryMiddleware>();
 builder.UseMiddleware<CorrelationIdMiddleware>();
 builder.UseMiddleware<TimingAllowOriginMiddleware>();
+// Stamp Cache-Control: no-store on credential/identity endpoints before next() so
+// short-circuit responses (401/403/500) from downstream middleware still inherit the
+// header. Allowlist lives inside NoStoreCacheMiddleware.
+builder.UseMiddleware<NoStoreCacheMiddleware>();
 builder.UseMiddleware<GlobalExceptionMiddleware>();
 builder.UseMiddleware<AuthenticationMiddleware>();
 builder.UseMiddleware<PolicyEnforcementMiddleware>();

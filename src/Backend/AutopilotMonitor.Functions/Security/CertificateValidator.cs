@@ -29,6 +29,12 @@ namespace AutopilotMonitor.Functions.Security
         private static readonly ConcurrentDictionary<string, CachedValidationResult> _validationCache = new();
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
+        // Hard cap on the encoded cert header length. A real Intune device cert base64-encodes to
+        // ~2 KB; 16 KB leaves ample headroom for URL-encoding while preventing CPU-DoS from a
+        // flooder posting near-host-limit (~32-64 KB) garbage that would otherwise allocate
+        // through UnescapeDataString + FromBase64String + X509Certificate2.
+        internal const int MaxCertHeaderLength = 16 * 1024;
+
         // Lazily loaded Intune CA certs from embedded PEM resources, split by role:
         //   roots         -> pinned trust anchors  (chain.ChainPolicy.CustomTrustStore)
         //   intermediates -> bridge candidates    (chain.ChainPolicy.ExtraStore)
@@ -98,6 +104,20 @@ namespace AutopilotMonitor.Functions.Security
 
             try
             {
+                // Reject oversized headers before the expensive decode + X509 parse path runs.
+                // See MaxCertHeaderLength for rationale.
+                if (certificateBase64.Length > MaxCertHeaderLength)
+                {
+                    logger?.LogWarning(
+                        "AgentCertRejected reason={Reason} thumbprint={Thumbprint} subject={Subject} issuer={Issuer} notBefore={NotBefore} notAfter={NotAfter} error={Error}",
+                        RejectReason.ParseError, "n/a", "n/a", "n/a", "n/a", "n/a", $"header too large ({certificateBase64.Length} > {MaxCertHeaderLength})");
+                    return new CertificateValidationResult
+                    {
+                        IsValid = false,
+                        ErrorMessage = "Certificate header too large"
+                    };
+                }
+
                 // Azure App Service may URL-encode the X-ARR-ClientCert header value.
                 // Decode before Base64 parsing.
                 if (certificateBase64.Contains('%'))

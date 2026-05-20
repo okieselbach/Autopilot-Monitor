@@ -182,6 +182,25 @@ namespace AutopilotMonitor.Functions.Functions.Diagnostics
                 return notFound;
             }
 
+            // Defense-in-depth: the save path validates the SAS URL host, but a row
+            // written before that guard existed (or via any other path) could still
+            // contain an off-Azure URL. Reject loudly rather than hand the agent a
+            // pointer to an attacker-controlled endpoint.
+            var sasFormatError = SsrfGuard.ValidateAzureBlobSasUrlFormat(tenantConfig.DiagnosticsBlobSasUrl);
+            if (sasFormatError != null)
+            {
+                _logger.LogWarning(
+                    "GetDiagnosticsUploadUrl: tenant {TenantId} has invalid DiagnosticsBlobSasUrl: {Reason}; rejecting",
+                    requestBody.TenantId, sasFormatError);
+                var misconfigured = req.CreateResponse(HttpStatusCode.InternalServerError);
+                await misconfigured.WriteAsJsonAsync(new GetDiagnosticsUploadUrlResponse
+                {
+                    Success = false,
+                    Message = "Diagnostics storage is misconfigured for this tenant"
+                });
+                return misconfigured;
+            }
+
             var sasExpiry = ParseSasExpiry(tenantConfig.DiagnosticsBlobSasUrl);
 
             // Log the request — but never log the SAS URL itself

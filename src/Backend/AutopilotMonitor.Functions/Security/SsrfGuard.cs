@@ -12,6 +12,13 @@ namespace AutopilotMonitor.Functions.Security
     public static class SsrfGuard
     {
         /// <summary>
+        /// Allowed host suffix for the customer-supplied diagnostics SAS URL. Limits the
+        /// destination to Azure Commercial Blob Storage so a malicious tenant admin can't
+        /// configure an arbitrary collector endpoint that the agent would egress to.
+        /// </summary>
+        private const string AzureBlobHostSuffix = ".blob.core.windows.net";
+
+        /// <summary>
         /// Validates webhook URL format (sync). Call at config save time for immediate feedback.
         /// Returns null if valid, or an error message if invalid.
         /// Empty/null URLs are considered valid (means "no webhook configured").
@@ -32,6 +39,31 @@ namespace AutopilotMonitor.Functions.Security
 
             if (IPAddress.TryParse(uri.Host, out _))
                 return "Webhook URL must use a DNS hostname, not an IP address.";
+
+            return null;
+        }
+
+        /// <summary>
+        /// Validates the customer-supplied diagnostics blob SAS URL format. The agent
+        /// uploads diagnostics packages (logs, registry, hardware IDs) to this URL, so
+        /// it must be locked down to Azure Commercial Blob Storage — otherwise a tenant
+        /// admin could redirect agent egress to an attacker-controlled endpoint.
+        /// Returns null if valid, or an error message if invalid.
+        /// Empty/null URLs are considered valid (means "no diagnostics storage configured").
+        /// </summary>
+        public static string? ValidateAzureBlobSasUrlFormat(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return null;
+
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                return "Diagnostics SAS URL is not a valid absolute URL.";
+
+            if (uri.Scheme != Uri.UriSchemeHttps)
+                return "Diagnostics SAS URL must use HTTPS.";
+
+            if (string.IsNullOrEmpty(uri.Host) || !uri.Host.EndsWith(AzureBlobHostSuffix, StringComparison.OrdinalIgnoreCase))
+                return $"Diagnostics SAS URL host must end with {AzureBlobHostSuffix}.";
 
             return null;
         }

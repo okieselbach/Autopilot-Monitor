@@ -63,6 +63,19 @@ public class CertificateValidatorTests
     }
 
     [Fact]
+    public void ValidateCertificate_WithOversizedHeader_ReturnsInvalidWithoutAllocating()
+    {
+        // Guard against CPU-DoS from a flooder posting a near-host-limit header that would
+        // otherwise traverse UnescapeDataString + FromBase64String + X509Certificate2.
+        var oversized = new string('A', CertificateValidator.MaxCertHeaderLength + 1);
+
+        var result = CertificateValidator.ValidateCertificate(oversized);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("too large", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ValidateCertificate_WithSelfSignedCertImpersonatingIntune_ReturnsInvalid()
     {
         // Regression test: a self-signed leaf with Subject CN="Microsoft Intune MDM Device CA"

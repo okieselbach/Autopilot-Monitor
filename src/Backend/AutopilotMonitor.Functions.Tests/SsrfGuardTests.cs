@@ -177,4 +177,53 @@ public class SsrfGuardTests
             () => SsrfGuard.ValidateDestinationAsync("https://this-host-does-not-exist-xyz123.invalid/webhook"));
         Assert.Contains("resolve", ex.Message);
     }
+
+    // ── ValidateAzureBlobSasUrlFormat ──
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void ValidateBlobSas_NullOrEmpty_ReturnsNull(string? url)
+    {
+        Assert.Null(SsrfGuard.ValidateAzureBlobSasUrlFormat(url));
+    }
+
+    [Theory]
+    [InlineData("https://contoso.blob.core.windows.net/diag?sv=2022-11-02&sig=abc")]
+    [InlineData("https://fabrikam.blob.core.windows.net/container?sv=2022-11-02&sig=abc")]
+    [InlineData("https://example.BLOB.core.windows.NET/container?sv=2022-11-02&sig=abc")] // case-insensitive
+    public void ValidateBlobSas_ValidAzureBlobUrl_ReturnsNull(string url)
+    {
+        Assert.Null(SsrfGuard.ValidateAzureBlobSasUrlFormat(url));
+    }
+
+    [Fact]
+    public void ValidateBlobSas_NotAUrl_ReturnsError()
+    {
+        var result = SsrfGuard.ValidateAzureBlobSasUrlFormat("not-a-url");
+        Assert.Contains("valid absolute URL", result);
+    }
+
+    [Fact]
+    public void ValidateBlobSas_HttpScheme_ReturnsError()
+    {
+        var result = SsrfGuard.ValidateAzureBlobSasUrlFormat("http://contoso.blob.core.windows.net/diag?sig=abc");
+        Assert.Contains("HTTPS", result);
+    }
+
+    [Theory]
+    [InlineData("https://attacker.example.com/x")]
+    [InlineData("https://attacker.example/x")]
+    [InlineData("https://blob.core.windows.net.attacker.example/x")]   // suffix lookalike
+    [InlineData("https://contoso.blob.core.chinacloudapi.cn/diag")]    // sovereign cloud
+    [InlineData("https://contoso.blob.core.usgovcloudapi.net/diag")]   // sovereign cloud
+    [InlineData("https://contoso.dfs.core.windows.net/diag")]          // ADLS endpoint
+    [InlineData("https://localhost/diag")]
+    [InlineData("https://10.0.0.1/diag")]
+    public void ValidateBlobSas_NonAzureCommercialHost_ReturnsError(string url)
+    {
+        var result = SsrfGuard.ValidateAzureBlobSasUrlFormat(url);
+        Assert.Contains(".blob.core.windows.net", result);
+    }
 }

@@ -78,6 +78,23 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     await badRequest.WriteAsJsonAsync(new { success = false, message = $"Invalid Teams Webhook URL: {teamsUrlError}" });
                     return badRequest;
                 }
+                // Only validate the customer-supplied SAS URL when the tenant has actually
+                // selected the CustomerSas destination. In Hosted mode the field is unused at
+                // runtime (see GetDiagnosticsUploadUrlFunction), so a stale/legacy value left
+                // over from a prior CustomerSas configuration must not block a Hosted save.
+                // Mirrors the runtime branching in GetDiagnosticsUploadUrlFunction.Run.
+                var diagDestination = AutopilotMonitor.Functions.Functions.Diagnostics.GetDiagnosticsUploadUrlFunction
+                    .NormalizeDestination(config.DiagnosticsUploadDestination);
+                if (diagDestination == AutopilotMonitor.Functions.Functions.Diagnostics.GetDiagnosticsUploadUrlFunction.DestinationCustomerSas)
+                {
+                    var diagSasError = SsrfGuard.ValidateAzureBlobSasUrlFormat(config.DiagnosticsBlobSasUrl);
+                    if (diagSasError != null)
+                    {
+                        var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await badRequest.WriteAsJsonAsync(new { success = false, message = $"Invalid Diagnostics SAS URL: {diagSasError}" });
+                        return badRequest;
+                    }
+                }
 
                 // Ensure tenant ID matches
                 config.TenantId = requestCtx.TargetTenantId;
