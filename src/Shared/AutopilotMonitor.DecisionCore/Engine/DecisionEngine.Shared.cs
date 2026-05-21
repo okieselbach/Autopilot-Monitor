@@ -344,6 +344,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     return HandleClassifierTickDeadlineFired(state, signal);
                 case DeadlineNames.FinalizingGrace:
                     return HandleFinalizingGraceDeadlineFired(state, signal);
+                case DeadlineNames.RealmJoinTimeout:
+                    return HandleRealmJoinTimeoutDeadlineFired(state, signal);
                 default:
                     // Deadline name not recognized in this sub-milestone. Cancel it from state
                     // and record a neutral taken transition — M3.3+ adds handlers for
@@ -392,7 +394,11 @@ namespace AutopilotMonitor.DecisionCore.Engine
             // Plan §5 Fix 6: route the both-prerequisites case through Finalizing so the
             // synthetic-timeout terminal event shares the same grace window + phase-declaration
             // pathway as the happy-path handlers. AwaitingDesktop path is unchanged.
-            if (desktopAlreadyArrived)
+            //
+            // RealmJoin gate: while RJ is detected and unresolved, defer Finalizing. The
+            // synthetic Hello-timeout fact stays recorded; the RJ resolved/timeout handler
+            // routes through CompleteIfDeferredOrBookkeep when both gates are ready.
+            if (desktopAlreadyArrived && RealmJoinGateOpen(state))
             {
                 return TransitionToFinalizing(
                     state: state,
@@ -400,6 +406,18 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     preparedBuilder: builder,
                     nextStepIndex: nextStep,
                     trigger: $"DeadlineFired:{DeadlineNames.HelloSafety}");
+            }
+
+            if (desktopAlreadyArrived)
+            {
+                var deferredState = builder.Build();
+                var deferredTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: nextStep,
+                    trigger: $"DeadlineFired:{DeadlineNames.HelloSafety}:RealmJoinGateClosed");
+                return new DecisionStep(deferredState, deferredTransition, Array.Empty<DecisionEffect>());
             }
 
             builder.WithStage(SessionStage.AwaitingDesktop);

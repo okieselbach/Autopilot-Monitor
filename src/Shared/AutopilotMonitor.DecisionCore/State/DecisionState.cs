@@ -30,7 +30,7 @@ namespace AutopilotMonitor.DecisionCore.State
     /// </summary>
     public sealed class DecisionState
     {
-        public const string CurrentSchemaVersion = "v2";
+        public const string CurrentSchemaVersion = "v3";
 
         public DecisionState(
             string sessionId,
@@ -58,6 +58,7 @@ namespace AutopilotMonitor.DecisionCore.State
             SignalFact<bool>? helloPolicyEnabled = null,
             DateTime? agentBootUtc = null,
             SignalFact<string>? lastFailureTrigger = null,
+            RealmJoinFacts? realmJoinFacts = null,
             string? schemaVersion = null)
         {
             if (string.IsNullOrEmpty(sessionId))
@@ -95,6 +96,7 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloPolicyEnabled = helloPolicyEnabled;
             AgentBootUtc = agentBootUtc;
             LastFailureTrigger = lastFailureTrigger;
+            RealmJoinFacts = realmJoinFacts ?? RealmJoinFacts.Empty;
             SchemaVersion = schemaVersion ?? CurrentSchemaVersion;
         }
 
@@ -218,6 +220,16 @@ namespace AutopilotMonitor.DecisionCore.State
         /// </para>
         /// </summary>
         public SignalFact<string>? LastFailureTrigger { get; }
+
+        /// <summary>
+        /// Aggregated facts about a RealmJoin (RJ) deployment observed during this session.
+        /// Never null; defaults to <see cref="State.RealmJoinFacts.Empty"/>. The V2 AND-gate
+        /// (Classic and SelfDeploying) extends the session lifetime while
+        /// <see cref="State.RealmJoinFacts.DetectedUtc"/> is set and <see cref="State.RealmJoinFacts.ResolvedUtc"/>
+        /// is not — driven by the new <c>HKLM\SYSTEM\CurrentControlSet\Services\realmjoin\Parameters</c>
+        /// + <c>HKLM\SOFTWARE\RealmJoin\Packages\*</c> registry collectors.
+        /// </summary>
+        public RealmJoinFacts RealmJoinFacts { get; }
 
         public string SchemaVersion { get; }
 

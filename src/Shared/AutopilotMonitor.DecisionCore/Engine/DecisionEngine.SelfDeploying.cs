@@ -83,6 +83,31 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 score: 100,
                 lastUpdatedUtc: signal.OccurredAtUtc);
 
+            // RealmJoin gate: when RJ is detected and unresolved, defer the SelfDeploying
+            // terminal transition. Record the classifier verdict + the deferred-completion
+            // marker on RealmJoinFacts so HandleRealmJoinResolvedV1 / HandleRealmJoinTimeoutDeadlineFired
+            // can short-circuit straight to Completed without re-routing through Classic
+            // Finalizing.
+            if (!RealmJoinGateOpen(state))
+            {
+                var deferredBuilder = state.ToBuilder()
+                    .WithStepIndex(nextStep)
+                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+                deferredBuilder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(updatedDeviceOnly);
+                deferredBuilder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyDeviceSetupProvisioningComplete(
+                    deferredBuilder.ScenarioProfile, signal);
+                deferredBuilder.RealmJoinFacts = state.RealmJoinFacts.WithSelfDeployingDeferred(signal.SessionSignalOrdinal);
+
+                var deferredState = deferredBuilder.Build();
+                var deferredTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete) + ":RealmJoinGateClosed");
+                return new DecisionStep(deferredState, deferredTransition, Array.Empty<DecisionEffect>());
+            }
+
             var builder = state.ToBuilder()
                 .WithStage(SessionStage.Completed)
                 .WithOutcome(SessionOutcome.EnrollmentComplete)

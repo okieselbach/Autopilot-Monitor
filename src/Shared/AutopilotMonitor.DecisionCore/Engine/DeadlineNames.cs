@@ -38,6 +38,13 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// <c>EnrollmentTerminationHandler</c> drains the spool. Plan §5 Fix 6.
         /// </summary>
         public const string FinalizingGrace = "finalizing_grace";
+
+        /// <summary>
+        /// Hard 60-min timeout from RealmJoin-detected. When fired without phase 110 being
+        /// observed, the gate closes anyway with <c>realmjoinOutcome=Timeout</c> so the
+        /// session can complete (Classic Finalizing or SelfDeploying-direct path).
+        /// </summary>
+        public const string RealmJoinTimeout = "realmjoin_timeout";
     }
 
     /// <summary>

@@ -120,6 +120,14 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 (DecisionSignalKind.AppInstallCompleted, 1)                => HandleAppInstallCompletedV1(state, signal),
                 (DecisionSignalKind.AppInstallFailed, 1)                   => HandleAppInstallFailedV1(state, signal),
 
+                // ----- RealmJoin deployment tracking (DecisionEngine.RealmJoin.cs) -----
+                (DecisionSignalKind.RealmJoinDetected, 1)                  => HandleRealmJoinDetectedV1(state, signal),
+                (DecisionSignalKind.RealmJoinResolved, 1)                  => HandleRealmJoinResolvedV1(state, signal),
+                (DecisionSignalKind.RealmJoinPackageStarted, 1)            => HandleRealmJoinPackageStartedV1(state, signal),
+                (DecisionSignalKind.RealmJoinPackageCompleted, 1)          => HandleRealmJoinPackageCompletedV1(state, signal),
+                // Note: RealmJoinTimeout is a deadline-only kind (no direct adapter signal) —
+                // dispatched via DeadlineFiredV1 switch in DecisionEngine.Shared.cs.
+
                 // ----- Fall-through: unknown (kind, schemaVersion) pair → dead-end journal entry -----
                 _ => HandleUnhandledSignal(state, signal),
             };

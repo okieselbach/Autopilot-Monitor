@@ -131,7 +131,62 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 data["imePatternMatchedPatternId"] = postState.ImeMatchedPatternId.Value;
             }
 
+            if (postState.RealmJoinFacts.DetectedUtc != null)
+            {
+                data["realmjoinDetectedUtc"] = FormatUtc(postState.RealmJoinFacts.DetectedUtc.Value);
+                data["realmjoinOutcome"] = postState.RealmJoinFacts.Outcome?.Value ?? "Pending";
+                if (postState.RealmJoinFacts.LastDeploymentPhase != null)
+                {
+                    data["realmjoinLastPhase"] = postState.RealmJoinFacts.LastDeploymentPhase.Value;
+                }
+                if (postState.RealmJoinFacts.ResolvedUtc != null)
+                {
+                    data["realmjoinResolvedUtc"] = FormatUtc(postState.RealmJoinFacts.ResolvedUtc.Value);
+                }
+                data["realmjoinPackages"] = BuildRealmJoinPackageSummary(postState.RealmJoinFacts.Packages);
+            }
+
             return data;
+        }
+
+        /// <summary>
+        /// Build a compact per-package summary list for the <c>realmjoinPackages</c> audit-trail
+        /// field. Each entry carries the identifiers + completion state but omits the per-package
+        /// timestamps to keep the payload size predictable.
+        /// </summary>
+        private static List<Dictionary<string, object>> BuildRealmJoinPackageSummary(
+            IReadOnlyList<State.RealmJoinPackageFact> packages)
+        {
+            var result = new List<Dictionary<string, object>>(packages.Count);
+            for (var i = 0; i < packages.Count; i++)
+            {
+                var p = packages[i];
+                var row = new Dictionary<string, object>(capacity: 6, StringComparer.Ordinal)
+                {
+                    ["packageId"] = p.PackageId,
+                    ["displayName"] = p.DisplayName,
+                    ["scope"] = p.Scope,
+                };
+                if (p.Version != null)
+                {
+                    row["version"] = p.Version;
+                }
+                if (p.CompletedUtc != null)
+                {
+                    row["completedUtc"] = FormatUtc(p.CompletedUtc.Value);
+                    row["durationSeconds"] = (int)Math.Max(0, (p.CompletedUtc.Value - p.StartedUtc).TotalSeconds);
+                }
+                if (p.Success != null)
+                {
+                    row["success"] = p.Success.Value;
+                }
+                if (p.LastExitCode != null)
+                {
+                    row["lastExitCode"] = p.LastExitCode.Value;
+                }
+                result.Add(row);
+            }
+            return result;
         }
 
         /// <summary>

@@ -94,5 +94,16 @@ namespace AutopilotMonitor.DecisionCore.Signals
         // and add a state-mutating reducer case. Emission shape and UI contract stay the
         // same because the effect parameters carry the same EnrollmentEvent fields.
         InformationalEvent,
+
+        // --- RealmJoin (RJ) deployment tracking ---
+        // RealmJoin is a third-party deployment agent that installs additional software
+        // after Autopilot reaches the desktop. When detected, the V2 engine keeps the
+        // session non-terminal until DeploymentPhase reaches CompletedFirstDeployment (110)
+        // or the 60-min hard timeout fires.
+        RealmJoinDetected,
+        RealmJoinResolved,
+        RealmJoinTimeout,
+        RealmJoinPackageStarted,
+        RealmJoinPackageCompleted,
     }
 }

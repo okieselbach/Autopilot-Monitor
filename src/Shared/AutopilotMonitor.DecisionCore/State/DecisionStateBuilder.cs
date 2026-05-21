@@ -44,6 +44,7 @@ namespace AutopilotMonitor.DecisionCore.State
             HelloPolicyEnabled = source.HelloPolicyEnabled;
             AgentBootUtc = source.AgentBootUtc;
             LastFailureTrigger = source.LastFailureTrigger;
+            RealmJoinFacts = source.RealmJoinFacts;
             SchemaVersion = source.SchemaVersion;
         }
 
@@ -72,6 +73,7 @@ namespace AutopilotMonitor.DecisionCore.State
         public SignalFact<bool>? HelloPolicyEnabled { get; set; }
         public DateTime? AgentBootUtc { get; set; }
         public SignalFact<string>? LastFailureTrigger { get; set; }
+        public RealmJoinFacts RealmJoinFacts { get; set; } = RealmJoinFacts.Empty;
         public string SchemaVersion { get; set; }
 
         // ---------- fluent helpers for the most common reducer operations ----------
@@ -118,6 +120,12 @@ namespace AutopilotMonitor.DecisionCore.State
         public DecisionStateBuilder WithAppInstallFacts(AppInstallFacts facts)
         {
             AppInstallFacts = facts ?? throw new ArgumentNullException(nameof(facts));
+            return this;
+        }
+
+        public DecisionStateBuilder WithRealmJoinFacts(RealmJoinFacts facts)
+        {
+            RealmJoinFacts = facts ?? throw new ArgumentNullException(nameof(facts));
             return this;
         }
 
@@ -200,6 +208,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 helloPolicyEnabled: HelloPolicyEnabled,
                 agentBootUtc: AgentBootUtc,
                 lastFailureTrigger: LastFailureTrigger,
+                realmJoinFacts: RealmJoinFacts,
                 schemaVersion: SchemaVersion);
     }
 }
