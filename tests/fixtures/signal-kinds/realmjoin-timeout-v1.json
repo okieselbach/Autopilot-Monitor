@@ -1,0 +1,8 @@
+# RealmJoin hard-timeout (60-min) deadline fire.
+# This kind is NOT posted by any adapter — it is dispatched by the DeadlineFiredV1 switch
+# (DecisionEngine.Shared.cs) when the RealmJoinTimeout ActiveDeadline armed by
+# HandleRealmJoinDetectedV1 elapses without DeploymentPhase reaching 110.
+# Reducer: HandleRealmJoinTimeoutDeadlineFired → sets RealmJoinFacts.Outcome="Timeout",
+# emits a realmjoin_timeout timeline event, and (if Hello+Desktop already resolved OR
+# SelfDeployingDeferredCompletion is set) routes through CompleteIfDeferredOrBookkeep.
+{"SessionSignalOrdinal":99,"SessionTraceOrdinal":99,"Kind":"DeadlineFired","KindSchemaVersion":1,"OccurredAtUtc":"2026-05-21T11:00:00.0000000Z","SourceOrigin":"DeadlineScheduler","Evidence":{"Kind":"Derived","Identifier":"deadline-realmjoin-timeout","Summary":"RealmJoin hard timeout fired"},"Payload":{"deadline":"realmjoin_timeout"}}

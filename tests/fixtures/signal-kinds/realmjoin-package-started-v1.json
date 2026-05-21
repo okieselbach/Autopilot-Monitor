@@ -1,0 +1,9 @@
+# RealmJoinPackageStarted v1 — observation-only per-package event.
+# Posted by RealmJoinWatcherAdapter when a HKLM\SOFTWARE\RealmJoin\Packages\<id> sub-key
+# (or its HKU\<sid>\... counterpart) is first observed with a DisplayName value.
+# Payload: packageId (mandatory), displayName (truncated to 256 chars), optional version,
+# scope ("machine"|"user").
+# Reducer: HandleRealmJoinPackageStartedV1 → appends a RealmJoinPackageFact row. Stage
+# unchanged. Dual emission as InformationalEvent realmjoin_package_started handles UI
+# timeline visibility.
+{"SessionSignalOrdinal":7,"SessionTraceOrdinal":7,"Kind":"RealmJoinPackageStarted","KindSchemaVersion":1,"OccurredAtUtc":"2026-05-21T10:05:00.0000000Z","SourceOrigin":"RealmJoinWatcher","Evidence":{"Kind":"Derived","Identifier":"realmjoin-package-started:machine:generic-vlc","Summary":"RealmJoin package install started (scope=machine, id=generic-vlc)","DerivationInputs":{"registryKey":"HKLM\\SYSTEM\\CurrentControlSet\\Services\\realmjoin\\Parameters"}},"Payload":{"packageId":"generic-vlc","displayName":"VLC media player","version":"3.0.21.0","scope":"machine"}}

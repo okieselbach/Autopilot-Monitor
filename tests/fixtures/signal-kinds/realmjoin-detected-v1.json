@@ -1,0 +1,8 @@
+# RealmJoinDetected v1 — RealmJoin deployment tracking.
+# Posted by RealmJoinWatcherAdapter when HKLM\SYSTEM\CurrentControlSet\Services\realmjoin\
+# Parameters is first observed. Payload carries the current DeploymentPhase DWORD.
+# Reducer: HandleRealmJoinDetectedV1 → records RealmJoinFacts.DetectedUtc + LastDeploymentPhase,
+# arms the 60-min RealmJoinTimeout deadline. The V2 completion AND-gate now reads
+# RealmJoinFacts.DetectedUtc != null and defers Finalizing until RealmJoinResolved /
+# RealmJoinTimeout fires.
+{"SessionSignalOrdinal":1,"SessionTraceOrdinal":1,"Kind":"RealmJoinDetected","KindSchemaVersion":1,"OccurredAtUtc":"2026-05-21T10:00:00.0000000Z","SourceOrigin":"RealmJoinWatcher","Evidence":{"Kind":"Derived","Identifier":"realmjoin-detected-v1","Summary":"RealmJoin Parameters key observed (phase=100)","DerivationInputs":{"registryKey":"HKLM\\SYSTEM\\CurrentControlSet\\Services\\realmjoin\\Parameters"}},"Payload":{"deploymentPhase":"100"}}

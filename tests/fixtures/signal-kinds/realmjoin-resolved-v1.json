@@ -1,0 +1,8 @@
+# RealmJoinResolved v1 — RealmJoin first deployment completed.
+# Posted by RealmJoinWatcherAdapter when DeploymentPhase first reaches
+# CompletedFirstDeployment (110). Payload carries the observed phase.
+# Reducer: HandleRealmJoinResolvedV1 → records RealmJoinFacts.ResolvedUtc/LastPhase/Outcome,
+# cancels the RealmJoinTimeout deadline (scheduler + reducer view), and (if Hello + Desktop
+# already resolved OR SelfDeployingDeferredCompletion is set) routes through
+# CompleteIfDeferredOrBookkeep to TransitionToFinalizing / direct Completed.
+{"SessionSignalOrdinal":42,"SessionTraceOrdinal":42,"Kind":"RealmJoinResolved","KindSchemaVersion":1,"OccurredAtUtc":"2026-05-21T10:25:00.0000000Z","SourceOrigin":"RealmJoinWatcher","Evidence":{"Kind":"Derived","Identifier":"realmjoin-resolved-v1","Summary":"RealmJoin reached phase 110","DerivationInputs":{"registryKey":"HKLM\\SYSTEM\\CurrentControlSet\\Services\\realmjoin\\Parameters"}},"Payload":{"deploymentPhase":"110"}}

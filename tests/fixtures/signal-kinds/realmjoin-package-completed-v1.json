@@ -1,0 +1,7 @@
+# RealmJoinPackageCompleted v1 — terminal per-package event.
+# Posted by RealmJoinWatcherAdapter when the matching <id> sub-key gains both Success and
+# LastExitCode values. Payload extends the started shape with success ("true"|"false") +
+# lastExitCode (decimal string of the DWORD).
+# Reducer: HandleRealmJoinPackageCompletedV1 → updates the matching RealmJoinPackageFact
+# row with CompletedUtc / Success / LastExitCode. Stage unchanged.
+{"SessionSignalOrdinal":12,"SessionTraceOrdinal":12,"Kind":"RealmJoinPackageCompleted","KindSchemaVersion":1,"OccurredAtUtc":"2026-05-21T10:08:00.0000000Z","SourceOrigin":"RealmJoinWatcher","Evidence":{"Kind":"Derived","Identifier":"realmjoin-package-completed:machine:generic-vlc","Summary":"RealmJoin package install completed (scope=machine, id=generic-vlc, success=True, exitCode=0)","DerivationInputs":{"registryKey":"HKLM\\SYSTEM\\CurrentControlSet\\Services\\realmjoin\\Parameters"}},"Payload":{"packageId":"generic-vlc","displayName":"VLC media player","version":"3.0.21.0","scope":"machine","success":"true","lastExitCode":"0"}}
