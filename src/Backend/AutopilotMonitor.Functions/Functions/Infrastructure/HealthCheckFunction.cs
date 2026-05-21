@@ -1,5 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -41,10 +42,11 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
         public async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "health")] HttpRequestData req)
         {
-            // IP-based rate limiting for the public anonymous endpoint
-            var clientIp = req.Headers.Contains("X-Forwarded-For")
-                ? req.Headers.GetValues("X-Forwarded-For").FirstOrDefault()?.Split(',')[0]?.Trim() ?? "unknown"
-                : "unknown";
+            // IP-based rate limiting for the public anonymous endpoint.
+            // Use the rightmost X-Forwarded-For entry (App Service-appended, trusted) —
+            // leftmost values are caller-controlled and would let a single client rotate
+            // the rate-limit key on every request.
+            var clientIp = ClientIpExtractor.GetTrustedClientIp(req);
 
             var cacheKey = $"health_ratelimit_{clientIp}";
             var now = DateTime.UtcNow;

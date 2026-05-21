@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
@@ -41,12 +42,13 @@ namespace AutopilotMonitor.Functions.Functions.Bootstrap
         {
             try
             {
-                // Rate limit by source IP (prevent brute-force enumeration of short codes)
-                var clientIp = req.Headers.Contains("X-Forwarded-For")
-                    ? req.Headers.GetValues("X-Forwarded-For").FirstOrDefault()?.Split(',')[0]?.Trim()
-                    : "unknown";
+                // Rate limit by source IP (prevent brute-force enumeration of short codes).
+                // Use the rightmost X-Forwarded-For entry — App Service appends the real
+                // client/proxy hop there; leftmost values are attacker-controlled and would
+                // let any caller rotate the rate-limit key for free.
+                var clientIp = ClientIpExtractor.GetTrustedClientIp(req);
 
-                var rateLimitKey = $"bootstrap-validate:{clientIp ?? "unknown"}";
+                var rateLimitKey = $"bootstrap-validate:{clientIp}";
                 var rateLimitResult = _rateLimitService.CheckRateLimit(rateLimitKey, 20); // 20 req/min
                 if (!rateLimitResult.IsAllowed)
                 {

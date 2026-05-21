@@ -1153,11 +1153,13 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<string?> FindSessionTenantIdAsync(string sessionId)
         {
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
             try
             {
                 var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
                 await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(
-                    filter: $"SessionId eq '{sessionId}'",
+                    filter: $"SessionId eq '{ODataSanitizer.EscapeValue(sessionId)}'",
                     maxPerPage: 1))
                 {
                     return entity.PartitionKey;

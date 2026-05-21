@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Functions.Services.Notifications;
 using AutopilotMonitor.Shared.DataAccess;
@@ -116,8 +117,11 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 if (!GuidPattern.IsMatch(tenantId))
                     return req.CreateResponse(HttpStatusCode.OK);
 
-                // Gate 4: Rate limiting (IP + tenant + global circuit breaker)
-                var clientIp = ExtractClientIp(req);
+                // Gate 4: Rate limiting (IP + tenant + global circuit breaker).
+                // ClientIpExtractor returns the rightmost X-Forwarded-For hop (the one
+                // App Service appended) — never the leftmost, which is caller-controlled
+                // and would let a single attacker rotate past the per-IP throttle.
+                var clientIp = ClientIpExtractor.GetTrustedClientIp(req);
                 var rateLimitResult = _rateLimitService.Check(clientIp, tenantId);
                 if (!rateLimitResult.IsAllowed)
                     return req.CreateResponse(HttpStatusCode.OK);
@@ -294,51 +298,6 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 _logger.LogError(ex, "ReportDistress: Unexpected error");
                 return req.CreateResponse(HttpStatusCode.OK);
             }
-        }
-
-        private static string ExtractClientIp(HttpRequestData req)
-        {
-            if (req.Headers.TryGetValues("X-Forwarded-For", out var fwdValues))
-            {
-                return ParseIpFromForwardedFor(fwdValues.FirstOrDefault());
-            }
-            return "unknown";
-        }
-
-        /// <summary>
-        /// Parses client IP from X-Forwarded-For header value.
-        /// Handles IPv4 with port, bracketed IPv6, bare IPv6, multiple proxies.
-        /// </summary>
-        internal static string ParseIpFromForwardedFor(string? forwardedFor)
-        {
-            if (string.IsNullOrEmpty(forwardedFor))
-                return "unknown";
-
-            // X-Forwarded-For can contain "client, proxy1, proxy2" — take the first
-            var ip = forwardedFor.Split(',')[0].Trim();
-
-            if (string.IsNullOrEmpty(ip))
-                return "unknown";
-
-            // Handle bracketed IPv6 with port: [::1]:12345
-            if (ip.StartsWith('['))
-            {
-                var closeBracket = ip.IndexOf(']');
-                if (closeBracket > 0)
-                    ip = ip.Substring(1, closeBracket - 1);
-                return ip;
-            }
-
-            // Bare IPv6 (contains multiple colons): return as-is
-            if (ip.IndexOf(':') != ip.LastIndexOf(':'))
-                return ip;
-
-            // IPv4 with optional port: strip port (e.g., "1.2.3.4:12345")
-            var colonIdx = ip.LastIndexOf(':');
-            if (colonIdx > 0)
-                ip = ip.Substring(0, colonIdx);
-
-            return ip;
         }
 
         /// <summary>

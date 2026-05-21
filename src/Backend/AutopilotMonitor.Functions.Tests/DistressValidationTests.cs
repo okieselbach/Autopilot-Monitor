@@ -1,4 +1,5 @@
 using AutopilotMonitor.Functions.Functions.Ingest;
+using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Functions.Tests;
@@ -7,7 +8,7 @@ namespace AutopilotMonitor.Functions.Tests;
 /// Tests for input validation, sanitization, and security properties of the distress channel.
 ///
 /// SECURITY GUARD: The distress endpoint is unauthenticated. These validations prevent:
-///   - IP spoofing/parsing exploits (ParseIpFromForwardedFor)
+///   - IP spoofing/parsing exploits (<see cref="ClientIpExtractor"/>, rightmost-hop policy)
 ///   - Control character injection and field overflow (Sanitize)
 ///   - Tenant ID injection attacks (GuidPattern)
 ///   - Replay attacks with stale timestamps (IsDistressTimestampValid)
@@ -21,77 +22,102 @@ public class DistressValidationTests
     private static readonly DateTime FixedUtcNow = new(2026, 3, 30, 12, 0, 0, DateTimeKind.Utc);
 
     // =========================================================================
-    // ParseIpFromForwardedFor — X-Forwarded-For header parsing
+    // ClientIpExtractor.ExtractTrustedHop — X-Forwarded-For RIGHTMOST-hop parsing.
+    //
+    // App Service appends "<client-ip>:<port>" to X-Forwarded-For when it forwards
+    // to the Functions worker, so the trustworthy entry is the rightmost one. Any
+    // entry to the left of it was supplied by the (untrusted) client and would let
+    // an attacker rotate the per-IP rate-limit key on every request.
     // =========================================================================
 
     [Fact]
-    public void ParseIp_SimpleIpv4_ReturnsIp()
+    public void ExtractTrustedHop_SimpleIpv4_ReturnsIp()
     {
-        Assert.Equal("10.0.0.1", ReportDistressFunction.ParseIpFromForwardedFor("10.0.0.1"));
+        Assert.Equal("10.0.0.1", ClientIpExtractor.ExtractTrustedHop("10.0.0.1"));
     }
 
     [Fact]
-    public void ParseIp_Ipv4WithPort_StripsPort()
+    public void ExtractTrustedHop_Ipv4WithPort_StripsPort()
     {
-        Assert.Equal("10.0.0.1", ReportDistressFunction.ParseIpFromForwardedFor("10.0.0.1:12345"));
+        Assert.Equal("10.0.0.1", ClientIpExtractor.ExtractTrustedHop("10.0.0.1:12345"));
     }
 
     [Fact]
-    public void ParseIp_MultipleProxies_TakesFirst()
+    public void ExtractTrustedHop_MultipleProxies_TakesRightmost()
     {
-        Assert.Equal("10.0.0.1", ReportDistressFunction.ParseIpFromForwardedFor("10.0.0.1, 192.168.1.1, 172.16.0.1"));
+        // The rightmost entry is the one App Service appended — anything to the left
+        // is client/upstream-proxy controlled.
+        Assert.Equal("172.16.0.1", ClientIpExtractor.ExtractTrustedHop("10.0.0.1, 192.168.1.1, 172.16.0.1"));
     }
 
     [Fact]
-    public void ParseIp_BracketedIpv6WithPort_ExtractsAddress()
+    public void ExtractTrustedHop_SpoofedLeftmostIgnored_TakesAppendedHop()
     {
-        Assert.Equal("::1", ReportDistressFunction.ParseIpFromForwardedFor("[::1]:12345"));
+        // Threat model: attacker sends "X-Forwarded-For: 1.1.1.1" and rotates the value
+        // on every request. App Service appends the real client IP (with port) to the
+        // right of it; we MUST trust that rightmost value, not the spoofed prefix.
+        Assert.Equal(
+            "203.0.113.5",
+            ClientIpExtractor.ExtractTrustedHop("1.1.1.1, 203.0.113.5:54321"));
     }
 
     [Fact]
-    public void ParseIp_BareIpv6_ReturnsAsIs()
+    public void ExtractTrustedHop_BracketedIpv6WithPort_ExtractsAddress()
     {
-        Assert.Equal("2001:db8::1", ReportDistressFunction.ParseIpFromForwardedFor("2001:db8::1"));
+        Assert.Equal("::1", ClientIpExtractor.ExtractTrustedHop("[::1]:12345"));
     }
 
     [Fact]
-    public void ParseIp_FullIpv6_ReturnsAsIs()
+    public void ExtractTrustedHop_BareIpv6_ReturnsAsIs()
+    {
+        Assert.Equal("2001:db8::1", ClientIpExtractor.ExtractTrustedHop("2001:db8::1"));
+    }
+
+    [Fact]
+    public void ExtractTrustedHop_FullIpv6_ReturnsAsIs()
     {
         var full = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
-        Assert.Equal(full, ReportDistressFunction.ParseIpFromForwardedFor(full));
+        Assert.Equal(full, ClientIpExtractor.ExtractTrustedHop(full));
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void ParseIp_NullOrEmpty_ReturnsUnknown(string? value)
+    public void ExtractTrustedHop_NullOrEmpty_ReturnsUnknown(string? value)
     {
-        Assert.Equal("unknown", ReportDistressFunction.ParseIpFromForwardedFor(value));
+        Assert.Equal("unknown", ClientIpExtractor.ExtractTrustedHop(value));
     }
 
     [Fact]
-    public void ParseIp_WhitespaceOnly_ReturnsUnknown()
+    public void ExtractTrustedHop_WhitespaceOnly_ReturnsUnknown()
     {
-        Assert.Equal("unknown", ReportDistressFunction.ParseIpFromForwardedFor("   "));
+        Assert.Equal("unknown", ClientIpExtractor.ExtractTrustedHop("   "));
     }
 
     [Fact]
-    public void ParseIp_MultipleProxiesWithIpv6First_TakesFirst()
+    public void ExtractTrustedHop_MultipleProxiesWithIpv6Last_TakesRightmostBracketedIpv6()
     {
-        Assert.Equal("::1", ReportDistressFunction.ParseIpFromForwardedFor("[::1]:443, 10.0.0.1"));
+        Assert.Equal("::1", ClientIpExtractor.ExtractTrustedHop("10.0.0.1, [::1]:443"));
     }
 
     [Fact]
-    public void ParseIp_Ipv4MappedIpv6_ReturnsAsIs()
+    public void ExtractTrustedHop_Ipv4MappedIpv6_ReturnsAsIs()
     {
-        // Multiple colons → treated as bare IPv6
-        Assert.Equal("::ffff:10.0.0.1", ReportDistressFunction.ParseIpFromForwardedFor("::ffff:10.0.0.1"));
+        // Multiple colons → treated as bare IPv6 (no port suffix to strip)
+        Assert.Equal("::ffff:10.0.0.1", ClientIpExtractor.ExtractTrustedHop("::ffff:10.0.0.1"));
     }
 
     [Fact]
-    public void ParseIp_Ipv4WithLeadingWhitespace_Trimmed()
+    public void ExtractTrustedHop_Ipv4WithLeadingWhitespace_Trimmed()
     {
-        Assert.Equal("10.0.0.1", ReportDistressFunction.ParseIpFromForwardedFor("  10.0.0.1  "));
+        Assert.Equal("10.0.0.1", ClientIpExtractor.ExtractTrustedHop("  10.0.0.1  "));
+    }
+
+    [Fact]
+    public void ExtractTrustedHop_TrailingEmptyEntry_SkipsToLastNonEmpty()
+    {
+        // Tolerant of stray trailing commas — defensive, not expected from App Service.
+        Assert.Equal("203.0.113.5", ClientIpExtractor.ExtractTrustedHop("10.0.0.1, 203.0.113.5, "));
     }
 
     // =========================================================================

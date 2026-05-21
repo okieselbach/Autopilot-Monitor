@@ -29,6 +29,10 @@ builder.ConfigureFunctionsWebApplication();
 builder.UseMiddleware<RequestTelemetryMiddleware>();
 builder.UseMiddleware<CorrelationIdMiddleware>();
 builder.UseMiddleware<TimingAllowOriginMiddleware>();
+// Stamp static security-baseline headers (X-Content-Type-Options, Referrer-Policy,
+// X-Frame-Options) on every response. Unconditional, runs early so even short-circuit
+// 401/403/500 responses from downstream middleware inherit the headers.
+builder.UseMiddleware<SecurityHeadersMiddleware>();
 // Stamp Cache-Control: no-store on credential/identity endpoints before next() so
 // short-circuit responses (401/403/500) from downstream middleware still inherit the
 // header. Allowlist lives inside NoStoreCacheMiddleware.
