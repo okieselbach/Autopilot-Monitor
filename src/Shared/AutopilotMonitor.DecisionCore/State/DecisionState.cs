@@ -30,7 +30,7 @@ namespace AutopilotMonitor.DecisionCore.State
     /// </summary>
     public sealed class DecisionState
     {
-        public const string CurrentSchemaVersion = "v3";
+        public const string CurrentSchemaVersion = "v4";
 
         public DecisionState(
             string sessionId,
@@ -59,6 +59,7 @@ namespace AutopilotMonitor.DecisionCore.State
             DateTime? agentBootUtc = null,
             SignalFact<string>? lastFailureTrigger = null,
             RealmJoinFacts? realmJoinFacts = null,
+            SignalFact<DateTime>? deviceSetupResolvedUtc = null,
             string? schemaVersion = null)
         {
             if (string.IsNullOrEmpty(sessionId))
@@ -97,6 +98,7 @@ namespace AutopilotMonitor.DecisionCore.State
             AgentBootUtc = agentBootUtc;
             LastFailureTrigger = lastFailureTrigger;
             RealmJoinFacts = realmJoinFacts ?? RealmJoinFacts.Empty;
+            DeviceSetupResolvedUtc = deviceSetupResolvedUtc;
             SchemaVersion = schemaVersion ?? CurrentSchemaVersion;
         }
 
@@ -230,6 +232,22 @@ namespace AutopilotMonitor.DecisionCore.State
         /// + <c>HKLM\SOFTWARE\RealmJoin\Packages\*</c> registry collectors.
         /// </summary>
         public RealmJoinFacts RealmJoinFacts { get; }
+
+        /// <summary>
+        /// Set when <see cref="Signals.DecisionSignalKind.DeviceSetupProvisioningComplete"/> is
+        /// observed — the "DeviceSetup phase is done" anchor. Drives the new SelfDeploying
+        /// classification path: arming the <see cref="Engine.DeadlineNames.DeviceOnlyEspDetection"/>
+        /// deadline from this anchor (5-min wait) replaces the v1 "terminate-on-signal" behavior
+        /// that mis-classified Classic UserDriven enrollments as SelfDeploying when Windows
+        /// transitioned slowly DeviceSetup→AccountSetup.
+        /// <para>
+        /// Null until <c>DeviceSetupProvisioningComplete</c> arrives; the signal handler sets
+        /// this fire-once. The new <c>HandleDeviceOnlyEspDetectionDeadlineFired</c> stale-fire
+        /// guard treats <c>null</c> here as "deadline armed by old code path before this anchor
+        /// existed" and dead-ends, ensuring rollout safety.
+        /// </para>
+        /// </summary>
+        public SignalFact<DateTime>? DeviceSetupResolvedUtc { get; }
 
         public string SchemaVersion { get; }
 

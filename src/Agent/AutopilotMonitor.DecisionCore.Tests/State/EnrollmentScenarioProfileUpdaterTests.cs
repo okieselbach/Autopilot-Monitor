@@ -306,17 +306,69 @@ namespace AutopilotMonitor.DecisionCore.Tests.State
             Assert.Same(seed, profile);
         }
 
-        [Fact]
-        public void DeviceSetupProvisioningComplete_upgradesToSelfDeployingHigh()
-        {
-            var signal = MakeSignal(DecisionSignalKind.DeviceSetupProvisioningComplete, ordinal: 6, payload: null);
+        // ================================================================== ApplySelfDeployingDeadlineConfirmed
+        // Plan v9 — ApplyDeviceSetupProvisioningComplete was removed (signal-time Mode promotion
+        // caused false-positive SelfDeploying terminations on Classic flows, session 88a53223).
+        // ApplySelfDeployingDeadlineConfirmed is its replacement, invoked from the deadline-fired
+        // handler after all guards have passed. Same monotonic semantics as ApplyImeUserSessionCompleted.
 
-            var profile = EnrollmentScenarioProfileUpdater.ApplyDeviceSetupProvisioningComplete(
+        [Fact]
+        public void SelfDeployingDeadlineConfirmed_fromUnknown_upgradesToSelfDeployingHigh()
+        {
+            var signal = MakeSignal(DecisionSignalKind.DeadlineFired, ordinal: 6, payload: null);
+
+            var profile = EnrollmentScenarioProfileUpdater.ApplySelfDeployingDeadlineConfirmed(
                 EnrollmentScenarioProfile.Empty, signal);
 
             Assert.Equal(EnrollmentMode.SelfDeploying, profile.Mode);
             Assert.Equal(ProfileConfidence.High, profile.Confidence);
-            Assert.Equal("selfdeploying_provisioning_complete", profile.Reason);
+            Assert.Equal("selfdeploying_deadline_confirmed", profile.Reason);
+        }
+
+        [Fact]
+        public void SelfDeployingDeadlineConfirmed_idempotent_whenAlreadySelfDeployingHigh()
+        {
+            var seed = EnrollmentScenarioProfile.Empty.With(
+                mode: EnrollmentMode.SelfDeploying,
+                confidence: ProfileConfidence.High,
+                reason: "selfdeploying_deadline_confirmed",
+                evidenceOrdinal: 5);
+            var signal = MakeSignal(DecisionSignalKind.DeadlineFired, ordinal: 6, payload: null);
+
+            var profile = EnrollmentScenarioProfileUpdater.ApplySelfDeployingDeadlineConfirmed(seed, signal);
+
+            Assert.Equal(EnrollmentMode.SelfDeploying, profile.Mode);
+            Assert.Equal(ProfileConfidence.High, profile.Confidence);
+            Assert.Equal("selfdeploying_deadline_confirmed", profile.Reason);
+        }
+
+        [Fact]
+        public void SelfDeployingDeadlineConfirmed_monotonicBail_whenClassicAlreadyHigh()
+        {
+            var seed = EnrollmentScenarioProfile.Empty.With(
+                mode: EnrollmentMode.Classic,
+                confidence: ProfileConfidence.High,
+                reason: "ime_user_session_completed");
+            var signal = MakeSignal(DecisionSignalKind.DeadlineFired, ordinal: 6, payload: null);
+
+            var profile = EnrollmentScenarioProfileUpdater.ApplySelfDeployingDeadlineConfirmed(seed, signal);
+
+            // Monotonic: SelfDeploying must not overwrite a Classic/High classification.
+            Assert.Same(seed, profile);
+        }
+
+        [Fact]
+        public void SelfDeployingDeadlineConfirmed_monotonicBail_whenWhiteGloveAlreadyHigh()
+        {
+            var seed = EnrollmentScenarioProfile.Empty.With(
+                mode: EnrollmentMode.WhiteGlove,
+                confidence: ProfileConfidence.High,
+                reason: "classifier_whiteglove_sealing_confirmed");
+            var signal = MakeSignal(DecisionSignalKind.DeadlineFired, ordinal: 6, payload: null);
+
+            var profile = EnrollmentScenarioProfileUpdater.ApplySelfDeployingDeadlineConfirmed(seed, signal);
+
+            Assert.Same(seed, profile);
         }
 
         [Fact]

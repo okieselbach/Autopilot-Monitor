@@ -161,16 +161,23 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(SessionStage.Completed, finalizingFire.ToStage);
 
             // The DeviceSetupProvisioningComplete signal is observed as a taken but stage-unchanged
-            // step (informational on Classic path — not a terminal trigger).
+            // step (informational on Classic path — not a terminal trigger). Plan v9: handler tags
+            // its trigger with ":AccountSetupAlreadyEntered" to discriminate from the other paths.
             var provTransition = Assert.Single(
                 result.Transitions,
-                t => t.Trigger == nameof(AutopilotMonitor.DecisionCore.Signals.DecisionSignalKind.DeviceSetupProvisioningComplete));
+                t => t.Trigger.StartsWith(nameof(AutopilotMonitor.DecisionCore.Signals.DecisionSignalKind.DeviceSetupProvisioningComplete), System.StringComparison.Ordinal));
             Assert.True(provTransition.Taken);
             Assert.Equal(SessionStage.EspAccountSetup, provTransition.FromStage);
             Assert.Equal(SessionStage.EspAccountSetup, provTransition.ToStage);
+            Assert.EndsWith(":AccountSetupAlreadyEntered", provTransition.Trigger);
 
             // DeviceOnlyDeployment hypothesis must stay Unknown — this is a Classic UserDriven path.
             Assert.Equal(HypothesisLevel.Unknown, result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Level);
+
+            // Plan v9: the DeviceSetupResolvedUtc anchor is set UNCONDITIONALLY (even on the
+            // Classic-already-AccountSetup short-circuit) so the audit trail surfaces that the
+            // signal was observed.
+            Assert.NotNull(result.FinalState.DeviceSetupResolvedUtc);
         }
     }
 }

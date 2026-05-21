@@ -9,7 +9,14 @@ namespace AutopilotMonitor.DecisionCore.Engine
     // SelfDeploying-v1 + Device-Only handlers. Plan §2.5 partial-class layout.
     public sealed partial class DecisionEngine
     {
-        // Plan §2.7: "5min timer after DeviceSetup; if no AccountSetup -> classified as device-only".
+        // 5-min wait between "DeviceSetup resolved" (DeviceSetupProvisioningComplete signal) and
+        // the SelfDeploying-terminal decision. The signal alone is NO LONGER terminal (88a53223
+        // defang) — it just sets the DeviceSetupResolvedUtc anchor + arms this deadline. The
+        // deadline-fired handler is now the sole SelfDeploying-terminal entry point and re-checks
+        // all guards (Stage.IsTerminal, AccountSetupEntered, monotonic mode conflict) before
+        // committing. This trades a 5-min completion delay on real SelfDeploying devices for
+        // robust protection against false-positive SelfDeploying terminations on Classic flows
+        // where Windows transitioned slowly DeviceSetup→AccountSetup (the original 88a53223 bug).
         internal static readonly TimeSpan s_deviceOnlyEspDetectionWindow = TimeSpan.FromMinutes(5);
 
         /// <summary>
@@ -27,75 +34,270 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// <summary>
         /// Handle <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/>.
         /// <para>
-        /// Terminal only on the SelfDeploying / Device-Only path (no AccountSetup phase ever
-        /// entered). On the Classic UserDriven-v1 path — where <see cref="DecisionState.AccountSetupEnteredUtc"/>
-        /// is already set — this is just the ProvisioningStatusTracker marking DeviceSetupCategory
-        /// resolved; completion on that path requires <see cref="DecisionSignalKind.HelloResolved"/>
-        /// + <see cref="DecisionSignalKind.DesktopArrived"/> (handled by Classic.cs).
+        /// <b>88a53223 defang (Plan v9)</b>: this handler NO LONGER terminates. It only records
+        /// the <see cref="DecisionState.DeviceSetupResolvedUtc"/> anchor and (cancel-then-)arms
+        /// the <see cref="DeadlineNames.DeviceOnlyEspDetection"/> deadline at
+        /// <c>signal.OccurredAtUtc + 5min</c>. The deadline-fired handler is the sole terminal
+        /// entry point and re-checks all guards.
         /// </para>
         /// <para>
-        /// Guarding on <see cref="DecisionState.AccountSetupEnteredUtc"/> prevents the regression
-        /// observed in session e259c121-dc13-46d6-8e96-118f1da9845e (2026-04-22), where a late
-        /// DeviceSetupProvisioningComplete (payload <c>deviceSetupResolved=unknown</c>) fired while
-        /// Stage was <see cref="SessionStage.EspAccountSetup"/> and <see cref="DecisionState.HelloResolvedUtc"/>
-        /// was still null — terminating the session before Hello even ran.
+        /// Why: the previous "terminate immediately when AccountSetupEnteredUtc == null" logic
+        /// mis-classified Classic UserDriven flows as SelfDeploying when the ProvisioningStatusTracker
+        /// 30-s fallback fired DeviceSetupProvisioningComplete before Windows transitioned
+        /// DeviceSetup→AccountSetup (session 88a53223-9795-4188-8352-7df9f0af9bb7). Defanging
+        /// to deadline-only terminal classification protects against this — real SelfDeploying
+        /// devices still complete (5 min later), real Classic flows continue normally and the
+        /// AccountSetup signal cancels the deadline before it fires.
         /// </para>
         /// </summary>
         private DecisionStep HandleDeviceSetupProvisioningCompleteV1(DecisionState state, DecisionSignal signal)
         {
             var nextStep = state.StepIndex + 1;
 
-            // Classic-path guard: AccountSetup already started → this signal is informational only.
-            if (state.AccountSetupEnteredUtc != null)
+            // Step 1 — Idempotency: anchor already set means we've already processed a previous
+            // DeviceSetupProvisioningComplete signal in this session. Replay-safe; the deadline
+            // was already armed (or already cancelled by AccountSetup). Pass-through.
+            if (state.DeviceSetupResolvedUtc != null)
             {
                 var passthroughState = state.ToBuilder()
                     .WithStepIndex(nextStep)
                     .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                     .Build();
-
                 var passthroughTransition = BuildTakenTransition(
                     before: state,
                     signal: signal,
                     toStage: state.Stage,
                     nextStepIndex: nextStep,
-                    trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete));
-
+                    trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete) + ":AnchorAlreadySet");
                 return new DecisionStep(passthroughState, passthroughTransition, Array.Empty<DecisionEffect>());
             }
 
-            // SelfDeploying / Device-Only terminal path.
-            // Codex follow-up #5: user-presence is now an observation-level check (late-AADJ
-            // user flag + signal-level Hello/Desktop facts) — NOT the legacy AadJoinedWithUser
-            // state field. Observations replace the legacy per-fact nullable bool.
+            // Step 2 — Set the DeviceSetupResolvedUtc anchor UNCONDITIONALLY. Even when Classic
+            // already entered AccountSetup (step 3 below), we record the anchor for observability
+            // (DecisionStateSignalCensus surfaces it in enrollment_complete audit).
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
+            builder.DeviceSetupResolvedUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+
+            // Step 3 — Classic-path short-circuit: AccountSetup already started. The DeviceOnly
+            // deadline is moot (already cancelled by HandleEspPhaseChangedV1's AccountSetup branch,
+            // or never armed under the new code). No deadline arm here.
+            if (state.AccountSetupEnteredUtc != null)
+            {
+                var classicState = builder.Build();
+                var classicTransition = BuildTakenTransition(
+                    before: state,
+                    signal: signal,
+                    toStage: state.Stage,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete) + ":AccountSetupAlreadyEntered");
+                return new DecisionStep(classicState, classicTransition, Array.Empty<DecisionEffect>());
+            }
+
+            // Step 4 — Arm the deadline. Cancel any existing DeviceOnlyEspDetection first
+            // (rollout-safety: handles snapshots loaded from old-code sessions where the deadline
+            // was armed at DeviceSetup-START rather than -END). EffectiveDeadlineBase floors the
+            // 5-min window at AgentBootUtc so a replayed signal from an older CMTrace log doesn't
+            // collapse the deadline to immediate-fire at boot.
+            builder.CancelDeadline(DeadlineNames.DeviceOnlyEspDetection);
+            var deadline = BuildDeviceOnlyEspDetectionDeadline(EffectiveDeadlineBase(state, signal));
+            builder.AddDeadline(deadline);
+
+            var newState = builder.Build();
+            var transition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: state.Stage,
+                nextStepIndex: nextStep,
+                trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete) + ":DeadlineArmed");
+
+            var effects = new[]
+            {
+                new DecisionEffect(DecisionEffectKind.CancelDeadline, cancelDeadlineName: DeadlineNames.DeviceOnlyEspDetection),
+                new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: deadline),
+            };
+
+            return new DecisionStep(newState, transition, effects);
+        }
+
+        /// <summary>
+        /// Sole SelfDeploying-terminal entry point. Plan v9.
+        /// <para>
+        /// Fires 5 min after <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/>
+        /// armed the <see cref="DeadlineNames.DeviceOnlyEspDetection"/> deadline. Three stale-fire
+        /// guards (a/b/c) + three race guards precede the terminal branch — when any trips, the
+        /// handler dead-ends (no Stage change, no effects). Only when all guards pass does the
+        /// terminal SelfDeploying classification commit + emit phase declarations +
+        /// <c>enrollment_complete</c>.
+        /// </para>
+        /// </summary>
+        private DecisionStep HandleDeviceOnlyEspDetectionDeadlineFired(DecisionState state, DecisionSignal signal)
+        {
+            // Look up the active deadline once — used by guards b/c and by the cancel-on-terminal
+            // builder mutation below.
+            ActiveDeadline? activeDeadline = null;
+            foreach (var d in state.Deadlines)
+            {
+                if (string.Equals(d.Name, DeadlineNames.DeviceOnlyEspDetection, StringComparison.Ordinal))
+                {
+                    activeDeadline = d;
+                    break;
+                }
+            }
+
+            // --- Stale-fire guard A: no anchor ---
+            // The signal that should have armed our new-style deadline never arrived. This is the
+            // rollout race: a session whose deadline was armed by old code (at DeviceSetup-START)
+            // fires under new code before DeviceSetupProvisioningComplete has set the anchor.
+            // Dead-end + state-side cancel the deadline (BumpStepBookkeeping alone wouldn't — and
+            // a persisted snapshot with the stale deadline would re-arm via the scheduler).
+            if (state.DeviceSetupResolvedUtc == null)
+            {
+                var staleNoAnchorState = state.ToBuilder()
+                    .WithStepIndex(state.StepIndex + 1)
+                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                    .CancelDeadline(DeadlineNames.DeviceOnlyEspDetection)
+                    .Build();
+                var staleNoAnchorTransition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: staleNoAnchorState.StepIndex,
+                    trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}",
+                    deadEndReason: "device_only_esp_detection_stale_no_anchor");
+                return new DecisionStep(staleNoAnchorState, staleNoAnchorTransition, Array.Empty<DecisionEffect>());
+            }
+
+            // --- Stale-fire guard B: deadline not armed ---
+            // Explicit cancel already happened (AccountSetup cancelled it, idempotent
+            // HandleDeviceSetupProvisioningCompleteV1 re-arm cancelled the previous one, …) but a
+            // stale DeadlineFired raced through. No state cleanup needed (nothing to cancel).
+            if (activeDeadline == null)
+            {
+                var bookkept = BumpStepBookkeeping(state, signal);
+                var transition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: bookkept.StepIndex,
+                    trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}",
+                    deadEndReason: "device_only_esp_detection_stale_deadline_not_armed");
+                return new DecisionStep(bookkept, transition, Array.Empty<DecisionEffect>());
+            }
+
+            // --- Stale-fire guard C: DueAtUtc mismatch ---
+            // Cancel-then-rearm race: an old DeadlineFired (from a deadline incarnation that was
+            // replaced by a later HandleDeviceSetupProvisioningCompleteV1 arming) is processed
+            // after the rearm. DeadlineScheduler posts OccurredAtUtc == deadline.DueAtUtc, so the
+            // OLD fire carries the OLD DueAtUtc. Dead-end WITHOUT cancelling the active deadline
+            // (the whole point is to keep the new one for its real fire).
+            if (activeDeadline.DueAtUtc != signal.OccurredAtUtc)
+            {
+                var bookkept = BumpStepBookkeeping(state, signal);
+                var transition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: bookkept.StepIndex,
+                    trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}",
+                    deadEndReason: "device_only_esp_detection_stale_due_at_mismatch");
+                return new DecisionStep(bookkept, transition, Array.Empty<DecisionEffect>());
+            }
+
+            // From here on the active deadline matched (guard C passed) and just fired. ANY
+            // dead-end below MUST state-side CancelDeadline(DeviceOnlyEspDetection) — otherwise
+            // BumpStepBookkeeping (which only advances Step/Ordinal) leaves the past-due deadline
+            // in state.Deadlines, the snapshot persists it, and on reload the scheduler re-arms
+            // it → repeat dead-end loop. This is distinct from the stale-fire DueAtUtc-mismatch
+            // path above, which intentionally KEEPS the newer active deadline.
+
+            // --- Race guard A: Stage already terminal ---
+            // Hello+Desktop Classic completion, AdminPreemption, or ESP failure won the race
+            // between deadline-arm and deadline-fire. Don't double-terminate.
+            if (state.Stage.IsTerminal())
+            {
+                var raceAState = state.ToBuilder()
+                    .WithStepIndex(state.StepIndex + 1)
+                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                    .CancelDeadline(DeadlineNames.DeviceOnlyEspDetection)
+                    .Build();
+                var transition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: raceAState.StepIndex,
+                    trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}",
+                    deadEndReason: "device_only_esp_detection_stage_already_terminal");
+                return new DecisionStep(raceAState, transition, Array.Empty<DecisionEffect>());
+            }
+
+            // --- Race guard B: AccountSetup entered between deadline-arm and -fire ---
+            // Defensive: the AccountSetup-cancel-deadline path normally prevents this; if it
+            // didn't, we still must not classify as SelfDeploying.
+            if (state.AccountSetupEnteredUtc != null)
+            {
+                var raceBState = state.ToBuilder()
+                    .WithStepIndex(state.StepIndex + 1)
+                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                    .CancelDeadline(DeadlineNames.DeviceOnlyEspDetection)
+                    .Build();
+                var transition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: raceBState.StepIndex,
+                    trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}",
+                    deadEndReason: "device_only_esp_detection_account_setup_entered");
+                return new DecisionStep(raceBState, transition, Array.Empty<DecisionEffect>());
+            }
+
+            // --- Race guard C: monotonic mode conflict ---
+            // Prior signal already classified the session more strongly on a different Mode
+            // (e.g. ImeUserSessionCompleted → Classic/High, or WhiteGloveSealingConfirmed →
+            // WhiteGlove/High). The session is genuinely not SelfDeploying. Don't relabel.
+            // Mirrors the precedent in ApplyImeUserSessionCompleted's monotonic guard.
+            if (state.ScenarioProfile.Confidence == ProfileConfidence.High
+                && state.ScenarioProfile.Mode != EnrollmentMode.Unknown
+                && state.ScenarioProfile.Mode != EnrollmentMode.SelfDeploying)
+            {
+                var raceCState = state.ToBuilder()
+                    .WithStepIndex(state.StepIndex + 1)
+                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                    .CancelDeadline(DeadlineNames.DeviceOnlyEspDetection)
+                    .Build();
+                var transition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: raceCState.StepIndex,
+                    trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}",
+                    deadEndReason: "device_only_esp_detection_monotonic_mode_conflict");
+                return new DecisionStep(raceCState, transition, Array.Empty<DecisionEffect>());
+            }
+
+            // All guards passed → this is a real SelfDeploying device.
+
+            var nextStep = state.StepIndex + 1;
             var hasUserPresence =
                 (state.ScenarioObservations.AadUserJoinWithUserObserved != null
                  && state.ScenarioObservations.AadUserJoinWithUserObserved.Value) ||
                 state.HelloResolvedUtc != null ||
                 state.DesktopArrivedUtc != null;
-
             var deviceOnlyReason = hasUserPresence
                 ? DeviceOnlyReasons.UserPresent
                 : DeviceOnlyReasons.DeviceOnly;
-
-            var updatedDeviceOnly = state.ClassifierOutcomes.DeviceOnlyDeployment.With(
+            var confirmedDeviceOnly = state.ClassifierOutcomes.DeviceOnlyDeployment.With(
                 level: HypothesisLevel.Confirmed,
                 reason: deviceOnlyReason,
                 score: 100,
                 lastUpdatedUtc: signal.OccurredAtUtc);
 
-            // RealmJoin gate: when RJ is detected and unresolved, defer the SelfDeploying
-            // terminal transition. Record the classifier verdict + the deferred-completion
-            // marker on RealmJoinFacts so HandleRealmJoinResolvedV1 / HandleRealmJoinTimeoutDeadlineFired
-            // can short-circuit straight to Completed without re-routing through Classic
-            // Finalizing.
+            // RealmJoin gate: when RJ is detected and unresolved, defer the terminal transition.
+            // The deferred flag drives CompleteIfDeferredOrBookkeep when RJ resolves/timeouts.
+            // Plan v9: this is the V9 location for RJ-deferral (was at signal-time previously;
+            // the move avoids a premature RJ-resolve-before-5min completing the session).
             if (!RealmJoinGateOpen(state))
             {
                 var deferredBuilder = state.ToBuilder()
                     .WithStepIndex(nextStep)
-                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
-                deferredBuilder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(updatedDeviceOnly);
-                deferredBuilder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyDeviceSetupProvisioningComplete(
-                    deferredBuilder.ScenarioProfile, signal);
+                    .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                    .CancelDeadline(DeadlineNames.DeviceOnlyEspDetection);
+                deferredBuilder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(confirmedDeviceOnly);
                 deferredBuilder.RealmJoinFacts = state.RealmJoinFacts.WithSelfDeployingDeferred(signal.SessionSignalOrdinal);
 
                 var deferredState = deferredBuilder.Build();
@@ -104,78 +306,48 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     signal: signal,
                     toStage: state.Stage,
                     nextStepIndex: nextStep,
-                    trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete) + ":RealmJoinGateClosed");
+                    trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}:RealmJoinGateClosed");
                 return new DecisionStep(deferredState, deferredTransition, Array.Empty<DecisionEffect>());
             }
 
-            var builder = state.ToBuilder()
+            // Terminal SelfDeploying branch.
+            var terminalBuilder = state.ToBuilder()
                 .WithStage(SessionStage.Completed)
                 .WithOutcome(SessionOutcome.EnrollmentComplete)
                 .WithStepIndex(nextStep)
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .ClearDeadlines();
-            builder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(updatedDeviceOnly);
+            terminalBuilder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(confirmedDeviceOnly);
+            terminalBuilder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplySelfDeployingDeadlineConfirmed(
+                state.ScenarioProfile, signal);
 
-            // Strengthen Mode: observing DeviceSetupProvisioningComplete without preceding
-            // AccountSetup strongly implies SelfDeploying-v1. Delegated to the updater.
-            builder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplyDeviceSetupProvisioningComplete(
-                builder.ScenarioProfile, signal);
-
-            var newState = builder.Build();
-
-            var transition = BuildTakenTransition(
+            var terminalState = terminalBuilder.Build();
+            var terminalTransition = BuildTakenTransition(
                 before: state,
                 signal: signal,
                 toStage: SessionStage.Completed,
                 nextStepIndex: nextStep,
-                trigger: nameof(DecisionSignalKind.DeviceSetupProvisioningComplete));
-
-            var effects = new[] { BuildEnrollmentCompleteEffect(newState, nameof(DecisionSignalKind.DeviceSetupProvisioningComplete)) };
-
-            return new DecisionStep(newState, transition, effects);
-        }
-
-        /// <summary>
-        /// Called by the shared <c>DeadlineFired</c> router when
-        /// <see cref="DeadlineNames.DeviceOnlyEspDetection"/> elapses without an AccountSetup
-        /// phase having arrived. Confirms the <see cref="DecisionState.DeviceOnlyDeployment"/>
-        /// hypothesis as DeviceOnly but does NOT complete the session — the terminal still
-        /// needs an explicit <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/>.
-        /// </summary>
-        private DecisionStep HandleDeviceOnlyEspDetectionDeadlineFired(DecisionState state, DecisionSignal signal)
-        {
-            var nextStep = state.StepIndex + 1;
-            var builder = state.ToBuilder()
-                .WithStepIndex(nextStep)
-                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
-                .CancelDeadline(DeadlineNames.DeviceOnlyEspDetection);
-
-            var strongDeviceOnly = state.ClassifierOutcomes.DeviceOnlyDeployment.With(
-                level: HypothesisLevel.Strong,
-                reason: DeviceOnlyReasons.DeviceOnly,
-                score: 70,
-                lastUpdatedUtc: signal.OccurredAtUtc);
-            builder.ClassifierOutcomes = state.ClassifierOutcomes.WithDeviceOnlyDeployment(strongDeviceOnly);
-
-            var newState = builder.Build();
-
-            var transition = BuildTakenTransition(
-                before: state,
-                signal: signal,
-                toStage: state.Stage,
-                nextStepIndex: nextStep,
                 trigger: $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}");
 
-            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
+            // Effects sequence — UI phase coverage (Plan v9 Phase 4): emit FinalizingSetup +
+            // Complete phase declarations BEFORE enrollment_complete so the Web timeline opens
+            // both phase bars for SelfDeploying terminal sessions (was missing entirely before).
+            var effects = new DecisionEffect[]
+            {
+                BuildPhaseTransitionEffect(EnrollmentPhase.FinalizingSetup),
+                BuildPhaseTransitionEffect(EnrollmentPhase.Complete),
+                BuildEnrollmentCompleteEffect(terminalState, $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}"),
+            };
+
+            return new DecisionStep(terminalState, terminalTransition, effects);
         }
 
         // ============================================================== internal helpers
 
         /// <summary>
-        /// Called from the Classic <see cref="HandleEspPhaseChangedV1"/> handler when
-        /// <c>DeviceSetup</c> is observed for the first time — arms the
-        /// <see cref="DeadlineNames.DeviceOnlyEspDetection"/> deadline. The Classic handler
-        /// adds the deadline effect to its own effect list.
+        /// Build the <see cref="DeadlineNames.DeviceOnlyEspDetection"/> active deadline. Plan v9:
+        /// armed by <see cref="HandleDeviceSetupProvisioningCompleteV1"/> at DeviceSetup-END (not
+        /// at DeviceSetup-START like the legacy v1 code).
         /// </summary>
         internal ActiveDeadline BuildDeviceOnlyEspDetectionDeadline(DateTime fromUtc) =>
             new ActiveDeadline(

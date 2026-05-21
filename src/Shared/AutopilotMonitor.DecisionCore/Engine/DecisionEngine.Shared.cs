@@ -282,20 +282,28 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStep,
                 trigger: $"AdminPreemption:{adminOutcome}");
 
-            var effects = new[]
+            // Plan v9 Phase 4 — UI phase coverage: for AdminPreemption-Succeeded, prepend
+            // FinalizingSetup + Complete phase declarations so the Web timeline opens both bars
+            // (parity with Classic FinalizingGrace + SelfDeploying-deadline terminal paths).
+            // For AdminPreemption-Failed, enrollment_failed already opens the Failed bar via
+            // the existing UI logic — no phase_transitions needed.
+            var effects = new List<DecisionEffect>(capacity: 3);
+            if (succeeded)
             {
-                new DecisionEffect(
-                    DecisionEffectKind.EmitEventTimelineEntry,
-                    parameters: new Dictionary<string, string>
-                    {
-                        ["eventType"] = eventType,
-                        ["adminAction"] = adminOutcome,
-                        ["source"] = signal.SourceOrigin ?? "register_session_response",
-                        ["reason"] = $"Session {adminOutcome.ToLowerInvariant()} by administrator (detected on register-session).",
-                    }),
-            };
+                effects.Add(BuildPhaseTransitionEffect(EnrollmentPhase.FinalizingSetup));
+                effects.Add(BuildPhaseTransitionEffect(EnrollmentPhase.Complete));
+            }
+            effects.Add(new DecisionEffect(
+                DecisionEffectKind.EmitEventTimelineEntry,
+                parameters: new Dictionary<string, string>
+                {
+                    ["eventType"] = eventType,
+                    ["adminAction"] = adminOutcome,
+                    ["source"] = signal.SourceOrigin ?? "register_session_response",
+                    ["reason"] = $"Session {adminOutcome.ToLowerInvariant()} by administrator (detected on register-session).",
+                }));
 
-            return new DecisionStep(newState, transition, effects);
+            return new DecisionStep(newState, transition, effects.ToArray());
         }
 
         // ============================================================== shared helpers

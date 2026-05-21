@@ -323,6 +323,66 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
+        public void Deserialize_v3Snapshot_withoutDeviceSetupResolvedUtc_field_yieldsNullAnchor()
+        {
+            // Rollout-safety regression (Plan v9, 88a53223 SelfDeploying defang): the new
+            // DeviceSetupResolvedUtc SignalFact is an additive nullable field. Old persisted
+            // snapshots from the v3 schema (DecisionState.CurrentSchemaVersion was "v3" before
+            // 2026-05-21) DO NOT contain this property in their JSON. Loading such a snapshot
+            // under v4 code must succeed and produce DeviceSetupResolvedUtc == null — otherwise
+            // any session in flight at the time of the agent upgrade would fail to rehydrate.
+            //
+            // The JSON below is a minimal v3-shaped DecisionState payload constructed by hand
+            // (NOT round-tripped through StateSerializer.Serialize, which would include the new
+            // field). It mirrors what an actual on-disk v3 snapshot.json would look like.
+            const string v3Json = @"{
+                ""SessionId"": ""legacy-session"",
+                ""TenantId"": ""legacy-tenant"",
+                ""Stage"": ""EspDeviceSetup"",
+                ""Outcome"": null,
+                ""CurrentEnrollmentPhase"": null,
+                ""DeviceSetupEnteredUtc"": null,
+                ""AccountSetupEnteredUtc"": null,
+                ""FinalizingEnteredUtc"": null,
+                ""AccountSetupProvisioningSucceededUtc"": null,
+                ""EspFinalExitUtc"": null,
+                ""DesktopArrivedUtc"": null,
+                ""HelloResolvedUtc"": null,
+                ""SystemRebootUtc"": null,
+                ""HelloOutcome"": null,
+                ""ImeMatchedPatternId"": null,
+                ""Deadlines"": [],
+                ""LastAppliedSignalOrdinal"": 5,
+                ""StepIndex"": 6,
+                ""AppInstallFacts"": null,
+                ""ScenarioProfile"": null,
+                ""ScenarioObservations"": null,
+                ""ClassifierOutcomes"": null,
+                ""HelloPolicyEnabled"": null,
+                ""AgentBootUtc"": ""2026-05-20T09:00:00Z"",
+                ""LastFailureTrigger"": null,
+                ""RealmJoinFacts"": null,
+                ""SchemaVersion"": ""v3""
+            }";
+
+            var deserialized = StateSerializer.Deserialize(v3Json);
+
+            // Critical: the missing DeviceSetupResolvedUtc field deserializes to null (the optional
+            // ctor parameter default) — no ArgumentException, no JsonSerializationException.
+            Assert.Null(deserialized.DeviceSetupResolvedUtc);
+
+            // The rest of the state survived the load — non-default fields are preserved.
+            Assert.Equal("legacy-session", deserialized.SessionId);
+            Assert.Equal("legacy-tenant", deserialized.TenantId);
+            Assert.Equal(SessionStage.EspDeviceSetup, deserialized.Stage);
+            Assert.Equal(5L, deserialized.LastAppliedSignalOrdinal);
+            Assert.Equal(6, deserialized.StepIndex);
+            // SchemaVersion is preserved verbatim (the reducer doesn't auto-upgrade v3 → v4 on read;
+            // the next state mutation re-builds via DecisionState ctor and gets the current default).
+            Assert.Equal("v3", deserialized.SchemaVersion);
+        }
+
+        [Fact]
         public void ScenarioProfile_stateRoundtripsThroughStateSerializer_enumsAsStrings()
         {
             // End-to-end regression: the full DecisionState must serialize the new Profile

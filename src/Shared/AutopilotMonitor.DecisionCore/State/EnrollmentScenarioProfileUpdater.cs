@@ -243,15 +243,25 @@ namespace AutopilotMonitor.DecisionCore.State
                 evidenceOrdinal: signal.SessionSignalOrdinal);
         }
 
-        // ================================================================== DeviceSetupProvisioningComplete
+        // ================================================================== SelfDeployingDeadlineConfirmed
 
         /// <summary>
-        /// <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/> without a preceding
-        /// AccountSetup is a strong SelfDeploying-v1 indicator (caller must guard that invariant).
+        /// SelfDeploying classification is now driven exclusively by the 5-min
+        /// <see cref="Engine.DeadlineNames.DeviceOnlyEspDetection"/> deadline firing without
+        /// AccountSetup having entered (NOT by the raw
+        /// <see cref="DecisionSignalKind.DeviceSetupProvisioningComplete"/> signal — which
+        /// previously caused false-positive SelfDeploying terminations on Classic UserDriven
+        /// flows where Windows transitioned slowly DeviceSetup→AccountSetup, e.g. session
+        /// <c>88a53223-9795-4188-8352-7df9f0af9bb7</c>).
+        /// <para>
         /// Upgrades Mode to <see cref="EnrollmentMode.SelfDeploying"/> at
-        /// <see cref="ProfileConfidence.High"/>.
+        /// <see cref="ProfileConfidence.High"/> with the same monotonic guard as
+        /// <see cref="ApplyImeUserSessionCompleted"/>: a prior High-confidence classification on
+        /// a different Mode wins. Belt-and-suspenders alongside the deadline-handler's Race
+        /// guard C ("monotonic mode conflict").
+        /// </para>
         /// </summary>
-        public static EnrollmentScenarioProfile ApplyDeviceSetupProvisioningComplete(
+        public static EnrollmentScenarioProfile ApplySelfDeployingDeadlineConfirmed(
             EnrollmentScenarioProfile current,
             DecisionSignal signal)
         {
@@ -267,7 +277,7 @@ namespace AutopilotMonitor.DecisionCore.State
             return current.With(
                 mode: EnrollmentMode.SelfDeploying,
                 confidence: ProfileConfidence.High,
-                reason: "selfdeploying_provisioning_complete",
+                reason: "selfdeploying_deadline_confirmed",
                 evidenceOrdinal: signal.SessionSignalOrdinal);
         }
 

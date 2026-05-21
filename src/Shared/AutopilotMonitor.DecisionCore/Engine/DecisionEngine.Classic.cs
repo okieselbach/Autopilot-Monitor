@@ -82,21 +82,17 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     builder.ScenarioProfile, signal);
             }
 
-            // Device-Only ESP detection (plan §2.7): arm on first DeviceSetup, cancel on AccountSetup.
-            // See DecisionEngine.SelfDeploying.cs for the deadline-fired handler.
-            // EffectiveDeadlineBase floors the 5-min window at AgentBootUtc so a replayed
-            // DeviceSetup signal from an older CMTrace log entry doesn't collapse the deadline
-            // to immediate-fire — that would mark a perfectly normal Classic enrollment as
-            // device-only at boot (premature classifier promotion to DeviceOnly@Strong).
+            // Device-Only ESP detection (plan §2.7 + 88a53223 defang): the DeviceOnlyEspDetection
+            // deadline is now armed by HandleDeviceSetupProvisioningCompleteV1 (DeviceSetup-END),
+            // not here at DeviceSetup-START. Rationale: DeviceSetup with apps takes 10-20min, so
+            // a 5-min deadline armed at start fired mid-enrollment while DeviceSetup was still in
+            // progress — semantically meaningless. The defang moves the arm to "5min after
+            // DeviceSetup-resolved" so the "no AccountSetup after DeviceSetup-done" check actually
+            // decides something. The AccountSetup-cancel below is unchanged — it's a no-op when
+            // the deadline isn't armed (fast DeviceSetup, AccountSetup arrives before signal) and
+            // a genuine cancel when it is (the normal Classic flow during the 5min window).
             var effectsList = new List<DecisionEffect>();
-            if (enrollmentPhase == EnrollmentPhase.DeviceSetup &&
-                state.DeviceSetupEnteredUtc == null)
-            {
-                var devOnlyDl = BuildDeviceOnlyEspDetectionDeadline(EffectiveDeadlineBase(state, signal));
-                builder.AddDeadline(devOnlyDl);
-                effectsList.Add(new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: devOnlyDl));
-            }
-            else if (enrollmentPhase == EnrollmentPhase.AccountSetup)
+            if (enrollmentPhase == EnrollmentPhase.AccountSetup)
             {
                 builder.CancelDeadline(DeadlineNames.DeviceOnlyEspDetection);
                 effectsList.Add(new DecisionEffect(
@@ -639,7 +635,15 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: nextStep,
                 trigger: $"DeadlineFired:{DeadlineNames.FinalizingGrace}");
 
-            var effects = new[] { BuildEnrollmentCompleteEffect(newState, $"DeadlineFired:{DeadlineNames.FinalizingGrace}") };
+            // Plan v9 Phase 4 — UI phase coverage: emit phase_transition(Complete) before
+            // enrollment_complete so the Web timeline opens the Complete phase bar. The prior
+            // phase_transition(FinalizingSetup) was already emitted by TransitionToFinalizing
+            // (Classic.cs:609) when this deadline was armed.
+            var effects = new[]
+            {
+                BuildPhaseTransitionEffect(EnrollmentPhase.Complete),
+                BuildEnrollmentCompleteEffect(newState, $"DeadlineFired:{DeadlineNames.FinalizingGrace}"),
+            };
 
             return new DecisionStep(newState, transition, effects);
         }

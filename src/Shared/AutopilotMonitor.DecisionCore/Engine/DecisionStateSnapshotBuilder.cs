@@ -50,6 +50,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
             {
                 ["currentEnrollmentPhase"]         = SerializeFact(state.CurrentEnrollmentPhase, v => v.ToString()),
                 ["deviceSetupEnteredUtc"]          = SerializeFact(state.DeviceSetupEnteredUtc, FormatUtc),
+                ["deviceSetupResolvedUtc"]         = SerializeFact(state.DeviceSetupResolvedUtc, FormatUtc),
                 ["accountSetupEnteredUtc"]         = SerializeFact(state.AccountSetupEnteredUtc, FormatUtc),
                 ["accountSetupProvisioningSucceededUtc"] = SerializeFact(state.AccountSetupProvisioningSucceededUtc, FormatUtc),
                 ["finalizingEnteredUtc"]           = SerializeFact(state.FinalizingEnteredUtc, FormatUtc),

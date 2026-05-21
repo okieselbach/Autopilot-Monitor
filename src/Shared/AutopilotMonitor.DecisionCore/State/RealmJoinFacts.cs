@@ -134,6 +134,24 @@ namespace AutopilotMonitor.DecisionCore.State
         }
 
         /// <summary>
+        /// Clear <see cref="SelfDeployingDeferredCompletion"/> back to null. Called by the RJ-deferred
+        /// release re-check branch in <c>CompleteIfDeferredOrBookkeep</c> when post-deadline
+        /// signals (AccountSetup entry, monotonic Mode conflict) demote the deferred SelfDeploying
+        /// path back to Classic flow. Idempotent — returns <c>this</c> when already null.
+        /// </summary>
+        public RealmJoinFacts ClearSelfDeployingDeferred()
+        {
+            if (SelfDeployingDeferredCompletion == null) return this;
+            return new RealmJoinFacts(
+                detectedUtc: DetectedUtc,
+                resolvedUtc: ResolvedUtc,
+                lastDeploymentPhase: LastDeploymentPhase,
+                outcome: Outcome,
+                selfDeployingDeferredCompletion: null,
+                packages: Packages);
+        }
+
+        /// <summary>
         /// Append a new package row when the package is first observed (DisplayName seen,
         /// no Success/LastExitCode yet). Idempotent on (<paramref name="packageId"/>,
         /// <paramref name="scope"/>) — a second start for the same pair is ignored.

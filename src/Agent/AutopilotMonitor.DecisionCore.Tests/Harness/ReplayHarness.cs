@@ -38,7 +38,15 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
                 throw new ArgumentNullException(nameof(signals));
             }
 
-            var state = DecisionState.CreateInitial(sessionId, tenantId);
+            // Plan v9 88a53223 defang — the harness sets AgentBootUtc to the first signal's
+            // OccurredAtUtc (or DateTime.UtcNow when empty) so fixture-driven scenarios run in
+            // their own time-bubble. Without this, replay-safety flooring (EffectiveDeadlineBase)
+            // would set every deadline's DueAtUtc to ~NOW + window, then DeadlineFired signals
+            // authored with fixture-time OccurredAtUtc would trip the new stale-fire DueAtUtc
+            // mismatch guard (Plan v9 F1). Production replay-safety is exercised directly by
+            // BootAnchorDeadlineFloorTests with explicit AgentBootUtc construction.
+            var agentBootUtc = signals.Count > 0 ? signals[0].OccurredAtUtc : DateTime.UtcNow;
+            var state = DecisionState.CreateInitial(sessionId, tenantId, agentBootUtc);
             var transitions = new List<DecisionTransition>(signals.Count);
 
             foreach (var signal in signals)

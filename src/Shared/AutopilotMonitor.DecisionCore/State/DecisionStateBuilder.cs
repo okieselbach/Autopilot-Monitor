@@ -45,6 +45,7 @@ namespace AutopilotMonitor.DecisionCore.State
             AgentBootUtc = source.AgentBootUtc;
             LastFailureTrigger = source.LastFailureTrigger;
             RealmJoinFacts = source.RealmJoinFacts;
+            DeviceSetupResolvedUtc = source.DeviceSetupResolvedUtc;
             SchemaVersion = source.SchemaVersion;
         }
 
@@ -74,6 +75,7 @@ namespace AutopilotMonitor.DecisionCore.State
         public DateTime? AgentBootUtc { get; set; }
         public SignalFact<string>? LastFailureTrigger { get; set; }
         public RealmJoinFacts RealmJoinFacts { get; set; } = RealmJoinFacts.Empty;
+        public SignalFact<DateTime>? DeviceSetupResolvedUtc { get; set; }
         public string SchemaVersion { get; set; }
 
         // ---------- fluent helpers for the most common reducer operations ----------
@@ -209,6 +211,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 agentBootUtc: AgentBootUtc,
                 lastFailureTrigger: LastFailureTrigger,
                 realmJoinFacts: RealmJoinFacts,
+                deviceSetupResolvedUtc: DeviceSetupResolvedUtc,
                 schemaVersion: SchemaVersion);
     }
 }

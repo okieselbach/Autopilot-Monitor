@@ -344,23 +344,63 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
             if (selfDeployingDeferred)
             {
-                preparedBuilder
-                    .WithStage(SessionStage.Completed)
-                    .WithOutcome(SessionOutcome.EnrollmentComplete)
-                    .ClearDeadlines();
-                var completedState = preparedBuilder.Build();
-                var completedTransition = BuildTakenTransition(
-                    before: state,
-                    signal: signal,
-                    toStage: SessionStage.Completed,
-                    nextStepIndex: nextStepIndex,
-                    trigger: trigger + ":SelfDeployingDeferred");
+                // Plan v9 re-check guards: between the SelfDeploying-deadline-fire (which set
+                // SelfDeployingDeferredCompletion) and now (RJ-resolve / RJ-timeout), the world
+                // may have moved — AccountSetup may have arrived or a stronger Mode classification
+                // (Classic/High, WhiteGlove/High) may have been set. In those cases the deferred
+                // SelfDeploying terminal is no longer appropriate: clear the deferred flag, reset
+                // the DeviceOnly hypothesis (would otherwise corrupt the WhiteGlove classifier),
+                // and fall through to classicReady / bookkeeping evaluation.
+                var monotonicModeConflict =
+                    state.ScenarioProfile.Confidence == ProfileConfidence.High
+                    && state.ScenarioProfile.Mode != EnrollmentMode.Unknown
+                    && state.ScenarioProfile.Mode != EnrollmentMode.SelfDeploying;
+                var accountSetupEntered = state.AccountSetupEnteredUtc != null;
 
-                var effects = new List<DecisionEffect>(capacity: 2);
-                if (leadingEffect != null) effects.Add(leadingEffect);
-                effects.Add(BuildEnrollmentCompleteEffect(completedState, trigger + ":SelfDeployingDeferred"));
+                if (accountSetupEntered || monotonicModeConflict)
+                {
+                    // Clear on preparedBuilder.* (not state.*) — the caller has already written
+                    // WithResolved(...) / WithTimeoutOutcome(...) into preparedBuilder, and using
+                    // state.RealmJoinFacts as the base would discard that and leave
+                    // RealmJoinGateOpen(postState) == false → session stuck (Plan v9 F1).
+                    preparedBuilder.RealmJoinFacts = preparedBuilder.RealmJoinFacts.ClearSelfDeployingDeferred();
+                    preparedBuilder.ClassifierOutcomes = preparedBuilder.ClassifierOutcomes.WithDeviceOnlyDeployment(
+                        Hypothesis.UnknownInstance);
+                    selfDeployingDeferred = false;
+                    // fall through to classicReady / bookkeeping below
+                }
+                else
+                {
+                    // Promote ScenarioProfile to SelfDeploying/High via the monotonic-respecting
+                    // updater (Plan v9 F2 — keeps state↔wire consistent; without this the
+                    // enrollment_complete event would be emitted while the snapshot still showed
+                    // ScenarioProfile.Mode=Unknown).
+                    preparedBuilder.ScenarioProfile = EnrollmentScenarioProfileUpdater.ApplySelfDeployingDeadlineConfirmed(
+                        preparedBuilder.ScenarioProfile, signal);
 
-                return new DecisionStep(completedState, completedTransition, effects.ToArray());
+                    preparedBuilder
+                        .WithStage(SessionStage.Completed)
+                        .WithOutcome(SessionOutcome.EnrollmentComplete)
+                        .ClearDeadlines();
+                    var completedState = preparedBuilder.Build();
+                    var completedTransition = BuildTakenTransition(
+                        before: state,
+                        signal: signal,
+                        toStage: SessionStage.Completed,
+                        nextStepIndex: nextStepIndex,
+                        trigger: trigger + ":SelfDeployingDeferred");
+
+                    // Plan v9 Phase 4 — UI phase coverage: emit FinalizingSetup + Complete phase
+                    // declarations BEFORE enrollment_complete so the Web timeline opens both bars
+                    // for RJ-deferred-completion just like the direct SelfDeploying-terminal path.
+                    var effects = new List<DecisionEffect>(capacity: 4);
+                    if (leadingEffect != null) effects.Add(leadingEffect);
+                    effects.Add(BuildPhaseTransitionEffect(EnrollmentPhase.FinalizingSetup));
+                    effects.Add(BuildPhaseTransitionEffect(EnrollmentPhase.Complete));
+                    effects.Add(BuildEnrollmentCompleteEffect(completedState, trigger + ":SelfDeployingDeferred"));
+
+                    return new DecisionStep(completedState, completedTransition, effects.ToArray());
+                }
             }
 
             if (classicReady)

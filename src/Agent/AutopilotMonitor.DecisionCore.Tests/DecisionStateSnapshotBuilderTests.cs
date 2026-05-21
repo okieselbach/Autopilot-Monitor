@@ -103,7 +103,9 @@ namespace AutopilotMonitor.DecisionCore.Tests
             // and only promote in-flight installs on ESP-Apps timeout → 12 slots.
             // Session 330f73f3 fix (2026-05-18) added `accountSetupProvisioningSucceededUtc`
             // as the strong post-AccountSetup gate → 13 slots.
-            Assert.Equal(13, facts.Count);
+            // 88a53223 SelfDeploying defang (Plan v9) added `deviceSetupResolvedUtc` so the
+            // new DeviceOnlyEspDetection deadline arms from DeviceSetup-END not -START → 14.
+            Assert.Equal(14, facts.Count);
             Assert.All(facts.Values, v => Assert.Null(v));
         }
 
@@ -215,9 +217,11 @@ namespace AutopilotMonitor.DecisionCore.Tests
             // `lastFailureTrigger` added for the EnrollmentTerminationHandler's
             // 4-check discriminator → 12. Session 330f73f3 fix (2026-05-18) added
             // `accountSetupProvisioningSucceededUtc` as the strong post-AccountSetup
-            // gate → 13. If this number ever changes, both the count expectation AND
-            // the actual snapshot output need to evolve in lockstep.
-            Assert.Equal(13, expectedFactKeys.Count);
+            // gate → 13. 88a53223 SelfDeploying defang (Plan v9, 2026-05-21) added
+            // `deviceSetupResolvedUtc` as the DeviceSetup-END anchor for the new
+            // deadline arm-point → 14. If this number ever changes, both the count
+            // expectation AND the actual snapshot output need to evolve in lockstep.
+            Assert.Equal(14, expectedFactKeys.Count);
 
             var snapshot = DecisionStateSnapshotBuilder.Build(DecisionState.CreateInitial("s", "t"));
             var facts = (Dictionary<string, object?>)snapshot["facts"]!;

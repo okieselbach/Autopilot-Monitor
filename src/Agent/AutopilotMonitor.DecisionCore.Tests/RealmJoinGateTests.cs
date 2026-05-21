@@ -196,27 +196,41 @@ namespace AutopilotMonitor.DecisionCore.Tests
         // ============================================================== SelfDeploying flow
 
         [Fact]
-        public void SelfDeploying_DeviceSetupProvisioningComplete_with_realmjoin_open_completes_immediately()
+        public void SelfDeploying_DeviceSetupProvisioningComplete_with_realmjoin_open_armsDeadline_thenDeadlineFiredCompletes()
         {
-            // Baseline — RJ never detected → SelfDeploying terminal path completes directly.
+            // Baseline — RJ never detected → SelfDeploying terminal path completes via the new
+            // 5-min deadline (Plan v9 88a53223 defang). The signal itself is no longer terminal;
+            // it just arms the deadline. Then DeadlineFired drives the terminal transition.
             var engine = new DecisionEngine();
             var state = DecisionState.CreateInitial("rj-sd", "rj-tenant", T0);
             state = engine.Reduce(state, MakeSignal(0, DecisionSignalKind.SessionStarted, T0)).NewState;
             state = engine.Reduce(state, MakeSignal(1, DecisionSignalKind.EspPhaseChanged, T0.AddMinutes(1),
                 new Dictionary<string, string> { [SignalPayloadKeys.EspPhase] = "DeviceSetup" })).NewState;
 
-            var step = engine.Reduce(state, MakeSignal(2, DecisionSignalKind.DeviceSetupProvisioningComplete, T0.AddMinutes(2)));
+            // Signal arms the deadline; Stage stays EspDeviceSetup.
+            var signalStep = engine.Reduce(state, MakeSignal(2, DecisionSignalKind.DeviceSetupProvisioningComplete, T0.AddMinutes(2)));
+            Assert.Equal(SessionStage.EspDeviceSetup, signalStep.NewState.Stage);
+            Assert.NotNull(signalStep.NewState.DeviceSetupResolvedUtc);
+            var deadline = Assert.Single(signalStep.NewState.Deadlines, d => d.Name == DeadlineNames.DeviceOnlyEspDetection);
+            Assert.Equal(T0.AddMinutes(7), deadline.DueAtUtc);
+
+            // DeadlineFired (OccurredAtUtc = DueAtUtc per scheduler contract) → terminal.
+            var step = engine.Reduce(signalStep.NewState, MakeSignal(3, DecisionSignalKind.DeadlineFired, T0.AddMinutes(7),
+                new Dictionary<string, string> { [SignalPayloadKeys.Deadline] = DeadlineNames.DeviceOnlyEspDetection }));
 
             Assert.Equal(SessionStage.Completed, step.NewState.Stage);
             Assert.Equal(SessionOutcome.EnrollmentComplete, step.NewState.Outcome);
+            Assert.Equal(EnrollmentMode.SelfDeploying, step.NewState.ScenarioProfile.Mode);
+            Assert.Equal("selfdeploying_deadline_confirmed", step.NewState.ScenarioProfile.Reason);
         }
 
         [Fact]
         public void SelfDeploying_with_realmjoin_detected_defers_terminal_until_resolved()
         {
-            // SelfDeploying terminal handler observes the gate is closed → marks
-            // SelfDeployingDeferredCompletion on RealmJoinFacts, stays non-terminal, lets the
-            // RealmJoinResolved handler complete directly to Completed (not via Finalizing).
+            // Plan v9 (88a53223 defang): RJ-deferral moves from signal-time to deadline-fire-time.
+            // The DeviceSetupProvisioningComplete signal arms the deadline; the deadline-fired
+            // handler observes the RJ gate is closed and marks SelfDeployingDeferredCompletion.
+            // RealmJoinResolved then routes through CompleteIfDeferredOrBookkeep to terminal.
             var engine = new DecisionEngine();
             var state = DecisionState.CreateInitial("rj-sd-2", "rj-tenant", T0);
             state = engine.Reduce(state, MakeSignal(0, DecisionSignalKind.SessionStarted, T0)).NewState;
@@ -225,22 +239,37 @@ namespace AutopilotMonitor.DecisionCore.Tests
             state = engine.Reduce(state, MakeSignal(2, DecisionSignalKind.RealmJoinDetected, T0.AddMinutes(2),
                 new Dictionary<string, string> { [DecisionEngine.RealmJoinPayloadKeys.DeploymentPhase] = "100" })).NewState;
 
-            var deferred = engine.Reduce(state, MakeSignal(3, DecisionSignalKind.DeviceSetupProvisioningComplete, T0.AddMinutes(3))).NewState;
+            // Signal arms deadline. Deferred flag NOT yet set (Plan v9: only at deadline-fire).
+            state = engine.Reduce(state, MakeSignal(3, DecisionSignalKind.DeviceSetupProvisioningComplete, T0.AddMinutes(3))).NewState;
+            Assert.NotEqual(SessionStage.Completed, state.Stage);
+            Assert.Null(state.RealmJoinFacts.SelfDeployingDeferredCompletion);
+
+            // Deadline fires. RJ-gate still closed → set deferred flag, NO terminal.
+            var deferredStep = engine.Reduce(state, MakeSignal(4, DecisionSignalKind.DeadlineFired, T0.AddMinutes(8),
+                new Dictionary<string, string> { [SignalPayloadKeys.Deadline] = DeadlineNames.DeviceOnlyEspDetection }));
+            var deferred = deferredStep.NewState;
             Assert.NotEqual(SessionStage.Completed, deferred.Stage);
             Assert.True(deferred.RealmJoinFacts.SelfDeployingDeferredCompletion?.Value);
 
-            var step = engine.Reduce(deferred, MakeSignal(4, DecisionSignalKind.RealmJoinResolved, T0.AddMinutes(4),
+            // RealmJoinResolved releases the deferred SelfDeploying terminal.
+            var step = engine.Reduce(deferred, MakeSignal(5, DecisionSignalKind.RealmJoinResolved, T0.AddMinutes(10),
                 new Dictionary<string, string> { [DecisionEngine.RealmJoinPayloadKeys.DeploymentPhase] = "110" }));
 
             Assert.Equal(SessionStage.Completed, step.NewState.Stage);
             Assert.Equal(SessionOutcome.EnrollmentComplete, step.NewState.Outcome);
-            // Direct Completed path emits enrollment_complete inline; no FinalizingGrace deadline
-            // needed because the SelfDeploying handler clears deadlines.
+            // Direct Completed path emits enrollment_complete; no FinalizingGrace deadline needed
+            // because the RJ-deferred branch clears deadlines.
             Assert.DoesNotContain(step.NewState.Deadlines, d => d.Name == DeadlineNames.FinalizingGrace);
             Assert.Contains(step.Effects, e =>
                 e.Kind == DecisionEffectKind.EmitEventTimelineEntry &&
                 e.Parameters != null &&
                 e.Parameters.TryGetValue("eventType", out var et) && et == "enrollment_complete");
+            // Plan v9 F2: ScenarioProfile promoted to SelfDeploying/High in RJ-deferred-release.
+            Assert.Equal(EnrollmentMode.SelfDeploying, step.NewState.ScenarioProfile.Mode);
+            Assert.Equal(ProfileConfidence.High, step.NewState.ScenarioProfile.Confidence);
+            Assert.Equal("selfdeploying_deadline_confirmed", step.NewState.ScenarioProfile.Reason);
+            // RJ gate is open post-release (the WithResolved fact survived ClearSelfDeployingDeferred).
+            Assert.NotNull(step.NewState.RealmJoinFacts.ResolvedUtc);
         }
 
         // ============================================================== Per-package tracking
@@ -284,8 +313,10 @@ namespace AutopilotMonitor.DecisionCore.Tests
         [Fact]
         public void Audit_trail_attaches_realmjoin_fields_when_enrollment_completes_after_resolved()
         {
-            // After SelfDeploying + RealmJoinResolved, the enrollment_complete effect must carry
-            // the realmjoin* audit-trail fields built by DecisionAuditTrailBuilder.
+            // After SelfDeploying-deadline-fired (deferred via RJ-gate) + RealmJoinResolved, the
+            // enrollment_complete effect must carry the realmjoin* audit-trail fields built by
+            // DecisionAuditTrailBuilder. Plan v9: signal arms deadline, deadline-fire defers when
+            // RJ gate closed, RJ-resolve releases via CompleteIfDeferredOrBookkeep.
             var engine = new DecisionEngine();
             var state = DecisionState.CreateInitial("rj-audit", "rj-tenant", T0);
             state = engine.Reduce(state, MakeSignal(0, DecisionSignalKind.SessionStarted, T0)).NewState;
@@ -294,8 +325,12 @@ namespace AutopilotMonitor.DecisionCore.Tests
             state = engine.Reduce(state, MakeSignal(2, DecisionSignalKind.RealmJoinDetected, T0.AddMinutes(2),
                 new Dictionary<string, string> { [DecisionEngine.RealmJoinPayloadKeys.DeploymentPhase] = "100" })).NewState;
             state = engine.Reduce(state, MakeSignal(3, DecisionSignalKind.DeviceSetupProvisioningComplete, T0.AddMinutes(3))).NewState;
+            // Deadline fires at T+8 (signal at T+3 + 5min) → RJ gate closed → deferred.
+            state = engine.Reduce(state, MakeSignal(4, DecisionSignalKind.DeadlineFired, T0.AddMinutes(8),
+                new Dictionary<string, string> { [SignalPayloadKeys.Deadline] = DeadlineNames.DeviceOnlyEspDetection })).NewState;
+            Assert.True(state.RealmJoinFacts.SelfDeployingDeferredCompletion?.Value);
 
-            var step = engine.Reduce(state, MakeSignal(4, DecisionSignalKind.RealmJoinResolved, T0.AddMinutes(4),
+            var step = engine.Reduce(state, MakeSignal(5, DecisionSignalKind.RealmJoinResolved, T0.AddMinutes(10),
                 new Dictionary<string, string> { [DecisionEngine.RealmJoinPayloadKeys.DeploymentPhase] = "110" }));
 
             var completeEffect = Assert.Single(step.Effects, e =>

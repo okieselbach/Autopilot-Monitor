@@ -39,7 +39,11 @@ namespace AutopilotMonitor.DecisionCore.Tests.Harness
         {
             if (signals == null) throw new ArgumentNullException(nameof(signals));
 
-            var state = DecisionState.CreateInitial(sessionId, tenantId);
+            // Plan v9: match ReplayHarness — set AgentBootUtc to the first signal's OccurredAtUtc
+            // so fixture-driven scenarios run in their own time-bubble (DueAtUtc matches subsequent
+            // DeadlineFired times in the fixture).
+            var agentBootUtc = signals.Count > 0 ? signals[0].OccurredAtUtc : System.DateTime.UtcNow;
+            var state = DecisionState.CreateInitial(sessionId, tenantId, agentBootUtc);
             var allTransitions = new List<DecisionTransition>(signals.Count * 2);
             ClassifierRunStats = new Dictionary<string, int>();
 

@@ -101,11 +101,26 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Equal(SessionStage.Completed, step.NewState.Stage);
             Assert.Equal(SessionOutcome.AdminPreempted, step.NewState.Outcome);
 
-            var effect = Assert.Single(step.Effects);
-            Assert.Equal(DecisionEffectKind.EmitEventTimelineEntry, effect.Kind);
-            Assert.Equal("enrollment_complete", effect.Parameters!["eventType"]);
-            Assert.Equal("Succeeded", effect.Parameters["adminAction"]);
-            Assert.Equal("register_session_response", effect.Parameters["source"]);
+            // Plan v9 Phase 4 — UI phase coverage: AdminPreemption-Succeeded now prepends
+            // FinalizingSetup + Complete phase declarations before the inline enrollment_complete
+            // so the Web timeline opens both phase bars (parity with Classic + SelfDeploying paths).
+            Assert.Equal(3, step.Effects.Count);
+
+            var finalizingEffect = step.Effects[0];
+            Assert.Equal(DecisionEffectKind.EmitEventTimelineEntry, finalizingEffect.Kind);
+            Assert.Equal("phase_transition", finalizingEffect.Parameters!["eventType"]);
+            Assert.Equal("FinalizingSetup", finalizingEffect.Parameters["phase"]);
+
+            var completePhaseEffect = step.Effects[1];
+            Assert.Equal(DecisionEffectKind.EmitEventTimelineEntry, completePhaseEffect.Kind);
+            Assert.Equal("phase_transition", completePhaseEffect.Parameters!["eventType"]);
+            Assert.Equal("Complete", completePhaseEffect.Parameters["phase"]);
+
+            var enrollmentCompleteEffect = step.Effects[2];
+            Assert.Equal(DecisionEffectKind.EmitEventTimelineEntry, enrollmentCompleteEffect.Kind);
+            Assert.Equal("enrollment_complete", enrollmentCompleteEffect.Parameters!["eventType"]);
+            Assert.Equal("Succeeded", enrollmentCompleteEffect.Parameters["adminAction"]);
+            Assert.Equal("register_session_response", enrollmentCompleteEffect.Parameters["source"]);
         }
 
         [Fact]

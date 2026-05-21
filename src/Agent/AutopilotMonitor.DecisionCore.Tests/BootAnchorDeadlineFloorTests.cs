@@ -68,22 +68,32 @@ namespace AutopilotMonitor.DecisionCore.Tests
         }
 
         [Fact]
-        public void DeviceOnlyEspDetection_armed_from_replayed_DeviceSetup_floors_at_AgentBootUtc()
+        public void DeviceOnlyEspDetection_armed_from_replayed_DeviceSetupProvisioningComplete_floors_at_AgentBootUtc()
         {
+            // Plan v9 88a53223 defang — the DeviceOnlyEspDetection deadline is now armed by
+            // DeviceSetupProvisioningComplete (DeviceSetup-END), NOT by EspPhaseChanged(DeviceSetup)
+            // (DeviceSetup-START). The replay-safety floor still applies: a replayed signal with a
+            // past OccurredAtUtc must not collapse the 5-min deadline to immediate-fire at boot.
             var engine = new DecisionEngine();
             var state = FreshAtBoot();
             state = engine.Reduce(state,
                 MakeSignal(0, DecisionSignalKind.SessionStarted, AgentBoot)).NewState;
+            // Get into a DeviceSetup state with a live signal so the replayed terminal-arm signal
+            // can be evaluated in isolation.
+            state = engine.Reduce(state,
+                MakeSignal(1, DecisionSignalKind.EspPhaseChanged, AgentBoot.AddSeconds(1),
+                    new Dictionary<string, string> { [SignalPayloadKeys.EspPhase] = "DeviceSetup" })).NewState;
 
-            // Replayed DeviceSetup phase change carrying a 30-min-old CMTrace timestamp.
-            var replayed = MakeSignal(1, DecisionSignalKind.EspPhaseChanged, LogPast,
-                new Dictionary<string, string> { [SignalPayloadKeys.EspPhase] = "DeviceSetup" });
+            // Replayed DeviceSetupProvisioningComplete carrying a 30-min-old CMTrace timestamp.
+            var replayed = MakeSignal(2, DecisionSignalKind.DeviceSetupProvisioningComplete, LogPast);
             var step = engine.Reduce(state, replayed);
 
             var devOnly = Assert.Single(step.NewState.Deadlines, d => d.Name == DeadlineNames.DeviceOnlyEspDetection);
-            // Without the floor: dueAt = LogPast + 5min = 9:35 → fires immediately, classifier
-            // promotes DeviceOnlyDeployment to Strong. With the floor: dueAt = AgentBoot + 5min.
+            // Without the floor: dueAt = LogPast + 5min → fires immediately at boot → false-positive
+            // SelfDeploying terminal classification on what may have been a Classic flow. With the
+            // floor: dueAt = AgentBoot + 5min, giving subsequent live signals time to arrive.
             Assert.Equal(AgentBoot.AddMinutes(5), devOnly.DueAtUtc);
+            Assert.NotNull(step.NewState.DeviceSetupResolvedUtc);
         }
 
         [Fact]
@@ -123,16 +133,19 @@ namespace AutopilotMonitor.DecisionCore.Tests
         {
             // Sanity: the floor is one-sided. A signal whose OccurredAtUtc is *after* the
             // boot anchor gets its raw timestamp through — the floor only kicks in when the
-            // signal is older than the boot.
+            // signal is older than the boot. Verified on the new DeviceSetupProvisioningComplete
+            // arm-point per Plan v9.
             var engine = new DecisionEngine();
             var state = FreshAtBoot();
             state = engine.Reduce(state,
                 MakeSignal(0, DecisionSignalKind.SessionStarted, AgentBoot)).NewState;
+            state = engine.Reduce(state,
+                MakeSignal(1, DecisionSignalKind.EspPhaseChanged, AgentBoot.AddSeconds(1),
+                    new Dictionary<string, string> { [SignalPayloadKeys.EspPhase] = "DeviceSetup" })).NewState;
 
             var liveAfterBoot = AgentBoot.AddMinutes(2);
             var step = engine.Reduce(state,
-                MakeSignal(1, DecisionSignalKind.EspPhaseChanged, liveAfterBoot,
-                    new Dictionary<string, string> { [SignalPayloadKeys.EspPhase] = "DeviceSetup" }));
+                MakeSignal(2, DecisionSignalKind.DeviceSetupProvisioningComplete, liveAfterBoot));
 
             var devOnly = Assert.Single(step.NewState.Deadlines, d => d.Name == DeadlineNames.DeviceOnlyEspDetection);
             Assert.Equal(liveAfterBoot.AddMinutes(5), devOnly.DueAtUtc);

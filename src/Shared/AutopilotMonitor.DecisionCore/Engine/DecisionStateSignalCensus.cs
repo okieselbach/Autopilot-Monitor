@@ -90,6 +90,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 timestamps["accountSetupProvisioningComplete"] = FormatUtc(state.AccountSetupProvisioningSucceededUtc.Value);
                 evidence["accountSetupProvisioningComplete"] = TimestampedEvidence(state.AccountSetupProvisioningSucceededUtc);
             }
+            // SelfDeploying-defang anchor — set when DeviceSetupProvisioningComplete signal
+            // arrives. Surfaces in enrollment_complete audit so consumers can see whether the
+            // DeviceSetup-done observation drove the SelfDeploying classification (via the new
+            // 5-min DeviceOnlyEspDetection deadline path).
+            if (state.DeviceSetupResolvedUtc != null)
+            {
+                seen.Add("device_setup_provisioning_complete");
+                timestamps["deviceSetupResolved"] = FormatUtc(state.DeviceSetupResolvedUtc.Value);
+                evidence["deviceSetupResolved"] = TimestampedEvidence(state.DeviceSetupResolvedUtc);
+            }
 
             // WhiteGlove Part-1 sealing observations — engine-internal, no UTC fact.
             var obs = state.ScenarioObservations;

@@ -34,31 +34,42 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
                 DecisionEngine.DeviceOnlyReasons.DeviceOnly,
                 result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Reason);
 
-            // Profile upgraded to Mode=SelfDeploying @ High by the SelfDeploying handler.
+            // Plan v9 — terminal classification now happens at DeadlineFired, not at signal-time.
+            // Reason changed from "selfdeploying_provisioning_complete" to "selfdeploying_deadline_confirmed".
             Assert.Equal(EnrollmentMode.SelfDeploying, result.FinalState.ScenarioProfile.Mode);
             Assert.Equal(ProfileConfidence.High, result.FinalState.ScenarioProfile.Confidence);
-            Assert.Equal("selfdeploying_provisioning_complete", result.FinalState.ScenarioProfile.Reason);
+            Assert.Equal("selfdeploying_deadline_confirmed", result.FinalState.ScenarioProfile.Reason);
 
-            Assert.Equal(3, result.Transitions.Count);
+            // Fixture now drives 4 signals (SessionStarted, EspPhaseChanged(DeviceSetup),
+            // DeviceSetupProvisioningComplete, DeadlineFired) instead of 3.
+            Assert.Equal(4, result.Transitions.Count);
             Assert.All(result.Transitions, t => Assert.True(t.Taken));
         }
 
         [Fact]
-        public void SelfDeployingHappy_schedulesAndCancelsDeviceOnlyEspDetection()
+        public void SelfDeployingHappy_armsAndClearsDeviceOnlyEspDetectionViaDeadline()
         {
+            // Plan v9 (88a53223 defang) — semantics:
+            // - DeviceSetupProvisioningComplete arms the deadline (no longer terminal at signal-time).
+            // - DeadlineFired completes the session (after all guards pass) and clears deadlines.
+            // Final state still has no active deadlines, just via a different mechanism.
             var result = RunFixture(
                 fixtureFilename: "selfdeploying-happy-v1.jsonl",
                 sessionId: "session-anon-0004",
                 tenantId: "tenant-anon-0004");
 
-            // Replay intermediate check via harness is not exposed, but we can assert the
-            // final state has no active deadlines (the provisioning-complete handler clears them).
             Assert.Empty(result.FinalState.Deadlines);
+            // Anchor must be set so downstream stale-fire guards can distinguish "new path" from
+            // "rollout-race deadline from old code".
+            Assert.NotNull(result.FinalState.DeviceSetupResolvedUtc);
         }
 
         [Fact]
-        public void DeviceOnlyEspExitUnknown_deadlineFires_then_provisioningCompletes()
+        public void DeviceOnlyEspExitUnknown_provisioningCompletesArmsDeadline_thenFiresToTerminal()
         {
+            // Plan v9 semantics: DeviceSetupProvisioningComplete arms the deadline; DeadlineFired
+            // is the sole SelfDeploying-terminal entry. The same fixture (now without the legacy
+            // arm-at-DeviceSetup-start DeadlineFired) drives the same final state via the new path.
             var result = RunFixture(
                 fixtureFilename: "selfdeploying-esp-exit-unknown-v1.jsonl",
                 sessionId: "session-anon-0005",
@@ -67,20 +78,23 @@ namespace AutopilotMonitor.DecisionCore.Tests.Scenarios
             Assert.Equal(SessionStage.Completed, result.FinalState.Stage);
             Assert.Equal(SessionOutcome.EnrollmentComplete, result.FinalState.Outcome);
 
-            // DeviceOnlyDeployment goes through Strong (by deadline) -> Confirmed (by provisioning).
+            // DeviceOnlyDeployment is now set to Confirmed exclusively in the deadline-fired terminal
+            // branch (previously the v1 path set it twice — first at signal-time, then again at
+            // deadline-fire). Final state is identical: Confirmed/DeviceOnly.
             Assert.Equal(HypothesisLevel.Confirmed, result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Level);
             Assert.Equal(
                 DecisionEngine.DeviceOnlyReasons.DeviceOnly,
                 result.FinalState.ClassifierOutcomes.DeviceOnlyDeployment.Reason);
 
-            // The deadline transition is present and taken (hypothesis update without stage change).
+            // The DeadlineFired transition is the terminal one (Stage transitions to Completed
+            // here, NOT a "hypothesis-only" no-op like in the v1 semantics).
             var deadlineTransition = Assert.Single(
                 result.Transitions,
                 t => t.Trigger == $"DeadlineFired:{DeadlineNames.DeviceOnlyEspDetection}");
             Assert.True(deadlineTransition.Taken);
-            Assert.Equal(deadlineTransition.FromStage, deadlineTransition.ToStage);
-            Assert.Equal(SessionStage.EspDeviceSetup, deadlineTransition.ToStage);
+            Assert.Equal(SessionStage.Completed, deadlineTransition.ToStage);
 
+            // Fixture: SessionStarted + EspPhaseChanged + DeviceSetupProvisioningComplete + DeadlineFired = 4.
             Assert.Equal(4, result.Transitions.Count);
         }
 
