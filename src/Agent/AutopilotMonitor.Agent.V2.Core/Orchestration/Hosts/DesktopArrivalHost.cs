@@ -27,11 +27,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IClock clock,
             int noCandidateTimeoutMinutes = 10,
             string? sessionId = null,
-            string? tenantId = null)
+            string? tenantId = null,
+            Action<string>? onRealUserOwnerObserved = null)
         {
             _logger = logger;
             _detector = new DesktopArrivalDetector(logger, noCandidateTimeoutMinutes);
             _adapter = new DesktopArrivalDetectorAdapter(_detector, ingress, clock);
+
+            if (onRealUserOwnerObserved != null)
+            {
+                _detector.RealUserOwnerObserved += (s, owner) =>
+                {
+                    try { onRealUserOwnerObserved(owner); }
+                    catch (Exception ex) { logger.Warning($"DesktopArrivalHost: onRealUserOwnerObserved callback threw: {ex.Message}"); }
+                };
+            }
 
             // V2 single-rail wiring (2026-05-15) — the OnTraceEvent callback is routed
             // through InformationalEventPost so the DAD lifecycle events

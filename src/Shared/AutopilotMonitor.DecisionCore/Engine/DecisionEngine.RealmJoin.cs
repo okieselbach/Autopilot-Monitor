@@ -4,6 +4,7 @@ using System.Globalization;
 using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.DecisionCore.State;
 using AutopilotMonitor.Shared.Models;
+using SharedConstants = AutopilotMonitor.Shared.Constants;
 
 namespace AutopilotMonitor.DecisionCore.Engine
 {
@@ -20,7 +21,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
         private static readonly TimeSpan s_realmJoinHardTimeout = TimeSpan.FromMinutes(60);
 
         // Payload keys consumed by the new handlers (set by the agent's RealmJoinWatcherAdapter).
-        internal static class RealmJoinPayloadKeys
+        // Public because the V2.Core agent adapter assembles signal payloads with these keys.
+        public static class RealmJoinPayloadKeys
         {
             public const string DeploymentPhase = "deploymentPhase";
             public const string PackageId = "packageId";
@@ -398,7 +400,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 kind: DecisionEffectKind.EmitEventTimelineEntry,
                 parameters: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    [SignalPayloadKeys.EventType] = "realmjoin_timeout",
+                    [SignalPayloadKeys.EventType] = SharedConstants.EventTypes.RealmJoinTimeout,
                     [SignalPayloadKeys.Source] = "DecisionEngine",
                     [SignalPayloadKeys.Severity] = "Warning",
                     [SignalPayloadKeys.Message] = $"RealmJoin did not reach phase 110 within 60 min (last phase: {lastPhase}).",

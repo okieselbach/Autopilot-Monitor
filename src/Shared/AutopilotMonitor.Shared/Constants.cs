@@ -300,6 +300,18 @@ namespace AutopilotMonitor.Shared
             // informational events too. Without this the FailureSnapshotBuilder cannot tell that
             // the real AAD user was ever observed (Codex review 2026-05-01).
             public const string AadUserJoinedObserved      = "aad_user_joined_observed";     // Real user observed in JoinInfo — synchronous startup-read OR mid-session watcher fire
+
+            // RealmJoin (RJ) deployment tracking — driven by HKLM\SYSTEM\...\realmjoin\Parameters
+            // + HKLM/HKU \SOFTWARE\RealmJoin\Packages\<id>. Detection extends the V2 enrollment
+            // session lifetime until DeploymentPhase reaches CompletedFirstDeployment (110) or
+            // the 60-min hard timeout fires. Per-package events surface install lifecycle in
+            // the same shape as IME app_install_started / app_install_completed.
+            public const string RealmJoinDetected         = "realmjoin_detected";
+            public const string RealmJoinPhaseChanged    = "realmjoin_phase_changed";
+            public const string RealmJoinResolved        = "realmjoin_resolved";
+            public const string RealmJoinTimeout         = "realmjoin_timeout";
+            public const string RealmJoinPackageStarted  = "realmjoin_package_started";
+            public const string RealmJoinPackageCompleted = "realmjoin_package_completed";
         }
 
         // -----------------------------------------------------------------------

@@ -66,6 +66,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public event EventHandler DesktopArrived;
 
         /// <summary>
+        /// Fired with the validated real-user owner string (<c>DOMAIN\User</c> or
+        /// <c>User</c>) right before <see cref="DesktopArrived"/>. Used by the composition
+        /// root to resolve the user's SID (<c>UserSidResolver</c>) so the
+        /// <see cref="RealmJoinWatcher"/> can attach its HKU-scope package watcher.
+        /// Carries the raw owner to keep the SID-resolution logic out of this detector;
+        /// the consumer is responsible for any PII handling.
+        /// </summary>
+        public event EventHandler<string> RealUserOwnerObserved;
+
+        /// <summary>
         /// Optional callback for trace events (decision, reason, context).
         /// Wired by MonitoringService to emit agent_trace events to the backend.
         /// </summary>
@@ -215,6 +225,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                         // Stop polling
                         _pollingTimer?.Dispose();
                         _pollingTimer = null;
+
+                        // Surface the raw owner so the composition root can resolve the SID for
+                        // the RealmJoinWatcher's HKU-scope attach. Fire BEFORE DesktopArrived so
+                        // dependent host wiring is in place by the time downstream handlers run.
+                        try { RealUserOwnerObserved?.Invoke(this, owner); }
+                        catch (Exception ex) { _logger.Warning($"DesktopArrivalDetector: RealUserOwnerObserved handler failed: {ex.Message}"); }
 
                         try { DesktopArrived?.Invoke(this, EventArgs.Empty); }
                         catch (Exception ex) { _logger.Warning($"DesktopArrivalDetector: DesktopArrived handler failed: {ex.Message}"); }

@@ -7,6 +7,7 @@ using AutopilotMonitor.Agent.V2.Core.Configuration;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
+using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.SignalAdapters;
@@ -70,6 +71,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private ImeLogHost? _imeLogHost;
         private EspAndHelloHost? _espAndHelloHost;
         private AadJoinHost? _aadJoinHost;
+        private RealmJoinHost? _realmJoinHost;
         private Transport.Telemetry.ITelemetrySpool? _telemetrySpool;
 
         /// <summary>
@@ -202,19 +204,39 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // placeholder, so the detector resets and re-evaluates after the Hybrid reboot
             // instead of staying latched on the foo desktop. Order matters — DesktopArrivalHost
             // must exist before AadJoinHost so the callback target is available.
+            //
+            // RealmJoin hookup: the DesktopArrival observer feeds the resolved real-user owner
+            // to the RealmJoinHost so it can arm its HKU-scope package watcher. The lambda
+            // captures `_realmJoinHost` by reference — null at this point, set a few lines
+            // later before the detector can ever fire.
             var desktopArrivalHost = new DesktopArrivalHost(
                 logger,
                 ingress,
                 clock,
                 noCandidateTimeoutMinutes: collectors.DesktopDetectorNoCandidateTimeoutMinutes,
                 sessionId: sessionId,
-                tenantId: tenantId);
+                tenantId: tenantId,
+                onRealUserOwnerObserved: owner =>
+                {
+                    if (_realmJoinHost == null) return;
+                    if (UserSidResolver.TryResolveSid(owner, out var sid) && !string.IsNullOrEmpty(sid))
+                    {
+                        _realmJoinHost.ArmHkuWatcher(sid!);
+                    }
+                    else
+                    {
+                        logger.Info($"DefaultComponentFactory: UserSidResolver.TryResolveSid('{owner}') failed — RealmJoin HKU watcher not armed");
+                    }
+                });
             hosts.Add(desktopArrivalHost);
 
             _aadJoinHost = new AadJoinHost(
                 logger, ingress, clock,
                 onRealUserJoined: desktopArrivalHost.RequestResetForRealUserSwitch);
             hosts.Add(_aadJoinHost);
+
+            _realmJoinHost = new RealmJoinHost(logger, ingress, clock);
+            hosts.Add(_realmJoinHost);
 
             // Single-rail refactor (plan §5.8) — DeviceInfoCollector existed in V2.Core but had
             // no host so the Device-Details UI block was empty in V2 sessions (V1-Parity Issue #2).
