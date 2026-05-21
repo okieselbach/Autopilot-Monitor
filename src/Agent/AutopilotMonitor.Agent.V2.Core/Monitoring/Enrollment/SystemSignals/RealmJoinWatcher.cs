@@ -107,6 +107,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly HashSet<string> _hkuPackagesCompleted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private string? _hkuSid;
+        // Set once the Services\realmjoin gate fires. Until then, HKLM\SOFTWARE\RealmJoin and
+        // HKU\<sid>\SOFTWARE\RealmJoin remain unarmed — RJ presence is the prerequisite for
+        // looking at those keys at all.
+        private bool _realmJoinServiceDetected;
         private bool _disposed;
 
         public event EventHandler<RealmJoinDetectedEventArgs>? RealmJoinDetected;
@@ -124,36 +128,43 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         {
             if (_disposed) throw new ObjectDisposedException(nameof(RealmJoinWatcher));
 
-            // Initial sync reads (cheap; both bail out if the target keys don't exist).
-            CheckParameters();
-            CheckMachinePackages();
-
-            // Stage A: ensure the machine RJ service key.
+            // The Services\realmjoin gate is the SOLE entry point. HKLM\SOFTWARE\RealmJoin and
+            // the HKU watcher do not run until this fires — RJ presence is the prerequisite for
+            // touching those keys at all. On RJ-less devices the only standing observer is the
+            // parent-watch on HKLM\SYSTEM\CurrentControlSet\Services.
             EnsureRealmJoinServiceStage();
-
-            // Stage B: ensure HKLM\SOFTWARE\RealmJoin (independent of A — either can appear first).
-            EnsureMachineRealmJoinStage();
         }
 
         /// <summary>
-        /// Attach the user-scope HKU watcher. Called by the host once
+        /// Record the user SID for HKU watching. Called by the host once
         /// <see cref="DesktopArrivalDetector"/> resolves a real user owner and
         /// <see cref="UserSidResolver"/> produces the SID. Idempotent.
+        /// <para>
+        /// The actual HKU watcher only arms once the <c>Services\realmjoin</c> gate fires —
+        /// either it has already fired (immediate arm) or it fires later
+        /// (deferred arm from <see cref="AttachServiceRealmjoinSubtreeWatcher"/>). On devices
+        /// without RJ the SID is recorded but no HKU watcher is ever created.
+        /// </para>
         /// </summary>
         public void ArmHku(string sid)
         {
             if (_disposed) return;
             if (string.IsNullOrEmpty(sid)) return;
 
+            bool armNow;
             lock (_stateLock)
             {
                 if (_hkuSid != null) return;
                 _hkuSid = sid;
+                armNow = _realmJoinServiceDetected;
             }
-            _logger.Info($"RealmJoinWatcher: arming HKU watcher for SID {sid}");
+            _logger.Info($"RealmJoinWatcher: recorded SID {sid} for HKU watching (armNow={armNow})");
 
-            CheckUserPackages();
-            EnsureUserRealmJoinStage();
+            if (armNow)
+            {
+                CheckUserPackages();
+                EnsureUserRealmJoinStage();
+            }
         }
 
         public void Stop(string reason = "watcher_stopped")
@@ -303,6 +314,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         private void AttachServiceRealmjoinSubtreeWatcher()
         {
+            bool armUserToo;
             lock (_stateLock)
             {
                 if (_serviceRealmjoinWatcher != null) return;
@@ -325,12 +337,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 {
                     _logger.Warning($"RealmJoinWatcher: failed to attach Services\\realmjoin watcher: {ex.Message}");
                 }
+
+                _realmJoinServiceDetected = true;
+                armUserToo = _hkuSid != null;
             }
 
             // The appearance of Services\realmjoin is itself the RJ-detected signal —
             // surface it even if Parameters\DeploymentPhase isn't populated yet.
             NotifyRealmJoinPresence(phase: null);
             CheckParameters();
+
+            // RJ is now confirmed installed — arm the package watchers.
+            EnsureMachineRealmJoinStage();
+            if (armUserToo)
+            {
+                CheckUserPackages();
+                EnsureUserRealmJoinStage();
+            }
         }
 
         private void AttachMachineRealmJoinSubtreeWatcher()
