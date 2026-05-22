@@ -67,6 +67,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public const int PhaseCompletedFirstDeployment = 110;
 
         /// <summary>
+        /// Minimum DWORD value indicating RJ has moved out of <c>Blank (0)</c> into an active
+        /// or terminal deployment phase. Below this the SOFTWARE\RealmJoin subtree may still
+        /// be written by adjacent IME packages — package watchers stay disarmed until RJ owns
+        /// the keys.
+        /// </summary>
+        public const int PhaseRunningThresholdMin = 100;
+
+        /// <summary>
         /// Map a raw <c>DeploymentPhase</c> DWORD to its RJ-internal enum name. Mirrors
         /// <c>RealmJoin.Core.SoftwarePackaging.DeploymentPhase</c> as documented at feature
         /// design time. Unknown values fall back to the numeric form so future RJ-introduced

@@ -225,6 +225,64 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         }
 
         [Fact]
+        public void Package_watchers_stay_disarmed_until_phase_reaches_RunningThreshold()
+        {
+            // Pre-RJ window: IME may still be writing to HKLM\SOFTWARE\RealmJoin while the
+            // RJ service key is already present but DeploymentPhase is still Blank (0).
+            // Package watchers must NOT arm yet — otherwise IME's in-flight package writes
+            // would be misattributed to RJ's lifecycle.
+            using var f = new Fixture();
+            using var adapter = new RealmJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            // Service-appearance fires Detected without a phase value — must NOT arm.
+            f.Watcher.TriggerNotifyRealmJoinPresenceFromTest(phase: null);
+            Assert.False(f.Watcher.PackageWatchersArmedForTest);
+
+            // Phase = 0 (Blank) — still no arm; RJ is installed but not deploying.
+            f.Watcher.TriggerNotifyRealmJoinPresenceFromTest(phase: 0);
+            Assert.False(f.Watcher.PackageWatchersArmedForTest);
+
+            // Phase transitions to 100 (RunningFirstDeployment) — package watchers MUST arm now.
+            f.Watcher.TriggerNotifyRealmJoinPresenceFromTest(phase: 100);
+            Assert.True(f.Watcher.PackageWatchersArmedForTest);
+        }
+
+        [Fact]
+        public void Package_watchers_stay_armed_once_phase_subsequently_drops_back_below_threshold()
+        {
+            // Set-once semantics — even if a later phase reading were below threshold
+            // (defensive against partial / racy registry writes), the watcher does not
+            // disarm and re-introduce a window where post-running events could be lost.
+            using var f = new Fixture();
+            using var adapter = new RealmJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            f.Watcher.TriggerNotifyRealmJoinPresenceFromTest(phase: 100);
+            Assert.True(f.Watcher.PackageWatchersArmedForTest);
+
+            // Hypothetical regression: phase reads as 0 again — must not flip the flag.
+            f.Watcher.TriggerNotifyRealmJoinPresenceFromTest(phase: 0);
+            Assert.True(f.Watcher.PackageWatchersArmedForTest);
+        }
+
+        [Fact]
+        public void Package_watchers_arm_immediately_when_first_phase_observed_is_completed()
+        {
+            // Agent boots into a session where RJ is already at CompletedFirstDeployment
+            // (110) — e.g. pre-installed on an image, or recovered after a long absence.
+            // The first phase observation is already past threshold, so package watchers
+            // arm in that same notify pass; the historic package rows enumerated by
+            // CheckMachinePackages then surface as started+completed pairs.
+            using var f = new Fixture();
+            using var adapter = new RealmJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            f.Watcher.TriggerNotifyRealmJoinPresenceFromTest(phase: 110);
+
+            Assert.True(f.Watcher.PackageWatchersArmedForTest);
+            // Resolved fires on the same pass.
+            Assert.Contains(f.Ingress.Posted, p => p.Kind == DecisionSignalKind.RealmJoinResolved);
+        }
+
+        [Fact]
         public void Watcher_fires_PackageStarted_even_when_DisplayName_is_missing()
         {
             // Today's RJ does not populate the DisplayName value for most package subkeys

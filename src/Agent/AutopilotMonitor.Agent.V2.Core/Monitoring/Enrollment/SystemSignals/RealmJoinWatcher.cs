@@ -118,10 +118,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly HashSet<string> _hkuPackagesCompleted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private string? _hkuSid;
-        // Set once the Services\realmjoin gate fires. Until then, HKLM\SOFTWARE\RealmJoin and
-        // HKU\<sid>\SOFTWARE\RealmJoin remain unarmed — RJ presence is the prerequisite for
-        // looking at those keys at all.
-        private bool _realmJoinServiceDetected;
+        // Set once the first non-Blank DeploymentPhase (>= 100) is observed. Package watchers
+        // (HKLM\SOFTWARE\RealmJoin + HKU\<sid>\SOFTWARE\RealmJoin) only arm at that point —
+        // earlier observation would mix IME's in-flight package writes (which share the same
+        // subtree) into RJ's lifecycle.
+        private bool _packageWatchersArmed;
         private bool _disposed;
 
         public event EventHandler<RealmJoinDetectedEventArgs>? RealmJoinDetected;
@@ -151,10 +152,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         /// <see cref="DesktopArrivalDetector"/> resolves a real user owner and
         /// <see cref="UserSidResolver"/> produces the SID. Idempotent.
         /// <para>
-        /// The actual HKU watcher only arms once the <c>Services\realmjoin</c> gate fires —
-        /// either it has already fired (immediate arm) or it fires later
-        /// (deferred arm from <see cref="AttachServiceRealmjoinSubtreeWatcher"/>). On devices
-        /// without RJ the SID is recorded but no HKU watcher is ever created.
+        /// The actual HKU watcher only arms once the package-watcher arming threshold has
+        /// fired (RJ observed at <see cref="RealmJoinInfo.PhaseRunningThresholdMin"/> or
+        /// higher). Either it has already fired (immediate arm) or fires later
+        /// (deferred arm from <see cref="NotifyRealmJoinPresence"/>). On devices without RJ
+        /// or where RJ never leaves Blank, the SID is recorded but no HKU watcher is created.
         /// </para>
         /// </summary>
         public void ArmHku(string sid)
@@ -167,7 +169,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             {
                 if (_hkuSid != null) return;
                 _hkuSid = sid;
-                armNow = _realmJoinServiceDetected;
+                armNow = _packageWatchersArmed;
             }
             _logger.Info($"RealmJoinWatcher: recorded SID {sid} for HKU watching (armNow={armNow})");
 
@@ -337,7 +339,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         private void AttachServiceRealmjoinSubtreeWatcher()
         {
-            bool armUserToo;
             lock (_stateLock)
             {
                 if (_serviceRealmjoinWatcher != null) return;
@@ -361,23 +362,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 {
                     _logger.Warning($"RealmJoinWatcher: failed to attach Services\\realmjoin watcher: {ex.Message}");
                 }
-
-                _realmJoinServiceDetected = true;
-                armUserToo = _hkuSid != null;
             }
 
             // The appearance of Services\realmjoin is itself the RJ-detected signal —
-            // surface it even if Parameters\DeploymentPhase isn't populated yet.
+            // surface it even if Parameters\DeploymentPhase isn't populated yet. The package
+            // watchers (HKLM + HKU SOFTWARE\RealmJoin) intentionally stay disarmed here:
+            // NotifyRealmJoinPresence arms them once DeploymentPhase >= PhaseRunningThresholdMin
+            // is observed. Before that the same subtree may still receive in-flight IME
+            // package writes that are not part of RJ's lifecycle.
             NotifyRealmJoinPresence(phase: null);
             CheckParameters();
-
-            // RJ is now confirmed installed — arm the package watchers.
-            EnsureMachineRealmJoinStage();
-            if (armUserToo)
-            {
-                CheckUserPackages();
-                EnsureUserRealmJoinStage();
-            }
         }
 
         private void AttachMachineRealmJoinSubtreeWatcher()
@@ -469,6 +463,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             bool firePhaseChange = false;
             bool fireResolved = false;
             int? prevPhase = null;
+            bool armPackageWatchers = false;
+            bool armUserPackageWatcherToo = false;
 
             lock (_stateLock)
             {
@@ -487,6 +483,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     {
                         fireResolved = true;
                         _resolvedFired = true;
+                    }
+                    // Arm the package watchers once RJ leaves Blank (phase >= 100). Before that,
+                    // IME may still be writing to HKLM\SOFTWARE\RealmJoin during the pre-RJ
+                    // install window and we'd misattribute those rows to RJ's lifecycle.
+                    if (!_packageWatchersArmed && phase.Value >= RealmJoinInfo.PhaseRunningThresholdMin)
+                    {
+                        _packageWatchersArmed = true;
+                        armPackageWatchers = true;
+                        armUserPackageWatcherToo = _hkuSid != null;
                     }
                 }
             }
@@ -514,6 +519,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 _logger.Info($"RealmJoinWatcher: RJ resolved (phase={phase.Value})");
                 try { RealmJoinResolved?.Invoke(this, new RealmJoinResolvedEventArgs(phase.Value)); }
                 catch (Exception ex) { _logger.Error("RealmJoinWatcher: RealmJoinResolved handler threw", ex); }
+            }
+
+            if (armPackageWatchers)
+            {
+                _logger.Info($"RealmJoinWatcher: phase={phase} crossed RunningThreshold — arming package watchers (HKLM + HKU={armUserPackageWatcherToo})");
+                EnsureMachineRealmJoinStage();
+                if (armUserPackageWatcherToo)
+                {
+                    CheckUserPackages();
+                    EnsureUserRealmJoinStage();
+                }
             }
         }
 
@@ -649,5 +665,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         internal void TriggerUserPackageObservationFromTest(RealmJoinPackageSnapshot snap) =>
             MaybeFirePackageEvents(RealmJoinPackageScope.User, snap, _hkuPackagesStarted, _hkuPackagesCompleted);
+
+        internal void TriggerNotifyRealmJoinPresenceFromTest(int? phase) => NotifyRealmJoinPresence(phase);
+
+        internal bool PackageWatchersArmedForTest
+        {
+            get { lock (_stateLock) { return _packageWatchersArmed; } }
+        }
     }
 }
