@@ -140,8 +140,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
                 && p.Payload != null
                 && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
                 && et == SharedEventTypes.RealmJoinPhaseChanged);
+            // Raw ints stay for downstream filters / KQL.
             Assert.Equal("200", info.Payload!["deploymentPhase"]);
             Assert.Equal("100", info.Payload["previousPhase"]);
+            // RJ enum names alongside — UI / message readable without a lookup table.
+            Assert.Equal("RunningDeployment", info.Payload["deploymentPhaseName"]);
+            Assert.Equal("RunningFirstDeployment", info.Payload["previousPhaseName"]);
+            Assert.Contains("RunningFirstDeployment -> RunningDeployment", info.Payload[SignalPayloadKeys.Message]);
+        }
+
+        [Fact]
+        public void TriggerPhaseChangedFromTest_falls_back_to_numeric_when_phase_is_unknown_RJ_enum_value()
+        {
+            using var f = new Fixture();
+            using var adapter = new RealmJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerPhaseChangedFromTest(prev: 100, curr: 999);
+
+            var info = f.Ingress.Posted.Single(p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == SharedEventTypes.RealmJoinPhaseChanged);
+            Assert.Equal("RunningFirstDeployment", info.Payload!["previousPhaseName"]);
+            // Future / unknown RJ phase values stay observable as their numeric form rather
+            // than being collapsed to "Unknown".
+            Assert.Equal("999", info.Payload["deploymentPhaseName"]);
         }
 
         [Fact]

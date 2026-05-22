@@ -129,15 +129,22 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         private void OnPhaseChanged(object? sender, RealmJoinPhaseChangedEventArgs e)
         {
             // Phase change is observability-only: no DecisionSignalKind, just a timeline event.
+            // Both raw int (deploymentPhase / previousPhase) and human-readable name
+            // (deploymentPhaseName / previousPhaseName) flow through — int stays for downstream
+            // filters / KQL, name fields make the message + UI rows readable without a lookup.
+            var currentName = RealmJoinInfo.PhaseDisplayName(e.CurrentPhase);
+            var previousName = RealmJoinInfo.PhaseDisplayName(e.PreviousPhase);
             var data = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["deploymentPhase"] = e.CurrentPhase.ToString(),
+                ["deploymentPhaseName"] = currentName,
                 ["previousPhase"] = e.PreviousPhase.ToString(),
+                ["previousPhaseName"] = previousName,
             };
             _post.Emit(
                 eventType: SharedConstants.EventTypes.RealmJoinPhaseChanged,
                 source: SourceLabel,
-                message: $"RealmJoin DeploymentPhase {e.PreviousPhase} -> {e.CurrentPhase}",
+                message: $"RealmJoin DeploymentPhase {previousName} -> {currentName}",
                 severity: EventSeverity.Info,
                 immediateUpload: false,
                 data: data,

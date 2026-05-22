@@ -66,6 +66,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         // Resolved-phase value per the RJ enum (RealmJoin.Core.SoftwarePackaging.DeploymentPhase).
         public const int PhaseCompletedFirstDeployment = 110;
 
+        /// <summary>
+        /// Map a raw <c>DeploymentPhase</c> DWORD to its RJ-internal enum name. Mirrors
+        /// <c>RealmJoin.Core.SoftwarePackaging.DeploymentPhase</c> as documented at feature
+        /// design time. Unknown values fall back to the numeric form so future RJ-introduced
+        /// phases stay observable instead of being collapsed to "Unknown".
+        /// </summary>
+        public static string PhaseDisplayName(int phase)
+        {
+            switch (phase)
+            {
+                case 0:   return "Blank";
+                case 100: return "RunningFirstDeployment";
+                case 101: return "RunningFirstDeploymentAuto";
+                case 110: return "CompletedFirstDeployment";
+                case 200: return "RunningDeployment";
+                case 210: return "CompletedDeployment";
+                case 500: return "ManualDeployment";
+                case 600: return "NestedFromShim";
+                default:  return phase.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
         /// <summary>Canonical 64-bit install path for the RJ host executable.</summary>
         public const string RealmJoinExePath = @"C:\Program Files\RealmJoin\RealmJoin.exe";
 
