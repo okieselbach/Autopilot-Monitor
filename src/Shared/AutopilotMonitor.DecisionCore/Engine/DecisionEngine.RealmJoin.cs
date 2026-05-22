@@ -31,6 +31,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
             public const string Scope = "scope";          // "machine" | "user"
             public const string Success = "success";       // "true" | "false"
             public const string LastExitCode = "lastExitCode";
+            // Set on RealmJoinDetected by the agent adapter from RealmJoin.exe ProductVersion.
+            public const string ProductVersion = "productVersion";
         }
 
         /// <summary>
@@ -77,10 +79,15 @@ namespace AutopilotMonitor.DecisionCore.Engine
             var alreadyDetected = state.RealmJoinFacts.DetectedUtc != null;
 
             var phase = TryReadPhase(signal);
+            var productVersion = TryReadString(signal, RealmJoinPayloadKeys.ProductVersion);
             var updatedFacts = state.RealmJoinFacts.WithDetected(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
             if (phase.HasValue)
             {
                 updatedFacts = updatedFacts.WithLastPhase(phase.Value, signal.SessionSignalOrdinal);
+            }
+            if (!string.IsNullOrEmpty(productVersion))
+            {
+                updatedFacts = updatedFacts.WithProductVersion(productVersion!, signal.SessionSignalOrdinal);
             }
             builder.RealmJoinFacts = updatedFacts;
 

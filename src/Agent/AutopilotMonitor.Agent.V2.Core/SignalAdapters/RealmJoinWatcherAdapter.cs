@@ -51,7 +51,8 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         }
 
         // Test seams
-        internal void TriggerDetectedFromTest(int phase) => OnDetected(this, new RealmJoinDetectedEventArgs(phase));
+        internal void TriggerDetectedFromTest(int phase, string? productVersion = null) =>
+            OnDetected(this, new RealmJoinDetectedEventArgs(phase, productVersion));
         internal void TriggerResolvedFromTest(int phase) => OnResolved(this, new RealmJoinResolvedEventArgs(phase));
         internal void TriggerPhaseChangedFromTest(int prev, int curr) => OnPhaseChanged(this, new RealmJoinPhaseChangedEventArgs(prev, curr));
         internal void TriggerPackageStartedFromTest(string scope, RealmJoinPackageSnapshot snap) => OnPackageStarted(this, new RealmJoinPackageEventArgs(scope, snap));
@@ -63,12 +64,18 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
             {
                 [DecisionEngine.RealmJoinPayloadKeys.DeploymentPhase] = e.DeploymentPhase.ToString(),
             };
+            if (!string.IsNullOrEmpty(e.ProductVersion))
+            {
+                payload[DecisionEngine.RealmJoinPayloadKeys.ProductVersion] = e.ProductVersion!;
+            }
 
             _ingress.Post(
                 kind: DecisionSignalKind.RealmJoinDetected,
                 occurredAtUtc: _clock.UtcNow,
                 sourceOrigin: SourceLabel,
-                evidence: BuildEvidence("realmjoin-detected-v1", $"RealmJoin Parameters key observed (phase={e.DeploymentPhase})"),
+                evidence: BuildEvidence(
+                    "realmjoin-detected-v1",
+                    $"RealmJoin Parameters key observed (phase={e.DeploymentPhase}, productVersion={e.ProductVersion ?? "<unknown>"})"),
                 payload: payload);
 
             var data = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -76,10 +83,15 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 ["deploymentPhase"] = e.DeploymentPhase.ToString(),
                 ["registryKey"] = RegistryKeyHint,
             };
+            if (!string.IsNullOrEmpty(e.ProductVersion))
+            {
+                data["productVersion"] = e.ProductVersion!;
+            }
+            var versionTail = string.IsNullOrEmpty(e.ProductVersion) ? string.Empty : $", version={e.ProductVersion}";
             _post.Emit(
                 eventType: SharedConstants.EventTypes.RealmJoinDetected,
                 source: SourceLabel,
-                message: $"RealmJoin deployment detected (phase={e.DeploymentPhase})",
+                message: $"RealmJoin deployment detected (phase={e.DeploymentPhase}{versionTail})",
                 severity: EventSeverity.Info,
                 immediateUpload: true,
                 data: data,

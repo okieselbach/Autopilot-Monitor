@@ -1,7 +1,9 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using Microsoft.Win32;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
@@ -63,6 +65,39 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         // Resolved-phase value per the RJ enum (RealmJoin.Core.SoftwarePackaging.DeploymentPhase).
         public const int PhaseCompletedFirstDeployment = 110;
+
+        /// <summary>Canonical 64-bit install path for the RJ host executable.</summary>
+        public const string RealmJoinExePath = @"C:\Program Files\RealmJoin\RealmJoin.exe";
+
+        /// <summary>Defensive fallback for legacy 32-bit installs.</summary>
+        public const string RealmJoinExePathX86 = @"C:\Program Files (x86)\RealmJoin\RealmJoin.exe";
+
+        /// <summary>
+        /// Best-effort read of <c>RealmJoin.exe</c>'s ProductVersion via
+        /// <see cref="FileVersionInfo.GetVersionInfo"/>. Wrapped in a defensive try/catch so a
+        /// missing/locked/inaccessible binary returns <c>null</c> instead of throwing —
+        /// version is observability-only and must never block the detection signal. Probes the
+        /// canonical 64-bit path first, then the (x86) fallback.
+        /// </summary>
+        public static string? TryReadRealmJoinProductVersion()
+        {
+            return TryReadVersion(RealmJoinExePath) ?? TryReadVersion(RealmJoinExePathX86);
+        }
+
+        private static string? TryReadVersion(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                var info = FileVersionInfo.GetVersionInfo(path);
+                var version = info.ProductVersion;
+                return string.IsNullOrWhiteSpace(version) ? info.FileVersion : version;
+            }
+            catch
+            {
+                return null;
+            }
+        }
 
         /// <summary>
         /// Read the <c>DeploymentPhase</c> DWORD from the Parameters key. Returns null when the

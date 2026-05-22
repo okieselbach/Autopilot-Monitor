@@ -64,6 +64,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         }
 
         [Fact]
+        public void TriggerDetectedFromTest_includes_RealmJoin_ProductVersion_when_provided()
+        {
+            using var f = new Fixture();
+            using var adapter = new RealmJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerDetectedFromTest(phase: 100, productVersion: "3.5.21.0");
+
+            var decision = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.RealmJoinDetected);
+            Assert.Equal("3.5.21.0", decision.Payload![DecisionEngine.RealmJoinPayloadKeys.ProductVersion]);
+
+            var info = f.Ingress.Posted.Single(p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == SharedEventTypes.RealmJoinDetected);
+            Assert.Equal("3.5.21.0", info.Payload!["productVersion"]);
+            Assert.Contains("version=3.5.21.0", info.Payload[SignalPayloadKeys.Message]);
+        }
+
+        [Fact]
+        public void TriggerDetectedFromTest_omits_ProductVersion_when_null_or_empty()
+        {
+            using var f = new Fixture();
+            using var adapter = new RealmJoinWatcherAdapter(f.Watcher, f.Ingress, f.Clock);
+
+            adapter.TriggerDetectedFromTest(phase: 100, productVersion: null);
+
+            var decision = f.Ingress.Posted.Single(p => p.Kind == DecisionSignalKind.RealmJoinDetected);
+            Assert.False(decision.Payload!.ContainsKey(DecisionEngine.RealmJoinPayloadKeys.ProductVersion));
+
+            var info = f.Ingress.Posted.Single(p =>
+                p.Kind == DecisionSignalKind.InformationalEvent
+                && p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == SharedEventTypes.RealmJoinDetected);
+            Assert.False(info.Payload!.ContainsKey("productVersion"));
+            Assert.DoesNotContain("version=", info.Payload[SignalPayloadKeys.Message]);
+        }
+
+        [Fact]
         public void TriggerResolvedFromTest_emits_RealmJoinResolved_signal_and_informational_event()
         {
             using var f = new Fixture();

@@ -143,6 +143,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 {
                     data["realmjoinResolvedUtc"] = FormatUtc(postState.RealmJoinFacts.ResolvedUtc.Value);
                 }
+                if (postState.RealmJoinFacts.ProductVersion != null)
+                {
+                    data["realmjoinProductVersion"] = postState.RealmJoinFacts.ProductVersion.Value;
+                }
                 data["realmjoinPackages"] = BuildRealmJoinPackageSummary(postState.RealmJoinFacts.Packages);
             }
 

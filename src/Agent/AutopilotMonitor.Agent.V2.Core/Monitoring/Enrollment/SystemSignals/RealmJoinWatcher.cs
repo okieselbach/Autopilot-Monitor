@@ -12,7 +12,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
     public sealed class RealmJoinDetectedEventArgs : EventArgs
     {
         public int DeploymentPhase { get; }
-        public RealmJoinDetectedEventArgs(int deploymentPhase) { DeploymentPhase = deploymentPhase; }
+        /// <summary>
+        /// ProductVersion read from <c>C:\Program Files\RealmJoin\RealmJoin.exe</c>
+        /// (or the x86 fallback). <c>null</c> when the binary is missing, locked, or read
+        /// fails — version is observability-only and never blocks detection.
+        /// </summary>
+        public string? ProductVersion { get; }
+
+        public RealmJoinDetectedEventArgs(int deploymentPhase, string? productVersion = null)
+        {
+            DeploymentPhase = deploymentPhase;
+            ProductVersion = productVersion;
+        }
     }
 
     public sealed class RealmJoinResolvedEventArgs : EventArgs
@@ -483,8 +494,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             if (fireDetected)
             {
                 var initial = phase ?? 0;
-                _logger.Info($"RealmJoinWatcher: RJ detected (phase={initial})");
-                try { RealmJoinDetected?.Invoke(this, new RealmJoinDetectedEventArgs(initial)); }
+                // Read RJ ProductVersion best-effort (fail-soft to null) ONLY when the Detected
+                // event actually fires — single read per session lifetime keeps any potential
+                // file-system cost to a single hit.
+                var productVersion = RealmJoinInfo.TryReadRealmJoinProductVersion();
+                _logger.Info($"RealmJoinWatcher: RJ detected (phase={initial}, productVersion={productVersion ?? "<unknown>"})");
+                try { RealmJoinDetected?.Invoke(this, new RealmJoinDetectedEventArgs(initial, productVersion)); }
                 catch (Exception ex) { _logger.Error("RealmJoinWatcher: RealmJoinDetected handler threw", ex); }
             }
 
