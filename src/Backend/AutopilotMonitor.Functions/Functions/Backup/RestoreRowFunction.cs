@@ -136,6 +136,7 @@ namespace AutopilotMonitor.Functions.Functions.Backup
             "RowChangedSinceValidation"     => HttpStatusCode.Conflict,
             "CurrentRowChanged"             => HttpStatusCode.Conflict,
             "MaintenanceInProgress"         => HttpStatusCode.Conflict,
+            "MaintenanceLeaseLost"          => HttpStatusCode.Conflict,
             _                               => HttpStatusCode.BadRequest,
         };
 

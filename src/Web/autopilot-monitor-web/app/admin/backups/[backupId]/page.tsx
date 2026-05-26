@@ -263,7 +263,10 @@ function RestoreInputRow({
       <button
         type="button"
         onClick={() => onSubmit(tableName, pk, rk)}
-        disabled={disabled || !tableName || pk === "" || rk === ""}
+        // Backend contract (RestoreTablePreflightValidator) allows empty PK/RK
+        // — only null is rejected. Match that here so an Azure Table row with
+        // a literal empty key (legal per spec) can be previewed/restored.
+        disabled={disabled || !tableName}
         className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm rounded-md transition-colors"
       >
         Preview restore

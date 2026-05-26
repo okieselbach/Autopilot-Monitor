@@ -103,6 +103,23 @@ public class RestoreTablePreflightValidatorTests
     }
 
     [Fact]
+    public void ValidateRowRequest_accepts_empty_partition_and_row_keys()
+    {
+        // Azure Tables permits empty-string PK/RK; the contract explicitly says
+        // "may be empty string but not null". Lock this so a future tightening of
+        // the validator doesn't silently break legal Azure Tables keys (UI in
+        // [backupId]/page.tsx mirrors this — Codex finding 2).
+        var req = new RestoreRowRequest
+        {
+            TableName = Constants.TableNames.AnalyzeRules,
+            PartitionKey = "",
+            RowKey = "",
+            Mode = RestoreRowMode.Preview,
+        };
+        Sut.ValidateRowRequest("backup1", req);   // no throw
+    }
+
+    [Fact]
     public void ValidateRowRequest_commit_requires_ifSha256()
     {
         var req = new RestoreRowRequest

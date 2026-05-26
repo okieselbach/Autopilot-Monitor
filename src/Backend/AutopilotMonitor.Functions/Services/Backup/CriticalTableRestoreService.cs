@@ -255,6 +255,20 @@ namespace AutopilotMonitor.Functions.Services.Backup
                     };
                 }
             }
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+            {
+                // The renewal loop cancelled handlerCts after a failed RenewAsync — the
+                // external client did NOT go away (ct still alive), so this is a server-side
+                // lease loss, not a client abort. Map to a stable 409 so the UI can prompt
+                // the operator to retry (the row-level write may not even have started).
+                // Without this guard the storage SDK's OperationCanceledException bubbles
+                // up to the HTTP layer's generic catch and renders as a 500.
+                var reason = holder.RenewalFailureReason ?? "handler cancelled without explicit renewal failure";
+                throw new BackupTerminalException(
+                    "MaintenanceLeaseLost",
+                    $"maintenance lease lost during commit — retry shortly ({reason})",
+                    ex);
+            }
             finally
             {
                 // DisposeAsync stops the renewal loop deterministically before releasing.
