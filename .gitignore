@@ -132,3 +132,9 @@ db-backups/
 plans/REFACTOR_AGENT_V2.md
 .claude/scheduled_tasks.lock
 .claude/plans/health-script-remediation-fix.md
+
+# Operator-local Azure setup helper — applies lifecycle policy + container
+# creation against a live storage account. Not portable across environments
+# (storage account name, resource group are operator-specific) so it stays
+# out of the repo. Each operator keeps their own copy.
+scripts/Backup/setup-backup-container.ps1
