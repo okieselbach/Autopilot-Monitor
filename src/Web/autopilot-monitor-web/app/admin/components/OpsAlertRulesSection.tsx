@@ -37,6 +37,9 @@ const OPS_EVENT_TYPES: Record<string, string[]> = {
     "CriticalTableBackupPartial",
     "CriticalTableBackupFailed",
     "CriticalTableBackupSkippedLocked",
+    // PR2: GA restored a single row from a backup. Warning severity so operators
+    // can wire a Telegram rule and see the audit in near-real-time.
+    "BackupRowRestored",
   ],
   Security: [
     "DeviceBlocked",

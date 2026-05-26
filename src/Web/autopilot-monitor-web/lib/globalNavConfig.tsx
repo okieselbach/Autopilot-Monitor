@@ -265,6 +265,7 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
           { id: "ga-maintenance", label: "Maintenance", href: "/admin/ops" },
           { id: "ga-session-cleanup", label: "Session Cleanup", href: "/admin/ops/session-cleanup" },
           { id: "ga-customs-archive", label: "Customs Archive", href: "/admin/customs-archive" },
+          { id: "ga-backups", label: "Backups", href: "/admin/backups" },
         ],
       },
       {

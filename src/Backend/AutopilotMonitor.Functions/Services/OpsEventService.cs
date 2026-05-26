@@ -284,6 +284,29 @@ namespace AutopilotMonitor.Functions.Services
                 null, "System.Maintenance",
                 new { reason, triggeredBy });
 
+        /// <summary>
+        /// A GA operator restored a single row from a backup (plan §PR2). Warning-level
+        /// because the restore overwrote (or created) live data via ETag-CAS — operators
+        /// frequently want a Telegram ping for this event so a parallel admin sees the
+        /// audit trail in near-real-time. Payload carries the canonical
+        /// <c>{ container, blobName }</c> only — no SAS URL, per plan §Medium #6.
+        /// </summary>
+        public Task RecordBackupRowRestoredAsync(
+            string backupId, string tableName, string partitionKey, string rowKey, string actor, string outcome)
+            => WriteAsync(OpsEventCategory.Maintenance, "BackupRowRestored", OpsEventSeverity.Warning,
+                $"Critical-table row restored: {tableName} (pk='{partitionKey}', rk='{rowKey}') from backup {backupId} by {actor} → {outcome}",
+                null, actor,
+                new
+                {
+                    backupId,
+                    tableName,
+                    partitionKey,
+                    rowKey,
+                    outcome,
+                    container = AutopilotMonitor.Shared.Constants.BlobContainers.CriticalTableBackups,
+                    blobName = $"{backupId}/{tableName}.ndjson",
+                });
+
         // ── Tenant ─────────────────────────────────────────────────────────────
 
         /// <summary>

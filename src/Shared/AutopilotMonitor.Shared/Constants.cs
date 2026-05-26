@@ -221,6 +221,7 @@ namespace AutopilotMonitor.Shared
             public const string GlobalBackupsList        = "/api/global/backups";                // GET  → list of backups
             public const string GlobalBackupsManifest    = "/api/global/backups/{backupId}";     // GET  → manifest detail
             public const string GlobalBackupsJobStatus   = "/api/global/backups/jobs/{jobId}";   // GET  → BackupJobStatus
+            public const string GlobalBackupsRestoreRow  = "/api/global/backups/{backupId}/restore-row"; // POST → preview|commit single row
         }
 
         // -----------------------------------------------------------------------

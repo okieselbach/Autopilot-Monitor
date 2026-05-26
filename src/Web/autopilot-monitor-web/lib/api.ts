@@ -496,6 +496,18 @@ export const api = {
     planTiers: () => `${API_BASE_URL}/api/global/config/plan-tiers`,
   },
 
+  // ── Critical-Table Backup (PR1 list/manifest/trigger + PR2 restore-row) ───
+  backups: {
+    list: () => `${API_BASE_URL}/api/global/backups`,
+    manifest: (backupId: string) =>
+      `${API_BASE_URL}/api/global/backups/${encodeURIComponent(backupId)}`,
+    trigger: () => `${API_BASE_URL}/api/global/backups/trigger`,
+    jobStatus: (jobId: string) =>
+      `${API_BASE_URL}/api/global/backups/jobs/${encodeURIComponent(jobId)}`,
+    restoreRow: (backupId: string) =>
+      `${API_BASE_URL}/api/global/backups/${encodeURIComponent(backupId)}/restore-row`,
+  },
+
   // ── Maintenance ───────────────────────────────────────────────────────────
   maintenance: {
     trigger: (date?: string) =>
@@ -555,4 +567,114 @@ export interface CustomsArchiveFullEntry extends CustomsArchiveEntrySummary {
   entityJson: string;
   historyRowKey: string;
   archivedBy: string;
+}
+
+// ── Backups response types (PR1 + PR2) ────────────────────────────────────
+
+export interface BackupListResponse {
+  backupIds: string[];
+}
+
+export type BackupTableStatus = "Ok" | "Empty" | "Skipped" | "Failed";
+export type BackupOutcome = "Success" | "Partial";
+
+export interface BackupTableEntry {
+  tableName: string;
+  status: BackupTableStatus;
+  rowCount: number;
+  byteSize: number;
+  sha256Hex: string;
+  blobName: string;
+  errorMessage?: string | null;
+}
+
+export interface BackupManifest {
+  schemaVersion: number;
+  backupId: string;
+  startedAtUtc: string;
+  completedAtUtc: string;
+  triggeredBy: string;
+  outcome: BackupOutcome;
+  tables: BackupTableEntry[];
+}
+
+export type BackupJobKind = "Backup" | "RestoreTable";
+export type BackupJobState =
+  | "Queued"
+  | "Running"
+  | "Completed"
+  | "Failed"
+  | "Skipped"
+  | "BlockedTerminal";
+
+export interface BackupJobStatus {
+  jobId: string;
+  kind: BackupJobKind;
+  state: BackupJobState;
+  requestedBy: string;
+  queuedAtUtc: string;
+  startedAtUtc?: string | null;
+  completedAtUtc?: string | null;
+  lastHeartbeatUtc: string;
+  backupId?: string | null;
+  sourceBackupId?: string | null;
+  tableName?: string | null;
+  strategy?: string | null;
+  progress?: string | null;
+  error?: string | null;
+  backupOutcome?: BackupOutcome | null;
+}
+
+export interface BackupTriggerResponse {
+  jobId: string;
+  statusUrl: string;
+}
+
+// ── PR2: single-row restore ───────────────────────────────────────────────
+
+export type RestoreRowMode = "Preview" | "Commit";
+export type RestoreRowDiffKind = "Added" | "Removed" | "Changed" | "Unchanged";
+export type RestoreRowCommitOutcome = "Inserted" | "Replaced";
+
+export interface RestoreRowPropertySnapshot {
+  edmType: string;
+  // JsonElement on the wire — string | number | boolean | null | object | array
+  value: unknown;
+}
+
+export interface RestoreRowPropertyDiff {
+  name: string;
+  kind: RestoreRowDiffKind;
+  backup?: RestoreRowPropertySnapshot | null;
+  current?: RestoreRowPropertySnapshot | null;
+}
+
+export interface RestoreRowPreviewResponse {
+  backupId: string;
+  tableName: string;
+  partitionKey: string;
+  rowKey: string;
+  backupProperties: Record<string, RestoreRowPropertySnapshot>;
+  currentProperties?: Record<string, RestoreRowPropertySnapshot> | null;
+  diff: RestoreRowPropertyDiff[];
+  rowSha256: string;
+  currentETag?: string | null;
+  isAuthTable: boolean;
+}
+
+export interface RestoreRowCommitResponse {
+  backupId: string;
+  tableName: string;
+  partitionKey: string;
+  rowKey: string;
+  outcome: RestoreRowCommitOutcome;
+}
+
+export interface RestoreRowRequestBody {
+  tableName: string;
+  partitionKey: string;
+  rowKey: string;
+  mode: RestoreRowMode;
+  ifSha256?: string;
+  ifCurrentETag?: string | null;
 }

@@ -174,6 +174,57 @@ namespace AutopilotMonitor.Functions.Services.Backup
         }
 
         /// <summary>
+        /// Opens the per-table NDJSON blob for read with a pinned ETag so the SHA
+        /// hash + subsequent line scan operate on the exact same blob version (plan
+        /// §Wave11 #4 + Wave12 #3). Workflow:
+        /// <list type="number">
+        ///   <item>GetProperties → pin ETag</item>
+        ///   <item>OpenReadAsync with <c>IfMatch=ETag</c>; 412 throws
+        ///       <see cref="BackupTerminalException"/> with code <c>BlobChangedSinceValidation</c></item>
+        /// </list>
+        /// Caller is responsible for disposing the returned stream. Returns
+        /// <c>null</c> if the blob does not exist (404).
+        /// </summary>
+        public virtual async Task<(Stream Stream, ETag ETag)?> OpenNdjsonReadAsync(
+            string backupId,
+            string tableName,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrEmpty(backupId)) throw new ArgumentException("backupId required", nameof(backupId));
+            if (string.IsNullOrEmpty(tableName)) throw new ArgumentException("tableName required", nameof(tableName));
+
+            await EnsureContainerAsync(ct).ConfigureAwait(false);
+            var blob = GetContainer().GetBlobClient(BuildNdjsonBlobName(backupId, tableName));
+
+            BlobProperties props;
+            try
+            {
+                props = (await blob.GetPropertiesAsync(cancellationToken: ct).ConfigureAwait(false)).Value;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return null;
+            }
+
+            var etag = props.ETag;
+            try
+            {
+                var stream = await blob.OpenReadAsync(new BlobOpenReadOptions(allowModifications: false)
+                {
+                    Conditions = new BlobRequestConditions { IfMatch = etag },
+                }, ct).ConfigureAwait(false);
+                return (stream, etag);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 412)
+            {
+                throw new BackupTerminalException(
+                    "BlobChangedSinceValidation",
+                    $"NDJSON blob '{BuildNdjsonBlobName(backupId, tableName)}' changed between GetProperties and OpenRead — refusing to read a half-version",
+                    ex);
+            }
+        }
+
+        /// <summary>
         /// Lists every backupId whose <c>manifest.json</c> exists — i.e. every run that
         /// reached the durability anchor (plan §3 "manifest is the backup"). Orphan
         /// prefixes (NDJSON written but manifest never followed) are deliberately

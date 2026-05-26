@@ -288,11 +288,14 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "versions/block/{encodedPattern}", EndpointPolicy.GlobalAdminOnly),
         new("POST",   "maintenance/trigger",        EndpointPolicy.GlobalAdminOnly),
 
-        // ── Critical-Table Backup (plan §PR1) ──────────────────────────────────
+        // ── Critical-Table Backup (plan §PR1+§PR2) ─────────────────────────────
         new("POST",   "global/backups/trigger",       EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/backups",               EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/backups/{backupId}",    EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/backups/jobs/{jobId}",  EndpointPolicy.GlobalAdminOnly),
+        // PR2: single-row preview + commit. PartitionKey + RowKey live in the body
+        // (Azure Tables permits / + % in PK/RK; the route wouldn't carry them safely).
+        new("POST",   "global/backups/{backupId}/restore-row", EndpointPolicy.GlobalAdminOnly),
 
         // ── Tenant Offboarding Customs Archive (PR3.B) ─────────────────────────
         // Snapshot of each tenant's custom GatherRules / AnalyzeRules / ImeLogPatterns

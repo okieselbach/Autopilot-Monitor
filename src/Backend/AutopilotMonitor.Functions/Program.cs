@@ -295,6 +295,11 @@ builder.Services.AddSingleton<
 // pattern per plan §Wave4 #1 — avoids the QueueTrigger-specific connection app-setting).
 builder.Services.AddHostedService<
     AutopilotMonitor.Functions.Services.Backup.Queue.CriticalTableBackupQueueWorker>();
+// PR2: single-row restore. Both validators are pure / I/O-only; the restore
+// service is stateless (lease lifecycle is owned per-call). Singleton is safe.
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Backup.RestoreTablePreflightValidator>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Backup.BackupRestoreInputValidator>();
+builder.Services.AddSingleton<AutopilotMonitor.Functions.Services.Backup.CriticalTableRestoreService>();
 
 // Programmatic SignalR push for background tasks (rule engine, vulnerability correlation)
 builder.Services.AddSingleton<SignalRNotificationService>();
