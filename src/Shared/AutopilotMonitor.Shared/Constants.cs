@@ -549,6 +549,13 @@ namespace AutopilotMonitor.Shared
             // Daily cleanup function evicts entries older than the TTL.
             public const string ScriptNameCache = "ScriptNameCache";
 
+            // Critical-table backup/restore job tracking (plan §PR1). Single-partition
+            // PK="BackupJobs", RK={jobId}. Persists per-job state machine
+            // (Queued / Running / Completed / Failed / Skipped / BlockedTerminal),
+            // backupOutcome (Success / Partial) for Kind=Backup jobs, and lastHeartbeatUtc
+            // for the watchdog (5min staleness threshold for Running, 60min for Queued).
+            public const string BackupJobs = "BackupJobs";
+
             /// <summary>
             /// Returns all table names for initialization
             /// </summary>
@@ -607,6 +614,7 @@ namespace AutopilotMonitor.Shared
                 OffboardingAudit,
                 TenantOffboardingCustomsArchive,
                 ScriptNameCache,
+                BackupJobs,
             };
         }
 

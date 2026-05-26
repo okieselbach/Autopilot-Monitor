@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Azure.Data.Tables;
 using AutopilotMonitor.Functions.Security;
+using AutopilotMonitor.Functions.Services.Tables;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models.Deletion;
 using Microsoft.Extensions.Logging;
@@ -30,12 +31,6 @@ namespace AutopilotMonitor.Functions.Services.Deletion
     {
         private readonly ISessionDeletionInventoryReader _reader;
         private readonly ILogger<DeletionManifestBuilder> _logger;
-
-        // Azure Tables system properties that should not appear in the per-row Props bag.
-        private static readonly HashSet<string> SystemPropertyNames = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "PartitionKey", "RowKey", "Timestamp", "odata.etag",
-        };
 
         // Per-row dump for the rare 0-row table is allowed; per-class step is always emitted.
         private static readonly JsonSerializerOptions HashSerializerOptions = new JsonSerializerOptions
@@ -152,7 +147,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             var rows = new List<DeletionRowDump>();
             await foreach (var entity in _reader.QueryAsync(table, filter, cancellationToken))
             {
-                rows.Add(MapEntityToDump(entity));
+                rows.Add(TableEntityDumpConverter.MapEntityToDump(entity));
             }
             manifest.Steps.Add(new DeletionStep
             {
@@ -173,7 +168,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             var rows = new List<DeletionRowDump>();
             await foreach (var entity in _reader.QueryAsync(table, filter, cancellationToken))
             {
-                rows.Add(MapEntityToDump(entity));
+                rows.Add(TableEntityDumpConverter.MapEntityToDump(entity));
             }
             manifest.Steps.Add(new DeletionStep
             {
@@ -194,7 +189,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             var rows = new List<DeletionRowDump>();
             if (entity != null)
             {
-                rows.Add(MapEntityToDump(entity));
+                rows.Add(TableEntityDumpConverter.MapEntityToDump(entity));
             }
             manifest.Steps.Add(new DeletionStep
             {
@@ -219,7 +214,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             {
                 if (entity.RowKey != null && entity.RowKey.EndsWith(suffix, StringComparison.Ordinal))
                 {
-                    rows.Add(MapEntityToDump(entity));
+                    rows.Add(TableEntityDumpConverter.MapEntityToDump(entity));
                 }
             }
             manifest.Steps.Add(new DeletionStep
@@ -244,7 +239,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             {
                 if (string.Equals(entity.RowKey, sessionId, StringComparison.Ordinal))
                 {
-                    rows.Add(MapEntityToDump(entity));
+                    rows.Add(TableEntityDumpConverter.MapEntityToDump(entity));
                 }
             }
             manifest.Steps.Add(new DeletionStep
@@ -269,7 +264,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             var rows = new List<DeletionRowDump>();
             await foreach (var entity in _reader.QueryAsync(table, filter, cancellationToken))
             {
-                rows.Add(MapEntityToDump(entity));
+                rows.Add(TableEntityDumpConverter.MapEntityToDump(entity));
             }
             manifest.Steps.Add(new DeletionStep
             {
@@ -303,7 +298,7 @@ namespace AutopilotMonitor.Functions.Services.Deletion
                 Table = Constants.TableNames.SessionInventoryContributions,
                 Class = DeletionStepClass.PkRkExact,
                 RowCount = 1,
-                Rows = new List<DeletionRowDump> { MapEntityToDump(contributionsRow) },
+                Rows = new List<DeletionRowDump> { TableEntityDumpConverter.MapEntityToDump(contributionsRow) },
             });
         }
 
@@ -313,11 +308,11 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             // §5 PR4 mandates SessionsIndex deleted FIRST so UI listings drop the session before the canonical row goes.
             if (sessionsIndexRow != null)
             {
-                rows.Add(MapEntityToDump(sessionsIndexRow));
+                rows.Add(TableEntityDumpConverter.MapEntityToDump(sessionsIndexRow));
             }
             if (sessionRow != null)
             {
-                rows.Add(MapEntityToDump(sessionRow));
+                rows.Add(TableEntityDumpConverter.MapEntityToDump(sessionRow));
             }
             manifest.Steps.Add(new DeletionStep
             {
@@ -360,77 +355,9 @@ namespace AutopilotMonitor.Functions.Services.Deletion
             return null;
         }
 
-        private static DeletionRowDump MapEntityToDump(TableEntity entity)
-        {
-            var props = new Dictionary<string, DeletionPropValue>(entity.Count, StringComparer.Ordinal);
-            foreach (var key in entity.Keys)
-            {
-                if (SystemPropertyNames.Contains(key)) continue;
-                props[key] = ConvertToPropValue(entity[key]);
-            }
-            return new DeletionRowDump
-            {
-                Pk = entity.PartitionKey ?? string.Empty,
-                Rk = entity.RowKey ?? string.Empty,
-                Etag = entity.ETag.ToString(),
-                Props = props,
-            };
-        }
-
-        /// <summary>
-        /// Converts a single TableEntity property value into an EDM-tagged
-        /// <see cref="DeletionPropValue"/>. Restore reads <see cref="DeletionPropValue.EdmType"/>
-        /// to choose the right strongly-typed entity setter — without the tag, a DateTime
-        /// timestamp coming out of JSON would be re-inserted as a plain string and the Azure
-        /// Tables column would silently change EDM type.
-        /// </summary>
-        private static DeletionPropValue ConvertToPropValue(object? value)
-        {
-            // null → null JsonElement, EdmType=String (Azure Tables has no first-class null type).
-            if (value == null)
-            {
-                return new DeletionPropValue
-                {
-                    EdmType = DeletionPropEdmType.String,
-                    Value = ParseJson("null"),
-                };
-            }
-
-            switch (value)
-            {
-                case string s:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.String, Value = ParseJson(JsonSerializer.Serialize(s)) };
-                case bool b:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.Boolean, Value = ParseJson(b ? "true" : "false") };
-                case int i:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.Int32, Value = ParseJson(i.ToString(System.Globalization.CultureInfo.InvariantCulture)) };
-                case long l:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.Int64, Value = ParseJson(l.ToString(System.Globalization.CultureInfo.InvariantCulture)) };
-                case double d:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.Double, Value = ParseJson(JsonSerializer.Serialize(d)) };
-                case System.Guid g:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.Guid, Value = ParseJson(JsonSerializer.Serialize(g.ToString("D"))) };
-                case byte[] bytes:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.Binary, Value = ParseJson(JsonSerializer.Serialize(Convert.ToBase64String(bytes))) };
-                case DateTimeOffset dto:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.DateTime, Value = ParseJson(JsonSerializer.Serialize(dto.UtcDateTime.ToString("o", System.Globalization.CultureInfo.InvariantCulture))) };
-                case DateTime dt:
-                    return new DeletionPropValue { EdmType = DeletionPropEdmType.DateTime, Value = ParseJson(JsonSerializer.Serialize(dt.ToUniversalTime().ToString("o", System.Globalization.CultureInfo.InvariantCulture))) };
-                default:
-                    // Unknown type — fall back to round-tripping through JSON as a string.
-                    return new DeletionPropValue
-                    {
-                        EdmType = DeletionPropEdmType.String,
-                        Value = ParseJson(JsonSerializer.Serialize(value.ToString() ?? string.Empty)),
-                    };
-            }
-        }
-
-        private static JsonElement ParseJson(string json)
-        {
-            using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.Clone();
-        }
+        // MapEntityToDump / ConvertToPropValue / ParseJson lifted to TableEntityDumpConverter
+        // (Services/Tables) so the critical-table backup pipeline can share the exact same
+        // EDM-typed row-dump representation. No behavior change.
 
         /// <summary>
         /// Decodes the side-row's <c>SoftwareKeysJson</c> (raw JSON or gzip+Base64 per §17.7) into

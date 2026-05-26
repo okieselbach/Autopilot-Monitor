@@ -157,7 +157,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Symmetric inverse of <see cref="Services.Deletion.DeletionManifestBuilder.ConvertToPropValue"/>:
+        /// Symmetric inverse of <see cref="Services.Tables.TableEntityDumpConverter.ConvertToPropValue"/>:
         /// parses the EDM-tagged <see cref="DeletionPropValue"/> back into a typed .NET object
         /// suitable for assignment into a <see cref="TableEntity"/>'s dictionary. The SDK then
         /// re-serializes with the original column type on the wire.
@@ -248,6 +248,50 @@ namespace AutopilotMonitor.Functions.Services
         // Azure Tables batch transactions cap at 100 actions per submission, all sharing a
         // PartitionKey. Mirrors the const in the deletion partial.
         private const int RestoreBatchActionLimit = 100;
+
+        /// <summary>
+        /// Bulk-restore helper for the critical-table backup feature (plan §PR0). Symmetric to
+        /// <see cref="RestoreRowsByExactKeysInBatchesAsync"/> but uses
+        /// <see cref="TableTransactionActionType.UpsertReplace"/> instead of <c>Add</c>:
+        /// existing rows are overwritten, missing rows are inserted, no 409 fallback path is
+        /// needed. This is the only safe primitive for "restore a row even if a corrupt version
+        /// is currently live" — the cascade-delete restore (Add-only with 409-skip) would leave
+        /// the corrupt live row in place.
+        /// <para>
+        /// Fail-loud per memory <c>feedback_storage_helpers_fail_soft</c>: storage errors propagate.
+        /// </para>
+        /// </summary>
+        public virtual async Task<int> UpsertRowsByExactKeysInBatchesAsync(
+            string tableName,
+            IReadOnlyList<DeletionRowDump> rows,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(tableName)) throw new ArgumentException("tableName is required", nameof(tableName));
+            if (rows == null) throw new ArgumentNullException(nameof(rows));
+            if (rows.Count == 0) return 0;
+
+            var tableClient = _tableServiceClient.GetTableClient(tableName);
+            var upserted = 0;
+
+            foreach (var group in rows.GroupBy(r => r.Pk, StringComparer.Ordinal))
+            {
+                var rowsInGroup = group.ToList();
+                for (var i = 0; i < rowsInGroup.Count; i += RestoreBatchActionLimit)
+                {
+                    var chunk = rowsInGroup.Skip(i).Take(RestoreBatchActionLimit).ToList();
+                    var actions = chunk
+                        .Select(dump => new TableTransactionAction(
+                            TableTransactionActionType.UpsertReplace,
+                            ConvertDumpToEntity(dump, tableName)))
+                        .ToList();
+
+                    await tableClient.SubmitTransactionAsync(actions, cancellationToken);
+                    upserted += chunk.Count;
+                }
+            }
+
+            return upserted;
+        }
 
         /// <summary>
         /// True when the Azure SDK exception encodes a "row already exists" outcome — the only
