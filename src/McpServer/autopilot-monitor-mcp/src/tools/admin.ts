@@ -40,6 +40,27 @@ export function extractTenantList(data: unknown): Record<string, unknown>[] {
   });
 }
 
+/**
+ * Keep only a comma-separated subset of fields from already-safe tenant rows.
+ * `tenantId` is always retained — the tool's whole purpose is discovering tenant
+ * IDs for other tools. Pagination-independent (operates on whatever page came
+ * back), so it never interacts with the backend cursor.
+ */
+export function projectTenantFields(
+  rows: Record<string, unknown>[],
+  fields: string | undefined,
+): Record<string, unknown>[] {
+  if (!fields) return rows;
+  const keep = new Set(
+    fields.split(',').map((f) => f.trim()).filter(Boolean).concat(['tenantId']),
+  );
+  return rows.map((row) => {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(row)) if (keep.has(key)) out[key] = row[key];
+    return out;
+  });
+}
+
 export function registerAdminTools(server: McpServer): void {
   // Tool 11: get_api_usage
   server.tool(
@@ -249,16 +270,36 @@ export function registerAdminTools(server: McpServer): void {
   // them down to TENANT_SAFE_FIELDS before anything reaches the model.
   server.tool(
     'list_tenants',
-    'List all onboarded tenants with their identity, plan tier, and lifecycle status (onboarded/disabled dates). ' +
+    'List onboarded tenants with their identity, plan tier, and lifecycle status (onboarded/disabled dates). ' +
     'Global Admin only. Use this to discover tenant IDs for the tenantId parameter of other tools when running ' +
-    'cross-tenant investigations. Returns only non-sensitive fields — secrets (webhook URLs, SAS URLs) are stripped.',
-    {},
+    'cross-tenant investigations. Returns only non-sensitive fields — secrets (webhook URLs, SAS URLs) are stripped ' +
+    'server-side. Tenants are sorted by tenantId and returned in pages (default 100). For lean ID discovery pass ' +
+    '`fields=tenantId,domainName`. ' +
+    'Pagination: when "nextLink" is present, more tenants are available — call again and pass that whole string ' +
+    'back as "continuation". Stop when nextLink is absent.',
+    {
+      fields: z.string().optional()
+        .describe('Comma-separated subset of safe fields to return (e.g. "tenantId,domainName" for lean ID discovery). ' +
+                  'tenantId is always included. Default: all safe fields. Trims the returned page client-side.'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(100)
+        .describe('Page size (1-1000, default 100). Tenants are sorted by tenantId; follow nextLink to fetch more.'),
+      continuation: z.string().optional()
+        .describe('Either the opaque "continuation" value from a prior response or the full nextLink path — both are accepted; the latter is preferred so backend-echoed query params round-trip correctly.'),
+    },
     READ_ONLY,
     async (args) => withToolTelemetry('list_tenants', async () => {
       try {
-        const data = await apiFetch('/api/config/all');
-        const tenants = extractTenantList(data);
-        return toolResultText({ count: tenants.length, tenants }, MAX_RESULT_SIZE_CHARS.small);
+        const { fields, pageSize, continuation } = args;
+        // /api/config/all supports opt-in pagination: passing pageSize switches the
+        // backend from its legacy unpaginated bare array to a secret-stripped
+        // { count, tenants, nextLink } envelope. extractTenantList re-applies the
+        // keep-list as defense-in-depth; projectTenantFields honours an optional fields= trim.
+        const path = followNextLink('/api/config/all', { pageSize }, continuation);
+        const data = await apiFetch(path) as { count?: number; tenants?: unknown[]; nextLink?: string | null };
+        const tenants = projectTenantFields(extractTenantList({ tenants: data?.tenants ?? [] }), fields);
+        return toolResultText(
+          { count: tenants.length, tenants, nextLink: data?.nextLink ?? null },
+          MAX_RESULT_SIZE_CHARS.adminStream);
       } catch (error: unknown) {
         return toolError('list_tenants', args, error);
       }

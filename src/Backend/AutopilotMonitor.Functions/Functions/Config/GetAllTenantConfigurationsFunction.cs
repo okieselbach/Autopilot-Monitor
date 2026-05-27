@@ -1,8 +1,12 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using System.Web;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -31,13 +35,80 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
                 string userIdentifier = TenantHelper.GetUserIdentifier(req);
 
-                _logger.LogInformation($"GetAllTenantConfigurations by Global Admin {userIdentifier}");
+                var query = HttpUtility.ParseQueryString(req.Url.Query ?? string.Empty);
+                var parsed = TenantConfigPagination.ParseQuery(query);
+                if (parsed.Error != null)
+                {
+                    var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                    await bad.WriteAsJsonAsync(new { error = parsed.Error });
+                    return bad;
+                }
 
-                var configurations = await _configService.GetAllConfigurationsAsync();
+                // Legacy/default mode: no pageSize → unpaginated bare full-config array.
+                // Web consumers (tenant selectors + admin config editor) depend on this shape.
+                if (parsed.PageSize == null)
+                {
+                    _logger.LogInformation($"GetAllTenantConfigurations (full) by Global Admin {userIdentifier}");
+                    var configurations = await _configService.GetAllConfigurationsAsync();
 
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(configurations);
-                return response;
+                    var response = req.CreateResponse(HttpStatusCode.OK);
+                    await response.WriteAsJsonAsync(configurations);
+                    return response;
+                }
+
+                // Paginated mode: opt-in via ?pageSize=. Returns a secret-stripped projection
+                // so tenant secrets (webhook/SAS/branding URLs, allow-lists) never leave the
+                // backend. Consumed by the MCP list_tenants tool.
+                _logger.LogInformation($"GetAllTenantConfigurations (page, size {parsed.PageSize}) by Global Admin {userIdentifier}");
+
+                var callerTenantId = TenantHelper.GetTenantId(req);
+
+                string? azureToken = null;
+                if (parsed.Continuation != null)
+                {
+                    if (!TenantConfigPagination.TryAcceptContinuation(
+                            parsed.Continuation, callerTenantId, out azureToken, out var rejectReason))
+                    {
+                        _logger.LogWarning("GetAllTenantConfigurations: continuation rejected ({Reason})", rejectReason);
+                        var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+                        await bad.WriteAsJsonAsync(new
+                        {
+                            error = $"Invalid continuation token ({rejectReason}). Restart pagination from the first page.",
+                        });
+                        return bad;
+                    }
+                }
+
+                var page = await _configService.GetConfigurationsPageAsync(parsed.PageSize.Value, azureToken);
+
+                // Keep-list projection — only non-sensitive identity / lifecycle / plan fields.
+                var tenants = page.Items.Select(c => new
+                {
+                    tenantId = c.TenantId,
+                    domainName = c.DomainName,
+                    planTier = c.PlanTier,
+                    disabled = c.Disabled,
+                    disabledReason = c.DisabledReason,
+                    onboardedAt = c.OnboardedAt,
+                    onboardedBy = c.OnboardedBy,
+                    lastUpdated = c.LastUpdated,
+                    dataRetentionDays = c.DataRetentionDays,
+                }).ToList();
+
+                string? nextLink = null;
+                if (!string.IsNullOrEmpty(page.NextRawToken))
+                {
+                    var fp = TenantConfigPagination.Fingerprint(callerTenantId);
+                    var wireToken = ContinuationToken.Encode(page.NextRawToken!, callerTenantId, fp);
+                    nextLink = TenantConfigPagination.BuildNextLink(parsed.PageSize.Value, wireToken);
+                }
+
+                return await req.OkAsync(new
+                {
+                    count = tenants.Count,
+                    tenants,
+                    nextLink,
+                });
             }
             catch (Exception ex)
             {
