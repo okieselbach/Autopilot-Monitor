@@ -366,13 +366,13 @@ export default function SessionDetailPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow">
-        <div className="py-6 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+        <div className="py-6 px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-y-3 gap-x-4">
           <div>
             <h1 className="text-2xl font-normal text-gray-900">
               Session Details
             </h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {session?.diagnosticsBlobName && (
               <button
                 onClick={async () => {

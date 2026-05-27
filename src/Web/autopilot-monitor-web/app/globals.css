@@ -15,6 +15,12 @@
 html {
   scroll-behavior: smooth;
   overflow-y: auto;
+  /* Clip (not hidden) any accidental horizontal overflow so a single
+     too-wide row can't make the whole page horizontally scrollable on
+     mobile. `clip` — unlike `hidden` — does not establish a scroll
+     container or a containing block, so fixed-position children (mobile
+     drawer + overlay) keep sizing against the viewport. */
+  overflow-x: clip;
   scrollbar-gutter: stable;
 }
 

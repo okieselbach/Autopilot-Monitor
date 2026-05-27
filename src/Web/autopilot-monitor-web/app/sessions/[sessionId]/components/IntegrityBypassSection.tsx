@@ -110,10 +110,10 @@ export default function IntegrityBypassSection({ events, expanded, setExpanded }
     <div className="bg-white shadow rounded-lg p-6 mb-6">
       <div
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full text-left cursor-pointer"
+        className="flex items-start justify-between gap-2 w-full text-left cursor-pointer"
       >
-        <div className="flex items-center space-x-2">
-          <svg className="w-6 h-6 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
+          <svg className="w-6 h-6 shrink-0 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
           <h2 className="text-xl font-semibold text-gray-900">Integrity Bypass Analyzer</h2>
@@ -121,10 +121,10 @@ export default function IntegrityBypassSection({ events, expanded, setExpanded }
             {severity.toUpperCase()}
           </span>
           {payload.finding && (
-            <span className="text-xs text-gray-500 font-mono">{payload.finding}</span>
+            <span className="text-xs text-gray-500 font-mono break-all">{payload.finding}</span>
           )}
         </div>
-        <svg className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={`w-5 h-5 shrink-0 text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
       </div>
