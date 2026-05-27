@@ -52,7 +52,9 @@ export function registerSessionTools(server: McpServer): void {
     'query params round-trip correctly.',
     {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
-      status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional().describe('Enrollment status filter'),
+      status: z.enum(['InProgress', 'Pending', 'Stalled', 'Succeeded', 'Failed']).optional()
+        .describe('Enrollment status filter. Pending = White Glove pre-provisioning done, awaiting user enrollment; ' +
+                  'Stalled = no progress for a while (non-terminal, can heal back to InProgress).'),
       serialNumber: z.string().optional().describe('Device serial number (exact match)'),
       deviceName: z.string().optional().describe('Device name (prefix match, e.g. "DESKTOP-")'),
       manufacturer: z.string().optional().describe('Hardware manufacturer (e.g. "Microsoft", "Dell", "HP")'),
@@ -376,7 +378,18 @@ export function registerSessionTools(server: McpServer): void {
             keyEventsTruncated: truncated,
             errorCount,
             warningCount,
-            appInstalls: { total: appTotal, succeeded: appSucceeded, failed: appFailed, skipped: appSkipped },
+            // `started` events can under-count vs terminal ones (dependencies and
+            // retries emit completed/failed without a matching "started"), which
+            // previously made `total` smaller than `succeeded`. Derive `total` as
+            // the max of the start signal and the sum of terminal outcomes so it is
+            // never smaller than its own breakdown; expose `started` for context.
+            appInstalls: {
+              total: Math.max(appTotal, appSucceeded + appFailed + appSkipped),
+              started: appTotal,
+              succeeded: appSucceeded,
+              failed: appFailed,
+              skipped: appSkipped,
+            },
           },
         };
 

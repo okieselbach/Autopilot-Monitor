@@ -1161,23 +1161,7 @@ namespace AutopilotMonitor.Functions.Services
 
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.CveIndex);
 
-            // Tenant-scoped: PK exact match (partition-targeted, cheap).
-            // Cross-tenant: PK prefix scan over `{*}_{cveId}` — Azure can't
-            // partition-target a suffix match, so this is the closest range we
-            // can express. Server-side CVSS / risk filters could in theory move
-            // to OData on numeric/string columns, but the existing index rows
-            // already enrich them, so client-side filtering after the page fetch
-            // matches the legacy method's semantics exactly.
-            string oDataFilter;
-            if (!string.IsNullOrEmpty(tenantId))
-            {
-                oDataFilter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{ODataSanitizer.EscapeValue(cveId)}'";
-            }
-            else
-            {
-                var safeCveId = ODataSanitizer.EscapeValue(cveId);
-                oDataFilter = $"PartitionKey ge '{safeCveId}' and PartitionKey lt '{safeCveId}~'";
-            }
+            var oDataFilter = BuildCveIndexSearchFilter(tenantId, cveId);
 
             var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
                 client: tableClient,
@@ -1212,6 +1196,27 @@ namespace AutopilotMonitor.Functions.Services
 
             var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
             return new RawPage<SessionSummary>(sessions, nextRawToken);
+        }
+
+        /// <summary>
+        /// Builds the CveIndex OData filter for the per-CVE session search.
+        /// CveIndex PartitionKey is <c>{tenantId}_{cveId}</c>.
+        /// <list type="bullet">
+        /// <item>Tenant-scoped: exact PK match — partition-targeted, cheap.</item>
+        /// <item>Cross-tenant (tenantId null): the PK begins with the tenant GUID,
+        /// NOT the cveId, so a PK range on the cveId matches nothing. We filter on
+        /// the <c>CveId</c> property instead — a server-side scan across partitions,
+        /// the same shape <see cref="ScanCveIndexAsync"/> uses for fleet aggregation.</item>
+        /// </list>
+        /// Exposed internal for regression testing (the old PK-range form silently
+        /// returned 0 cross-tenant results — see SearchSessionsByCveFilterTests).
+        /// </summary>
+        internal static string BuildCveIndexSearchFilter(string? tenantId, string cveId)
+        {
+            var safeCveId = ODataSanitizer.EscapeValue(cveId);
+            return string.IsNullOrEmpty(tenantId)
+                ? $"CveId eq '{safeCveId}'"
+                : $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{safeCveId}'";
         }
 
         /// <summary>

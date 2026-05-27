@@ -46,7 +46,9 @@ export function registerAdminTools(server: McpServer): void {
     'get_api_usage',
     'Get API/MCP usage statistics. Shows request counts per endpoint per day. ' +
     'Use to monitor platform usage, identify heavy users, or debug rate limiting. ' +
-    'Use userId for a specific user, daily for aggregated summaries, or neither for global per-record breakdown.',
+    'Use userId for a specific user, daily for aggregated summaries, or neither for global per-record breakdown. ' +
+    'The daily and global breakdowns are Global Admin only; the per-user (userId) view also works for a ' +
+    'Tenant Admin querying a user within their own tenant.',
     {
       userId: z.string().optional().describe('Specific user object ID to query usage for'),
       tenantId: z.string().optional().describe('Filter usage by tenant ID'),
@@ -105,9 +107,13 @@ export function registerAdminTools(server: McpServer): void {
   // Tool 13: get_geographic_sessions
   server.tool(
     'get_geographic_sessions',
-    'Drill into a specific geographic location. Returns all enrollment sessions at that location. ' +
+    'Drill into a specific geographic location and list its enrollment sessions (lean rows). ' +
     'Either provide locationKey (from get_geographic_metrics results, e.g. "Falkenstein, Saxony, DE") ' +
-    'or use country/region/city filters to find sessions by location.',
+    'or use country/region/city filters to find sessions by location. ' +
+    'A busy location can hold thousands of sessions, so results are paged: the default pageSize is 50 ' +
+    'and the response carries a "nextLink" when more remain — pass that whole string back as "continuation" ' +
+    'to get the next slice, and stop when nextLink is absent. (Pagination is applied to the location result ' +
+    'set, so raise pageSize for fewer round-trips when you need a full sweep.)',
     {
       locationKey: z.string().optional().describe('Location key from get_geographic_metrics (e.g. "Falkenstein, Saxony, DE"). If provided, country/region/city are ignored.'),
       country: z.string().optional().describe('2-letter country code filter (e.g. "DE", "US", "CH"). Used when locationKey is not provided.'),
@@ -116,11 +122,15 @@ export function registerAdminTools(server: McpServer): void {
       tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
       days: z.coerce.number().int().min(1).max(365).optional().default(30)
         .describe('Time range in days (1-365). Defaults to 30.'),
+      pageSize: z.coerce.number().int().min(1).max(1000).optional().default(50)
+        .describe('Sessions to return per call (1-1000, default 50). Follow nextLink for more; raise it for full sweeps.'),
+      continuation: z.string().optional()
+        .describe('Pass the whole nextLink string from the prior response to fetch the next slice.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_geographic_sessions', async () => {
       try {
-        const { tenantId, country, region, city, ...rest } = args;
+        const { tenantId, country, region, city, pageSize, continuation, ...rest } = args;
         const params: Record<string, string | number | undefined> = { ...rest };
         if (tenantId) params.tenantId = tenantId;
         if (!params.locationKey && country) {
@@ -129,8 +139,31 @@ export function registerAdminTools(server: McpServer): void {
           params.groupBy = city ? 'city' : region ? 'region' : 'country';
         }
         const prefix = pickGlobalOrTenantPath('/api/global/metrics', '/api/metrics');
-        const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`);
-        return toolResultText(data, MAX_RESULT_SIZE_CHARS.sessions);
+        const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`) as
+          { success?: boolean; sessions?: unknown[]; totalCount?: number };
+
+        // The location-sessions endpoint filters in-memory and returns the full
+        // set in one shot (no server-side cursor). A single busy location can
+        // exceed the client's inline response budget, so we page client-side:
+        // the "continuation" carries an integer offset into the location result
+        // set. (Each page re-fetches the location set; raise pageSize to amortize.)
+        const all = Array.isArray(data?.sessions) ? data.sessions : [];
+        const m = continuation ? /^geo-offset:(\d+)$/.exec(continuation) : null;
+        const offset = m ? parseInt(m[1], 10) : 0;
+        const slice = all.slice(offset, offset + pageSize);
+        const nextOffset = offset + pageSize;
+        const nextLink = nextOffset < all.length ? `geo-offset:${nextOffset}` : null;
+
+        return toolResultText(
+          {
+            success: data?.success ?? true,
+            totalCount: data?.totalCount ?? all.length,
+            count: slice.length,
+            offset,
+            sessions: slice,
+            nextLink,
+          },
+          MAX_RESULT_SIZE_CHARS.sessions);
       } catch (error: unknown) {
         return toolError('get_geographic_sessions', args, error);
       }
@@ -225,10 +258,12 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'get_usage_metrics',
     'Get platform usage statistics: active tenants, session volumes, feature adoption. ' +
-    'Omit tenantId for platform-wide overview (Global Admin), or specify tenantId for tenant-specific usage. ' +
+    'Global Admin only — omit tenantId for the platform-wide overview, or pass tenantId to filter that ' +
+    'cross-tenant view down to a single tenant. The call always uses the global endpoint, so a Tenant Admin ' +
+    'cannot use this tool (they receive 403) even when passing their own tenantId. ' +
     'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
     {
-      tenantId: z.string().optional().describe('Tenant ID for tenant-specific metrics. Omit for platform-wide overview (Global Admin only).'),
+      tenantId: z.string().optional().describe('Filter the global view to a single tenant. Omit for the platform-wide overview. This tool is Global Admin only either way.'),
       days: z.coerce.number().int().min(1).max(365).optional().default(30)
         .describe('Time window in days (1-365). Defaults to 30. Sessions.Total / Tenants.Total reflect this window.'),
     },
@@ -452,7 +487,7 @@ export function registerAdminTools(server: McpServer): void {
     'Pass the whole nextLink string as "continuation" so all backend-echoed query params round-trip correctly.',
     {
       tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
-      status: z.enum(['InProgress', 'Succeeded', 'Failed']).optional(),
+      status: z.enum(['InProgress', 'Pending', 'Stalled', 'Succeeded', 'Failed']).optional(),
       startedAfter: z.string().optional().describe('ISO 8601 datetime'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime'),
       serialNumber: z.string().optional(),
