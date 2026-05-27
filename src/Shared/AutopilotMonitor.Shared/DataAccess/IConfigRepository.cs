@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 
 namespace AutopilotMonitor.Shared.DataAccess
 {
@@ -15,6 +16,13 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<TenantConfiguration?> GetTenantConfigurationAsync(string tenantId);
         Task<bool> SaveTenantConfigurationAsync(TenantConfiguration config);
         Task<List<TenantConfiguration>> GetAllTenantConfigurationsAsync();
+
+        /// <summary>
+        /// One page of tenant configurations, ordered by TenantId (Azure cross-partition
+        /// scan over RowKey eq 'config' is PartitionKey-ascending and PartitionKey == TenantId).
+        /// Carries the store's opaque continuation token for the function layer to wrap.
+        /// </summary>
+        Task<RawPage<TenantConfiguration>> GetTenantConfigurationsPageAsync(int pageSize, string? continuation);
 
         // --- Admin Configuration ---
         Task<AdminConfiguration?> GetAdminConfigurationAsync();

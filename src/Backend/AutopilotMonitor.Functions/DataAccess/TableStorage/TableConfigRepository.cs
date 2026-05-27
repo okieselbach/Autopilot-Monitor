@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Services;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Azure;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Logging;
@@ -88,6 +90,25 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 _logger.LogError(ex, "Error loading all tenant configurations");
                 throw;
             }
+        }
+
+        public async Task<RawPage<TenantConfiguration>> GetTenantConfigurationsPageAsync(int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            // Cross-partition scan over the single 'config' row per tenant. Azure returns
+            // (PartitionKey asc, RowKey asc); PartitionKey == TenantId, so pages are already
+            // TenantId-ordered — a stable cursor without an in-memory re-sort (which would
+            // break pagination by only ordering the current page).
+            var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                client: _tenantConfigTableClient,
+                filter: "RowKey eq 'config'",
+                pageSize: pageSize,
+                continuation: continuation);
+
+            var configurations = new List<TenantConfiguration>(entities.Count);
+            foreach (var entity in entities) configurations.Add(ConvertFromTenantTableEntity(entity));
+            return new RawPage<TenantConfiguration>(configurations, nextRawToken);
         }
 
         // --- Admin Configuration ---

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
+using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
@@ -165,6 +166,24 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error loading all tenant configurations");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Gets one page of tenant configurations (for Global Admin use), ordered by TenantId.
+        /// Unlike <see cref="GetAllConfigurationsAsync"/> this does not load every tenant at once;
+        /// callers follow the page's continuation token until it is null.
+        /// </summary>
+        public async Task<RawPage<TenantConfiguration>> GetConfigurationsPageAsync(int pageSize, string? continuation)
+        {
+            try
+            {
+                return await _configRepo.GetTenantConfigurationsPageAsync(pageSize, continuation);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading tenant configurations page");
                 throw;
             }
         }
