@@ -220,6 +220,8 @@ export const api = {
       `${API_BASE_URL}/api/metrics/rule-stats${qs({ startDate, endDate, ruleType })}`,
     globalRuleStats: (startDate?: string, endDate?: string, ruleType?: string, tenantId?: string) =>
       `${API_BASE_URL}/api/global/metrics/rule-stats${qs({ startDate, endDate, ruleType, tenantId })}`,
+    globalVulnerability: (days?: number, topN?: number, tenantId?: string) =>
+      `${API_BASE_URL}/api/global/metrics/vulnerability${qs({ days: days?.toString(), topN: topN?.toString(), tenantId })}`,
     sla: (tenantId?: string, months?: number, fresh?: boolean) =>
       `${API_BASE_URL}/api/metrics/sla${qs({ tenantId, months: months?.toString(), fresh: fresh ? "1" : undefined })}`,
     globalSla: (tenantId: string, months?: number, fresh?: boolean) =>
