@@ -229,7 +229,7 @@ function scoreEvent(e: EventEntry, queryKeywords: string[]): ScoredEvent | null 
 
 // ── Registration ────────────────────────────────────────────────────────
 
-export function registerSearchTools(server: McpServer, knowledgeBase?: SearchProvider): void {
+export function registerSearchTools(server: McpServer, knowledgeBase: SearchProvider | undefined, ga: boolean): void {
   // Tool 9: search_events_semantic — weighted keyword search
   server.tool(
     'search_events_semantic',
@@ -242,7 +242,7 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
     {
       query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
       sessionId: SessionIdSchema.optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
-      tenantId: z.string().optional().describe('Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.' : 'Optional tenant ID. Defaults to your tenant.'),
       topK: z.coerce.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
       minScore: z.coerce.number().min(0).max(1).optional().default(0.1)
         .describe('Minimum relevance score (0-1, default 0.1). Events matching at least one keyword in any field pass this threshold.'),
@@ -370,12 +370,12 @@ export function registerSearchTools(server: McpServer, knowledgeBase?: SearchPro
     'Results include matched keywords and which fields they were found in. ' +
     'Use this when: (1) a previous search may have missed events, (2) you need high confidence in completeness, ' +
     'or (3) you want to see which specific fields matched. ' +
-    'Provide sessionId to search within one session, or omit to search across recent failed sessions. ' +
-    'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant.',
+    'Provide sessionId to search within one session, or omit to search across recent failed sessions.' +
+    (ga ? ' Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant.' : ''),
     {
       query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
       sessionId: SessionIdSchema.optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
-      tenantId: z.string().optional().describe('Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.' : 'Optional tenant ID. Defaults to your tenant.'),
       topK: z.coerce.number().min(1).max(50).optional().default(20)
         .describe('Max results to return (1-50, default 20). Higher default for thoroughness.'),
       minScore: z.coerce.number().min(0).max(1).optional().default(0.05)

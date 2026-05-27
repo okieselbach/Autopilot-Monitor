@@ -40,9 +40,10 @@ export function extractTenantList(data: unknown): Record<string, unknown>[] {
   });
 }
 
-export function registerAdminTools(server: McpServer): void {
-  // Tool 11: get_api_usage
-  server.tool(
+export function registerAdminTools(server: McpServer, ga: boolean): void {
+  // Tool 11: get_api_usage — Global Admin only; not registered for normal users
+  // (the `if (ga)` guards the whole single server.tool(...) statement).
+  if (ga) server.tool(
     'get_api_usage',
     'Get API/MCP usage statistics. Shows request counts per endpoint per day. ' +
     'Use to monitor platform usage, identify heavy users, or debug rate limiting. ' +
@@ -80,10 +81,11 @@ export function registerAdminTools(server: McpServer): void {
     'get_geographic_metrics',
     'Get geographic distribution of enrollments — where devices are enrolling from, with performance comparisons. ' +
     'Shows per-location: session counts, success rates, avg/median/p95 duration, throughput, and outlier detection. ' +
-    'Omit tenantId for cross-tenant view (Global Admin). Use get_geographic_sessions to drill into a specific location. ' +
+    (ga ? 'Omit tenantId for cross-tenant view (Global Admin). ' : '') +
+    'Use get_geographic_sessions to drill into a specific location. ' +
     'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
     {
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant view (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       days: z.coerce.number().int().min(1).max(365).optional().default(30)
         .describe('Time range in days (1-365). Defaults to 30.'),
       groupBy: z.enum(['country', 'region', 'city']).optional().default('city')
@@ -119,7 +121,7 @@ export function registerAdminTools(server: McpServer): void {
       country: z.string().optional().describe('2-letter country code filter (e.g. "DE", "US", "CH"). Used when locationKey is not provided.'),
       region: z.string().optional().describe('Region/state filter (e.g. "Saxony", "North Carolina"). Used with country.'),
       city: z.string().optional().describe('City filter (e.g. "Falkenstein"). Used with country.'),
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant view (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant view (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       days: z.coerce.number().int().min(1).max(365).optional().default(30)
         .describe('Time range in days (1-365). Defaults to 30.'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(50)
@@ -170,8 +172,8 @@ export function registerAdminTools(server: McpServer): void {
     })
   );
 
-  // Tool 14: get_platform_metrics
-  server.tool(
+  // Tool 14: get_platform_metrics — Global Admin only; not registered for normal users.
+  if (ga) server.tool(
     'get_platform_metrics',
     'Get aggregated platform-level agent performance metrics across recent sessions. ' +
     'Returns: avg/max/p95 CPU, memory (working set, private bytes), network (bytes up/down, latency, requests), ' +
@@ -257,13 +259,12 @@ export function registerAdminTools(server: McpServer): void {
   // Tool 15: get_usage_metrics
   server.tool(
     'get_usage_metrics',
-    'Get usage statistics: session volumes, feature adoption, active tenants/users. ' +
-    'Global Admin: cross-tenant platform overview — omit tenantId for the whole platform, or pass ' +
-    'tenantId to filter that view to one tenant. Tenant Admin / Member: returns usage scoped to your ' +
-    'own tenant (the tenantId argument is ignored — your token determines the tenant). ' +
+    (ga
+      ? 'Get usage statistics. Omit tenantId for the cross-tenant platform overview (Global Admin), or pass tenantId to filter it to a single tenant. '
+      : 'Get usage statistics for your tenant: session volumes, feature adoption, success rate, active users. ') +
     'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
     {
-      tenantId: z.string().optional().describe('Global Admin only: filter the platform-wide view to a single tenant. Ignored for Tenant Admins (your token scopes the result).'),
+      tenantId: z.string().optional().describe(ga ? 'Filter the platform-wide view to a single tenant (Global Admin only). Omit for the whole platform.' : 'Optional; ignored — usage is scoped to your tenant.'),
       days: z.coerce.number().int().min(1).max(365).optional().default(30)
         .describe('Time window in days (1-365). Defaults to 30. Sessions.Total / Tenants.Total reflect this window.'),
     },
@@ -286,7 +287,8 @@ export function registerAdminTools(server: McpServer): void {
   // Tool: list_tenants — reuses the GlobalAdminOnly /api/config/all endpoint.
   // The endpoint returns FULL configs (incl. secrets); extractTenantList strips
   // them down to TENANT_SAFE_FIELDS before anything reaches the model.
-  server.tool(
+  // Global Admin only; not registered for normal users.
+  if (ga) server.tool(
     'list_tenants',
     'List onboarded tenants with their identity, plan tier, and lifecycle status (onboarded/disabled dates). ' +
     'Global Admin only. Use this to discover tenant IDs for the tenantId parameter of other tools when running ' +
@@ -330,14 +332,14 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'get_audit_logs',
     'Get audit trail of administrative actions: config changes, device blocks, user management, report submissions. ' +
-    'Omit tenantId for cross-tenant audit log (Global Admin). ' +
+    (ga ? 'Omit tenantId for cross-tenant audit log (Global Admin). ' : '') +
     'Forensics: dateFrom / dateTo (ISO 8601 UTC) bound the search window exactly; without either, the backend defaults to the last 30 days. ' +
     'Pagination: when "nextLink" is present in the response, more entries are available — call this tool again and pass the ' +
     'whole nextLink string (e.g. "/api/global/audit/logs?pageSize=...&continuation=...&dateFrom=...&dateTo=...") as ' +
     '"continuation". The tool follows it verbatim so the backend-defaulted date window round-trips correctly (otherwise ' +
     'a follow-up call would compute a fresh "now" and the token fingerprint would mismatch). Stop when nextLink is absent.',
     {
-      tenantId: z.string().optional().describe('Tenant ID for tenant-scoped audit log. Omit for cross-tenant view (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID for tenant-scoped audit log. Omit for cross-tenant view (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       dateFrom: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive lower bound of the audit window.'),
       dateTo: z.string().optional().describe('ISO 8601 UTC timestamp — inclusive upper bound of the audit window.'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
@@ -363,8 +365,8 @@ export function registerAdminTools(server: McpServer): void {
     })
   );
 
-  // Tool 17: get_ops_events
-  server.tool(
+  // Tool 17: get_ops_events — Global Admin only; not registered for normal users.
+  if (ga) server.tool(
     'get_ops_events',
     'Get operational events for platform monitoring. Shows consent flow results, maintenance runs, security blocks, ' +
     'tenant offboards, agent timeouts, and blob storage health. Global Admin only. ' +
@@ -401,8 +403,8 @@ export function registerAdminTools(server: McpServer): void {
     })
   );
 
-  // Tool 18: list_session_reports
-  server.tool(
+  // Tool 18: list_session_reports — Global Admin only; not registered for normal users.
+  if (ga) server.tool(
     'list_session_reports',
     'List session reports submitted by tenant admins. Reports contain user comments, screenshots, and agent logs for troubleshooting. ' +
     'Global Admin only — returns reports across all tenants by default; pass tenantId to filter to one tenant. ' +
@@ -440,7 +442,7 @@ export function registerAdminTools(server: McpServer): void {
     'query_raw_events',
     'TIER 2 — RAW CROSS-SESSION EVENT QUERY (fallback for broader scope). ' +
     'Query raw enrollment events with flexible filters across sessions. ' +
-    'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' +
+    (ga ? 'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' : '') +
     'Use this when search_events_semantic does not cover the time range or session scope you need, ' +
     'or when you need exact event-type filtering across many sessions. Returns raw event data. ' +
     'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
@@ -449,7 +451,7 @@ export function registerAdminTools(server: McpServer): void {
     'so all backend-echoed query params round-trip correctly. Note: pageSize is the index-scan cadence — a single ' +
     'indexed session can contribute multiple events, so total events per page may exceed pageSize.',
     {
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant search (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       sessionId: SessionIdSchema.optional().describe('Filter to a specific session'),
       eventType: z.string().optional().describe('Event type filter (e.g. "app_install_failed", "error_detected")'),
       severity: z.enum(['Info', 'Warning', 'Error', 'Critical']).optional(),
@@ -483,14 +485,14 @@ export function registerAdminTools(server: McpServer): void {
   server.tool(
     'query_raw_sessions',
     'Query raw session data with flexible filters and field projection. ' +
-    'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' +
+    (ga ? 'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' : '') +
     'For COUNTING / AGGREGATION queries pass `fields=sessionId,status,agentVersion,startedAt` (or similar lean subset) — ' +
     'avoids the response cap that fat raw rows trip. ' +
     'For VERSION sweeps use `agentVersionPrefix=2.0.` instead of one call per build. ' +
     'This endpoint is fully paginated — there is no truncation. Default pageSize=200; raise it (up to 1000) for bulk pulls. ' +
     'Pass the whole nextLink string as "continuation" so all backend-echoed query params round-trip correctly.',
     {
-      tenantId: z.string().optional().describe('Tenant ID to query. Omit for cross-tenant access (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID to query. Omit for cross-tenant access (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       status: z.enum(['InProgress', 'Pending', 'Stalled', 'Succeeded', 'Failed']).optional(),
       startedAfter: z.string().optional().describe('ISO 8601 datetime'),
       startedBefore: z.string().optional().describe('ISO 8601 datetime'),
@@ -533,8 +535,8 @@ export function registerAdminTools(server: McpServer): void {
   // gated by GlobalAdmin RBAC on the backend. No client-side filter allowlist is
   // needed because the backend enforces the same permission boundary.
 
-  // Tool 20: list_tables
-  server.tool(
+  // Tool 20: list_tables — Global Admin only; not registered for normal users.
+  if (ga) server.tool(
     'list_tables',
     'List all available Azure Table Storage tables that can be queried via query_table. Global Admin only.',
     {},
@@ -549,8 +551,8 @@ export function registerAdminTools(server: McpServer): void {
     })
   );
 
-  // Tool 21: query_table
-  server.tool(
+  // Tool 21: query_table — Global Admin only; not registered for normal users.
+  if (ga) server.tool(
     'query_table',
     'Query any Azure Table Storage table directly with OData filters. Global Admin only. ' +
     'Use list_tables to see available tables. Useful for inspecting TenantConfiguration, RuleResults, or any raw data ' +
@@ -608,8 +610,8 @@ export function registerAdminTools(server: McpServer): void {
     })
   );
 
-  // Tool 22: query_backend_logs
-  server.tool(
+  // Tool 22: query_backend_logs — Global Admin only; not registered for normal users.
+  if (ga) server.tool(
     'query_backend_logs',
     'Query backend Application Insights logs using KQL. Global Admin only. ' +
     'Use for debugging backend issues, tracing requests by correlation ID, and platform diagnostics.',
@@ -637,12 +639,12 @@ export function registerAdminTools(server: McpServer): void {
     'Get rule firing statistics for analyze and gather rules. Shows which rules fire most often, ' +
     'their hit rates (fires/evaluations), and daily trends. Use to identify commonly triggered rules, ' +
     'optimize rule definitions, or understand tenant-specific failure patterns. ' +
-    'Without tenantId returns global stats (cross-tenant). With tenantId returns tenant-specific stats. ' +
+    (ga ? 'Without tenantId returns global stats (cross-tenant). With tenantId returns tenant-specific stats. ' : '') +
     'NOTE: default window is 30 days × every rule × per-day trend rows — for 20+ rules the response ' +
     'easily exceeds 70 KB and can trip the response cap. Pass a tighter `startDate`/`endDate` window ' +
     '(7 days is usually plenty) and/or `ruleType` filter to keep responses lean.',
     {
-      tenantId: z.string().optional().describe('Filter by tenant ID. Omit for global (cross-tenant) stats.'),
+      tenantId: z.string().optional().describe(ga ? 'Filter by tenant ID. Omit for global (cross-tenant) stats.' : 'Optional tenant ID. Defaults to your tenant.'),
       ruleType: z.enum(['analyze', 'gather']).optional().describe('Filter by rule type'),
       startDate: z.string().optional().describe('Start date (YYYY-MM-DD). Defaults to 30 days ago.'),
       endDate: z.string().optional().describe('End date (YYYY-MM-DD). Defaults to today.'),
@@ -670,13 +672,14 @@ export function registerAdminTools(server: McpServer): void {
     'get_vulnerability_summary',
     'Get a fleet-wide vulnerability exposure summary aggregated from detected CVEs: total affected devices, ' +
     'distinct CVE count, KEV (CISA Known-Exploited) count, a severity breakdown, and the top CVEs ranked by how ' +
-    'many devices they affect. Omit tenantId for a cross-tenant overview (Global Admin; also returns affected ' +
-    'tenant count); pass tenantId to scope to one tenant. Use this to answer "how exposed is the fleet / this ' +
+    'many devices they affect. ' +
+    (ga ? 'Omit tenantId for a cross-tenant overview (Global Admin; also returns affected tenant count); pass tenantId to scope to one tenant. ' : '') +
+    'Use this to answer "how exposed is the fleet / this ' +
     'tenant?" and "which CVEs affect the most devices?" — for the device list of a single CVE use search_sessions_by_cve. ' +
     'If "truncated" is true, the underlying index scan hit its cap and counts are a lower bound (narrow with tenantId). ' +
     'Requires vulnerability scanning to be enabled (an empty summary means no findings, not necessarily "not affected").',
     {
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant overview (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant overview (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       days: z.coerce.number().int().min(1).max(365).optional().default(30)
         .describe('Time window in days (1-365, default 30). Filters CVEs by when they were detected.'),
       topN: z.coerce.number().int().min(1).max(100).optional().default(20)

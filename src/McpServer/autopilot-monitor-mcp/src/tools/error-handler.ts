@@ -46,7 +46,7 @@ export function toolError(
   } else if (error instanceof ApiError) {
     // API error but non-JSON body
     if (error.status === 403) {
-      parts.push(`**Access denied in ${toolName}**: This operation requires higher permissions (Global Admin or Tenant Admin).`);
+      parts.push(`**Access denied in ${toolName}**: you do not have permission to perform this operation.`);
     } else if (error.status === 404) {
       parts.push(`**Not found in ${toolName}**: The requested resource does not exist. Verify IDs, table names, or filters.`);
     } else if (error.status === 429) {

@@ -14,7 +14,7 @@ import { z } from 'zod';
  * with Zod but keep types as strings; numeric/optional semantics are described
  * in the argument text for the model.
  */
-export function registerPrompts(server: McpServer): void {
+export function registerPrompts(server: McpServer, ga: boolean): void {
   server.prompt(
     'investigate-failed-session',
     'Guided root-cause investigation of a single enrollment session. Seeds the ' +
@@ -53,7 +53,7 @@ export function registerPrompts(server: McpServer): void {
       tenantId: z
         .string()
         .optional()
-        .describe('Optional tenant ID to scope the audit. Omit for a cross-tenant audit (Global Admin).'),
+        .describe(ga ? 'Optional tenant ID to scope the audit. Omit for a cross-tenant audit (Global Admin).' : 'Optional tenant ID. Defaults to your tenant.'),
     },
     ({ cveId, tenantId }) => ({
       messages: [
@@ -63,7 +63,7 @@ export function registerPrompts(server: McpServer): void {
             type: 'text',
             text:
               `Audit fleet exposure to ${cveId}` +
-              (tenantId ? ` within tenant ${tenantId}` : ' across all tenants') +
+              (tenantId ? ` within tenant ${tenantId}` : (ga ? ' across all tenants' : ' in your tenant')) +
               '.\n\n' +
               '1. Call search_sessions_by_cve with the cveId' +
               (tenantId ? ' and tenantId' : '') +
@@ -78,7 +78,10 @@ export function registerPrompts(server: McpServer): void {
     }),
   );
 
-  server.prompt(
+  // Global Admin only — relies on get_platform_metrics (a GA-only tool that is
+  // not registered for normal users). Hidden from non-GA so it never references
+  // a tool they cannot see.
+  if (ga) server.prompt(
     'compare-agent-versions',
     'Compare enrollment success rate and agent resource usage across Monitor Agent ' +
       'versions over a time window — useful for validating a rollout.',

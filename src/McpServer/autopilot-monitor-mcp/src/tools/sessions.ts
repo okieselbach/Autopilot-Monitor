@@ -41,11 +41,12 @@ const phaseName = (phase: unknown, enrollmentType: unknown): string => {
 
 // ── Registration ────────────────────────────────────────────────────────
 
-export function registerSessionTools(server: McpServer): void {
+export function registerSessionTools(server: McpServer, ga: boolean): void {
   // Tool 1: search_sessions
   server.tool(
     'search_sessions',
-    'Search enrollment sessions. Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' +
+    'Search enrollment sessions' +
+    (ga ? '. Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant' : ' in your tenant') + '. ' +
     'Basic properties (status, serial number, manufacturer, model, etc.) filter on the session index. ' +
     'Use deviceProperties for ANY device hardware/config filter — keys use "eventType.propertyName" notation. ' +
     'Consult the device_properties catalog (call get_resource(name="device_properties")) for available keys. ' +
@@ -61,7 +62,7 @@ export function registerSessionTools(server: McpServer): void {
     'raise it (up to 1000) for full sweeps. Pass the whole nextLink string as "continuation" so all backend-echoed ' +
     'query params round-trip correctly.',
     {
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant search (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       status: z.enum(['InProgress', 'Pending', 'Stalled', 'Succeeded', 'Failed']).optional()
         .describe('Enrollment status filter. Pending = White Glove pre-provisioning done, awaiting user enrollment; ' +
                   'Stalled = no progress for a while (non-terminal, can heal back to InProgress).'),
@@ -128,7 +129,8 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'search_sessions_by_event',
     'Find sessions that contain a specific event type (e.g. app install failure, phase transitions, errors). ' +
-    'Omit tenantId for cross-tenant search (Global Admin). Check the event_types catalog (call get_resource(name="event_types")) for valid eventType values. ' +
+    (ga ? 'Omit tenantId for cross-tenant search (Global Admin). ' : '') +
+    'Check the event_types catalog (call get_resource(name="event_types")) for valid eventType values. ' +
     'Use this to answer: which devices had a failed Teams install, which sessions had an error in DeviceSetup phase. ' +
     'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
     'interactive queries; raise it (up to 1000) for full sweeps. For broad analysis, use pageSize=1000 and follow ' +
@@ -136,7 +138,7 @@ export function registerSessionTools(server: McpServer): void {
     'params round-trip correctly.',
     {
       eventType: z.string().describe('Event type string — see event_types catalog (call get_resource(name="event_types")) for valid values (e.g. "app_install_failed", "enrollment_failed")'),
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant search (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
         .describe('Page size (1-1000, default 200). Returns this many sessions per call; follow nextLink to fetch more.'),
       continuation: z.string().optional()
@@ -166,7 +168,7 @@ export function registerSessionTools(server: McpServer): void {
     'Get full details of a single enrollment session including all device metadata. Set includeAnalysis=true to also get AI rule analysis results explaining why the session failed and remediation suggestions.',
     {
       sessionId: SessionIdSchema.describe('Session UUID'),
-      tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).' : 'Tenant ID. If omitted, auto-resolved from the session.'),
       includeAnalysis: z.boolean().optional().default(false).describe('Include rule analysis results (failure explanations and remediation steps)'),
     },
     READ_ONLY,
@@ -197,10 +199,10 @@ export function registerSessionTools(server: McpServer): void {
     'Returns up to pageSize events from a single session. Filter by eventType, severity, or source (app name). ' +
     'Use this when search_events_semantic returns incomplete results and you need the full unfiltered event stream, ' +
     'or for root cause analysis when you need every event in chronological sequence. ' +
-    'If you omit tenantId, the backend auto-resolves it from the session (Global Admin can access any tenant). ' +
+    'If you omit tenantId, the backend auto-resolves it from the session' + (ga ? ' (Global Admin can access any tenant)' : '') + '. ' +
     'Pagination: if the response includes "nextLink", more events are available — call this tool again and pass the ' +
     'whole nextLink string (e.g. "/api/sessions/{id}/events?pageSize=...&continuation=...&tenantId=...") as ' +
-    '"continuation". The tool follows it verbatim so query params the backend echoes (tenantId on cross-tenant reads, ' +
+    '"continuation". The tool follows it verbatim so query params the backend echoes (tenantId, ' +
     'filters, etc.) round-trip correctly. Stop when the response no longer contains a nextLink. Sessions with ' +
     'thousands of events are fully reachable across multiple calls.',
     {
@@ -247,7 +249,7 @@ export function registerSessionTools(server: McpServer): void {
     'For raw unfiltered events use get_session_events. For full metadata use get_session.',
     {
       sessionId: SessionIdSchema.describe('Session UUID'),
-      tenantId: z.string().optional().describe('Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).' : 'Tenant ID. If omitted, auto-resolved from the session.'),
     },
     READ_ONLY,
     async (args) => withToolTelemetry('get_session_summary', async () => {
@@ -414,10 +416,10 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'get_metrics',
     'Get aggregated enrollment metrics: failure rates, slowest/most-failing apps, session counts. ' +
-    'Omit tenantId for cross-tenant platform overview (Global Admin). Specify tenantId for single-tenant metrics. ' +
+    (ga ? 'Omit tenantId for cross-tenant platform overview (Global Admin). Specify tenantId for single-tenant metrics. ' : '') +
     'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
     {
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant overview (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant overview (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       days: z.coerce.number().int().min(1).max(365).optional().default(30)
         .describe('Time window in days (1-365). Defaults to 30. Applied to both summary and app metrics.'),
     },
@@ -444,7 +446,8 @@ export function registerSessionTools(server: McpServer): void {
   server.tool(
     'search_sessions_by_cve',
     "Find enrollment sessions where a specific CVE was detected in the device's software inventory. " +
-    "Omit tenantId for cross-tenant search (Global Admin). Requires vulnerability scanning to be enabled. " +
+    (ga ? "Omit tenantId for cross-tenant search (Global Admin). " : "") +
+    "Requires vulnerability scanning to be enabled. " +
     "Use this to answer: which devices are affected by CVE-2024-XXXX, show all critical vulnerability sessions. " +
     "This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical " +
     "interactive queries; raise it (up to 1000) for full exposure audits. For \"how many of my devices have CVE-X\" " +
@@ -452,7 +455,7 @@ export function registerSessionTools(server: McpServer): void {
     "\"continuation\" so all backend-echoed query params (cveId, minCvssScore, overallRisk) round-trip correctly.",
     {
       cveId: z.string().describe('CVE identifier (e.g. "CVE-2024-21447")'),
-      tenantId: z.string().optional().describe('Tenant ID. Omit for cross-tenant search (Global Admin only).'),
+      tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant search (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
       minCvssScore: z.coerce.number().min(0).max(10).optional().describe('Minimum CVSS score filter (e.g. 7.0 for high+critical)'),
       overallRisk: z.enum(['low', 'medium', 'high', 'critical']).optional(),
       pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
@@ -478,7 +481,9 @@ export function registerSessionTools(server: McpServer): void {
     })
   );
 
-  // Tool 8: list_blocked_devices
+  // Tool 8: list_blocked_devices — Global Admin only. Registered only for a GA,
+  // so a normal tenant user never sees it in tools/list (no name, no hint).
+  if (ga) {
   server.tool(
     'list_blocked_devices',
     'List devices currently blocked from enrolling. Blocked devices have their enrollment sessions rejected by the backend. ' +
@@ -502,6 +507,7 @@ export function registerSessionTools(server: McpServer): void {
       }
     })
   );
+  } // end if (ga) — list_blocked_devices
 
   // Tool: get_ime_version_history
   server.tool(

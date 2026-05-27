@@ -166,14 +166,22 @@ public class McpUserFunction
         var result = await _mcpUserService.IsAllowedAsync(upn);
 
         var response = req.CreateResponse(result.IsAllowed ? HttpStatusCode.OK : HttpStatusCode.Forbidden);
-        await response.WriteAsJsonAsync(new
+        var payload = new Dictionary<string, object?>
         {
-            allowed = result.IsAllowed,
-            upn = result.Upn,
-            accessGrant = result.AccessGrant,
-            reason = result.Reason,
-            isGlobalAdmin = result.IsGlobalAdmin
-        });
+            ["allowed"] = result.IsAllowed,
+            ["upn"] = result.Upn,
+            ["accessGrant"] = result.AccessGrant,
+            ["reason"] = result.Reason,
+        };
+        // Only surface the Global-Admin flag when it is actually true. A normal
+        // tenant user gets no isGlobalAdmin field at all: the MCP access-guard
+        // reads `=== true` (absent → non-GA), and we avoid hinting to ordinary
+        // callers that a Global-Admin tier even exists.
+        if (result.IsGlobalAdmin)
+        {
+            payload["isGlobalAdmin"] = true;
+        }
+        await response.WriteAsJsonAsync(payload);
         return response;
     }
 }
