@@ -455,6 +455,7 @@ export const api = {
   vulnerability: {
     sync: () => `${API_BASE_URL}/api/vulnerability/sync`,
     syncMsrc: () => `${API_BASE_URL}/api/vulnerability/sync-msrc`,
+    syncStatus: () => `${API_BASE_URL}/api/vulnerability/sync-status`,
     syncReseed: (type: string) =>
       `${API_BASE_URL}/api/vulnerability/sync${qs({ reseed: type })}`,
     cpeMappings: () => `${API_BASE_URL}/api/vulnerability/cpe-mappings`,
