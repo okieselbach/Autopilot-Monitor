@@ -395,14 +395,22 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                                 // counter. Discriminator inside the handler gates this to the
                                 // EspTerminalFailure pathway only — other Failed paths leave the
                                 // app list untouched.
-                                promoteActiveInstallsToStuck: (failureType, message)
-                                    => componentFactory.PromoteActiveInstallsToStuck(failureType, message),
+                                promoteActiveInstallsToStuck: (failureType, message, errorCode)
+                                    => componentFactory.PromoteActiveInstallsToStuck(failureType, message, errorCode),
                                 // Shutdown-gap closure (2026-05-15) — share the cross-path
                                 // idempotency gate so a Terminated event that races a Ctrl+C /
                                 // ProcessExit gap-path does not emit two agent_shutting_down
                                 // events on the wire. The handler skips its emit when the
                                 // gate already claimed the slot.
-                                tryClaimShutdownEvent: TryClaimAgentShuttingDownEmit);
+                                tryClaimShutdownEvent: TryClaimAgentShuttingDownEmit,
+                                // Session 080edee9 follow-up (2026-05-28) — feeds the latest
+                                // HRESULT captured by ProvisioningStatusTracker (via
+                                // EspAndHelloTracker.LastEspTerminalErrorCode) into the
+                                // termination handler's classifier so promoted apps land
+                                // with the right failureType (esp_apps_detection_failure /
+                                // esp_apps_install_failure) instead of always claiming a
+                                // generic timeout.
+                                lastEspTerminalErrorCodeAccessor: () => componentFactory.LastEspTerminalErrorCode);
 
                             // ServerActionDispatcher (plan §5.3) — constructed inside this
                             // hook so lifecyclePost + terminationHandler are guaranteed

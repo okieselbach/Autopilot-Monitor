@@ -123,6 +123,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         public DateTime? LastEventOccurredAtUtc { get; private set; }
 
         /// <summary>
+        /// Session 080edee9 follow-up (2026-05-28) — last HRESULT observed on an ESP failure
+        /// raised by <see cref="ProvisioningStatusTracker"/> (registry-derived, e.g.
+        /// <c>0x87D1041C</c> from a failed Apps subcategory). Read by
+        /// <c>EnrollmentTerminationHandler</c> via <see cref="EspAndHelloHost"/> +
+        /// <c>DefaultComponentFactory</c> so the late "Installing-→-Error" promotion can
+        /// classify the failure correctly (detection-failure vs. install-failure vs. genuine
+        /// timeout) instead of always claiming an ESP timeout. Null when no
+        /// HRESULT-carrying ESP failure has fired (or all observed failures came from
+        /// ShellCoreTracker, which has no HRESULT surface).
+        /// </summary>
+        public string LastEspTerminalErrorCode { get; private set; }
+
+        /// <summary>
         /// Outcome of Hello provisioning. Set when Hello resolves (via events, timeout, or not configured).
         /// Values: "completed", "skipped", "timeout", "not_configured", "wizard_not_started", null (not yet resolved).
         /// </summary>
@@ -493,6 +506,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private void OnProvisioningEspFailureDetected(object sender, EspFailureDetectedEventArgs args)
         {
             LastEventOccurredAtUtc = null;
+            // Session 080edee9 follow-up — stash the HRESULT before forwarding so
+            // EnrollmentTerminationHandler can read it on the terminal-failure pathway even
+            // if the downstream signal flow is asynchronous. Only updates on non-empty values
+            // so a later ShellCore-derived failure (which carries no HRESULT) cannot wipe
+            // out the previously captured registry value.
+            if (!string.IsNullOrEmpty(args?.ErrorCode))
+            {
+                LastEspTerminalErrorCode = args.ErrorCode;
+            }
             try
             {
                 EspFailureDetected?.Invoke(this, args);

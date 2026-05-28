@@ -133,7 +133,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         // ONLY when the discriminator in <see cref="ShouldPromoteActiveInstallsAsStuck"/>
         // matches — every other terminal path leaves app states untouched. Returns the list
         // of promoted appIds for logging; null = legacy (no promotion).
-        private readonly Func<string, string, IReadOnlyList<string>> _promoteActiveInstallsToStuck;
+        //
+        // Session 080edee9 follow-up (2026-05-28): third parameter carries the HRESULT from
+        // the failed Apps subcategory (e.g. <c>0x87D1041C</c>) when available, so the
+        // promotion can stamp <see cref="AppPackageState.ErrorCode"/> + emit an enriched
+        // <c>app_install_failed</c> event. Null = no HRESULT observed → fallback to the
+        // legacy "esp_apps_timeout" classification.
+        private readonly Func<string, string, string, IReadOnlyList<string>> _promoteActiveInstallsToStuck;
+
+        // Session 080edee9 follow-up (2026-05-28): accessor returning the latest HRESULT
+        // observed on an ESP failure (typically extracted by
+        // <see cref="ProvisioningStatusTracker.TryExtractErrorCode"/> from the failed
+        // subcategory's <c>statusText</c>). Read once during
+        // <see cref="MaybePromoteActiveInstallsAsStuck"/> and passed to
+        // <see cref="AppFailureTypes.ClassifyEspAppsFailure"/> so the failureType +
+        // message accurately reflect "detection failure" / "install failure" vs. the
+        // generic timeout fallback. Null accessor or null result = no HRESULT → fallback.
+        private readonly Func<string> _lastEspTerminalErrorCodeAccessor;
 
         private int _handled;
 
@@ -162,8 +178,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             Action writeCleanExitMarker = null,
             Func<long> ingressPendingSignalCountAccessor = null,
             Func<bool> isWhiteGlovePart2Accessor = null,
-            Func<string, string, IReadOnlyList<string>> promoteActiveInstallsToStuck = null,
-            Func<bool> tryClaimShutdownEvent = null)
+            Func<string, string, string, IReadOnlyList<string>> promoteActiveInstallsToStuck = null,
+            Func<bool> tryClaimShutdownEvent = null,
+            Func<string> lastEspTerminalErrorCodeAccessor = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -195,6 +212,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             _isWhiteGlovePart2Accessor = isWhiteGlovePart2Accessor;
             _promoteActiveInstallsToStuck = promoteActiveInstallsToStuck;
             _tryClaimShutdownEvent = tryClaimShutdownEvent;
+            _lastEspTerminalErrorCodeAccessor = lastEspTerminalErrorCodeAccessor;
         }
 
         /// <summary>
@@ -517,15 +535,23 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             try
             {
                 var timeoutMinutes = state.ScenarioObservations?.EspSyncFailureTimeoutMinutes?.Value;
-                var message = timeoutMinutes.HasValue
-                    ? $"Install status unconfirmed — ESP timed out ({timeoutMinutes.Value} min) while still installing."
-                    : "Install status unconfirmed — ESP timed out while still installing.";
-                var promoted = _promoteActiveInstallsToStuck(AppFailureTypes.EspAppsTimeout, message);
+                string errorCode = null;
+                try { errorCode = _lastEspTerminalErrorCodeAccessor?.Invoke(); }
+                catch (Exception ex) { _logger.Warning($"EnrollmentTerminationHandler: lastEspTerminalErrorCodeAccessor threw: {ex.Message}"); }
+
+                // Session 080edee9 follow-up (2026-05-28): classify the ESP Apps-subcategory
+                // failure via the shared helper so the failureType + message accurately
+                // reflect the HRESULT (detection-failure / install-failure) instead of
+                // claiming a timeout for every ESP terminal pathway.
+                var (failureType, message) = AppFailureTypes.ClassifyEspAppsFailure(errorCode, timeoutMinutes);
+
+                var promoted = _promoteActiveInstallsToStuck(failureType, message, errorCode);
                 var count = promoted?.Count ?? 0;
                 if (count > 0)
                 {
+                    var ecSuffix = string.IsNullOrEmpty(errorCode) ? string.Empty : $", errorCode={errorCode}";
                     _logger.Info(
-                        $"EnrollmentTerminationHandler: promoted {count} Installing app(s) to likely-stuck (failureType={AppFailureTypes.EspAppsTimeout}).");
+                        $"EnrollmentTerminationHandler: promoted {count} Installing app(s) to Error (failureType={failureType}{ecSuffix}).");
                 }
                 else
                 {

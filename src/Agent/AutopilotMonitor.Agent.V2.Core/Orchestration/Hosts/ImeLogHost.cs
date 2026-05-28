@@ -59,8 +59,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <c>OnAppStateChanged</c> path emits the per-app <c>app_install_failed</c> events.
         /// Returns the list of promoted appIds for logging.
         /// </summary>
-        public IReadOnlyList<string> PromoteActiveInstallsToStuck(string failureType, string message) =>
-            _tracker.PromoteActiveInstallsToStuck(failureType, message);
+        public IReadOnlyList<string> PromoteActiveInstallsToStuck(string failureType, string message, string? errorCode = null) =>
+            _tracker.PromoteActiveInstallsToStuck(failureType, message, errorCode);
 
         /// <summary>
         /// Exposes the tracker's simulation flag so the Dev / Test CLI flag

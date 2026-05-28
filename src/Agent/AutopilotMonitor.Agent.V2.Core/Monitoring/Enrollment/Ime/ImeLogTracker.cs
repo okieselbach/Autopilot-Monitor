@@ -241,7 +241,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         /// (idempotent at the engine — promoted apps are post-terminal).
         /// </para>
         /// </summary>
-        public IReadOnlyList<string> PromoteActiveInstallsToStuck(string failureType, string message)
+        public IReadOnlyList<string> PromoteActiveInstallsToStuck(string failureType, string message, string errorCode = null)
         {
             if (string.IsNullOrEmpty(failureType))
                 throw new ArgumentException("failureType is mandatory.", nameof(failureType));
@@ -256,11 +256,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             foreach (var pkg in candidates)
             {
                 var oldState = pkg.InstallationState;
-                pkg.SetErrorContext(failureType, message ?? string.Empty);
+                pkg.SetErrorContext(failureType, message ?? string.Empty, errorCode);
                 if (pkg.UpdateState(AppInstallationState.Error))
                 {
                     promoted.Add(pkg.Id);
-                    _logger?.Info($"ImeLogTracker: promoted '{pkg.Name ?? pkg.Id}' Installing -> Error ({failureType}).");
+                    var ecSuffix = string.IsNullOrEmpty(errorCode) ? string.Empty : $", errorCode={errorCode}";
+                    _logger?.Info($"ImeLogTracker: promoted '{pkg.Name ?? pkg.Id}' Installing -> Error ({failureType}{ecSuffix}).");
                     OnAppStateChanged?.Invoke(pkg, oldState, AppInstallationState.Error);
                 }
             }

@@ -354,17 +354,90 @@ namespace AutopilotMonitor.Shared
         public static class AppFailureTypes
         {
             /// <summary>
-            /// The Enrollment Status Page Apps-subcategory timed out while this app was still
-            /// in an active install state. The agent cannot tell whether the install ultimately
-            /// would have succeeded, failed, or hung — the ESP gave up first. UI renders these
-            /// as "likely stuck" rather than confirmed failures.
+            /// The Enrollment Status Page Apps-subcategory failed with no per-app HRESULT
+            /// available, so the agent cannot tell whether the install ultimately would have
+            /// succeeded, failed, or hung. UI renders these as "likely stuck" rather than
+            /// confirmed failures.
             /// <para>
             /// Emitted only by the V2 EnrollmentTerminationHandler on the terminal-ESP-failure
-            /// path. Apps with this failureType always carry <c>confidence: "presumed"</c> in
-            /// their event payload.
+            /// path when <see cref="ClassifyEspAppsFailure"/> falls through to this fallback.
+            /// Apps with this failureType always carry <c>confidence: "presumed"</c> in their
+            /// event payload.
             /// </para>
             /// </summary>
             public const string EspAppsTimeout = "esp_apps_timeout";
+
+            /// <summary>
+            /// The ESP Apps-subcategory failed with HRESULT <c>0x87D1041C</c> — "Application
+            /// not detected after installation completed successfully". The installer ran
+            /// (often to completion) but the Intune detection rule could not verify the app.
+            /// This is a confirmed detection failure, NOT a timeout — UI renders these in red
+            /// ("Detection failed") instead of orange ("Likely stuck").
+            /// </summary>
+            public const string EspAppsDetectionFailure = "esp_apps_detection_failure";
+
+            /// <summary>
+            /// The ESP Apps-subcategory failed with a non-detection HRESULT (anything other
+            /// than <c>0x87D1041C</c>). The app install itself reported an error. UI renders
+            /// these as a confirmed "Install failed" in red.
+            /// </summary>
+            public const string EspAppsInstallFailure = "esp_apps_install_failure";
+
+            /// <summary>
+            /// Windows HRESULT for "Application not detected after installation completed
+            /// successfully" — the canonical marker for an Intune detection-rule mismatch
+            /// surfacing on the ESP Apps subcategory. Lower-case so equality checks against
+            /// <see cref="ProvisioningStatusTracker.TryExtractErrorCode"/> output line up.
+            /// </summary>
+            public const string DetectionFailureHResult = "0x87d1041c";
+
+            /// <summary>
+            /// Maps an ESP Apps-subcategory failure to a canonical <see cref="AppFailureTypes"/>
+            /// identifier + a human-readable app-install message based on the HRESULT carried
+            /// by the failed subcategory.
+            /// <list type="bullet">
+            ///   <item><c>0x87D1041C</c> → <see cref="EspAppsDetectionFailure"/> (install
+            ///         ran but Intune could not detect the app afterwards).</item>
+            ///   <item>Any other non-empty HRESULT → <see cref="EspAppsInstallFailure"/>
+            ///         (the install itself reported an error).</item>
+            ///   <item>No HRESULT available → <see cref="EspAppsTimeout"/> (fallback for
+            ///         genuine timeout cases; the ESP gave up without a per-app verdict).
+            ///         <paramref name="espTimeoutMinutes"/> is only mentioned in the message
+            ///         on this branch — quoting it elsewhere is misleading because the ESP
+            ///         did not necessarily run out the configured clock.</item>
+            /// </list>
+            /// </summary>
+            public static (string FailureType, string Message) ClassifyEspAppsFailure(
+                string errorCode, int? espTimeoutMinutes)
+            {
+                var normalised = string.IsNullOrEmpty(errorCode) ? null : errorCode.ToLowerInvariant();
+
+                if (string.Equals(normalised, DetectionFailureHResult, System.StringComparison.Ordinal))
+                {
+                    return (
+                        EspAppsDetectionFailure,
+                        $"Install completed but Intune detection rule did not find the app afterwards (HRESULT {normalised}).");
+                }
+
+                if (!string.IsNullOrEmpty(normalised))
+                {
+                    return (
+                        EspAppsInstallFailure,
+                        $"ESP reported an Apps-subcategory failure (HRESULT {normalised}) before this app finished installing.");
+                }
+
+                if (espTimeoutMinutes.HasValue)
+                {
+                    return (
+                        EspAppsTimeout,
+                        $"Install status unconfirmed — ESP gave up while this app was still installing " +
+                        $"(ESP timeout was configured at {espTimeoutMinutes.Value} min; actual elapsed time may be lower).");
+                }
+
+                return (
+                    EspAppsTimeout,
+                    "Install status unconfirmed — ESP gave up while this app was still installing.");
+            }
         }
 
         // -----------------------------------------------------------------------

@@ -145,9 +145,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             public int CleanExitMarkerWrites;
             // c117946b debrief (2026-05-12) — captures every PromoteActiveInstallsToStuck
             // call so tests can assert the discriminator fired exactly when intended.
-            public List<(string failureType, string message)> PromotionCalls { get; } =
-                new List<(string failureType, string message)>();
+            // Session 080edee9 follow-up (2026-05-28) — added `errorCode` slot so tests can
+            // verify the HRESULT-based classification (esp_apps_detection_failure vs
+            // esp_apps_install_failure vs esp_apps_timeout).
+            public List<(string failureType, string message, string errorCode)> PromotionCalls { get; } =
+                new List<(string failureType, string message, string errorCode)>();
             public IReadOnlyList<string> PromotionReturnValue { get; set; } = Array.Empty<string>();
+            // Session 080edee9 follow-up (2026-05-28) — feeds the
+            // lastEspTerminalErrorCodeAccessor in the production wiring. Defaults to null
+            // (no HRESULT observed) so existing tests fall through to the
+            // `esp_apps_timeout` classification.
+            public string LastEspTerminalErrorCodeOverride { get; set; } = null;
             public List<string> TerminationActionLog { get; } = new List<string>();
             public TimeSpan SpoolDrainPeriodOverride { get; set; } = TimeSpan.Zero;
             // Shutdown-gap closure (2026-05-15) — when set, the constructed handler shares
@@ -205,12 +213,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                         TerminationActionLog.Add("writeCleanExitMarker");
                     }),
                     ingressPendingSignalCountAccessor: IngressPendingSignalCountAccessor,
-                    promoteActiveInstallsToStuck: (failureType, message) =>
+                    promoteActiveInstallsToStuck: (failureType, message, errorCode) =>
                     {
-                        PromotionCalls.Add((failureType, message));
+                        PromotionCalls.Add((failureType, message, errorCode));
                         return PromotionReturnValue;
                     },
-                    tryClaimShutdownEvent: TryClaimShutdownEventOverride);
+                    tryClaimShutdownEvent: TryClaimShutdownEventOverride,
+                    lastEspTerminalErrorCodeAccessor: () => LastEspTerminalErrorCodeOverride);
             }
 
             public void Dispose() => Tmp.Dispose();
@@ -966,10 +975,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             rig.Build().Handle(sender: null!,
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
 
-            // Exactly one promotion call with the canonical failureType + the user-facing message.
+            // No HRESULT observed → fallback to the EspAppsTimeout classification with the
+            // canonical "ESP gave up while still installing" message. errorCode is null.
             Assert.Single(rig.PromotionCalls);
             Assert.Equal(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsTimeout, rig.PromotionCalls[0].failureType);
-            Assert.Contains("ESP timed out", rig.PromotionCalls[0].message);
+            Assert.Contains("ESP gave up", rig.PromotionCalls[0].message);
+            Assert.Null(rig.PromotionCalls[0].errorCode);
         }
 
         [Fact]
@@ -1072,8 +1083,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
 
             Assert.Single(rig.PromotionCalls);
-            Assert.Contains("(60 min)", rig.PromotionCalls[0].message);
-            Assert.Contains("ESP timed out", rig.PromotionCalls[0].message);
+            // Session 080edee9 follow-up — message no longer claims a literal timeout
+            // (the timeout was the *configured* ceiling, not necessarily the elapsed time).
+            Assert.Equal(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsTimeout, rig.PromotionCalls[0].failureType);
+            Assert.Contains("ESP gave up", rig.PromotionCalls[0].message);
+            Assert.Contains("60 min", rig.PromotionCalls[0].message);
+            Assert.Contains("configured", rig.PromotionCalls[0].message);
         }
 
         [Fact]
@@ -1090,7 +1105,55 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
 
             Assert.Single(rig.PromotionCalls);
             Assert.DoesNotContain("min)", rig.PromotionCalls[0].message);
-            Assert.Contains("ESP timed out while still installing", rig.PromotionCalls[0].message);
+            Assert.DoesNotContain("min;", rig.PromotionCalls[0].message);
+            Assert.Contains("ESP gave up while this app was still installing", rig.PromotionCalls[0].message);
+        }
+
+        [Fact]
+        public void PromoteActiveInstalls_classifies_0x87d1041c_as_detection_failure()
+        {
+            // Session 080edee9: the agent observed HRESULT 0x87D1041C in the failed
+            // DeviceSetup/Apps subcategory ("App not detected after install completed
+            // successfully"). The classifier must NOT label this as a timeout — it is a
+            // confirmed Intune detection-rule mismatch. The errorCode is propagated to the
+            // promotion so the per-app `app_install_failed` event carries DataJson.errorCode
+            // and downstream rules (ANALYZE-APP-013) can correlate.
+            using var rig = new Rig();
+            rig.State = BuildEspTerminalFailureState();
+            rig.PromotionReturnValue = new[] { "office-365" };
+            rig.LastEspTerminalErrorCodeOverride = "0x87d1041c";
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.Single(rig.PromotionCalls);
+            Assert.Equal(
+                AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsDetectionFailure,
+                rig.PromotionCalls[0].failureType);
+            Assert.Contains("detection", rig.PromotionCalls[0].message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("0x87d1041c", rig.PromotionCalls[0].message);
+            Assert.Equal("0x87d1041c", rig.PromotionCalls[0].errorCode);
+        }
+
+        [Fact]
+        public void PromoteActiveInstalls_classifies_other_hresult_as_install_failure()
+        {
+            // Any HRESULT other than 0x87D1041C means the install itself reported an error
+            // (vs. a detection-rule mismatch). Must NOT be labelled as a timeout.
+            using var rig = new Rig();
+            rig.State = BuildEspTerminalFailureState();
+            rig.PromotionReturnValue = new[] { "vpn-client" };
+            rig.LastEspTerminalErrorCodeOverride = "0x80070643";
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.Single(rig.PromotionCalls);
+            Assert.Equal(
+                AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsInstallFailure,
+                rig.PromotionCalls[0].failureType);
+            Assert.Contains("0x80070643", rig.PromotionCalls[0].message);
+            Assert.Equal("0x80070643", rig.PromotionCalls[0].errorCode);
         }
     }
 }

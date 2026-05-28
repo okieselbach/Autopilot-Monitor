@@ -134,8 +134,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// adapter emits regular <c>app_install_failed</c> events for every promoted app.
         /// Returns an empty list when the host has not been created yet (start order).
         /// </summary>
-        public IReadOnlyList<string> PromoteActiveInstallsToStuck(string failureType, string message) =>
-            _imeLogHost?.PromoteActiveInstallsToStuck(failureType, message) ?? Array.Empty<string>();
+        public IReadOnlyList<string> PromoteActiveInstallsToStuck(string failureType, string message, string? errorCode = null) =>
+            _imeLogHost?.PromoteActiveInstallsToStuck(failureType, message, errorCode) ?? Array.Empty<string>();
+
+        /// <summary>
+        /// Session 080edee9 follow-up (2026-05-28) — last observed HRESULT from the ESP Apps
+        /// subcategory failure (e.g. <c>0x87D1041C</c>). Surfaced by
+        /// <see cref="EspAndHelloHost.LastEspTerminalErrorCode"/> and read by
+        /// <c>EnrollmentTerminationHandler.MaybePromoteActiveInstallsAsStuck</c> so the
+        /// promotion can classify the failure as <c>esp_apps_detection_failure</c> /
+        /// <c>esp_apps_install_failure</c> instead of always claiming a generic timeout.
+        /// Returns null when no ESP failure with a HRESULT was observed (or the host has not
+        /// been created yet).
+        /// </summary>
+        public string? LastEspTerminalErrorCode => EspAndHelloHost?.LastEspTerminalErrorCode;
 
         public DefaultComponentFactory(
             AgentConfiguration agentConfig,
