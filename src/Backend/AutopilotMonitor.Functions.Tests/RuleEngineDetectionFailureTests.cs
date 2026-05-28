@@ -151,27 +151,27 @@ public class RuleEngineDetectionFailureTests
     }
 
     [Fact]
-    public async Task ANALYZE_CORR_001_is_disabled_after_version_bump()
+    public void ANALYZE_CORR_001_is_removed_from_builtin_catalog()
     {
-        // The "Slow Network" rule fired as a false positive on session 080edee9 because
-        // its conditions don't actually check for slow downloads. With the v1.1.0 bump,
-        // EnsureBuiltInRulesSeededAsync will re-import it as enabled=false on the next
-        // backend boot — verify the in-code shape is correct.
-        var rule = BuiltInAnalyzeRules.GetAll().First(r => r.RuleId == "ANALYZE-CORR-001");
-        Assert.Equal("1.1.0", rule.Version);
-        Assert.False(rule.Enabled);
+        // "Slow Network Causing App Installation Failure" was sunset because its
+        // conditions never verified a slow download — it fired on the simple combo
+        // of any app-failure + any download event + sufficient disk. The first attempt
+        // to ship it as enabled:false was a half-measure that left orphan per-tenant
+        // RuleState{Enabled=true} overrides in place. Sunset = removed from source +
+        // EnsureBuiltInRulesSeededAsync GCs the orphan state on the next backend boot.
+        Assert.DoesNotContain(BuiltInAnalyzeRules.GetAll(), r => r.RuleId == "ANALYZE-CORR-001");
     }
 
     [Fact]
-    public async Task ANALYZE_APP_009_is_disabled_after_version_bump()
+    public void ANALYZE_APP_009_is_removed_from_builtin_catalog()
     {
-        // The "App Download Stalled" rule fired on the V2 termination handler's
-        // synthetic download_progress with status=failed (emitted AFTER the download
-        // already completed). Disabled until the engine grows status-aware suppression
-        // OR we introduce a dedicated download_stalled event type.
-        var rule = BuiltInAnalyzeRules.GetAll().First(r => r.RuleId == "ANALYZE-APP-009");
-        Assert.Equal("1.1.0", rule.Version);
-        Assert.False(rule.Enabled);
+        // "App Download Stalled" was sunset for the same reason CORR-001 was: the rule
+        // fired on the V2 termination handler's synthetic `download_progress: failed`
+        // (emitted AFTER the download already completed), and the engine's
+        // suppressByEvent can't filter by a third event's `status` field. Re-introduce
+        // only with a real stall-detection mechanism (e.g. a dedicated `download_stalled`
+        // event type that isn't post-hoc-synthesized).
+        Assert.DoesNotContain(BuiltInAnalyzeRules.GetAll(), r => r.RuleId == "ANALYZE-APP-009");
     }
 
     // ===== Event builders (faithful to session 080edee9's actual payloads) =====

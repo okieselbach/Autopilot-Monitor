@@ -337,6 +337,57 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Cross-partition cleanup: deletes every RuleState row across all tenants whose
+        /// RowKey matches <paramref name="ruleId"/>. Used as orphan-GC when a built-in
+        /// rule is removed from the global catalog — without this, per-tenant
+        /// <c>RuleState{Enabled=true}</c> overrides survive the sunset and would re-fire
+        /// the moment the rule was ever re-introduced under the same ruleId. Best-effort:
+        /// failures on individual rows are logged and skipped (no transactionality across
+        /// partitions). Returns the actual number of rows deleted.
+        /// </summary>
+        public async Task<int> DeleteRuleStatesForRuleIdAcrossTenantsAsync(string ruleId)
+        {
+            if (string.IsNullOrWhiteSpace(ruleId)) return 0;
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.RuleStates);
+                // Cross-partition scan is acceptable here — RuleStates is a small table
+                // (one row per tenant × overridden rule). Deletion is rare (only on built-in
+                // sunset), so we don't need a partition-key-indexed shortcut.
+                var query = tableClient.QueryAsync<TableEntity>(filter: $"RowKey eq '{ruleId.Replace("'", "''")}'");
+
+                var deleted = 0;
+                await foreach (var entity in query)
+                {
+                    try
+                    {
+                        await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                        deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Failed to delete orphan RuleState {RuleId} for tenant {TenantId}",
+                            ruleId, entity.PartitionKey);
+                    }
+                }
+                if (deleted > 0)
+                {
+                    _logger.LogInformation(
+                        "Deleted {Count} orphan RuleState row(s) for sunset rule {RuleId}",
+                        deleted, ruleId);
+                }
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to enumerate RuleStates for orphan GC of {RuleId}", ruleId);
+                return 0;
+            }
+        }
+
         // ===== ANALYZE RULES METHODS =====
 
         /// <summary>

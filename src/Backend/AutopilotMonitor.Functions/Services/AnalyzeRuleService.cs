@@ -215,15 +215,28 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Re-imports all built-in analyze rules into the global partition.
-        /// Deletes old global built-in rules and writes current code definitions.
-        /// Tenant RuleStates are preserved.
+        /// Re-imports all built-in analyze rules into the global partition. Deletes old
+        /// global built-in rules and writes current code definitions. For rules that
+        /// existed before but are NOT in the new catalog (sunset rules), this also GCs
+        /// the per-tenant <c>RuleState</c> rows that would otherwise linger as orphan
+        /// state. Tenant RuleStates for rules that are still in the catalog are preserved.
         /// </summary>
-        public async Task<(int deleted, int written)> ReseedBuiltInRulesAsync()
+        public async Task<(int deleted, int written, int orphanStatesGcd)> ReseedBuiltInRulesAsync()
         {
             _logger.LogInformation("Reseeding built-in analyze rules (full re-import)...");
 
             var existingGlobalRules = await _ruleRepo.GetAnalyzeRulesAsync("global");
+            var builtInRules = BuiltInAnalyzeRules.GetAll();
+            var newCatalogIds = builtInRules.Select(r => r.RuleId).ToHashSet(StringComparer.Ordinal);
+
+            // Identify sunset rule IDs BEFORE the delete pass so we can fan out the
+            // per-tenant RuleState GC after the catalog is rebuilt. A rule is "sunset"
+            // if it existed in the global partition (as built-in) but isn't in the
+            // new catalog.
+            var sunsetRuleIds = existingGlobalRules
+                .Where(r => r.IsBuiltIn && !newCatalogIds.Contains(r.RuleId))
+                .Select(r => r.RuleId)
+                .ToList();
 
             var deleted = 0;
             foreach (var rule in existingGlobalRules.Where(r => r.IsBuiltIn))
@@ -233,21 +246,37 @@ namespace AutopilotMonitor.Functions.Services
             }
             _logger.LogInformation($"Deleted {deleted} old global built-in analyze rules");
 
-            var builtInRules = BuiltInAnalyzeRules.GetAll();
             foreach (var rule in builtInRules)
             {
                 await _ruleRepo.StoreAnalyzeRuleAsync(rule, "global");
             }
             _logger.LogInformation($"Written {builtInRules.Count} built-in analyze rules from code");
 
+            // Orphan-RuleState GC for sunset rules — see method-level XML doc for the
+            // motivation. Best-effort: failures on individual rows are logged inside the
+            // storage method, not surfaced here.
+            var orphanStatesGcd = 0;
+            foreach (var sunsetRuleId in sunsetRuleIds)
+            {
+                orphanStatesGcd += await _ruleRepo.DeleteRuleStatesForRuleIdAcrossTenantsAsync(sunsetRuleId);
+            }
+            if (orphanStatesGcd > 0)
+            {
+                _logger.LogInformation(
+                    "Cleaned up {Count} orphan per-tenant RuleState row(s) for {SunsetCount} sunset built-in rule(s)",
+                    orphanStatesGcd, sunsetRuleIds.Count);
+            }
+
             _seeded = false;
 
-            return (deleted, builtInRules.Count);
+            return (deleted, builtInRules.Count, orphanStatesGcd);
         }
 
         /// <summary>
-        /// Seeds built-in analyze rules if not already done.
-        /// Also updates existing built-in rules when the code definitions change (version or key fields).
+        /// Seeds built-in analyze rules if not already done. Also updates existing
+        /// built-in rules when the code definitions change (version or key fields),
+        /// removes built-in rules that no longer exist in the code (sunset), and GCs
+        /// per-tenant RuleState rows for sunset rules so no orphan overrides linger.
         /// </summary>
         private async Task EnsureBuiltInRulesSeededAsync()
         {
@@ -255,6 +284,7 @@ namespace AutopilotMonitor.Functions.Services
 
             var existingRules = await _ruleRepo.GetAnalyzeRulesAsync("global");
             var builtInRules = BuiltInAnalyzeRules.GetAll();
+            var newCatalogIds = builtInRules.Select(r => r.RuleId).ToHashSet(StringComparer.Ordinal);
 
             if (existingRules.Count == 0)
             {
@@ -295,6 +325,26 @@ namespace AutopilotMonitor.Functions.Services
                 if (updated > 0)
                 {
                     _logger.LogInformation($"Updated {updated} built-in analyze rules from code definitions");
+                }
+
+                // Sunset detection: rules that existed as built-in but are no longer in
+                // the code catalog. Delete the global row AND fan out the per-tenant
+                // RuleState GC so opt-in overrides don't linger as dead state.
+                var sunsetRules = existingRules
+                    .Where(r => r.IsBuiltIn && !newCatalogIds.Contains(r.RuleId))
+                    .ToList();
+
+                if (sunsetRules.Count > 0)
+                {
+                    var orphanStatesGcd = 0;
+                    foreach (var sunset in sunsetRules)
+                    {
+                        await _ruleRepo.DeleteAnalyzeRuleAsync("global", sunset.RuleId);
+                        orphanStatesGcd += await _ruleRepo.DeleteRuleStatesForRuleIdAcrossTenantsAsync(sunset.RuleId);
+                    }
+                    _logger.LogInformation(
+                        "Sunset {RuleCount} built-in analyze rule(s) no longer in the code catalog; GC'd {OrphanCount} orphan per-tenant RuleState row(s)",
+                        sunsetRules.Count, orphanStatesGcd);
                 }
             }
 

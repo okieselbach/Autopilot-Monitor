@@ -162,6 +162,19 @@ namespace AutopilotMonitor.Functions.Functions.Admin
         private async Task<(int deleted, int written)> ReseedAnalyzeAsync(List<AutopilotMonitor.Shared.Models.AnalyzeRule> rules)
         {
             var existing = await _ruleRepo.GetAnalyzeRulesAsync("global");
+
+            // Identify sunset rules BEFORE the delete pass so we can fan out the
+            // per-tenant RuleState orphan GC after the catalog is rebuilt. A rule is
+            // "sunset" if it existed as built-in / community in the global partition but
+            // isn't in the new GitHub-fetched catalog. Mirrors the sunset handling in
+            // AnalyzeRuleService.EnsureBuiltInRulesSeededAsync — kept symmetric so
+            // every reseed path leaves the same DB invariants.
+            var newCatalogIds = rules.Select(r => r.RuleId).ToHashSet(System.StringComparer.Ordinal);
+            var sunsetRuleIds = existing
+                .Where(r => (r.IsBuiltIn || r.IsCommunity) && !newCatalogIds.Contains(r.RuleId))
+                .Select(r => r.RuleId)
+                .ToList();
+
             var deleted = 0;
             foreach (var rule in existing.Where(r => r.IsBuiltIn || r.IsCommunity))
             {
@@ -179,7 +192,15 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 await _ruleRepo.StoreAnalyzeRuleAsync(rule, "global");
             }
 
-            _logger.LogInformation($"GitHub reseed analyze: {deleted} deleted, {rules.Count} written");
+            var orphanStatesGcd = 0;
+            foreach (var sunsetRuleId in sunsetRuleIds)
+            {
+                orphanStatesGcd += await _ruleRepo.DeleteRuleStatesForRuleIdAcrossTenantsAsync(sunsetRuleId);
+            }
+
+            _logger.LogInformation(
+                "GitHub reseed analyze: {Deleted} deleted, {Written} written, {OrphanCount} orphan per-tenant RuleState(s) cleaned for {SunsetCount} sunset rule(s)",
+                deleted, rules.Count, orphanStatesGcd, sunsetRuleIds.Count);
             return (deleted, rules.Count);
         }
 

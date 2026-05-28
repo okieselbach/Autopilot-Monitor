@@ -23,6 +23,14 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> StoreRuleStateAsync(string tenantId, string ruleId, RuleState state);
         Task<Dictionary<string, RuleState>> GetRuleStatesAsync(string tenantId);
         Task<bool> DeleteRuleStateAsync(string tenantId, string ruleId);
+        /// <summary>
+        /// Removes every <c>RuleStates</c> row (across all tenants) whose RowKey equals
+        /// <paramref name="ruleId"/>. Used as orphan-GC when a built-in / community rule
+        /// is sunset (deleted from the global catalog): tenants that previously toggled
+        /// the rule in the UI have a per-tenant <c>RuleState</c> row that would otherwise
+        /// linger as dead state. Returns the number of orphans deleted.
+        /// </summary>
+        Task<int> DeleteRuleStatesForRuleIdAcrossTenantsAsync(string ruleId);
 
         // --- Analyze Rules ---
         Task<bool> StoreAnalyzeRuleAsync(AnalyzeRule rule, string tenantId = "global");

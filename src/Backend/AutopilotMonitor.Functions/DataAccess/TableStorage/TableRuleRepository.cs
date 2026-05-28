@@ -48,6 +48,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<bool> DeleteRuleStateAsync(string tenantId, string ruleId)
             => _storage.DeleteRuleStateAsync(tenantId, ruleId);
 
+        public Task<int> DeleteRuleStatesForRuleIdAcrossTenantsAsync(string ruleId)
+            => _storage.DeleteRuleStatesForRuleIdAcrossTenantsAsync(ruleId);
+
         public Task<bool> StoreAnalyzeRuleAsync(AnalyzeRule rule, string tenantId = "global")
             => _storage.StoreAnalyzeRuleAsync(rule, tenantId);
 
