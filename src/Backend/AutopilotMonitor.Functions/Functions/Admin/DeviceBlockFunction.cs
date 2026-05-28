@@ -82,6 +82,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 var durationHours = json["durationHours"]?.Value<int>() ?? 12;
                 var reason = json["reason"]?.ToString();
                 var action = json["action"]?.ToString() ?? "Block";
+                var blockedSessionId = NormalizeOptionalSessionId(json["blockedSessionId"]?.ToString());
 
                 if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(serialNumber))
                     return await BadRequestAsync(req, "tenantId and serialNumber are required");
@@ -96,7 +97,17 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 // Normalize casing
                 action = string.Equals(action, "Kill", StringComparison.OrdinalIgnoreCase) ? "Kill" : "Block";
 
-                await _blockedDeviceService.BlockDeviceAsync(tenantId, serialNumber, durationHours, userIdentifier, reason, action);
+                await _blockedDeviceService.BlockDeviceAsync(
+                    tenantId, serialNumber, durationHours, userIdentifier, reason, action, blockedSessionId);
+
+                var auditFields = new Dictionary<string, string>
+                {
+                    { "Action", action },
+                    { "DurationHours", durationHours.ToString() },
+                    { "Reason", reason ?? string.Empty }
+                };
+                if (blockedSessionId != null)
+                    auditFields["BlockedSessionId"] = blockedSessionId;
 
                 await _maintenanceRepo.LogAuditEntryAsync(
                     tenantId,
@@ -104,20 +115,15 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     "DeviceBlock",
                     serialNumber,
                     userIdentifier,
-                    new Dictionary<string, string>
-                    {
-                        { "Action", action },
-                        { "DurationHours", durationHours.ToString() },
-                        { "Reason", reason ?? string.Empty }
-                    }
+                    auditFields
                 );
 
                 await _opsEventService.RecordDeviceBlockedAsync(tenantId, serialNumber, reason ?? "No reason", userIdentifier);
 
                 var isKill = action == "Kill";
                 _logger.LogWarning(
-                    "Global Admin {User} {Action} device {SerialNumber} in tenant {TenantId} for {Hours}h. Reason: {Reason}",
-                    userIdentifier, isKill ? "issued KILL signal to" : "blocked", serialNumber, tenantId, durationHours, reason);
+                    "Global Admin {User} {Action} device {SerialNumber} in tenant {TenantId} for {Hours}h. Reason: {Reason} SessionId: {SessionId}",
+                    userIdentifier, isKill ? "issued KILL signal to" : "blocked", serialNumber, tenantId, durationHours, reason, blockedSessionId);
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(new
@@ -195,6 +201,15 @@ namespace AutopilotMonitor.Functions.Functions.Admin
             var r = req.CreateResponse(HttpStatusCode.BadRequest);
             await r.WriteAsJsonAsync(new { success = false, message });
             return r;
+        }
+
+        /// <summary>
+        /// Trims and rejects whitespace/empty sessionIds so the service layer never receives "  " as a valid session token.
+        /// </summary>
+        internal static string? NormalizeOptionalSessionId(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            return raw.Trim();
         }
     }
 }

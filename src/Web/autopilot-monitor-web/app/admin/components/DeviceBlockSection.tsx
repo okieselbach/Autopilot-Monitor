@@ -1,11 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { trackEvent } from "@/lib/appInsights";
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
+
+interface ResolvedDevice {
+  sessionId: string;
+  tenantId: string;
+  serialNumber: string;
+  deviceName: string;
+  manufacturer: string;
+  model: string;
+}
 
 interface BlockedDevice {
   tenantId: string;
@@ -57,6 +67,72 @@ export function DeviceBlockSection({
   const [killingDevice, setKillingDevice] = useState<string | null>(null);
   const [blockListTenantId, setBlockListTenantId] = useState("");
   const [loadingAllBlocked, setLoadingAllBlocked] = useState(false);
+  const [blockSessionId, setBlockSessionId] = useState("");
+  const [resolvingSession, setResolvingSession] = useState(false);
+  const [resolvedDevice, setResolvedDevice] = useState<ResolvedDevice | null>(null);
+
+  const searchParams = useSearchParams();
+  const autoResolvedRef = useRef(false);
+
+  const handleResolveSession = useCallback(async (rawSessionId?: string) => {
+    const id = (rawSessionId ?? blockSessionId).trim();
+    if (!id) return;
+    try {
+      setResolvingSession(true);
+      setError(null);
+      const response = await authenticatedFetch(api.sessions.get(id), getAccessToken);
+      const data = await response.json();
+      if (!response.ok || !data?.success || !data.session) {
+        throw new Error(data?.message || `Session ${id} not found`);
+      }
+      const session = data.session as {
+        sessionId: string;
+        tenantId: string;
+        serialNumber: string;
+        deviceName?: string;
+        manufacturer?: string;
+        model?: string;
+      };
+      setBlockTenantId(session.tenantId);
+      setBlockSerialNumber(session.serialNumber);
+      setResolvedDevice({
+        sessionId: session.sessionId,
+        tenantId: session.tenantId,
+        serialNumber: session.serialNumber,
+        deviceName: session.deviceName ?? "",
+        manufacturer: session.manufacturer ?? "",
+        model: session.model ?? "",
+      });
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while resolving session ID");
+      }
+      setResolvedDevice(null);
+      setError(err instanceof Error ? err.message : "Failed to resolve session");
+    } finally {
+      setResolvingSession(false);
+    }
+  }, [blockSessionId, getAccessToken, setError]);
+
+  const clearResolvedDevice = () => {
+    setResolvedDevice(null);
+    setBlockSessionId("");
+  };
+
+  useEffect(() => {
+    if (autoResolvedRef.current) return;
+    const sessionIdParam = searchParams?.get("sessionId");
+    const actionParam = searchParams?.get("action");
+    const reasonParam = searchParams?.get("reason");
+    if (!sessionIdParam) return;
+    autoResolvedRef.current = true;
+    setBlockSessionId(sessionIdParam);
+    if (actionParam === "Block" || actionParam === "Kill") setBlockAction(actionParam);
+    if (reasonParam) setBlockReason(reasonParam);
+    void handleResolveSession(sessionIdParam);
+    // handleResolveSession intentionally excluded from deps — fires once per mount based on URL params
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const fetchBlockedDevices = async (tenantId: string) => {
     if (!tenantId) return;
@@ -101,6 +177,16 @@ export function DeviceBlockSection({
       `REMOTE KILL: This will permanently shut down the agent on device "${blockSerialNumber.trim()}" and remove all agent files. This cannot be undone. Continue?`
     )) return;
 
+    // Only forward the session ID if the operator actually resolved a session that matches
+    // the current Serial+Tenant fields — prevents a stale sessionId from auto-fill binding
+    // to a hand-edited target device.
+    const sessionIdToForward =
+      resolvedDevice &&
+      resolvedDevice.serialNumber === blockSerialNumber.trim() &&
+      resolvedDevice.tenantId === blockTenantId
+        ? resolvedDevice.sessionId
+        : undefined;
+
     try {
       setBlockingDevice(true);
       setError(null);
@@ -113,11 +199,16 @@ export function DeviceBlockSection({
           durationHours: blockDurationHours,
           reason: blockReason.trim() || undefined,
           action: blockAction,
+          blockedSessionId: sessionIdToForward,
         }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || response.statusText);
-      trackEvent("device_blocked", { action: blockAction, durationHours: blockDurationHours });
+      trackEvent("device_blocked", {
+        action: blockAction,
+        durationHours: blockDurationHours,
+        via: sessionIdToForward ? "sessionId" : "manual",
+      });
       setSuccessMessage(
         blockAction === "Kill"
           ? `Device ${blockSerialNumber.trim()} issued remote kill signal for ${blockDurationHours}h.`
@@ -127,6 +218,8 @@ export function DeviceBlockSection({
       setBlockSerialNumber("");
       setBlockReason("");
       setBlockAction("Block");
+      setBlockSessionId("");
+      setResolvedDevice(null);
       if (blockListTenantId === blockTenantId) await fetchBlockedDevices(blockTenantId);
     } catch (err) {
       if (err instanceof TokenExpiredError) {
@@ -270,6 +363,68 @@ export function DeviceBlockSection({
         {/* Block / Kill a device form */}
         <div>
           <h3 className="text-sm font-semibold text-red-900 dark:text-red-100 mb-3">Block or Kill a Device</h3>
+
+          {/* Resolve-by-Session row: optional shortcut that fills Tenant + Serial from a sessionId */}
+          <div className="mb-4 p-3 bg-white/60 dark:bg-gray-900/30 border border-red-200 dark:border-red-700/60 rounded-lg">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Session ID <span className="text-xs font-normal text-gray-500 dark:text-gray-400">(optional shortcut — fills Tenant + Serial)</span>
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="e.g. 806f61c3-1978-4e5c-8fd7-a571cb0fe6bc"
+                value={blockSessionId}
+                onChange={(e) => setBlockSessionId(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && blockSessionId.trim() && !resolvingSession) {
+                    e.preventDefault();
+                    void handleResolveSession();
+                  }
+                }}
+                disabled={resolvingSession}
+                className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-mono text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+              />
+              <button
+                onClick={() => void handleResolveSession()}
+                disabled={resolvingSession || !blockSessionId.trim()}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {resolvingSession ? (
+                  <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div><span>Resolving...</span></>
+                ) : (
+                  <span>Resolve</span>
+                )}
+              </button>
+            </div>
+            {resolvedDevice && (
+              <div className="mt-2 flex items-start justify-between gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700 rounded-md">
+                <div className="text-xs text-green-900 dark:text-green-200">
+                  <span className="font-semibold">Resolved:</span>{" "}
+                  <span className="font-mono">{resolvedDevice.serialNumber}</span>
+                  {(resolvedDevice.deviceName || resolvedDevice.manufacturer || resolvedDevice.model) && (
+                    <>
+                      {" — "}
+                      {resolvedDevice.deviceName && <span>{resolvedDevice.deviceName} </span>}
+                      {(resolvedDevice.manufacturer || resolvedDevice.model) && (
+                        <span className="italic">({[resolvedDevice.manufacturer, resolvedDevice.model].filter(Boolean).join(" ")})</span>
+                      )}
+                    </>
+                  )}
+                  {" — Tenant "}
+                  <span className="font-mono">{resolvedDevice.tenantId.split("-").slice(0, 2).join("-")}...</span>
+                </div>
+                <button
+                  onClick={clearResolvedDevice}
+                  className="text-green-700 dark:text-green-300 hover:text-green-900 dark:hover:text-green-100 text-lg leading-none"
+                  aria-label="Clear resolved session"
+                  title="Clear"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Serial Number</label>
@@ -277,7 +432,7 @@ export function DeviceBlockSection({
                 type="text"
                 placeholder="e.g. 1234ABCD"
                 value={blockSerialNumber}
-                onChange={(e) => setBlockSerialNumber(e.target.value)}
+                onChange={(e) => { setBlockSerialNumber(e.target.value); if (resolvedDevice) setResolvedDevice(null); }}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
               />
             </div>
@@ -286,7 +441,7 @@ export function DeviceBlockSection({
               <TenantSearchSelect
                 tenants={tenants}
                 value={blockTenantId}
-                onChange={setBlockTenantId}
+                onChange={(id) => { setBlockTenantId(id); if (resolvedDevice && id !== resolvedDevice.tenantId) setResolvedDevice(null); }}
                 focusRingClass="focus:ring-red-500 focus:border-red-500"
               />
             </div>

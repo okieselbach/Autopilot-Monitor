@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { extractContinuation } from "@/lib/paginationLink";
+import { extractSessionId, buildAutoReason } from "./opsEventSessionHelpers";
 
 interface OpsEvent {
   id: string;
@@ -549,6 +550,36 @@ export function OpsEventsSection({
                   </div>
                 )}
               </dl>
+
+              {(() => {
+                const sessionId = extractSessionId(selectedEvent.details);
+                if (!sessionId) return null;
+                const reason = buildAutoReason(selectedEvent.eventType, sessionId);
+                const baseHref = `/admin/security/device-block?sessionId=${encodeURIComponent(sessionId)}&reason=${encodeURIComponent(reason)}`;
+                return (
+                  <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                      Quick-action against the device behind this session:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        href={`${baseHref}&action=Block`}
+                        onClick={() => setSelectedEvent(null)}
+                        className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-orange-100 text-orange-800 hover:bg-orange-200 dark:bg-orange-900/40 dark:text-orange-200 dark:hover:bg-orange-900/60 border border-orange-300 dark:border-orange-700"
+                      >
+                        Block this device
+                      </Link>
+                      <Link
+                        href={`${baseHref}&action=Kill`}
+                        onClick={() => setSelectedEvent(null)}
+                        className="inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-red-700 text-white hover:bg-red-800 dark:bg-red-700 dark:hover:bg-red-800"
+                      >
+                        Kill this device
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="mt-6 flex justify-end">
                 <button
