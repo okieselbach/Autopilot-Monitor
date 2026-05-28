@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
+using AutopilotMonitor.Agent.V2.Core.Diagnostics;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
@@ -557,6 +558,25 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             catch (Exception ex)
                             {
                                 logger.Warning($"StartupEnvironmentProbes: outer exception: {ex.Message}");
+                            }
+
+                            // PR2 — Crash-dump capture: refresh the handler labels with the now-known
+                            // session/tenant, then drain pending crash records from previous runs
+                            // into the timeline as previous_crash_detected events.
+                            try
+                            {
+                                var programData = Environment.ExpandEnvironmentVariables(@"%ProgramData%\AutopilotMonitor");
+                                CrashDumpCapture.RegisterHandlers(
+                                    programDataDirectory: programData,
+                                    sessionId: agentConfig.SessionId ?? string.Empty,
+                                    tenantId: agentConfig.TenantId ?? string.Empty,
+                                    agentVersion: System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown");
+
+                                PendingCrashReporter.ScanAndEmit(agentConfig, programData, logger, lifecyclePost);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.Warning($"PendingCrashReporter: outer exception: {ex.Message}");
                             }
                         });
 

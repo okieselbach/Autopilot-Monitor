@@ -122,6 +122,16 @@ namespace AutopilotMonitor.Agent.V2
             // shutdown during self-update still produces a "clean" classification.
             RegisterCleanExitMarker(dataDirectory);
 
+            // Register crash-dump handlers as early as possible — before SelfUpdate, before
+            // any other startup work — so an unhandled exception anywhere downstream still
+            // produces a MiniDump + CrashRecord. SessionId/TenantId are unknown at this point;
+            // they're filled in later by AgentRuntimeHost via a second RegisterHandlers call.
+            AutopilotMonitor.Agent.V2.Core.Diagnostics.CrashDumpCapture.RegisterHandlers(
+                programDataDirectory: dataDirectory,
+                sessionId: "(pre-runtime)",
+                tenantId: "(pre-runtime)",
+                agentVersion: GetAgentVersion());
+
             // Startup self-update. Legacy parity: cleanup leftover .old files, load cached
             // backend hash / downgrade policy, then attempt the update. Failures here never
             // abort startup — we prefer to run the current version than delay.
