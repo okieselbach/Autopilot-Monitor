@@ -323,9 +323,10 @@
     {
       "ruleId": "ANALYZE-APP-009",
       "title": "App Download Stalled",
-      "description": "Detects when app downloads appear to have stalled, based on failed download progress events.",
+      "description": "Detects when app downloads appear to have stalled, based on failed download progress events. DISABLED: the V2 EnrollmentTerminationHandler emits a synthetic download_progress with status=failed when it promotes Installing -> Error on terminal ESP-Apps failure. That synthetic event fires AFTER the download already completed (e.g. session 080edee9 saw download_progress 100% at 10:34:30 then download_progress failed at 10:41:08), so 'status=failed' alone is a false signal. The engine's `suppressByEvent` cannot filter by a third event's `status` field, so we can't directly say 'suppress when a prior download_progress for the same appId reached 100%' — re-enable only after the engine grows a status-aware suppression filter OR after we introduce a dedicated `download_stalled` event type that doesn't share its eventType with the post-mortem synthesis path.",
       "severity": "warning",
       "category": "apps",
+      "version": "1.1.0",
       "enabled": false,
       "trigger": "correlation",
       "baseConfidence": 55,
@@ -345,7 +346,11 @@
           "eventType": "app_install_failed",
           "operator": "exists",
           "value": "",
-          "required": true
+          "required": true,
+          "suppressByEvent": {
+            "eventType": "app_install_completed",
+            "joinField": "appId"
+          }
         }
       ],
       "confidenceFactors": [
@@ -505,17 +510,37 @@
       "description": "Detects when the Enrollment Status Page failed because Intune could not verify an app was installed (HRESULT 0x87D1041C). The installer ran but the detection rule did not match afterwards.",
       "severity": "critical",
       "category": "apps",
+      "version": "1.1.0",
       "enabled": true,
       "baseConfidence": 90,
+      "preconditions": [
+        {
+          "source": "event_data",
+          "eventType": "esp_failure_settle_started",
+          "dataField": "errorCode",
+          "operator": "equals",
+          "value": "0x87d1041c",
+          "description": "Scope this rule to sessions where the ESP terminated against the Apps subcategory with the canonical detection-failure HRESULT. Works for any agent version, since esp_failure_settle_started is emitted by the V2 ProvisioningStatusTracker regardless of how the Installing-app promotion is later classified."
+        }
+      ],
       "conditions": [
         {
-          "signal": "esp_apps_detection_failure",
+          "signal": "app_with_detection_failure",
           "source": "event_type",
           "eventType": "app_install_failed",
-          "dataField": "failureType",
+          "dataField": "detectionResult",
           "operator": "equals",
-          "value": "esp_apps_detection_failure",
+          "value": "NotDetected",
           "required": true
+        },
+        {
+          "signal": "esp_failure_errorcode",
+          "source": "event_type",
+          "eventType": "esp_failure_settle_started",
+          "dataField": "errorCode",
+          "operator": "equals",
+          "value": "0x87d1041c",
+          "required": false
         }
       ],
       "explanation": "App **{{appName}}** failed during the Enrollment Status Page with HRESULT **{{errorCode}}** — *Application not detected after installation completed successfully*. The installer reported success but the Intune detection rule (file/registry/script) did not find the app afterwards, so the ESP Apps subcategory failed and the device's enrollment terminated.\n\nThis is a confirmed detection-rule mismatch, NOT an install timeout — the install itself most likely completed (or the installer exited 0). Common root causes:\n\n- The detection rule looks for a registry/file path that the installer doesn't create (wrong path, wrong bitness — e.g. checking HKLM\\SOFTWARE\\... on a 32-bit installer that lands under WOW6432Node).\n- The installer writes the detection artefact AFTER the ESP's detection probe runs (e.g. async post-install task, requires reboot).\n- The detection script returns 0 with no stdout (Intune treats empty stdout as \"not detected\").\n- The installer wrote files to a user profile but the rule looks in System scope (or vice-versa).",
@@ -569,9 +594,10 @@
     {
       "ruleId": "ANALYZE-CORR-001",
       "title": "Slow Network Causing App Installation Failure",
-      "description": "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk).",
+      "description": "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk). DISABLED: the current conditions do not actually verify slow downloads — they fire on the simple combination of any app-failure + any download event + sufficient disk, which was a false positive on session 080edee9 (Office detection-failure with a 10.58 MB / 1.5 s download). Re-enable only after the rule grows a real bytes-per-second / download-duration check.",
       "severity": "high",
       "category": "apps",
+      "version": "1.1.0",
       "enabled": false,
       "trigger": "correlation",
       "baseConfidence": 55,
@@ -582,7 +608,11 @@
           "eventType": "app_install_failed",
           "operator": "exists",
           "value": "",
-          "required": true
+          "required": true,
+          "suppressByEvent": {
+            "eventType": "app_install_completed",
+            "joinField": "appId"
+          }
         },
         {
           "signal": "download_events",
@@ -946,6 +976,7 @@
       "description": "Detects when the Autopilot enrollment has explicitly failed.",
       "severity": "critical",
       "category": "enrollment",
+      "version": "1.1.0",
       "enabled": true,
       "baseConfidence": 95,
       "conditions": [
@@ -983,6 +1014,15 @@
           "operator": "exists",
           "value": "",
           "required": false
+        },
+        {
+          "signal": "failed_app",
+          "source": "event_type",
+          "eventType": "app_install_failed",
+          "dataField": "appName",
+          "operator": "exists",
+          "value": "",
+          "required": false
         }
       ],
       "confidenceFactors": [
@@ -992,13 +1032,14 @@
           "weight": 5
         }
       ],
-      "explanation": "The Autopilot enrollment has explicitly failed. The most specific failure information is carried by the events captured during this session — review the `enrollment_failed` event payload and the more targeted rule results (ANALYZE-APP-* / ANALYZE-ESP-*) that fired alongside this one for the actionable root cause.\n\nKey facts extracted from the timeline:\n\n- **Failure reason:** `{{reason}}`\n- **ESP failed subcategory:** `{{failedSubcategory}}`\n- **ESP HRESULT:** `{{errorCode}}`\n\n(Fields shown as `{{…}}` were not present in this session — e.g. a non-ESP failure path has no failed-subcategory.)",
+      "explanation": "The Autopilot enrollment has explicitly failed.\n\n**Key facts extracted from this session's events:**\n\n- **Failure reason:** `{{reason}}`\n- **First failed app:** `{{appName}}`\n- **ESP failed subcategory:** `{{failedSubcategory}}`\n- **ESP HRESULT:** `{{errorCode}}`\n\nWhen an ESP Apps-subcategory failure is paired with HRESULT `0x87D1041C`, the device-side install most likely completed but the Intune detection rule did not match afterwards — see the **App Detection Failure During ESP** rule (ANALYZE-APP-013) in this same analysis for the actionable root cause and remediation steps. Fields shown as `{{…}}` were not present in this session (e.g. a non-ESP failure path has no failed-subcategory).",
       "remediation": [
         {
           "title": "Investigate enrollment failure",
           "steps": [
+            "Start with the more specific ANALYZE-APP-* / ANALYZE-ESP-* rules that fired alongside this one — they correlate specific HRESULTs to actionable causes (e.g. 0x87D1041C → detection rule mismatch in ANALYZE-APP-013)",
             "Read the `reason` field on the enrollment_failed event for the immediate trigger (e.g. esp_terminal_failure, hello_timeout, max_lifetime)",
-            "If a HRESULT is present, look it up against the ESP error catalog (Microsoft Learn: Autopilot ESP error codes) — the ANALYZE-APP-* rules in this session correlate specific HRESULTs to actionable root causes (e.g. 0x87D1041C → detection rule mismatch)",
+            "If a HRESULT is present, look it up against the ESP error catalog (Microsoft Learn: Autopilot ESP error codes)",
             "Review other analyze rule results for correlated issues (disk space, network, app failures)",
             "Check the device event timeline for the sequence of events leading to failure",
             "Verify the Autopilot profile and ESP configuration in Intune"

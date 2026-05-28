@@ -2,9 +2,10 @@
   "$schema": "../schema/analyze-rule.schema.json",
   "ruleId": "ANALYZE-APP-009",
   "title": "App Download Stalled",
-  "description": "Detects when app downloads appear to have stalled, based on failed download progress events.",
+  "description": "Detects when app downloads appear to have stalled, based on failed download progress events. DISABLED: the V2 EnrollmentTerminationHandler emits a synthetic download_progress with status=failed when it promotes Installing -> Error on terminal ESP-Apps failure. That synthetic event fires AFTER the download already completed (e.g. session 080edee9 saw download_progress 100% at 10:34:30 then download_progress failed at 10:41:08), so 'status=failed' alone is a false signal. The engine's `suppressByEvent` cannot filter by a third event's `status` field, so we can't directly say 'suppress when a prior download_progress for the same appId reached 100%' — re-enable only after the engine grows a status-aware suppression filter OR after we introduce a dedicated `download_stalled` event type that doesn't share its eventType with the post-mortem synthesis path.",
   "severity": "warning",
   "category": "apps",
+  "version": "1.1.0",
   "enabled": false,
   "trigger": "correlation",
   "baseConfidence": 55,
@@ -24,7 +25,11 @@
       "eventType": "app_install_failed",
       "operator": "exists",
       "value": "",
-      "required": true
+      "required": true,
+      "suppressByEvent": {
+        "eventType": "app_install_completed",
+        "joinField": "appId"
+      }
     }
   ],
   "confidenceFactors": [

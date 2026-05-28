@@ -2,9 +2,10 @@
   "$schema": "../schema/analyze-rule.schema.json",
   "ruleId": "ANALYZE-CORR-001",
   "title": "Slow Network Causing App Installation Failure",
-  "description": "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk).",
+  "description": "Correlates slow download speeds with app installation failures while disk space is adequate, confirming network as root cause (not disk). DISABLED: the current conditions do not actually verify slow downloads — they fire on the simple combination of any app-failure + any download event + sufficient disk, which was a false positive on session 080edee9 (Office detection-failure with a 10.58 MB / 1.5 s download). Re-enable only after the rule grows a real bytes-per-second / download-duration check.",
   "severity": "high",
   "category": "apps",
+  "version": "1.1.0",
   "enabled": false,
   "trigger": "correlation",
   "baseConfidence": 55,
@@ -15,7 +16,11 @@
       "eventType": "app_install_failed",
       "operator": "exists",
       "value": "",
-      "required": true
+      "required": true,
+      "suppressByEvent": {
+        "eventType": "app_install_completed",
+        "joinField": "appId"
+      }
     },
     {
       "signal": "download_events",

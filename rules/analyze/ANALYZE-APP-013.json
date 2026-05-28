@@ -5,17 +5,37 @@
   "description": "Detects when the Enrollment Status Page failed because Intune could not verify an app was installed (HRESULT 0x87D1041C). The installer ran but the detection rule did not match afterwards.",
   "severity": "critical",
   "category": "apps",
+  "version": "1.1.0",
   "enabled": true,
   "baseConfidence": 90,
+  "preconditions": [
+    {
+      "source": "event_data",
+      "eventType": "esp_failure_settle_started",
+      "dataField": "errorCode",
+      "operator": "equals",
+      "value": "0x87d1041c",
+      "description": "Scope this rule to sessions where the ESP terminated against the Apps subcategory with the canonical detection-failure HRESULT. Works for any agent version, since esp_failure_settle_started is emitted by the V2 ProvisioningStatusTracker regardless of how the Installing-app promotion is later classified."
+    }
+  ],
   "conditions": [
     {
-      "signal": "esp_apps_detection_failure",
+      "signal": "app_with_detection_failure",
       "source": "event_type",
       "eventType": "app_install_failed",
-      "dataField": "failureType",
+      "dataField": "detectionResult",
       "operator": "equals",
-      "value": "esp_apps_detection_failure",
+      "value": "NotDetected",
       "required": true
+    },
+    {
+      "signal": "esp_failure_errorcode",
+      "source": "event_type",
+      "eventType": "esp_failure_settle_started",
+      "dataField": "errorCode",
+      "operator": "equals",
+      "value": "0x87d1041c",
+      "required": false
     }
   ],
   "explanation": "App **{{appName}}** failed during the Enrollment Status Page with HRESULT **{{errorCode}}** — *Application not detected after installation completed successfully*. The installer reported success but the Intune detection rule (file/registry/script) did not find the app afterwards, so the ESP Apps subcategory failed and the device's enrollment terminated.\n\nThis is a confirmed detection-rule mismatch, NOT an install timeout — the install itself most likely completed (or the installer exited 0). Common root causes:\n\n- The detection rule looks for a registry/file path that the installer doesn't create (wrong path, wrong bitness — e.g. checking HKLM\\SOFTWARE\\... on a 32-bit installer that lands under WOW6432Node).\n- The installer writes the detection artefact AFTER the ESP's detection probe runs (e.g. async post-install task, requires reboot).\n- The detection script returns 0 with no stdout (Intune treats empty stdout as \"not detected\").\n- The installer wrote files to a user profile but the rule looks in System scope (or vice-versa).",
