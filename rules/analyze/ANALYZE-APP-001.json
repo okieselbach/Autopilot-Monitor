@@ -12,9 +12,9 @@
       "signal": "detection_failure",
       "source": "event_type",
       "eventType": "app_install_failed",
-      "dataField": "message",
-      "operator": "regex",
-      "value": "detection|not detected|script.*fail|detection.*error|DetectionState|NotDetected",
+      "dataField": "detectionResult",
+      "operator": "equals",
+      "value": "NotDetected",
       "required": true
     }
   ],

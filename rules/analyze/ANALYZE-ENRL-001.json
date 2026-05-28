@@ -15,17 +15,54 @@
       "operator": "exists",
       "value": "",
       "required": true
+    },
+    {
+      "signal": "enrollment_failed_reason",
+      "source": "event_type",
+      "eventType": "enrollment_failed",
+      "dataField": "reason",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    },
+    {
+      "signal": "esp_failure_subcategory",
+      "source": "event_type",
+      "eventType": "esp_failure_settle_started",
+      "dataField": "failedSubcategory",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    },
+    {
+      "signal": "esp_failure_errorcode",
+      "source": "event_type",
+      "eventType": "esp_failure_settle_started",
+      "dataField": "errorCode",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    },
+    {
+      "signal": "failed_app",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "appName",
+      "operator": "exists",
+      "value": "",
+      "required": false
     }
   ],
   "confidenceFactors": [
     { "signal": "app_failed", "condition": "exists", "weight": 5 }
   ],
-  "explanation": "The Autopilot enrollment has explicitly failed. Check the enrollment_failed event details and other rule results for the root cause.",
+  "explanation": "The Autopilot enrollment has explicitly failed. The most specific failure information is carried by the events captured during this session — review the `enrollment_failed` event payload and the more targeted rule results (ANALYZE-APP-* / ANALYZE-ESP-*) that fired alongside this one for the actionable root cause.\n\nKey facts extracted from the timeline:\n\n- **Failure reason:** `{{reason}}`\n- **ESP failed subcategory:** `{{failedSubcategory}}`\n- **ESP HRESULT:** `{{errorCode}}`\n- **First failed app:** `{{appName}}`\n\n(Fields shown as `{{…}}` were not present in this session — e.g. a non-ESP failure path has no failed-subcategory, and a successful pre-ESP stage has no failed app.)",
   "remediation": [
     {
       "title": "Investigate enrollment failure",
       "steps": [
-        "Check the 'reason' field in the enrollment_failed event for specific failure details",
+        "Read the `reason` field on the enrollment_failed event for the immediate trigger (e.g. esp_terminal_failure, hello_timeout, max_lifetime)",
+        "If a HRESULT is present, look it up against the ESP error catalog (Microsoft Learn: Autopilot ESP error codes) — the ANALYZE-APP-* rules in this session correlate specific HRESULTs to actionable root causes (e.g. 0x87D1041C → detection rule mismatch)",
         "Review other analyze rule results for correlated issues (disk space, network, app failures)",
         "Check the device event timeline for the sequence of events leading to failure",
         "Verify the Autopilot profile and ESP configuration in Intune"

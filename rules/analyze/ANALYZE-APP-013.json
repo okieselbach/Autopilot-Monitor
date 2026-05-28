@@ -1,0 +1,74 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-APP-013",
+  "title": "App Detection Failure During ESP (0x87D1041C)",
+  "description": "Detects when the Enrollment Status Page failed because Intune could not verify an app was installed (HRESULT 0x87D1041C). The installer ran but the detection rule did not match afterwards.",
+  "severity": "critical",
+  "category": "apps",
+  "enabled": true,
+  "baseConfidence": 90,
+  "conditions": [
+    {
+      "signal": "esp_apps_detection_failure",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "failureType",
+      "operator": "equals",
+      "value": "esp_apps_detection_failure",
+      "required": true
+    },
+    {
+      "signal": "failed_app_name",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "appName",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    },
+    {
+      "signal": "detection_hresult",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "errorCode",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    }
+  ],
+  "explanation": "App **{{appName}}** failed during the Enrollment Status Page with HRESULT **{{errorCode}}** — *Application not detected after installation completed successfully*. The installer reported success but the Intune detection rule (file/registry/script) did not find the app afterwards, so the ESP Apps subcategory failed and the device's enrollment terminated.\n\nThis is a confirmed detection-rule mismatch, NOT an install timeout — the install itself most likely completed (or the installer exited 0). Common root causes:\n\n- The detection rule looks for a registry/file path that the installer doesn't create (wrong path, wrong bitness — e.g. checking HKLM\\SOFTWARE\\... on a 32-bit installer that lands under WOW6432Node).\n- The installer writes the detection artefact AFTER the ESP's detection probe runs (e.g. async post-install task, requires reboot).\n- The detection script returns 0 with no stdout (Intune treats empty stdout as \"not detected\").\n- The installer wrote files to a user profile but the rule looks in System scope (or vice-versa).",
+  "remediation": [
+    {
+      "title": "Validate the detection rule against an installed device",
+      "steps": [
+        "Open Intune portal → Apps → {{appName}} → Properties → Detection rules",
+        "Note the exact path / registry key / script the rule checks",
+        "Install the app manually on a reference device (outside Autopilot) and verify the detection artefact actually exists at that path AFTER the installer finishes",
+        "For registry rules: check both HKLM\\SOFTWARE\\... and HKLM\\SOFTWARE\\WOW6432Node\\... depending on the installer's bitness",
+        "For file rules: ensure the path is what the installer actually writes (case, trailing version folder, ProgramData vs Program Files)",
+        "For script detection: test the script in PowerShell as SYSTEM (psexec -s) — it must write at least one line to stdout AND exit 0"
+      ]
+    },
+    {
+      "title": "Investigate post-install delay",
+      "steps": [
+        "Check whether the installer schedules an async task (Windows Installer scheduled reboot, service start) that creates the detection artefact only after ESP completes",
+        "If yes: either move the detection artefact creation into the synchronous installer path, or add a wait step in the installer wrapper script before exit",
+        "As a workaround, change the detection rule to something the synchronous installer writes immediately (typically the MSI ProductCode under HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\)"
+      ]
+    },
+    {
+      "title": "Cross-check the agent's per-app event",
+      "steps": [
+        "Look at the app_install_failed event in this session for DataJson.detectionResult — NotDetected confirms Intune's detection probe ran and returned negative",
+        "Look at app_install_failed.bytesDownloaded vs bytesTotal — if they match, the package downloaded fully (install error vs. download error)",
+        "Cross-reference DataJson.exitCode and hresultFromWin32 — these come from the installer itself and may explain why the detection artefact was not written"
+      ]
+    }
+  ],
+  "relatedDocs": [
+    { "title": "Microsoft Learn: Troubleshoot Windows Autopilot ESP error codes", "url": "https://learn.microsoft.com/en-us/autopilot/troubleshoot-tsg" },
+    { "title": "Win32 app detection rules in Intune", "url": "https://learn.microsoft.com/en-us/mem/intune/apps/apps-win32-add#step-4-detection-rules" }
+  ],
+  "tags": ["apps", "detection", "esp", "0x87d1041c", "intune"]
+}
