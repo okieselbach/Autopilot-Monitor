@@ -37,10 +37,42 @@ namespace AutopilotMonitor.Functions.Services
         private readonly ILogger<AnalyzeRuleService> _logger;
         private bool _seeded = false;
 
+        // Cached set of currently-shipped built-in rule IDs from
+        // <see cref="BuiltInAnalyzeRules.GetAll"/>. Used by the runtime sunset filter
+        // in <see cref="GetAllRulesForTenantAsync"/> to hide rules whose code definition
+        // has been removed but whose DB row hasn't been tombstoned yet (sunset GC may
+        // still be retrying). The set is the source of truth for "what the code expects
+        // to exist" — same input that drives the seed diff. Lazy-initialised on first
+        // read; never invalidated because the embedded resource is immutable per
+        // deployed binary.
+        private HashSet<string>? _liveCatalogIds;
+        private readonly object _liveCatalogLock = new();
+
         public AnalyzeRuleService(IRuleRepository ruleRepo, ILogger<AnalyzeRuleService> logger)
         {
             _ruleRepo = ruleRepo;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// Lazy accessor for the currently-shipped built-in rule ID set. Pulled out
+        /// because <see cref="BuiltInAnalyzeRules.GetAll"/> re-deserialises the embedded
+        /// JSON on every call — caching the resulting HashSet on the service instance
+        /// is materially cheaper for the hot read path.
+        /// </summary>
+        private HashSet<string> LiveCatalogIds
+        {
+            get
+            {
+                if (_liveCatalogIds != null) return _liveCatalogIds;
+                lock (_liveCatalogLock)
+                {
+                    _liveCatalogIds ??= BuiltInAnalyzeRules.GetAll()
+                        .Select(r => r.RuleId)
+                        .ToHashSet(StringComparer.Ordinal);
+                }
+                return _liveCatalogIds;
+            }
         }
 
         /// <summary>
@@ -136,9 +168,33 @@ namespace AutopilotMonitor.Functions.Services
 
             var mergedRules = new List<AnalyzeRule>();
 
-            // Apply tenant state overrides to global rules
+            // Apply tenant state overrides to global rules.
+            //
+            // Codex review (Low/Medium): a built-in / community rule that was removed
+            // from the code catalog stays in the global table until the sunset GC
+            // tombstones it. If the GC is mid-retry (because orphan-state cleanup
+            // failed last cycle), a surviving per-tenant RuleState{Enabled=true} would
+            // re-enable the rule via the override line below — exactly the
+            // "resurrected zombie" behaviour the sunset path is meant to prevent.
+            // Closing that window with a runtime filter: rules whose code definition
+            // is gone (not in LiveCatalogIds) MUST NOT appear in the merged result,
+            // regardless of any tenant override. The DB row stays so the next seed
+            // cycle still finds it in the sunset diff and retries the GC.
+            //
+            // Custom (tenant-authored) rules are never subject to this filter — they
+            // live entirely on the tenant partition and aren't part of the built-in
+            // catalog at all.
+            var liveCatalog = LiveCatalogIds;
             foreach (var rule in globalRules)
             {
+                if ((rule.IsBuiltIn || rule.IsCommunity) && !liveCatalog.Contains(rule.RuleId))
+                {
+                    // Sunset-pending: code catalog no longer ships this rule. Hide it
+                    // so a surviving tenant override can't keep it firing while the
+                    // GC retry is in flight. NOT logged on every call — that's noisy.
+                    continue;
+                }
+
                 if (ruleStates.TryGetValue(rule.RuleId, out var state))
                 {
                     rule.Enabled = state.Enabled;

@@ -210,6 +210,68 @@ public class AnalyzeRuleServiceSunsetTests
     }
 
     [Fact]
+    public async Task GetAllRules_runtime_filter_hides_sunset_rule_even_with_enabled_tenant_override()
+    {
+        // Codex review (Low/Medium): closes the exposure window between a partial GC
+        // failure and the next successful retry. Even when the sunset rule's global
+        // row is still present (because GC failed and we kept it for retry), it must
+        // NOT appear in the tenant-merged result if a surviving RuleState{Enabled=true}
+        // would otherwise re-enable it via AnalyzeRuleService:142.
+        var tenantId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        var rig = new SunsetRig(SunsetRuleId, gcDeleted: 0, gcFailed: 1);
+
+        // The tenant has an Enabled=true override on the sunset rule — exactly the
+        // "zombie resurrection" path we're closing.
+        rig.Repo.Setup(r => r.GetRuleStatesAsync(tenantId))
+            .ReturnsAsync(new Dictionary<string, RuleState>
+            {
+                [SunsetRuleId] = new RuleState { Enabled = true, MarkSessionAsFailed = null }
+            });
+
+        var service = new AnalyzeRuleService(rig.Repo.Object, NullLogger<AnalyzeRuleService>.Instance);
+        var merged = await service.GetAllRulesForTenantAsync(tenantId);
+
+        // The sunset rule must be absent from the merged list, regardless of the
+        // surviving override.
+        Assert.DoesNotContain(merged, r => r.RuleId == SunsetRuleId);
+        // Catalog rules must still be present (filter is precise).
+        Assert.True(merged.Count >= BuiltInAnalyzeRules.GetAll().Count,
+            "Live catalog rules must still appear in the merged result.");
+    }
+
+    [Fact]
+    public async Task GetAllRules_runtime_filter_does_not_hide_custom_tenant_rules()
+    {
+        // Defense: custom tenant rules (IsBuiltIn=false, IsCommunity=false) live on
+        // the tenant partition, not the global one. They MUST NOT be filtered by the
+        // sunset rule against the global catalog — the rule's existence is fully
+        // owned by the tenant.
+        var tenantId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        var rig = new SunsetRig(SunsetRuleId, gcDeleted: 1, gcFailed: 0);
+
+        var customRuleId = "TENANT-CUSTOM-XYZ";
+        rig.Repo.Setup(r => r.GetAnalyzeRulesAsync(tenantId)).ReturnsAsync(new List<AnalyzeRule>
+        {
+            new AnalyzeRule
+            {
+                RuleId = customRuleId,
+                Title = "Custom",
+                Description = "Tenant-owned",
+                Severity = "warning",
+                Category = "custom",
+                IsBuiltIn = false,
+                IsCommunity = false,
+                Enabled = true,
+            }
+        });
+
+        var service = new AnalyzeRuleService(rig.Repo.Object, NullLogger<AnalyzeRuleService>.Instance);
+        var merged = await service.GetAllRulesForTenantAsync(tenantId);
+
+        Assert.Contains(merged, r => r.RuleId == customRuleId);
+    }
+
+    [Fact]
     public async Task ReseedBuiltIn_skips_global_delete_on_partial_GC_failure()
     {
         var rig = new SunsetRig(SunsetRuleId, gcDeleted: 2, gcFailed: 1);
