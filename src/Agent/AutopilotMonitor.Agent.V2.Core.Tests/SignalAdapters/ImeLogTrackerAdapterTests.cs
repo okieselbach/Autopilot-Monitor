@@ -341,6 +341,63 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Equal("60001", info.Payload["errorCode"]);
             Assert.Equal("-2146964895", info.Payload["hresultFromWin32"]);
             Assert.Equal(EventSeverity.Error.ToString(), info.Payload[SignalPayloadKeys.Severity]);
+            // Codex review follow-up (P1): an unrelated ErrorPatternId (here a regular
+            // IME-ERROR-* pattern from the per-app installer) MUST NOT promote to a
+            // failureType tag — that field is reserved for the three canonical
+            // termination-handler-promoted classifications.
+            Assert.False(info.Payload.ContainsKey("failureType"));
+        }
+
+        [Theory]
+        [InlineData(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsTimeout, null)]
+        [InlineData(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsDetectionFailure, "0x87d1041c")]
+        [InlineData(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsInstallFailure, "0x80070643")]
+        public void AppStateChange_Error_promoted_carries_failureType_and_errorCode(string failureType, string errorCode)
+        {
+            // Codex review follow-up (P1) — when the V2 EnrollmentTerminationHandler
+            // promotes an app from Installing -> Error via
+            // ImeLogTracker.PromoteActiveInstallsToStuck, AppPackageState.ErrorPatternId
+            // is one of the three canonical AppFailureTypes constants and
+            // AppPackageState.ErrorCode carries the ESP HRESULT (when known). The adapter
+            // MUST surface BOTH on the emitted app_install_failed event so the analyze
+            // rule engine, the AppInstallSummary FailureCode column, and the UI badge
+            // logic can all distinguish detection-failure / install-failure / likely-stuck.
+            using var f = new ImeLogTrackerAdapterFixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+            var app = AppPackageState.Restore(
+                id: "app-promoted",
+                listPos: 0,
+                name: "Microsoft Apps for Enterprise - 64Bit",
+                runAs: AppRunAs.System,
+                intent: AppIntent.Install,
+                targeted: AppTargeted.Device,
+                dependsOn: new HashSet<string>(),
+                installationState: AppInstallationState.Error,
+                downloadingOrInstallingSeen: true,
+                progressPercent: 0,
+                bytesDownloaded: 10580224,
+                bytesTotal: 10580224,
+                errorPatternId: failureType,
+                errorDetail: "promoted by termination handler",
+                errorCode: errorCode,
+                attemptNumber: 1,
+                detectionResult: failureType == AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsDetectionFailure ? "NotDetected" : null);
+
+            adapter.TriggerAppStateFromTest(app, AppInstallationState.Installing, AppInstallationState.Error);
+
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.AppInstallFailed));
+            Assert.Equal(failureType, info.Payload!["failureType"]);
+            Assert.Equal(failureType, info.Payload["errorPatternId"]);
+            Assert.Equal("presumed", info.Payload["confidence"]);
+            Assert.Equal("EspTerminalFailure", info.Payload["terminationTrigger"]);
+            if (errorCode == null)
+            {
+                Assert.False(info.Payload.ContainsKey("errorCode"));
+            }
+            else
+            {
+                Assert.Equal(errorCode, info.Payload["errorCode"]);
+            }
         }
 
         [Fact]

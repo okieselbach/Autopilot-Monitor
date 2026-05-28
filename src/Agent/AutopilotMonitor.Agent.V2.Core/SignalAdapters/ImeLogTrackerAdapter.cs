@@ -1062,15 +1062,20 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
                 if (!string.IsNullOrEmpty(app.ExitCode)) data["exitCode"] = app.ExitCode!;
                 if (!string.IsNullOrEmpty(app.HResultFromWin32)) data["hresultFromWin32"] = app.HResultFromWin32!;
 
-                // Likely-stuck classification: when the agent itself promoted this app from
-                // Installing -> Error (because the ESP gave up before IME reported a final
-                // status), tag the event so the backend's AppInstallSummary carries the
-                // canonical failureType and the UI can render hedged "likely stuck" wording
-                // instead of a confirmed-failure label. See EnrollmentTerminationHandler for
-                // the discriminator that gates the promotion.
-                if (string.Equals(app.ErrorPatternId, AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsTimeout, StringComparison.Ordinal))
+                // Likely-stuck / detection-failure / install-failure classification: when the
+                // agent itself promoted this app from Installing -> Error (because the ESP
+                // terminated), tag the event with the canonical failureType so the backend's
+                // AppInstallSummary carries it as FailureCode and the UI / analyze rules can
+                // distinguish a confirmed detection-rule mismatch (esp_apps_detection_failure
+                // / HRESULT 0x87D1041C) or installer error (esp_apps_install_failure) from
+                // the genuine "no HRESULT available" timeout (esp_apps_timeout). See
+                // EnrollmentTerminationHandler.MaybePromoteActiveInstallsAsStuck +
+                // AppFailureTypes.ClassifyEspAppsFailure for the assignment.
+                if (string.Equals(app.ErrorPatternId, AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsTimeout, StringComparison.Ordinal)
+                    || string.Equals(app.ErrorPatternId, AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsDetectionFailure, StringComparison.Ordinal)
+                    || string.Equals(app.ErrorPatternId, AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsInstallFailure, StringComparison.Ordinal))
                 {
-                    data["failureType"] = AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsTimeout;
+                    data["failureType"] = app.ErrorPatternId!;
                     data["confidence"] = "presumed";
                     data["terminationTrigger"] = "EspTerminalFailure";
                 }
