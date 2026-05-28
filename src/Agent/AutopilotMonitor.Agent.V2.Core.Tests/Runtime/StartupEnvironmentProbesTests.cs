@@ -178,5 +178,111 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
             Assert.Contains("DNS resolution failed", evt.Message);
             Assert.Equal("DNS resolution failed", evt.Data["error"]);
         }
+
+        // ================================================================= PowerState
+
+        [Fact]
+        public void BuildPowerStateEvent_on_ac_with_battery_emits_info()
+        {
+            var r = new PowerStateResult
+            {
+                OnAcPower = true,
+                HasBattery = true,
+                BatteryPercent = 95,
+                IsCharging = true,
+                BatteryLifeMinutes = 180,
+            };
+
+            var evt = StartupEnvironmentProbes.BuildPowerStateEvent(Config(), r);
+
+            Assert.Equal("power_state_check", evt.EventType);
+            Assert.Equal(EventSeverity.Info, evt.Severity);
+            Assert.Equal("StartupEnvironmentProbes", evt.Source);
+            Assert.Equal(EnrollmentPhase.Unknown, evt.Phase);
+            Assert.Contains("AC", evt.Message);
+            Assert.Contains("95%", evt.Message);
+            Assert.Equal(true, evt.Data["onAcPower"]);
+            Assert.Equal(true, evt.Data["hasBattery"]);
+            Assert.Equal(95, evt.Data["batteryPercent"]);
+            Assert.Equal(true, evt.Data["isCharging"]);
+            Assert.Equal(180, evt.Data["batteryLifeMinutes"]);
+        }
+
+        [Fact]
+        public void BuildPowerStateEvent_desktop_no_battery_emits_info()
+        {
+            var r = new PowerStateResult
+            {
+                OnAcPower = true,
+                HasBattery = false,
+            };
+
+            var evt = StartupEnvironmentProbes.BuildPowerStateEvent(Config(), r);
+
+            Assert.Equal(EventSeverity.Info, evt.Severity);
+            Assert.Contains("no battery", evt.Message);
+            Assert.Equal(false, evt.Data["hasBattery"]);
+            Assert.Equal("unknown", evt.Data["batteryPercent"]);
+            Assert.Equal("unknown", evt.Data["batteryLifeMinutes"]);
+        }
+
+        [Fact]
+        public void BuildPowerStateEvent_on_battery_high_charge_emits_info()
+        {
+            var r = new PowerStateResult
+            {
+                OnAcPower = false,
+                HasBattery = true,
+                BatteryPercent = 92,
+                IsCharging = false,
+                BatteryLifeMinutes = 240,
+            };
+
+            var evt = StartupEnvironmentProbes.BuildPowerStateEvent(Config(), r);
+
+            Assert.Equal(EventSeverity.Info, evt.Severity);
+            Assert.Contains("on battery", evt.Message);
+            Assert.Contains("92%", evt.Message);
+            Assert.DoesNotContain("low charge", evt.Message);
+            Assert.Equal(false, evt.Data["onAcPower"]);
+            Assert.Equal(92, evt.Data["batteryPercent"]);
+        }
+
+        [Fact]
+        public void BuildPowerStateEvent_on_battery_below_threshold_emits_warning()
+        {
+            var r = new PowerStateResult
+            {
+                OnAcPower = false,
+                HasBattery = true,
+                BatteryPercent = 65,
+                IsCharging = false,
+                BatteryLifeMinutes = 90,
+            };
+
+            var evt = StartupEnvironmentProbes.BuildPowerStateEvent(Config(), r);
+
+            Assert.Equal(EventSeverity.Warning, evt.Severity);
+            Assert.Contains("on battery", evt.Message);
+            Assert.Contains("65%", evt.Message);
+            Assert.Contains("low charge", evt.Message);
+            Assert.Equal(65, evt.Data["batteryPercent"]);
+        }
+
+        [Fact]
+        public void BuildPowerStateEvent_probe_error_emits_warning_with_error_detail()
+        {
+            var r = new PowerStateResult
+            {
+                ProbeError = "GetSystemPowerStatus returned false (Win32Error=87)",
+            };
+
+            var evt = StartupEnvironmentProbes.BuildPowerStateEvent(Config(), r);
+
+            Assert.Equal(EventSeverity.Warning, evt.Severity);
+            Assert.Contains("probe failed", evt.Message);
+            Assert.Contains("Win32Error=87", evt.Message);
+            Assert.Equal("GetSystemPowerStatus returned false (Win32Error=87)", evt.Data["error"]);
+        }
     }
 }

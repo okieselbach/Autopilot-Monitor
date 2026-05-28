@@ -22,6 +22,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
     ///     geo lookup returned an IANA timezone. Uses <see cref="TimezoneService"/> (tzutil).</item>
     ///   <item><b>ntp_time_check</b> — NTP offset from <c>NtpServer</c> (default time.windows.com).
     ///     Always emitted — offset &gt;60s is Warning, smaller is Info, failure is Warning.</item>
+    ///   <item><b>power_state_check</b> — AC vs. battery snapshot via Win32 <c>GetSystemPowerStatus</c>.
+    ///     On battery with &lt;80% charge is Warning, otherwise Info, probe failure is Warning.</item>
     /// </list>
     /// <para>
     /// Each probe runs best-effort: failures are logged + optionally emitted as a Warning event,
@@ -50,6 +52,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 logger.Debug("StartupEnvironmentProbes: EnableGeoLocation=false — skipping geo + timezone probes.");
 
             await RunNtpCheck(configuration, logger, post).ConfigureAwait(false);
+
+            RunPowerStateCheck(configuration, logger, post);
         }
 
         private static async Task RunGeoAndTimezone(
@@ -218,6 +222,84 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 },
             };
         }
+
+        private static void RunPowerStateCheck(
+            AgentConfiguration configuration,
+            AgentLogger logger,
+            Orchestration.InformationalEventPost post)
+        {
+            try
+            {
+                var result = PowerStateProbe.Probe();
+                SafeEmit(post, logger, BuildPowerStateEvent(configuration, result));
+            }
+            catch (Exception ex)
+            {
+                logger.Warning($"StartupEnvironmentProbes: power-state check threw: {ex.Message}");
+            }
+        }
+
+        internal const int PowerStateBatteryWarningThresholdPercent = 80;
+
+        internal static EnrollmentEvent BuildPowerStateEvent(AgentConfiguration configuration, PowerStateResult result)
+        {
+            EventSeverity severity;
+            string message;
+
+            if (!string.IsNullOrEmpty(result.ProbeError))
+            {
+                severity = EventSeverity.Warning;
+                message = $"Power state probe failed: {result.ProbeError}";
+            }
+            else if (!result.HasBattery)
+            {
+                severity = EventSeverity.Info;
+                message = "Power state: AC, no battery (desktop)";
+            }
+            else if (result.OnAcPower)
+            {
+                severity = EventSeverity.Info;
+                message = $"Power state: AC, battery {FormatPercent(result.BatteryPercent)}";
+            }
+            else if (result.BatteryPercent.HasValue && result.BatteryPercent.Value < PowerStateBatteryWarningThresholdPercent)
+            {
+                severity = EventSeverity.Warning;
+                message = $"Power state: on battery, {result.BatteryPercent.Value}% — low charge for enrollment";
+            }
+            else
+            {
+                severity = EventSeverity.Info;
+                message = $"Power state: on battery, {FormatPercent(result.BatteryPercent)}";
+            }
+
+            var data = new Dictionary<string, object>
+            {
+                { "onAcPower", result.OnAcPower },
+                { "hasBattery", result.HasBattery },
+                { "batteryPercent", (object?)result.BatteryPercent ?? "unknown" },
+                { "isCharging", result.IsCharging },
+                { "batteryLifeMinutes", (object?)result.BatteryLifeMinutes ?? "unknown" },
+            };
+
+            if (!string.IsNullOrEmpty(result.ProbeError))
+                data["error"] = result.ProbeError!;
+
+            return new EnrollmentEvent
+            {
+                SessionId = configuration.SessionId,
+                TenantId = configuration.TenantId,
+                EventType = "power_state_check",
+                Severity = severity,
+                Source = "StartupEnvironmentProbes",
+                Phase = EnrollmentPhase.Unknown,
+                Timestamp = DateTime.UtcNow,
+                Message = message,
+                Data = data,
+            };
+        }
+
+        private static string FormatPercent(int? percent) =>
+            percent.HasValue ? $"{percent.Value}%" : "unknown";
 
         private static void SafeEmit(Orchestration.InformationalEventPost post, AgentLogger logger, EnrollmentEvent evt)
         {
