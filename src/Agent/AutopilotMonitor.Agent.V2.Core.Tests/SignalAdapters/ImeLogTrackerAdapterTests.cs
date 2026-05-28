@@ -352,7 +352,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
         [InlineData(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsTimeout, null)]
         [InlineData(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsDetectionFailure, "0x87d1041c")]
         [InlineData(AutopilotMonitor.Shared.Constants.AppFailureTypes.EspAppsInstallFailure, "0x80070643")]
-        public void AppStateChange_Error_promoted_carries_failureType_and_errorCode(string failureType, string errorCode)
+        public void AppStateChange_Error_promoted_carries_failureType_and_errorCode(string failureType, string? errorCode)
         {
             // Codex review follow-up (P1) — when the V2 EnrollmentTerminationHandler
             // promotes an app from Installing -> Error via
