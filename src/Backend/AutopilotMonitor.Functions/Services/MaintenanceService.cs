@@ -370,40 +370,121 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Scans every tenant for sessions whose EventCount exceeds the configured
-        /// <c>ExcessiveEventCountThreshold</c> (AdminConfiguration, default 2000).
-        /// Emits one ExcessiveSessionEvents ops event per session (dispatched to Telegram/Teams
-        /// via OpsAlertDispatchService) and marks the session so subsequent runs do not re-alert.
-        /// A threshold of 0 disables the scan entirely.
+        /// Pure decision helper for the runaway-session auto-action path. Returns the
+        /// concrete action to take (<c>"Block"</c> or <c>"Kill"</c>) or <c>null</c> when
+        /// the feature is off, the threshold is unconfigured, or the session does not yet
+        /// qualify. Lives as a static method so the gate is unit-testable without the full
+        /// MaintenanceService dependency graph (analog to <see cref="ClassifyCertExpiryTier"/>).
+        /// </summary>
+        internal static string? DecideAutoAction(int eventCount, string? autoMode, int autoThreshold)
+        {
+            if (autoThreshold <= 0) return null;
+            if (eventCount <= autoThreshold) return null;
+            // Normalize: tolerate casing drift from external callers / legacy rows.
+            var normalized = (autoMode ?? "Off").Trim();
+            if (string.Equals(normalized, "Block", StringComparison.OrdinalIgnoreCase)) return "Block";
+            if (string.Equals(normalized, "Kill", StringComparison.OrdinalIgnoreCase)) return "Kill";
+            return null;
+        }
+
+        /// <summary>
+        /// Scans every tenant for sessions whose EventCount exceeds the configured warn
+        /// threshold (<see cref="AdminConfiguration.ExcessiveEventCountThreshold"/>) or the
+        /// auto-action threshold (<see cref="AdminConfiguration.ExcessiveEventAutoActionThreshold"/>).
+        /// <para>
+        /// Warn path: emits one <c>ExcessiveSessionEvents</c> ops event per session and marks
+        /// <c>ExcessiveEventsAlerted</c> for idempotency.
+        /// </para>
+        /// <para>
+        /// Auto-action path (Block/Kill): when <see cref="AdminConfiguration.ExcessiveEventAutoActionMode"/>
+        /// is set and the session crosses the higher threshold, calls
+        /// <see cref="BlockedDeviceService.BlockDeviceAsync"/>, emits a Critical
+        /// <c>ExcessiveSessionEventsAutoActioned</c> ops event, and marks
+        /// <c>ExcessiveEventsAutoActioned</c>. The two flags are independent so flipping the
+        /// mode mid-run never re-fires the warn.
+        /// </para>
+        /// Both paths skip when their threshold is 0; the whole sweep no-ops when both are off.
         /// </summary>
         private async Task DetectExcessiveEventSessionsAsync()
         {
             try
             {
                 var adminConfig = await _adminConfigurationService.GetConfigurationAsync();
-                var threshold = adminConfig?.ExcessiveEventCountThreshold ?? 2000;
-                if (threshold <= 0)
+                var warnThreshold = adminConfig?.ExcessiveEventCountThreshold ?? 0;
+                var autoMode = adminConfig?.ExcessiveEventAutoActionMode ?? "Off";
+                var autoThreshold = adminConfig?.ExcessiveEventAutoActionThreshold ?? 0;
+                var autoDurationHours = adminConfig?.ExcessiveEventAutoActionDurationHours ?? 24;
+
+                var warnEnabled = warnThreshold > 0;
+                var autoEnabled = autoThreshold > 0
+                    && !string.Equals(autoMode, "Off", StringComparison.OrdinalIgnoreCase);
+
+                if (!warnEnabled && !autoEnabled)
                 {
-                    _logger.LogDebug("Excessive-event scan disabled (threshold = 0)");
+                    _logger.LogDebug("Excessive-event scan disabled (warn and auto-action both off)");
                     return;
                 }
 
+                // Query filter must catch the lower of the two so we never miss the warn-tier
+                // by setting auto-action to a stricter cutoff (and vice versa).
+                var queryThreshold = (warnEnabled, autoEnabled) switch
+                {
+                    (true, true) => Math.Min(warnThreshold, autoThreshold),
+                    (true, false) => warnThreshold,
+                    (false, true) => autoThreshold,
+                    _ => int.MaxValue, // unreachable thanks to early-return above
+                };
+
                 var tenantIds = await _maintenanceRepo.GetAllTenantIdsAsync();
                 int totalAlerted = 0;
+                int totalAutoActioned = 0;
 
                 foreach (var tenantId in tenantIds)
                 {
                     try
                     {
-                        var runaways = await _sessionRepo.GetSessionsWithEventCountAboveAsync(tenantId, threshold);
+                        var runaways = await _sessionRepo.GetSessionsWithEventCountAboveAsync(tenantId, queryThreshold);
                         foreach (var session in runaways)
                         {
-                            if (session.ExcessiveEventsAlerted) continue;
+                            // Warn-tier: emit once per session, regardless of auto-action state.
+                            if (warnEnabled && session.EventCount > warnThreshold && !session.ExcessiveEventsAlerted)
+                            {
+                                await _opsEventService.RecordExcessiveSessionEventsAsync(
+                                    tenantId, session.SessionId, session.EventCount, warnThreshold);
+                                await _sessionRepo.MarkExcessiveEventsAlertedAsync(tenantId, session.SessionId);
+                                totalAlerted++;
+                            }
 
-                            await _opsEventService.RecordExcessiveSessionEventsAsync(
-                                tenantId, session.SessionId, session.EventCount, threshold);
-                            await _sessionRepo.MarkExcessiveEventsAlertedAsync(tenantId, session.SessionId);
-                            totalAlerted++;
+                            // Auto-action tier: block/kill once per session when configured.
+                            if (autoEnabled && !session.ExcessiveEventsAutoActioned)
+                            {
+                                var action = DecideAutoAction(session.EventCount, autoMode, autoThreshold);
+                                if (action == null) continue;
+
+                                if (string.IsNullOrEmpty(session.SerialNumber))
+                                {
+                                    _logger.LogWarning(
+                                        "Skipping auto-action for runaway session {SessionId} (tenant {TenantId}): SerialNumber is missing",
+                                        session.SessionId, tenantId);
+                                    continue;
+                                }
+
+                                var reason = $"Auto-action: excessive session events ({session.EventCount} events ≥ threshold {autoThreshold})";
+                                await _blockedDeviceService.BlockDeviceAsync(
+                                    tenantId,
+                                    session.SerialNumber,
+                                    durationHours: autoDurationHours,
+                                    blockedByEmail: "System.Maintenance",
+                                    reason: reason,
+                                    action: action,
+                                    blockedSessionId: session.SessionId);
+
+                                await _opsEventService.RecordExcessiveSessionEventsAutoActionedAsync(
+                                    tenantId, session.SessionId, session.SerialNumber,
+                                    session.EventCount, autoThreshold, action, autoDurationHours);
+                                await _sessionRepo.MarkExcessiveEventsAutoActionedAsync(tenantId, session.SessionId);
+                                totalAutoActioned++;
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -412,8 +493,10 @@ namespace AutopilotMonitor.Functions.Services
                     }
                 }
 
-                if (totalAlerted > 0)
-                    _logger.LogWarning("Excessive-event scan: {Count} new runaway session(s) alerted (threshold {Threshold})", totalAlerted, threshold);
+                if (totalAlerted > 0 || totalAutoActioned > 0)
+                    _logger.LogWarning(
+                        "Excessive-event scan: {Alerted} warned (threshold {WarnThreshold}), {AutoActioned} auto-{AutoMode} (threshold {AutoThreshold}, duration {Hours}h)",
+                        totalAlerted, warnThreshold, totalAutoActioned, autoMode, autoThreshold, autoDurationHours);
             }
             catch (Exception ex)
             {

@@ -383,6 +383,21 @@ namespace AutopilotMonitor.Functions.Services
                 $"Session {sessionId} has {eventCount} events (threshold {threshold}) — likely agent loop bug",
                 tenantId, "System.Maintenance", new { sessionId, eventCount, threshold });
 
+        /// <summary>
+        /// Fired when maintenance auto-blocks or auto-kills a device after its session crossed
+        /// <see cref="AutopilotMonitor.Shared.Models.AdminConfiguration.ExcessiveEventAutoActionThreshold"/>.
+        /// Critical-severity so operators can wire a Telegram rule independent of the warn-tier
+        /// <c>ExcessiveSessionEvents</c> rule. Details carry the resolved <c>serialNumber</c>
+        /// so the Ops Events detail modal's Block/Kill shortcuts deep-link correctly.
+        /// </summary>
+        public Task RecordExcessiveSessionEventsAutoActionedAsync(
+            string tenantId, string sessionId, string serialNumber, int eventCount, int threshold,
+            string action, int durationHours)
+            => WriteAsync(OpsEventCategory.Security, "ExcessiveSessionEventsAutoActioned", OpsEventSeverity.Critical,
+                $"Auto-{action.ToLowerInvariant()} device {serialNumber} for session {sessionId} ({eventCount} events ≥ {threshold}, {durationHours}h)",
+                tenantId, "System.Maintenance",
+                new { sessionId, serialNumber, eventCount, threshold, action, durationHours });
+
         public Task RecordNewImeVersionDetectedAsync(string version, string tenantId, string sessionId)
             => WriteAsync(OpsEventCategory.Agent, "NewImeVersionDetected", OpsEventSeverity.Warning,
                 $"New IME agent version detected: {version}",

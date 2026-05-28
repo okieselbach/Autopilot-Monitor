@@ -92,6 +92,31 @@ namespace AutopilotMonitor.Shared.Models
         /// </summary>
         public int ExcessiveEventCountThreshold { get; set; } = 2000;
 
+        /// <summary>
+        /// Auto-action mode for runaway sessions whose EventCount exceeds
+        /// <see cref="ExcessiveEventAutoActionThreshold"/>. One of <c>"Off"</c>, <c>"Block"</c>,
+        /// or <c>"Kill"</c>. Off (default) keeps the warn-only behaviour;
+        /// Block stops the device's uploads for <see cref="ExcessiveEventAutoActionDurationHours"/>;
+        /// Kill issues a remote self-destruct signal. Action runs in the 2h maintenance batch,
+        /// is idempotent per session via <c>ExcessiveEventsAutoActioned</c>, and never downgrades
+        /// an existing Kill to Block.
+        /// </summary>
+        public string ExcessiveEventAutoActionMode { get; set; } = "Off";
+
+        /// <summary>
+        /// Event-count threshold for auto-block/kill. Must be greater than
+        /// <see cref="ExcessiveEventCountThreshold"/> so operators see the warn first.
+        /// 0 disables regardless of <see cref="ExcessiveEventAutoActionMode"/>. Default: 2500.
+        /// </summary>
+        public int ExcessiveEventAutoActionThreshold { get; set; } = 2500;
+
+        /// <summary>
+        /// Duration in hours for the device block created by the auto-action path. Independent
+        /// of <see cref="MaintenanceBlockDurationHours"/> (which governs the time-window
+        /// ExcessiveDataBlocked path) so the operator can tune both autonomously. Default: 24.
+        /// </summary>
+        public int ExcessiveEventAutoActionDurationHours { get; set; } = 24;
+
         // ===== MAINTENANCE AUTO-BLOCK SETTINGS =====
 
         /// <summary>

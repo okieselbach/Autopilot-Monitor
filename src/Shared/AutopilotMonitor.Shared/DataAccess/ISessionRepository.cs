@@ -112,6 +112,12 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// </summary>
         Task MarkExcessiveEventsAlertedAsync(string tenantId, string sessionId);
 
+        /// <summary>
+        /// Marks the session as already-auto-actioned so maintenance only blocks/kills the
+        /// device once per runaway session. Independent of <see cref="MarkExcessiveEventsAlertedAsync"/>.
+        /// </summary>
+        Task MarkExcessiveEventsAutoActionedAsync(string tenantId, string sessionId);
+
         // --- IME Version History ---
         Task<bool> RecordImeVersionAsync(string version, string tenantId, string sessionId);
         Task<List<ImeVersionHistoryEntry>> GetImeVersionHistoryAsync();

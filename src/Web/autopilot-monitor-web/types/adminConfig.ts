@@ -8,6 +8,18 @@ export interface AdminConfiguration {
   collectorIdleTimeoutMinutes?: number;
   desktopDetectorNoCandidateTimeoutMinutes?: number;
   excessiveEventCountThreshold?: number;
+  /**
+   * Auto-action mode for runaway sessions whose EventCount crosses
+   * `excessiveEventAutoActionThreshold`. "Off" keeps warn-only behaviour;
+   * "Block" stops device uploads for `excessiveEventAutoActionDurationHours`;
+   * "Kill" issues a remote self-destruct signal. Server tolerates casing drift
+   * but the UI emits these canonical values.
+   */
+  excessiveEventAutoActionMode?: "Off" | "Block" | "Kill";
+  /** Threshold for auto-block/kill. Should be higher than `excessiveEventCountThreshold`. 0 disables. */
+  excessiveEventAutoActionThreshold?: number;
+  /** Block duration in hours when the auto-action fires. */
+  excessiveEventAutoActionDurationHours?: number;
   maxSessionWindowHours?: number;
   maintenanceBlockDurationHours?: number;
   opsEventRetentionDays?: number;

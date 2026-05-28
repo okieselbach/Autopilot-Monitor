@@ -335,6 +335,15 @@ namespace AutopilotMonitor.Shared.Models
         public bool ExcessiveEventsAlerted { get; set; }
 
         /// <summary>
+        /// True once maintenance has auto-blocked or auto-killed the device for this runaway
+        /// session (see <see cref="AutopilotMonitor.Shared.Models.AdminConfiguration.ExcessiveEventAutoActionMode"/>).
+        /// Independent of <see cref="ExcessiveEventsAlerted"/> so warn and auto-action are
+        /// each idempotent on their own — admins can change the auto-action mode mid-flight
+        /// without re-firing the warn.
+        /// </summary>
+        public bool ExcessiveEventsAutoActioned { get; set; }
+
+        /// <summary>
         /// JSON-serialized <see cref="System.Collections.Generic.List{T}"/> of <see cref="ServerAction"/>
         /// pending delivery to the agent. Empty string when no actions are queued.
         /// The Ingest function reads this alongside the session's status fields (no extra I/O),

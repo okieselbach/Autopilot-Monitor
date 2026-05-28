@@ -235,6 +235,7 @@ namespace AutopilotMonitor.Functions.Services
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
                 ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
+                ExcessiveEventsAutoActioned = entity.GetBoolean("ExcessiveEventsAutoActioned") ?? false,
                 FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty,
                 // PR3: cascade-delete state-machine columns. Empty/null on legacy rows is fine —
                 // SessionDeletionGuard treats null/empty as "None" (no cascade in flight).
@@ -2142,6 +2143,7 @@ namespace AutopilotMonitor.Functions.Services
                 PlatformScriptCount = SafeGetInt32(entity, "PlatformScriptCount") ?? 0,
                 RemediationScriptCount = SafeGetInt32(entity, "RemediationScriptCount") ?? 0,
                 ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
+                ExcessiveEventsAutoActioned = entity.GetBoolean("ExcessiveEventsAutoActioned") ?? false,
                 FailureSnapshotJson = entity.GetString("FailureSnapshotJson") ?? string.Empty,
                 // PR3: cascade-delete state-machine columns. Empty/null on legacy rows is fine —
                 // SessionDeletionGuard treats null/empty as "None" (no cascade in flight).
@@ -2329,7 +2331,10 @@ namespace AutopilotMonitor.Functions.Services
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
                 var query = tableClient.QueryAsync<TableEntity>(
                     filter: $"PartitionKey eq '{tenantId}' and EventCount gt {threshold}",
-                    select: new[] { "PartitionKey", "RowKey", "EventCount", "ExcessiveEventsAlerted" });
+                    // SerialNumber + ExcessiveEventsAutoActioned added for the auto-block/kill
+                    // path in MaintenanceService — lets us decide and execute in one round-trip
+                    // per qualifying session, without a follow-up GetSessionAsync.
+                    select: new[] { "PartitionKey", "RowKey", "EventCount", "SerialNumber", "ExcessiveEventsAlerted", "ExcessiveEventsAutoActioned" });
 
                 await foreach (var entity in query)
                 {
@@ -2338,7 +2343,9 @@ namespace AutopilotMonitor.Functions.Services
                         TenantId = entity.PartitionKey,
                         SessionId = entity.RowKey,
                         EventCount = SafeGetInt32(entity, "EventCount") ?? 0,
-                        ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false
+                        SerialNumber = entity.GetString("SerialNumber") ?? string.Empty,
+                        ExcessiveEventsAlerted = entity.GetBoolean("ExcessiveEventsAlerted") ?? false,
+                        ExcessiveEventsAutoActioned = entity.GetBoolean("ExcessiveEventsAutoActioned") ?? false
                     });
                 }
             }
@@ -2383,6 +2390,44 @@ namespace AutopilotMonitor.Functions.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to mark session {SessionId} as ExcessiveEventsAlerted", sessionId);
+            }
+        }
+
+        /// <summary>
+        /// Sets ExcessiveEventsAutoActioned=true on the session entity so the maintenance
+        /// auto-block/kill emission is idempotent. Best-effort Merge write; failures are
+        /// logged only (warn-path stays intact even if this fails).
+        /// </summary>
+        public async Task MarkExcessiveEventsAutoActionedAsync(string tenantId, string sessionId)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Sessions);
+                var update = new TableEntity(tenantId, sessionId)
+                {
+                    ["ExcessiveEventsAutoActioned"] = true
+                };
+                await tableClient.UpdateEntityAsync(update, ETag.All, TableUpdateMode.Merge);
+
+                // Dual-write into SessionsIndex so dashboard queries see the flag without a separate read.
+                try
+                {
+                    var entity = await tableClient.GetEntityAsync<TableEntity>(tenantId, sessionId,
+                        select: new[] { "IndexRowKey" });
+                    var indexRowKey = entity.Value.GetString("IndexRowKey");
+                    await MergeSessionIndexAsync(tenantId, indexRowKey, update);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "SessionsIndex merge skipped for ExcessiveEventsAutoActioned on {SessionId}", sessionId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to mark session {SessionId} as ExcessiveEventsAutoActioned", sessionId);
             }
         }
 

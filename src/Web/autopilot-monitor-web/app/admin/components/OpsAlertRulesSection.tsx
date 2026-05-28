@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { type OpsAlertRule } from "../AdminConfigContext";
+import { AUTO_ACTION_MODES, describeAutoActionWarning, type AutoActionMode } from "./excessiveEventAutoAction";
 
 // All known ops event types grouped by category
 const OPS_EVENT_TYPES: Record<string, string[]> = {
@@ -44,6 +45,11 @@ const OPS_EVENT_TYPES: Record<string, string[]> = {
   Security: [
     "DeviceBlocked",
     "ExcessiveDataBlocked",
+    // Critical-tier auto-action: emitted when maintenance auto-blocks/kills a device
+    // after its session crosses `excessiveEventAutoActionThreshold`. Dual-register
+    // per memory feedback_ops_event_types_dual_register so operators can wire a
+    // dedicated Telegram rule independent of the warn-tier ExcessiveSessionEvents.
+    "ExcessiveSessionEventsAutoActioned",
     "VersionBlocked",
     "EmbeddedCertExpiringSoon",
     "EmbeddedCertExpiringUrgent",
@@ -89,12 +95,18 @@ interface OpsAlertRulesSectionProps {
   opsAlertSlackEnabled: boolean;
   opsAlertSlackWebhookUrl: string;
   excessiveEventCountThreshold: number;
+  excessiveEventAutoActionMode: AutoActionMode;
+  excessiveEventAutoActionThreshold: number;
+  excessiveEventAutoActionDurationHours: number;
   onSave: (
     rules: OpsAlertRule[],
     telegramEnabled: boolean, telegramChatId: string,
     teamsEnabled: boolean, teamsWebhookUrl: string,
     slackEnabled: boolean, slackWebhookUrl: string,
     excessiveEventCountThreshold: number,
+    excessiveEventAutoActionMode: AutoActionMode,
+    excessiveEventAutoActionThreshold: number,
+    excessiveEventAutoActionDurationHours: number,
   ) => Promise<void>;
 }
 
@@ -110,6 +122,9 @@ export function OpsAlertRulesSection({
   opsAlertSlackEnabled,
   opsAlertSlackWebhookUrl,
   excessiveEventCountThreshold: excessiveEventCountThresholdProp,
+  excessiveEventAutoActionMode: autoActionModeProp,
+  excessiveEventAutoActionThreshold: autoActionThresholdProp,
+  excessiveEventAutoActionDurationHours: autoActionDurationProp,
   onSave,
 }: OpsAlertRulesSectionProps) {
   // Local state for editing
@@ -121,6 +136,9 @@ export function OpsAlertRulesSection({
   const [slackEnabled, setSlackEnabled] = useState(false);
   const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
   const [excessiveThreshold, setExcessiveThreshold] = useState(excessiveEventCountThresholdProp);
+  const [autoActionMode, setAutoActionMode] = useState<AutoActionMode>(autoActionModeProp);
+  const [autoActionThreshold, setAutoActionThreshold] = useState(autoActionThresholdProp);
+  const [autoActionDuration, setAutoActionDuration] = useState(autoActionDurationProp);
 
   // Sync from props
   useEffect(() => {
@@ -141,7 +159,10 @@ export function OpsAlertRulesSection({
     setSlackEnabled(opsAlertSlackEnabled);
     setSlackWebhookUrl(opsAlertSlackWebhookUrl);
     setExcessiveThreshold(excessiveEventCountThresholdProp);
-  }, [opsAlertRules, opsAlertTelegramEnabled, opsAlertTelegramChatId, opsAlertTeamsEnabled, opsAlertTeamsWebhookUrl, opsAlertSlackEnabled, opsAlertSlackWebhookUrl, excessiveEventCountThresholdProp]);
+    setAutoActionMode(autoActionModeProp);
+    setAutoActionThreshold(autoActionThresholdProp);
+    setAutoActionDuration(autoActionDurationProp);
+  }, [opsAlertRules, opsAlertTelegramEnabled, opsAlertTelegramChatId, opsAlertTeamsEnabled, opsAlertTeamsWebhookUrl, opsAlertSlackEnabled, opsAlertSlackWebhookUrl, excessiveEventCountThresholdProp, autoActionModeProp, autoActionThresholdProp, autoActionDurationProp]);
 
   const toggleRule = (eventType: string) => {
     setRules(prev => prev.map(r => r.eventType === eventType ? { ...r, enabled: !r.enabled } : r));
@@ -152,8 +173,12 @@ export function OpsAlertRulesSection({
   };
 
   const handleSave = () => {
-    onSave(rules, telegramEnabled, telegramChatId, teamsEnabled, teamsWebhookUrl, slackEnabled, slackWebhookUrl, excessiveThreshold);
+    onSave(
+      rules, telegramEnabled, telegramChatId, teamsEnabled, teamsWebhookUrl, slackEnabled, slackWebhookUrl,
+      excessiveThreshold, autoActionMode, autoActionThreshold, autoActionDuration);
   };
+
+  const autoActionWarning = describeAutoActionWarning(autoActionMode, autoActionThreshold, excessiveThreshold);
 
   const enabledRulesCount = rules.filter(r => r.enabled).length;
   const enabledProviders = [telegramEnabled, teamsEnabled, slackEnabled].filter(Boolean).length;
@@ -238,6 +263,53 @@ export function OpsAlertRulesSection({
                                 className="w-24 text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
                               />
                               <span className="text-xs text-amber-600 dark:text-amber-400">events per session (0 = disabled)</span>
+                            </div>
+                          )}
+                          {et === "ExcessiveSessionEventsAutoActioned" && (
+                            // Auto-action controls always render under the rule row (independent of `rule.enabled`,
+                            // which only governs Telegram routing — the auto-block/kill itself fires from
+                            // maintenance regardless). Operators can opt in/out via the Off mode here.
+                            <div className="ml-12 mt-1 mb-2 space-y-1.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <label className="text-xs text-orange-700 dark:text-orange-300 whitespace-nowrap">Auto-action:</label>
+                                <select
+                                  value={autoActionMode}
+                                  onChange={(e) => setAutoActionMode(e.target.value as AutoActionMode)}
+                                  className="text-xs px-2 py-1 rounded border border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                >
+                                  {AUTO_ACTION_MODES.map(m => (
+                                    <option key={m} value={m}>{m}</option>
+                                  ))}
+                                </select>
+                                {autoActionMode !== "Off" && (
+                                  <>
+                                    <label className="text-xs text-orange-700 dark:text-orange-300 whitespace-nowrap ml-2">Threshold:</label>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step={100}
+                                      value={autoActionThreshold}
+                                      onChange={(e) => setAutoActionThreshold(parseInt(e.target.value, 10) || 0)}
+                                      className="w-24 text-xs px-2 py-1 rounded border border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                    />
+                                    <label className="text-xs text-orange-700 dark:text-orange-300 whitespace-nowrap ml-2">Duration:</label>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      step={1}
+                                      value={autoActionDuration}
+                                      onChange={(e) => setAutoActionDuration(parseInt(e.target.value, 10) || 1)}
+                                      className="w-16 text-xs px-2 py-1 rounded border border-orange-300 dark:border-orange-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                    />
+                                    <span className="text-xs text-orange-600 dark:text-orange-400">hours</span>
+                                  </>
+                                )}
+                              </div>
+                              {autoActionMode === "Off" ? (
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Off = warn only. Block stops uploads, Kill issues remote self-destruct.</p>
+                              ) : autoActionWarning ? (
+                                <p className="text-xs text-red-600 dark:text-red-400">{autoActionWarning}</p>
+                              ) : null}
                             </div>
                           )}
                         </div>
