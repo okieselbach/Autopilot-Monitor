@@ -22,6 +22,13 @@ interface InstallProgressProps {
   summaryStats?: SummaryStats | null;
 }
 
+// Canonical V2 agent `failureType` identifiers — mirrors
+// AutopilotMonitor.Shared.Constants.AppFailureTypes (Constants.cs). Stable strings —
+// UI badges, summary buckets, and analyze rules all match on these.
+const ESP_APPS_TIMEOUT = "esp_apps_timeout";
+const ESP_APPS_DETECTION_FAILURE = "esp_apps_detection_failure";
+const ESP_APPS_INSTALL_FAILURE = "esp_apps_install_failure";
+
 interface InstallItem {
   appName: string;
   appId: string;
@@ -35,14 +42,24 @@ interface InstallItem {
   errorPatternId?: string;
   exitCode?: string;
   hresultFromWin32?: string;
+  // ESP-level HRESULT extracted from the failed subcategory's statusText (e.g.
+  // 0x87D1041C). Only set on `app_install_failed` events produced by the V2
+  // termination-handler promotion, where it carries the cross-app failure cause.
+  // Distinct from hresultFromWin32 (per-app installer HRESULT).
+  errorCode?: string;
   // c117946b debrief (2026-05-12) — when the agent promotes an app from Installing
-  // to Error on terminal ESP-Apps-failure, it tags the event with
-  // failureType=esp_apps_timeout + confidence=presumed. UI renders these as a
-  // hedged "Likely stuck" badge with explanatory wording, separate from a hard
-  // "Failed" label, because we genuinely don't know the final outcome.
+  // to Error on terminal ESP-Apps-failure, it tags the event with `failureType`.
+  // Session 080edee9 follow-up (2026-05-28) — three flavours:
+  //   * esp_apps_timeout            → orange "Likely stuck" (no HRESULT observed)
+  //   * esp_apps_detection_failure  → red "Detection failed" (HRESULT 0x87D1041C —
+  //     install ran but Intune could not detect the app afterwards)
+  //   * esp_apps_install_failure    → red "Install failed" (any other HRESULT —
+  //     installer itself returned an error)
   failureType?: string;
   confidence?: string;
   isLikelyStuck: boolean;
+  isDetectionFailure: boolean;
+  isInstallFailure: boolean;
   firstSeenIndex: number;
   eventData?: Record<string, any>;
 }
@@ -93,6 +110,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           isCompleted: false,
           isError: false,
           isLikelyStuck: false,
+          isDetectionFailure: false,
+          isInstallFailure: false,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
@@ -113,6 +132,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           isCompleted: true,
           isError: false,
           isLikelyStuck: false,
+          isDetectionFailure: false,
+          isInstallFailure: false,
           exitCode: d.exitCode ?? d.exit_code,
           hresultFromWin32: d.hresultFromWin32 ?? d.hresult_from_win32,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
@@ -127,7 +148,9 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
 
         const failureType = (d.failureType ?? d.failure_type) as string | undefined;
         const confidence = (d.confidence) as string | undefined;
-        const isLikelyStuck = failureType === "esp_apps_timeout";
+        const isLikelyStuck = failureType === ESP_APPS_TIMEOUT;
+        const isDetectionFailure = failureType === ESP_APPS_DETECTION_FAILURE;
+        const isInstallFailure = failureType === ESP_APPS_INSTALL_FAILURE;
 
         installMap.set(appName, {
           appName,
@@ -139,12 +162,17 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           isCompleted: true,
           isError: true,
           isLikelyStuck,
+          isDetectionFailure,
+          isInstallFailure,
           failureType,
           confidence,
           errorDetail: d.errorDetail ?? d.error_detail,
           errorPatternId: d.errorPatternId ?? d.error_pattern_id,
           exitCode: d.exitCode ?? d.exit_code,
           hresultFromWin32: d.hresultFromWin32 ?? d.hresult_from_win32,
+          // Session 080edee9 follow-up — ESP-level HRESULT carried on promoted
+          // app_install_failed events from the V2 termination handler.
+          errorCode: d.errorCode ?? d.error_code,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
@@ -165,6 +193,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           isCompleted: true,
           isError: false,
           isLikelyStuck: false,
+          isDetectionFailure: false,
+          isInstallFailure: false,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
@@ -178,6 +208,8 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           isCompleted: true,
           isError: false,
           isLikelyStuck: false,
+          isDetectionFailure: false,
+          isInstallFailure: false,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
@@ -214,6 +246,9 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
   const completedCount = installs.filter(d => d.state === "Installed").length;
   // Separate confirmed failures from likely-stuck (esp_apps_timeout) so the user
   // sees an honest count of "this really failed" vs "we don't actually know".
+  // Session 080edee9 follow-up — `esp_apps_detection_failure` and
+  // `esp_apps_install_failure` are confirmed failures (HRESULT present) and roll up
+  // under the existing `failed` bucket — the per-app badge distinguishes them.
   const failedCount = installs.filter(d => d.state === "Failed" && !d.isLikelyStuck).length;
   const likelyStuckCount = installs.filter(d => d.isLikelyStuck).length;
   const postponedCount = installs.filter(d => d.state === "Postponed").length;
@@ -314,6 +349,9 @@ function InstallItemRow({ item }: { item: InstallItem }) {
     return () => clearInterval(id);
   }, [item.state, item.startedAt]);
 
+  // Session 080edee9 follow-up — only the genuine "no HRESULT available" timeout
+  // case wears the hedged orange treatment. Detection-failures and install-failures
+  // have a concrete HRESULT and are confirmed errors → red, same as any other.
   const containerClass = item.state === "Skipped"
     ? "bg-gray-50 border border-gray-300"
     : item.isLikelyStuck
@@ -360,12 +398,28 @@ function InstallItemRow({ item }: { item: InstallItem }) {
           {item.state === "Failed" && item.isLikelyStuck && (
             <span
               className="text-xs px-2 py-0.5 rounded-full bg-orange-200 text-orange-800 font-medium"
-              title="ESP timed out while this app was still installing — final status couldn't be confirmed. Treat as a strong hint to investigate, not a confirmed failure."
+              title="ESP gave up while this app was still installing and no per-app HRESULT was available — final status couldn't be confirmed. Treat as a strong hint to investigate, not a confirmed failure."
             >
               Likely stuck
             </span>
           )}
-          {item.state === "Failed" && !item.isLikelyStuck && (
+          {item.state === "Failed" && item.isDetectionFailure && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full bg-red-200 text-red-800 font-medium"
+              title="Install completed but the Intune detection rule did not find the app afterwards (HRESULT 0x87D1041C). Review the app's detection rules in Intune."
+            >
+              Detection failed
+            </span>
+          )}
+          {item.state === "Failed" && item.isInstallFailure && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full bg-red-200 text-red-800 font-medium"
+              title="ESP Apps subcategory reported a HRESULT before this app finished installing. The installer itself returned an error."
+            >
+              Install failed
+            </span>
+          )}
+          {item.state === "Failed" && !item.isLikelyStuck && !item.isDetectionFailure && !item.isInstallFailure && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-red-200 text-red-700 font-medium">Failed</span>
           )}
           {item.state === "Postponed" && (
@@ -427,12 +481,30 @@ function InstallItemRow({ item }: { item: InstallItem }) {
               </div>
             );
           })()}
+          {/* ESP-level HRESULT (errorCode) — distinct from per-app hresultFromWin32.
+              Carries cross-app failure cause from the ESP Apps subcategory; mapped to
+              a description via the shared error-codes catalog. */}
+          {item.errorCode && (() => {
+            const entry = getErrorCodeEntry(item.errorCode);
+            return (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="px-1.5 py-0.5 rounded font-mono font-medium bg-red-100 text-red-800">
+                  ESP HRESULT: {formatErrorCode(item.errorCode)}
+                </span>
+                {entry && (
+                  <span className="text-red-600" title={`${entry.source} (${entry.confidence} confidence)`}>
+                    {entry.description}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
           {item.isError && item.errorDetail && !item.isLikelyStuck && (
             <div className="text-xs text-red-600">{item.errorDetail}</div>
           )}
           {item.isLikelyStuck && (
             <div className="text-xs text-orange-700">
-              ESP timed out while this app was still installing — final status couldn&apos;t be confirmed.
+              ESP gave up while this app was still installing and no per-app HRESULT was available &mdash; final status couldn&apos;t be confirmed.
             </div>
           )}
         </div>
