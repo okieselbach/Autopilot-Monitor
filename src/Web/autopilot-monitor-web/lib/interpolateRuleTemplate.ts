@@ -5,9 +5,16 @@
  * Resolution order for `{{token}}`:
  *   1. The first matchedConditions entry whose `field` equals `token`
  *      (e.g. {{uefiCA2023Status}} -> entry where field === "uefiCA2023Status").
- *   2. A matchedConditions entry whose key (signal name) equals `token`
+ *   2. The first matchedConditions entry that carries a same-event auto-field
+ *      named `token` (added by the backend's
+ *      `RuleEngine.ConditionEvaluators.AddDataFieldsToEvidence` whitelist —
+ *      currently `appId`, `appName`, `errorPatternId`, `errorCode`, `exitCode`,
+ *      `status`). Using "first" pins these to the same source event as the
+ *      rule's required condition, avoiding cross-event interpolation drift
+ *      when a session has multiple `app_install_failed` events.
+ *   3. A matchedConditions entry whose key (signal name) equals `token`
  *      (e.g. {{ca2023_not_updated}} -> that signal's value).
- *   3. Unresolved tokens are left untouched so authors notice the typo.
+ *   4. Unresolved tokens are left untouched so authors notice the typo.
  *
  * Token chars: [a-zA-Z0-9_]. Whitespace inside the braces is tolerated.
  */
@@ -19,7 +26,14 @@ export function interpolateRuleTemplate(
   if (!matchedConditions || typeof matchedConditions !== "object") return text;
 
   const byField = new Map<string, string>();
+  const byAutoField = new Map<string, string>();
   const bySignal = new Map<string, string>();
+
+  // Whitelist of auto-injected event fields the backend rule engine adds to every
+  // matched-condition evidence dict via AddDataFieldsToEvidence. Mirror keeps the
+  // mapping explicit so a rogue evidence key (e.g. accidental `description`) can't
+  // shadow a template token from another resolution path.
+  const AUTO_FIELDS = ["appId", "appName", "errorPatternId", "errorCode", "exitCode", "status"];
 
   for (const [signal, evidence] of Object.entries(matchedConditions)) {
     if (!evidence || typeof evidence !== "object") {
@@ -33,10 +47,19 @@ export function interpolateRuleTemplate(
     if ("value" in e) {
       bySignal.set(signal, formatValue(e.value));
     }
+    // Auto-field fallback: first non-empty wins (insertion order of
+    // matchedConditions mirrors rule.conditions order, so the required
+    // condition's event is checked first).
+    for (const af of AUTO_FIELDS) {
+      if (byAutoField.has(af)) continue;
+      const v = e[af];
+      if (v != null && v !== "") byAutoField.set(af, formatValue(v));
+    }
   }
 
   return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (raw, token: string) => {
     if (byField.has(token)) return byField.get(token)!;
+    if (byAutoField.has(token)) return byAutoField.get(token)!;
     if (bySignal.has(token)) return bySignal.get(token)!;
     return raw;
   });

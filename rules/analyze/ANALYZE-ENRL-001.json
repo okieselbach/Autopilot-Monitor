@@ -42,21 +42,12 @@
       "operator": "exists",
       "value": "",
       "required": false
-    },
-    {
-      "signal": "failed_app",
-      "source": "event_type",
-      "eventType": "app_install_failed",
-      "dataField": "appName",
-      "operator": "exists",
-      "value": "",
-      "required": false
     }
   ],
   "confidenceFactors": [
     { "signal": "app_failed", "condition": "exists", "weight": 5 }
   ],
-  "explanation": "The Autopilot enrollment has explicitly failed. The most specific failure information is carried by the events captured during this session — review the `enrollment_failed` event payload and the more targeted rule results (ANALYZE-APP-* / ANALYZE-ESP-*) that fired alongside this one for the actionable root cause.\n\nKey facts extracted from the timeline:\n\n- **Failure reason:** `{{reason}}`\n- **ESP failed subcategory:** `{{failedSubcategory}}`\n- **ESP HRESULT:** `{{errorCode}}`\n- **First failed app:** `{{appName}}`\n\n(Fields shown as `{{…}}` were not present in this session — e.g. a non-ESP failure path has no failed-subcategory, and a successful pre-ESP stage has no failed app.)",
+  "explanation": "The Autopilot enrollment has explicitly failed. The most specific failure information is carried by the events captured during this session — review the `enrollment_failed` event payload and the more targeted rule results (ANALYZE-APP-* / ANALYZE-ESP-*) that fired alongside this one for the actionable root cause.\n\nKey facts extracted from the timeline:\n\n- **Failure reason:** `{{reason}}`\n- **ESP failed subcategory:** `{{failedSubcategory}}`\n- **ESP HRESULT:** `{{errorCode}}`\n\n(Fields shown as `{{…}}` were not present in this session — e.g. a non-ESP failure path has no failed-subcategory.)",
   "remediation": [
     {
       "title": "Investigate enrollment failure",

@@ -71,4 +71,111 @@ describe("interpolateRuleTemplate", () => {
   it("does not blow up on text with no placeholders", () => {
     expect(interpolateRuleTemplate("plain text", matched)).toBe("plain text");
   });
+
+  // Codex review follow-up (P2): when a rule's required condition matches an event
+  // that carries auto-injected whitelist fields (appName, errorCode, etc.), the
+  // template MUST resolve those tokens from the SAME event — even if other
+  // optional conditions matched different events. The interpolator pins to the
+  // first matched-conditions entry so the rule's required (= first) condition
+  // wins.
+  it("ANALYZE-APP-013 multi-failure: interpolation uses the required-condition event, not the first failed app", () => {
+    const matchedConditions = {
+      // Required condition: matched the Office app with HRESULT 0x87D1041C.
+      esp_apps_detection_failure: {
+        eventId: "evt-office",
+        sequence: 168,
+        timestamp: "2026-05-28T10:41:08Z",
+        eventType: "app_install_failed",
+        field: "failureType",
+        value: "esp_apps_detection_failure",
+        // AddDataFieldsToEvidence auto-injects these from the SAME event:
+        appId: "f9026516-dbec-47cd-ae4e-ec2312a1303c",
+        appName: "Microsoft Apps for Enterprise - 64Bit",
+        errorPatternId: "esp_apps_detection_failure",
+        errorCode: "0x87d1041c",
+      },
+    };
+
+    const explanation =
+      "App **{{appName}}** failed during the Enrollment Status Page with HRESULT **{{errorCode}}**.";
+    const out = interpolateRuleTemplate(explanation, matchedConditions);
+    expect(out).toBe(
+      "App **Microsoft Apps for Enterprise - 64Bit** failed during the Enrollment Status Page with HRESULT **0x87d1041c**."
+    );
+  });
+
+  it("auto-field resolution pins to the first matched condition (no cross-event drift)", () => {
+    // Order matters: the FIRST matched-conditions entry's auto-fields win even
+    // when a later entry has different auto-fields (e.g. a second condition
+    // that matched a different `app_install_failed` event in the same
+    // session). Insertion order of matchedConditions mirrors rule.conditions
+    // order on the backend. The decoy below uses a different explicit `field`
+    // so the byField path doesn't cross-shadow — this asserts the auto-field
+    // shadowing semantics only.
+    const matchedConditions = {
+      esp_apps_detection_failure: {
+        eventId: "evt-office",
+        field: "failureType",
+        value: "esp_apps_detection_failure",
+        appName: "Microsoft Apps for Enterprise - 64Bit",
+        errorCode: "0x87d1041c",
+      },
+      another_app_failure_decoy: {
+        eventId: "evt-other",
+        field: "isError",
+        value: "true",
+        appName: "Some Other App",
+        errorCode: "0x80070005",
+      },
+    };
+
+    const out = interpolateRuleTemplate(
+      "App={{appName}} HR={{errorCode}}",
+      matchedConditions
+    );
+    expect(out).toBe(
+      "App=Microsoft Apps for Enterprise - 64Bit HR=0x87d1041c"
+    );
+  });
+
+  it("explicit field/value still wins over auto-fields from a later condition", () => {
+    // Defense-in-depth: if a downstream condition explicitly declared a
+    // dataField that happens to share a name with a whitelist auto-field, the
+    // explicit-field path (byField) still wins over the auto-field fallback,
+    // because byField is checked first.
+    const matchedConditions = {
+      explicit_appname: {
+        field: "appName",
+        value: "Explicit value",
+      },
+      esp_apps_detection_failure: {
+        field: "failureType",
+        value: "esp_apps_detection_failure",
+        appName: "Auto-field value",
+      },
+    };
+    const out = interpolateRuleTemplate("{{appName}}", matchedConditions);
+    expect(out).toBe("Explicit value");
+  });
+
+  it("ignores non-whitelist evidence keys (no leakage of internal fields)", () => {
+    // Evidence dicts may contain internal keys like `eventId`, `sequence`,
+    // `timestamp`, `field`, `value`, `eventType` — none of these may be resolved
+    // as template tokens, otherwise authors could accidentally leak Table
+    // Storage row keys into customer-visible rule explanations.
+    const matchedConditions = {
+      sig: {
+        eventId: "evt-secret",
+        sequence: 42,
+        timestamp: "2026-05-28T10:00:00Z",
+        eventType: "app_install_failed",
+        field: "failureType",
+        value: "esp_apps_detection_failure",
+      },
+    };
+    expect(interpolateRuleTemplate("{{eventId}}", matchedConditions)).toBe("{{eventId}}");
+    expect(interpolateRuleTemplate("{{sequence}}", matchedConditions)).toBe("{{sequence}}");
+    expect(interpolateRuleTemplate("{{timestamp}}", matchedConditions)).toBe("{{timestamp}}");
+    expect(interpolateRuleTemplate("{{eventType}}", matchedConditions)).toBe("{{eventType}}");
+  });
 });

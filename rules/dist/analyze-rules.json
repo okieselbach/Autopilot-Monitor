@@ -516,24 +516,6 @@
           "operator": "equals",
           "value": "esp_apps_detection_failure",
           "required": true
-        },
-        {
-          "signal": "failed_app_name",
-          "source": "event_type",
-          "eventType": "app_install_failed",
-          "dataField": "appName",
-          "operator": "exists",
-          "value": "",
-          "required": false
-        },
-        {
-          "signal": "detection_hresult",
-          "source": "event_type",
-          "eventType": "app_install_failed",
-          "dataField": "errorCode",
-          "operator": "exists",
-          "value": "",
-          "required": false
         }
       ],
       "explanation": "App **{{appName}}** failed during the Enrollment Status Page with HRESULT **{{errorCode}}** — *Application not detected after installation completed successfully*. The installer reported success but the Intune detection rule (file/registry/script) did not find the app afterwards, so the ESP Apps subcategory failed and the device's enrollment terminated.\n\nThis is a confirmed detection-rule mismatch, NOT an install timeout — the install itself most likely completed (or the installer exited 0). Common root causes:\n\n- The detection rule looks for a registry/file path that the installer doesn't create (wrong path, wrong bitness — e.g. checking HKLM\\SOFTWARE\\... on a 32-bit installer that lands under WOW6432Node).\n- The installer writes the detection artefact AFTER the ESP's detection probe runs (e.g. async post-install task, requires reboot).\n- The detection script returns 0 with no stdout (Intune treats empty stdout as \"not detected\").\n- The installer wrote files to a user profile but the rule looks in System scope (or vice-versa).",
@@ -1001,15 +983,6 @@
           "operator": "exists",
           "value": "",
           "required": false
-        },
-        {
-          "signal": "failed_app",
-          "source": "event_type",
-          "eventType": "app_install_failed",
-          "dataField": "appName",
-          "operator": "exists",
-          "value": "",
-          "required": false
         }
       ],
       "confidenceFactors": [
@@ -1019,7 +992,7 @@
           "weight": 5
         }
       ],
-      "explanation": "The Autopilot enrollment has explicitly failed. The most specific failure information is carried by the events captured during this session — review the `enrollment_failed` event payload and the more targeted rule results (ANALYZE-APP-* / ANALYZE-ESP-*) that fired alongside this one for the actionable root cause.\n\nKey facts extracted from the timeline:\n\n- **Failure reason:** `{{reason}}`\n- **ESP failed subcategory:** `{{failedSubcategory}}`\n- **ESP HRESULT:** `{{errorCode}}`\n- **First failed app:** `{{appName}}`\n\n(Fields shown as `{{…}}` were not present in this session — e.g. a non-ESP failure path has no failed-subcategory, and a successful pre-ESP stage has no failed app.)",
+      "explanation": "The Autopilot enrollment has explicitly failed. The most specific failure information is carried by the events captured during this session — review the `enrollment_failed` event payload and the more targeted rule results (ANALYZE-APP-* / ANALYZE-ESP-*) that fired alongside this one for the actionable root cause.\n\nKey facts extracted from the timeline:\n\n- **Failure reason:** `{{reason}}`\n- **ESP failed subcategory:** `{{failedSubcategory}}`\n- **ESP HRESULT:** `{{errorCode}}`\n\n(Fields shown as `{{…}}` were not present in this session — e.g. a non-ESP failure path has no failed-subcategory.)",
       "remediation": [
         {
           "title": "Investigate enrollment failure",
