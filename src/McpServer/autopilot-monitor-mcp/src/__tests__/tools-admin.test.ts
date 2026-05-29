@@ -5,11 +5,17 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { apiFetch, getToken } from './helpers.js';
 
+// Integration suite: only runs when a backend token is supplied. Without one it
+// SKIPS (not errors), so an unattended CI run still goes green on the unit
+// suites instead of failing the whole file. (review finding tests-7)
+const RUN_INTEGRATION = !!process.env.AUTOPILOT_API_TOKEN;
+const suite = describe.skipIf(!RUN_INTEGRATION);
+
 beforeAll(() => {
-  getToken();
+  if (RUN_INTEGRATION) getToken();
 });
 
-describe('get_metrics', () => {
+suite('get_metrics', () => {
   it('should return global enrollment metrics', async () => {
     const data = await apiFetch<any>(`/api/global/metrics/summary?days=30`);
     expect(data.success).toBe(true);
@@ -30,7 +36,7 @@ describe('get_metrics', () => {
   });
 });
 
-describe('get_usage_metrics', () => {
+suite('get_usage_metrics', () => {
   it('should return platform usage overview', async () => {
     const data = await apiFetch<any>(`/api/global/metrics/usage`);
     expect(data).toHaveProperty('sessions');
@@ -41,7 +47,7 @@ describe('get_usage_metrics', () => {
   });
 });
 
-describe('get_geographic_metrics', () => {
+suite('get_geographic_metrics', () => {
   it('should return geographic distribution (by country)', async () => {
     const data = await apiFetch<any>(`/api/global/metrics/geographic?groupBy=country&days=30`);
     expect(data.success).toBe(true);
@@ -55,7 +61,7 @@ describe('get_geographic_metrics', () => {
   });
 });
 
-describe('get_geographic_sessions', () => {
+suite('get_geographic_sessions', () => {
   it('should return sessions for a country', async () => {
     const data = await apiFetch<any>(`/api/global/metrics/geographic/sessions?country=DE&days=7`);
     expect(data.success).toBe(true);
@@ -63,7 +69,7 @@ describe('get_geographic_sessions', () => {
   });
 });
 
-describe('get_platform_metrics', () => {
+suite('get_platform_metrics', () => {
   it('should return agent performance metrics', async () => {
     const data = await apiFetch<any>(`/api/global/metrics/platform`);
     expect(data).toHaveProperty('sessionsAnalyzed');
@@ -75,7 +81,7 @@ describe('get_platform_metrics', () => {
   });
 });
 
-describe('get_api_usage', () => {
+suite('get_api_usage', () => {
   it('should return daily usage summary', async () => {
     const data = await apiFetch<any>(`/api/global/metrics/mcp-usage/daily`);
     expect(Array.isArray(data.summaries)).toBe(true);
@@ -92,7 +98,7 @@ describe('get_api_usage', () => {
   });
 });
 
-describe('get_audit_logs', () => {
+suite('get_audit_logs', () => {
   it('should return audit log entries (cross-tenant)', async () => {
     const data = await apiFetch<any>(`/api/global/audit/logs`);
     expect(data.success).toBe(true);
@@ -107,7 +113,7 @@ describe('get_audit_logs', () => {
   });
 });
 
-describe('get_ops_events', () => {
+suite('get_ops_events', () => {
   it('should return ops events', async () => {
     const data = await apiFetch<any>(`/api/global/ops-events?maxResults=5`);
     expect(data.success).toBe(true);
@@ -123,7 +129,7 @@ describe('get_ops_events', () => {
   });
 });
 
-describe('list_session_reports', () => {
+suite('list_session_reports', () => {
   it('should return session reports', async () => {
     const data = await apiFetch<any>(`/api/global/session-reports`);
     expect(data.success).toBe(true);

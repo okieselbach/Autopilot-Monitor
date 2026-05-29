@@ -7,14 +7,21 @@ import { apiFetch, getToken } from './helpers.js';
 
 let knownTenantId: string;
 
+// Integration suite: only runs when a backend token is supplied. Without one it
+// SKIPS (not errors), so an unattended CI run still goes green on the unit
+// suites instead of failing the whole file. (review finding tests-7)
+const RUN_INTEGRATION = !!process.env.AUTOPILOT_API_TOKEN;
+const suite = describe.skipIf(!RUN_INTEGRATION);
+
 beforeAll(async () => {
+  if (!RUN_INTEGRATION) return;
   getToken();
   // Discover a tenant with data
   const data = await apiFetch<any>(`/api/global/search/sessions?limit=1`);
   knownTenantId = data.sessions[0]?.tenantId ?? '';
 });
 
-describe('list_tables', () => {
+suite('list_tables', () => {
   it('should return list of Azure Table Storage tables', async () => {
     const data = await apiFetch<any>(`/api/global/raw/tables`);
     expect(data).toHaveProperty('tables');
@@ -26,7 +33,7 @@ describe('list_tables', () => {
   });
 });
 
-describe('query_table', () => {
+suite('query_table', () => {
   it('should query TenantConfiguration table', async () => {
     const data = await apiFetch<any>(`/api/global/raw/tables/TenantConfiguration?limit=2`);
     expect(data).toHaveProperty('entities');
@@ -58,7 +65,7 @@ describe('query_table', () => {
   });
 });
 
-describe('query_raw_sessions', () => {
+suite('query_raw_sessions', () => {
   it('should return raw sessions (cross-tenant)', async () => {
     const data = await apiFetch<any>(`/api/global/raw/sessions?limit=3`);
     expect(data).toHaveProperty('sessions');
@@ -84,7 +91,7 @@ describe('query_raw_sessions', () => {
   });
 });
 
-describe('query_raw_events', () => {
+suite('query_raw_events', () => {
   it('should return events for a tenant', async () => {
     if (!knownTenantId) return;
     const data = await apiFetch<any>(
@@ -95,7 +102,7 @@ describe('query_raw_events', () => {
   });
 });
 
-describe('query_backend_logs', () => {
+suite('query_backend_logs', () => {
   it('should execute KQL query (POST)', async () => {
     const data = await apiFetch<any>(`/api/global/raw/logs`, {
       method: 'POST',
@@ -111,7 +118,7 @@ describe('query_backend_logs', () => {
   });
 });
 
-describe('read-only verification', () => {
+suite('read-only verification', () => {
   it('should reject PUT on session endpoint', async () => {
     // Verify the API doesn't accept mutation methods on read endpoints
     try {

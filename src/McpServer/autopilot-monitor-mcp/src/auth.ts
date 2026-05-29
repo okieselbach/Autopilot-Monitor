@@ -20,7 +20,18 @@ export interface TokenClaims {
   tid?: string;
   /** Token expiry (unix timestamp) */
   exp?: number;
-  /** Audience */
+  /**
+   * Audience. Parsed for observability/diagnostics but intentionally NOT
+   * validated here — the same Bearer token is passed through to the backend
+   * API, which enforces the audience cryptographically alongside the
+   * signature/issuer/lifetime checks. See
+   * `src/Backend/AutopilotMonitor.Functions/Middleware/AuthenticationMiddleware.cs:200`
+   * (`ValidateAudience = true`, `ValidAudiences = { clientId, api://clientId }`).
+   * Duplicating that gate here would only add a second, drift-prone copy of the
+   * accepted-audience list (RFC 8707 resource indicators are honored by the
+   * backend, not the proxy). This is spec-conformant token pass-through: the
+   * user's token is forwarded to the resource it was issued for.
+   */
   aud?: string;
 }
 

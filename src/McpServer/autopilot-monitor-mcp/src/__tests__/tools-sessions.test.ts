@@ -9,11 +9,17 @@ import { apiFetch, buildQuery, getToken } from './helpers.js';
 let knownSessionId: string;
 let knownTenantId: string;
 
+// Integration suite: only runs when a backend token is supplied. Without one it
+// SKIPS (not errors), so an unattended CI run still goes green on the unit
+// suites instead of failing the whole file. (review finding tests-7)
+const RUN_INTEGRATION = !!process.env.AUTOPILOT_API_TOKEN;
+const suite = describe.skipIf(!RUN_INTEGRATION);
+
 beforeAll(() => {
-  getToken(); // Fail fast if no token
+  if (RUN_INTEGRATION) getToken(); // Fail fast if no token
 });
 
-describe('search_sessions', () => {
+suite('search_sessions', () => {
   it('should return sessions (cross-tenant, no filters)', async () => {
     const data = await apiFetch<any>(`/api/global/search/sessions?limit=3`);
     expect(data.success).toBe(true);
@@ -50,7 +56,7 @@ describe('search_sessions', () => {
   });
 });
 
-describe('search_sessions_by_event', () => {
+suite('search_sessions_by_event', () => {
   it('should find sessions with enrollment_complete events', async () => {
     const data = await apiFetch<any>(
       `/api/global/search/sessions-by-event?eventType=enrollment_complete&limit=3`,
@@ -68,7 +74,7 @@ describe('search_sessions_by_event', () => {
   });
 });
 
-describe('get_session', () => {
+suite('get_session', () => {
   it('should return session details', async () => {
     const data = await apiFetch<any>(`/api/sessions/${knownSessionId}`);
     expect(data.success).toBe(true);
@@ -93,7 +99,7 @@ describe('get_session', () => {
   });
 });
 
-describe('get_session_events', () => {
+suite('get_session_events', () => {
   it('should return events for a session', async () => {
     const data = await apiFetch<any>(`/api/sessions/${knownSessionId}/events`);
     expect(data.success).toBe(true);
@@ -128,7 +134,7 @@ describe('get_session_events', () => {
   });
 });
 
-describe('get_session_analysis', () => {
+suite('get_session_analysis', () => {
   it('should return analysis results', async () => {
     const data = await apiFetch<any>(`/api/sessions/${knownSessionId}/analysis`);
     expect(data.success).toBe(true);
@@ -137,7 +143,7 @@ describe('get_session_analysis', () => {
   });
 });
 
-describe('search_sessions_by_cve', () => {
+suite('search_sessions_by_cve', () => {
   it('should return results (possibly empty) for a CVE search', async () => {
     const data = await apiFetch<any>(
       `/api/global/search/sessions-by-cve?cveId=CVE-2024-21447&limit=3`,
@@ -155,7 +161,7 @@ describe('search_sessions_by_cve', () => {
   });
 });
 
-describe('list_blocked_devices', () => {
+suite('list_blocked_devices', () => {
   it('should return blocked devices list (cross-tenant)', async () => {
     const data = await apiFetch<any>(`/api/global/devices/blocked`);
     expect(data.success).toBe(true);
