@@ -262,6 +262,27 @@ function extractKeywords(query: string): string[] {
 
 // ── Weighted keyword scoring ────────────────────────────────────────────
 
+/**
+ * Query stems that signal the caller is hunting a failure/anomaly rather than
+ * a benign state. When any appears in the query, scoring aligns event severity
+ * with that intent: failures rank up, benign Info/Trace events that only match
+ * incidentally rank down. Matched prefix-aware so "fail" covers
+ * "failed"/"failure"/"failing".
+ */
+const PROBLEM_INTENT_STEMS = [
+  'error', 'fail', 'stuck', 'hang', 'hung', 'timeout', 'timedout', 'crash',
+  'block', 'denied', 'deny', 'refuse', 'reject', 'unable', 'cannot', 'broken',
+  'corrupt', 'invalid', 'unsupported', 'abort', 'exception', 'fault',
+  'problem', 'issue', 'stall', 'retry', 'retries', 'missing',
+];
+
+/** True when the query keywords imply the caller is looking for a problem. */
+export function queryHasProblemIntent(keywords: string[]): boolean {
+  return keywords.some((kw) =>
+    PROBLEM_INTENT_STEMS.some((stem) => kw.startsWith(stem) || (kw.length >= 4 && stem.startsWith(kw))),
+  );
+}
+
 const MIN_PREFIX_LEN = 4;
 
 /** Check if keyword matches text via substring or shared prefix (min 4 chars). */
@@ -293,8 +314,24 @@ type ScoredEvent = {
   bestFields: string[];
 };
 
+/**
+ * Severity-intent multiplier. When the query signals a problem (`boostFailures`),
+ * lift events whose severity/type marks a failure and damp benign Info/Trace
+ * events so a successful `enrollment_complete` can't outrank a real error just
+ * because it incidentally matched a keyword. A no-op (1.0) when intent is absent.
+ */
+function severityIntentFactor(e: EventEntry, boostFailures: boolean): number {
+  if (!boostFailures) return 1;
+  const sev = (e.severity ?? '').toLowerCase();
+  const type = (e.eventType ?? '').toLowerCase();
+  if (sev === 'error' || sev === 'critical' || type.includes('failed') || type === 'error_detected') return 1.5;
+  if (sev === 'warning') return 1.15;
+  if (sev === 'info' || sev === 'trace' || sev === 'verbose' || sev === 'debug') return 0.6;
+  return 1;
+}
+
 /** Score an event against query keywords with weighted field matching. */
-function scoreEvent(e: EventEntry, queryKeywords: string[]): ScoredEvent | null {
+export function scoreEvent(e: EventEntry, queryKeywords: string[], boostFailures = false): ScoredEvent | null {
   const fields: Array<{ name: string; text: string; weight: number }> = [
     { name: 'eventType', text: (e.eventType ?? '').toLowerCase(), weight: FIELD_WEIGHTS.eventType },
     { name: 'message', text: (e.message ?? '').toLowerCase(), weight: FIELD_WEIGHTS.message },
@@ -334,9 +371,12 @@ function scoreEvent(e: EventEntry, queryKeywords: string[]): ScoredEvent | null 
   // Bonus for matching MORE keywords (coverage matters)
   const coverageBonus = (matched.length / queryKeywords.length) * 0.2;
 
+  // Align ranking with problem intent before clamping into [0, 1].
+  const score = Math.min((normalizedScore + coverageBonus) * severityIntentFactor(e, boostFailures), 1.0);
+
   return {
     index: 0, // set by caller
-    score: Math.min(normalizedScore + coverageBonus, 1.0),
+    score,
     matchedKeywords: matched,
     bestFields: Array.from(bestFields),
   };
@@ -355,6 +395,9 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
         'Searches enrollment events by matching keywords against event type, message, source, severity, and data fields. ' +
         'Uses prefix-aware matching (e.g. "install" matches "installation", "installed", "app_install_failed") ' +
         'and weighted field scoring (matches in eventType rank higher than in data). ' +
+        'When the query implies a problem (error/fail/stuck/timeout…), ranking lifts failure/Warning events and damps ' +
+        'benign Info/Trace events. `matchedSessionIds` lists the distinct sessions behind the ranked hits (drill into ' +
+        'these next); `sessionsSearchedCount` is how many sessions were scanned. ' +
         'Provide sessionId to search within one session, or omit for a fast (single-page-per-type) cross-session scan. ' +
         'This is a bounded scan: check the returned `truncated` flag — if true, recall is incomplete, so escalate to ' +
         'deep_search_events for a broader multi-page scan or narrow the query as `recallNote` suggests.',
@@ -382,9 +425,10 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
 
         const { events, sessionIds, searchMethod, truncated } = await fetchSessionEvents(sessionId, tenantId, queryKeywords, SEMANTIC_BUDGET);
 
+        const boostFailures = queryHasProblemIntent(queryKeywords);
         const scored: Array<ScoredEvent & { event: EventEntry }> = [];
         for (let i = 0; i < events.length; i++) {
-          const result = scoreEvent(events[i], queryKeywords);
+          const result = scoreEvent(events[i], queryKeywords, boostFailures);
           if (result && result.score >= minScore) {
             scored.push({ ...result, index: i, event: events[i] });
           }
@@ -404,15 +448,19 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
           message: s.event.message,
         }));
 
+        // Distinct session UUIDs behind the ranked hits — the set to drill into next.
+        const matchedSessionIds = [...new Set(results.map((r) => r.sessionId).filter(Boolean))];
+
         return toolResultText({
           query,
           searchBackend: 'weighted-keyword',
           searchMethod,
           keywordsUsed: queryKeywords,
-          sessionsSearched: sessionIds,
+          sessionsSearchedCount: sessionIds.length,
           eventsFetched: events.length,
           eventsMatched: scored.length,
           resultCount: results.length,
+          matchedSessionIds,
           ...recallSummary(searchMethod, truncated),
           results,
         }, MAX_RESULT_SIZE_CHARS.small);
@@ -498,6 +546,10 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
         'up to a generous budget, then ranks the matches. Scores across ALL event fields including full DataJson content. ' +
         'Returns the top `topK` ranked matches (NOT every matching event) — compare `resultCount` vs `eventsMatched`, ' +
         'and use get_session_events / search_sessions_by_event for full per-event recall. ' +
+        'When the query implies a problem (error/fail/stuck/timeout…), ranking lifts failure/Warning events and damps ' +
+        'benign Info/Trace events so a successful enrollment can\'t outrank a real error. ' +
+        '`matchedSessionIds` lists the distinct sessions behind the ranked hits (drill into these next); ' +
+        '`sessionsSearchedCount` is how many sessions were scanned. ' +
         'Check the `truncated` flag: if true, the scan hit its page/time budget (or fell back to recent failed ' +
         'sessions) and recall is incomplete — narrow the query as `recallNote` suggests. ' +
         'Provide sessionId to search within one session (complete, no truncation), or omit to search across sessions.' +
@@ -540,9 +592,10 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
             MAX_RESULT_SIZE_CHARS.small);
         }
 
+        const boostFailures = queryHasProblemIntent(queryKeywords);
         const scored: Array<ScoredEvent & { event: EventEntry }> = [];
         for (let i = 0; i < events.length; i++) {
-          const result = scoreEvent(events[i], queryKeywords);
+          const result = scoreEvent(events[i], queryKeywords, boostFailures);
           if (result && result.score >= minScore) {
             scored.push({ ...result, index: i, event: events[i] });
           }
@@ -562,15 +615,19 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
           message: s.event.message,
         }));
 
+        // Distinct session UUIDs behind the ranked hits — the set to drill into next.
+        const matchedSessionIds = [...new Set(results.map((r) => r.sessionId).filter(Boolean))];
+
         return toolResultText({
           query,
           searchBackend: 'weighted-keyword',
           searchMethod,
           keywordsUsed: queryKeywords,
-          sessionsSearched: sessionIds,
+          sessionsSearchedCount: sessionIds.length,
           eventsFetched: events.length,
           eventsMatched: scored.length,
           resultCount: results.length,
+          matchedSessionIds,
           ...recallSummary(searchMethod, truncated),
           results,
         }, MAX_RESULT_SIZE_CHARS.small);

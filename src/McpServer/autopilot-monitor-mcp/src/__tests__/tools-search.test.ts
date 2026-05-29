@@ -5,7 +5,7 @@
  * and clock, so we drive it with canned pages instead of the live API.
  */
 import { describe, it, expect } from 'vitest';
-import { fetchEventsViaIndex } from '../tools/search.js';
+import { fetchEventsViaIndex, scoreEvent, queryHasProblemIntent } from '../tools/search.js';
 
 type Page = { events?: Array<Record<string, unknown>>; nextLink?: string };
 
@@ -163,5 +163,56 @@ describe('fetchEventsViaIndex', () => {
     expect(res.events).toHaveLength(0);
     expect(res.anySucceeded).toBe(true);
     expect(res.truncated).toBe(false);
+  });
+});
+
+describe('queryHasProblemIntent', () => {
+  it('detects failure-intent stems (incl. inflections)', () => {
+    expect(queryHasProblemIntent(['error'])).toBe(true);
+    expect(queryHasProblemIntent(['failed'])).toBe(true);   // "fail" stem
+    expect(queryHasProblemIntent(['failure'])).toBe(true);
+    expect(queryHasProblemIntent(['stuck'])).toBe(true);
+    expect(queryHasProblemIntent(['timeout'])).toBe(true);
+    expect(queryHasProblemIntent(['certificate', 'error', 'enrollment'])).toBe(true);
+  });
+
+  it('returns false for purely benign queries', () => {
+    expect(queryHasProblemIntent(['certificate', 'enrollment'])).toBe(false);
+    expect(queryHasProblemIntent(['desktop', 'arrived'])).toBe(false);
+    expect(queryHasProblemIntent([])).toBe(false);
+  });
+});
+
+describe('scoreEvent — severity-intent alignment', () => {
+  const keywords = ['certificate', 'error', 'enrollment'];
+  // Benign success: matches "enrollment" (eventType) + "certificate" (data).
+  const benign = { eventType: 'enrollment_complete', severity: 'Info', data: { note: 'certificate ok' } };
+  // Real failure: matches "error" (eventType) + "certificate" (data).
+  const failure = { eventType: 'error_detected', severity: 'Error', data: { detail: 'certificate chain failed' } };
+
+  it('scores benign and failure events equally when intent is absent', () => {
+    const a = scoreEvent(benign, keywords, false);
+    const b = scoreEvent(failure, keywords, false);
+    expect(a?.score).toBeCloseTo(0.522, 2);
+    expect(b?.score).toBeCloseTo(0.522, 2);
+  });
+
+  it('lifts the failure above the benign success when intent is present', () => {
+    const a = scoreEvent(benign, keywords, true);
+    const b = scoreEvent(failure, keywords, true);
+    expect(a!.score).toBeLessThan(b!.score);
+    expect(b?.score).toBeCloseTo(0.783, 2); // 0.522 * 1.5
+    expect(a?.score).toBeCloseTo(0.313, 2); // 0.522 * 0.6 (benign Info damped)
+  });
+
+  it('clamps a boosted score into [0, 1]', () => {
+    const strong = { eventType: 'enrollment_failed', severity: 'Error' }; // "enrollment" + "error"? only "enrollment"
+    const s = scoreEvent({ eventType: 'error_enrollment_certificate' }, keywords, true);
+    expect(s!.score).toBeLessThanOrEqual(1);
+    expect(scoreEvent(strong, keywords, true)!.score).toBeLessThanOrEqual(1);
+  });
+
+  it('returns null when no keyword matches', () => {
+    expect(scoreEvent({ eventType: 'network_state_change', severity: 'Info' }, keywords, true)).toBeNull();
   });
 });
