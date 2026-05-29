@@ -43,9 +43,9 @@ function extractEventTypeCandidates(keywords: string[]): string[] {
 //
 // The cross-session search walks the already-paginated /api/raw/events
 // endpoint once per candidate event type, following nextLink to a bounded
-// budget and merging client-side. This replaces the legacy capped
-// /api/raw/events/search call (fixed sessionLimit:10 + limit:200, no cursor,
-// no nextLink) whose result silently truncated without telling the caller.
+// budget and merging client-side. This replaces a former capped multi-type
+// search call (fixed sessionLimit:10 + limit:200, no cursor, no nextLink)
+// whose result silently truncated without telling the caller.
 // Because each walk filters by a single event type and Azure-Tables
 // continuation pages never overlap, the same event can never appear in two
 // walks — only sessions recur across type-walks, which we union into a Set.

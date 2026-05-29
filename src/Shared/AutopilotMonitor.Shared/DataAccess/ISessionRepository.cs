@@ -152,12 +152,8 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// </summary>
         Task<RawPage<SessionSummary>> SearchSessionsPageAsync(
             string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation);
-        Task<List<SessionSummary>> SearchSessionsByEventAsync(
-            string? tenantId, string eventType, string? source, string? severity,
-            string? phase, int limit = 50);
-
         /// <summary>
-        /// Paged variant of <see cref="SearchSessionsByEventAsync"/>. Walks the
+        /// Paged walk of the
         /// <c>EventTypeIndex</c> table page-by-page so callers can drain large
         /// result sets via <c>nextLink</c>. Replaces the legacy hard-coded
         /// <c>limit:20</c> session-index lookup that silently dropped recall on
@@ -166,9 +162,6 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<RawPage<SessionSummary>> SearchSessionsByEventPageAsync(
             string? tenantId, string eventType, string? source, string? severity, string? phase,
             int pageSize, string? continuation);
-        Task<List<EnrollmentEvent>> SearchEventsByTypesAsync(
-            string? tenantId, IEnumerable<string> eventTypes, string? source, string? severity,
-            int sessionLimit = 10, int eventLimit = 50);
         Task<List<SessionSummary>> SearchSessionsByCveAsync(
             string? tenantId, string cveId, double? minCvssScore, string? overallRisk, int limit = 50);
 

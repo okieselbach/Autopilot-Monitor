@@ -27,7 +27,6 @@ public class NoStoreCacheMiddlewareTests
     // GA cross-tenant raw + global PII surfaces
     [InlineData("/api/raw/sessions")]
     [InlineData("/api/raw/events")]
-    [InlineData("/api/raw/events/search")]
     [InlineData("/api/global/sessions")]
     [InlineData("/api/global/raw/sessions")]
     [InlineData("/api/global/raw/events")]

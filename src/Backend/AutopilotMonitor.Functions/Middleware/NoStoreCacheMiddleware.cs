@@ -37,7 +37,6 @@ public class NoStoreCacheMiddleware : IFunctionsWorkerMiddleware
         // GA cross-tenant raw + global PII surfaces
         "/api/raw/sessions",
         "/api/raw/events",
-        "/api/raw/events/search",
         "/api/global/sessions",
         "/api/global/distress-reports",
         "/api/global/session-reports",         // covers list; /download-url + /{id}/note via prefix

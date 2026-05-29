@@ -153,16 +153,6 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             int pageSize, string? continuation)
             => _storage.SearchSessionsByEventPageAsync(tenantId, eventType, source, severity, phase, pageSize, continuation);
 
-        public Task<List<SessionSummary>> SearchSessionsByEventAsync(
-            string? tenantId, string eventType, string? source, string? severity,
-            string? phase, int limit = 50)
-            => _storage.SearchSessionsByEventAsync(tenantId, eventType, source, severity, phase, limit);
-
-        public Task<List<EnrollmentEvent>> SearchEventsByTypesAsync(
-            string? tenantId, IEnumerable<string> eventTypes, string? source, string? severity,
-            int sessionLimit = 10, int eventLimit = 50)
-            => _storage.SearchEventsByTypesAsync(tenantId, eventTypes, source, severity, sessionLimit, eventLimit);
-
         public Task<List<SessionSummary>> SearchSessionsByCveAsync(
             string? tenantId, string cveId, double? minCvssScore, string? overallRisk, int limit = 50)
             => _storage.SearchSessionsByCveAsync(tenantId, cveId, minCvssScore, overallRisk, limit);

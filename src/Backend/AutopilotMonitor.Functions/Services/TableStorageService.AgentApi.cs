@@ -886,72 +886,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Searches sessions that contain a specific event type using the EventTypeIndex.
-        /// Supports server-side severity prefilter via MaxSeverity (enriched index rows).
-        /// Source filtering is applied client-side on the Sources field.
-        /// </summary>
-        public async Task<List<SessionSummary>> SearchSessionsByEventAsync(
-            string? tenantId, string eventType, string? source, string? severity, string? phase, int limit = 50)
-        {
-            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventTypeIndex);
-
-            // Build OData filter: PartitionKey + optional severity prefilter
-            int? minSeverity = null;
-            if (!string.IsNullOrEmpty(severity) &&
-                Enum.TryParse<AutopilotMonitor.Shared.Models.EventSeverity>(severity, ignoreCase: true, out var parsedSeverity))
-            {
-                minSeverity = (int)parsedSeverity;
-            }
-
-            // Tenant-scoped: partition-targeted (cheap, exact-match on PK).
-            // Cross-tenant: server-side filter on the EventType column. The
-            // PartitionKey shape is `{tenantId}_{eventType}` and tenantIds may
-            // contain dashes but never underscores, while eventType itself may
-            // contain underscores (e.g. `app_install_failed`) — so a PK-suffix
-            // split is brittle. Filtering on the explicit EventType column
-            // avoids that ambiguity entirely (regression: previously used
-            // `LastIndexOf('_')` and silently dropped every multi-underscore
-            // event type).
-            string? oDataFilter;
-            if (!string.IsNullOrEmpty(tenantId))
-            {
-                oDataFilter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(tenantId)}_{ODataSanitizer.EscapeValue(eventType)}'";
-                if (minSeverity.HasValue)
-                    oDataFilter += $" and MaxSeverity ge {minSeverity.Value}";
-            }
-            else
-            {
-                oDataFilter = $"EventType eq '{ODataSanitizer.EscapeValue(eventType)}'";
-                if (minSeverity.HasValue)
-                    oDataFilter += $" and MaxSeverity ge {minSeverity.Value}";
-            }
-
-            var sessionIds = new List<string>();
-            await foreach (var entity in tableClient.QueryAsync<TableEntity>(filter: oDataFilter))
-            {
-
-                // Client-side source filter on the Sources field
-                if (!string.IsNullOrEmpty(source))
-                {
-                    var sources = entity.GetString("Sources") ?? "";
-                    if (!sources.Contains(source, StringComparison.OrdinalIgnoreCase)) continue;
-                }
-
-                var sessionId = entity.GetString("SessionId");
-                if (!string.IsNullOrEmpty(sessionId) && !sessionIds.Contains(sessionId))
-                    sessionIds.Add(sessionId);
-
-                if (sessionIds.Count >= limit * 2) break;
-            }
-
-            if (sessionIds.Count == 0) return new List<SessionSummary>();
-
-            var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
-            return sessions.Take(limit).ToList();
-        }
-
-        /// <summary>
-        /// Paged variant of <see cref="SearchSessionsByEventAsync"/> — drives
+        /// Paged EventTypeIndex walk that drives
         /// <c>QueryRawEventsFunction</c>'s cross-session walk. Returns up to
         /// <paramref name="pageSize"/> distinct sessions plus the underlying
         /// Azure-Tables continuation; caller follows the wire <c>nextLink</c>
@@ -965,8 +900,8 @@ namespace AutopilotMonitor.Functions.Services
 
             var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.EventTypeIndex);
 
-            // Build OData filter — same as legacy SearchSessionsByEventAsync but
-            // without the limit*2 over-fetch, since pagination handles depth.
+            // Build OData filter (PartitionKey eq for tenant-scoped, EventType eq
+            // for cross-tenant) — no limit*2 over-fetch; pagination handles depth.
             int? minSeverity = null;
             if (!string.IsNullOrEmpty(severity) &&
                 Enum.TryParse<AutopilotMonitor.Shared.Models.EventSeverity>(severity, ignoreCase: true, out var parsedSeverity))
@@ -1027,77 +962,6 @@ namespace AutopilotMonitor.Functions.Services
 
             var sessions = await BatchGetSessionsAsync(tenantId, sessionIds);
             return new RawPage<SessionSummary>(sessions, nextRawToken);
-        }
-
-        /// <summary>
-        /// Searches events across sessions for multiple event types using the EventTypeIndex for pre-filtering,
-        /// then fetches only matching events per session via server-side OData filter on the Events table.
-        /// Designed for MCP search tools to replace the N+1 fetchSessionEvents pattern.
-        /// </summary>
-        public async Task<List<EnrollmentEvent>> SearchEventsByTypesAsync(
-            string? tenantId, IEnumerable<string> eventTypes, string? source, string? severity,
-            int sessionLimit = 10, int eventLimit = 50)
-        {
-            var typeList = eventTypes.Where(t => !string.IsNullOrEmpty(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            if (typeList.Count == 0) return new List<EnrollmentEvent>();
-
-            // Step 1: Query EventTypeIndex for each event type to find candidate sessions
-            var candidateSessionIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // sessionId → tenantId
-
-            foreach (var eventType in typeList)
-            {
-                var sessions = await SearchSessionsByEventAsync(tenantId, eventType, source, severity, null, limit: sessionLimit);
-                foreach (var session in sessions)
-                {
-                    candidateSessionIds.TryAdd(session.SessionId, session.TenantId);
-                }
-
-                if (candidateSessionIds.Count >= sessionLimit) break;
-            }
-
-            if (candidateSessionIds.Count == 0) return new List<EnrollmentEvent>();
-
-            // Step 2: For each candidate session, fetch only matching event types via filtered query
-            var allEvents = new List<EnrollmentEvent>();
-            var sem = new SemaphoreSlim(10, 10);
-
-            var tasks = candidateSessionIds.Take(sessionLimit).Select(async kvp =>
-            {
-                await sem.WaitAsync();
-                try
-                {
-                    var sessionEvents = new List<EnrollmentEvent>();
-                    foreach (var eventType in typeList)
-                    {
-                        var events = await GetSessionEventsByTypeAsync(kvp.Value, kvp.Key, eventType, eventLimit);
-                        sessionEvents.AddRange(events);
-                    }
-
-                    // Apply remaining client-side filters (severity, source)
-                    return sessionEvents.Where(e =>
-                        (string.IsNullOrEmpty(severity) || e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)) &&
-                        (string.IsNullOrEmpty(source) || (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase))
-                    ).ToList();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to fetch events for session {SessionId}", kvp.Key);
-                    return new List<EnrollmentEvent>();
-                }
-                finally
-                {
-                    sem.Release();
-                }
-            });
-
-            var results = await Task.WhenAll(tasks);
-            foreach (var batch in results)
-                allEvents.AddRange(batch);
-
-            return allEvents
-                .OrderByDescending(e => e.Timestamp)
-                .Take(eventLimit)
-                .ToList();
         }
 
         /// <summary>
