@@ -252,6 +252,77 @@ export const DEVICE_PROPERTIES_CATALOG = {
   },
 } as const;
 
+// ── Filter-key validation ─────────────────────────────────────────────────
+//
+// Without these, an invalid eventType / deviceProperties key produces the SAME
+// `count: 0` as a genuine miss, so "bad filter" is indistinguishable from "no
+// matches". The search tools call these to reject a typo with a clear, correctable
+// error instead of a silent empty result.
+
+/** Set form of ALL_EVENT_TYPES for O(1) membership checks. */
+const EVENT_TYPE_SET = new Set<string>(ALL_EVENT_TYPES);
+
+/** True if `s` is a known event type (public catalog ∪ internal). */
+export function isKnownEventType(s: string): boolean {
+  return EVENT_TYPE_SET.has(s);
+}
+
+/**
+ * Every catalogued deviceProperties key, flattened across event-type groups
+ * (excluding the `_usage` doc block). This is a CURATED subset — not exhaustive —
+ * because the backend reconstructs arbitrary `Props_*` columns. Use it for hints,
+ * never for hard rejection of a full key.
+ */
+export const ALL_DEVICE_PROPERTY_KEYS: readonly string[] = Object.entries(DEVICE_PROPERTIES_CATALOG)
+  .filter(([group]) => group !== '_usage')
+  .flatMap(([, props]) => Object.keys(props as Record<string, unknown>));
+
+/** Event-type prefix of a deviceProperties key ("tpm_status.specVersion" → "tpm_status"). */
+export function eventTypePrefixOf(key: string): string {
+  const dot = key.indexOf('.');
+  return dot === -1 ? key : key.slice(0, dot);
+}
+
+/** Up to 5 catalogued event types that loosely resemble `input`, for "did you mean" hints. */
+function suggestEventTypes(input: string): string[] {
+  const lower = input.toLowerCase();
+  const token = lower.split(/[_.]/)[0] ?? '';
+  return ALL_EVENT_TYPES
+    .filter((t) => t.includes(lower) || (token.length >= 3 && t.includes(token)))
+    .slice(0, 5);
+}
+
+/**
+ * Throws a descriptive Error if `eventType` is not a known type. The thrown
+ * message routes through the tools' `toolError` handler so the model gets an
+ * actionable correction instead of a misleading empty result.
+ */
+export function assertKnownEventType(eventType: string): void {
+  if (isKnownEventType(eventType)) return;
+  const suggestions = suggestEventTypes(eventType);
+  const hint = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(', ')}?` : '';
+  throw new Error(
+    `Unknown eventType "${eventType}" — it is not in the event_types catalog.${hint} ` +
+    'Call get_resource(name="event_types") for the full list of valid event types.',
+  );
+}
+
+/**
+ * Throws if any deviceProperties key's event-type prefix is unknown (e.g. the
+ * typo "tmp_status.x"). Keys whose prefix is valid but whose full name isn't
+ * catalogued are allowed through — the catalog is a curated subset and the backend
+ * accepts arbitrary `Props_*` columns, so hard-rejecting them would be a regression.
+ */
+export function assertKnownDevicePropertyKeys(keys: string[]): void {
+  const bad = keys.filter((k) => !isKnownEventType(eventTypePrefixOf(k)));
+  if (bad.length === 0) return;
+  throw new Error(
+    `Unknown deviceProperties key prefix(es): ${bad.join(', ')}. ` +
+    'Each key is "eventType.propertyName"; the part before the first "." must be a known event type. ' +
+    'Call get_resource(name="device_properties") for valid keys.',
+  );
+}
+
 export type ResourceName = 'event_types' | 'device_properties';
 
 export function getResourceContent(name: ResourceName): unknown {

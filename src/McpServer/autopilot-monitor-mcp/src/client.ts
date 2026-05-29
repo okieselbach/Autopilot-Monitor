@@ -175,3 +175,108 @@ function followNextLink(
 }
 
 export { apiFetch, buildQuery, followNextLink };
+
+// ── Auto-exhaust for in-memory-post-filtered endpoints ────────────────────
+
+/** Bounds a single tool call's forward-scan so it can't run unbounded. */
+export interface ScanBudget {
+  /** Max backend pages to fetch in one call (including the first). */
+  maxPages: number;
+  /** Wall-clock ceiling across the whole scan, in milliseconds. */
+  wallClockMs: number;
+}
+
+/**
+ * Default forward-scan budget for endpoints that post-filter in memory. Kept
+ * conservative: a genuinely-empty filter scans at most `maxPages` before
+ * returning `moreToScan`, so the MCP container's cost stays bounded.
+ */
+export const DEFAULT_SCAN_BUDGET: ScanBudget = { maxPages: 10, wallClockMs: 15_000 };
+
+/** Page fetcher seam — production hits the backend; tests inject a fake. */
+export type PageFetcher = (path: string) => Promise<Record<string, unknown>>;
+
+const defaultPageFetcher: PageFetcher = (path) =>
+  apiFetch(path) as Promise<Record<string, unknown>>;
+
+/** Item-array keys that backend list envelopes use, in detection priority order. */
+const ITEM_ARRAY_KEYS = ['events', 'sessions', 'items', 'results'] as const;
+
+/** Find the first array-valued envelope field — the page's item list. */
+function extractItems(page: Record<string, unknown>): unknown[] | undefined {
+  for (const key of ITEM_ARRAY_KEYS) {
+    const v = page[key];
+    if (Array.isArray(v)) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Auto-exhausts an in-memory-post-filtered list endpoint forward until it finds
+ * matches, drains, or hits a bounded budget — then returns an honest envelope.
+ *
+ * Why: endpoints whose filters are applied AFTER a single backend page fetch
+ * (search_sessions deviceProperties, get_session_events / query_raw_events
+ * eventType/severity/source) can return a page with `count: 0` that still carries
+ * a `nextLink`, because the matches live on a later page. A caller that stops at
+ * the empty first page wrongly concludes "no results". This helper scans forward
+ * while the page is empty, so the model never sees a misleading empty-but-
+ * continuable page.
+ *
+ * Resulting states are all distinguishable:
+ *   - First non-empty page → returned verbatim (its `nextLink` still means "more
+ *     pages exist"); no `moreToScan`.
+ *   - Empty + no `nextLink` → genuinely drained: `count: 0`, no `nextLink`.
+ *   - Empty + budget exhausted while a `nextLink` remains → `count: 0`, `nextLink`
+ *     kept, `moreToScan: true` + a `recallNote` so the caller resumes or concludes
+ *     "truly empty".
+ *
+ * `scannedPages` is always added. Pages map 1:1 to backend page boundaries, so
+ * continuation tokens stay exact — no row is split, duplicated, or skipped. An
+ * envelope without a recognised item array is passed through unchanged (plus
+ * `scannedPages`), so non-list responses are never mangled.
+ */
+export async function scanUntilMatch(
+  firstPath: string,
+  basePath: string,
+  budget: ScanBudget = DEFAULT_SCAN_BUDGET,
+  fetchPage: PageFetcher = defaultPageFetcher,
+  now: () => number = Date.now,
+): Promise<Record<string, unknown>> {
+  const deadline = now() + budget.wallClockMs;
+  let path = firstPath;
+  let scannedPages = 0;
+
+  for (;;) {
+    const page = await fetchPage(path);
+    scannedPages++;
+
+    const items = extractItems(page);
+    const nextLink = typeof page.nextLink === 'string' ? page.nextLink : undefined;
+
+    // Matches found, or the response isn't a recognised list shape → return as-is.
+    if (!items || items.length > 0) {
+      return { ...page, scannedPages };
+    }
+
+    // Empty page with no continuation → genuinely drained (truly empty).
+    if (!nextLink) {
+      return { ...page, scannedPages };
+    }
+
+    // Empty but more pages remain — keep scanning unless the budget is spent.
+    if (scannedPages >= budget.maxPages || now() > deadline) {
+      return {
+        ...page,
+        scannedPages,
+        moreToScan: true,
+        recallNote:
+          `Scanned ${scannedPages} page(s) without a match but more rows remain unscanned. ` +
+          'Pass nextLink as "continuation" to keep scanning, or this filter may genuinely have ' +
+          'no matches (widen the filter or confirm the value exists).',
+      };
+    }
+
+    path = followNextLink(basePath, {}, nextLink);
+  }
+}

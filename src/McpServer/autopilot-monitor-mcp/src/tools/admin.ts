@@ -1,8 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath } from '../client.js';
+import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath, scanUntilMatch } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
-import { getResourceContent } from '../resource-catalog.js';
+import { getResourceContent, assertKnownEventType } from '../resource-catalog.js';
 import { READ_ONLY, READ_ONLY_OPEN, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema } from './shared.js';
 import { toolError } from './error-handler.js';
 
@@ -484,6 +484,10 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         (ga ? 'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' : '') +
         'Use this when search_events does not cover the time range or session scope you need, ' +
         'or when you need exact event-type filtering across many sessions. Returns raw event data. ' +
+        'eventType is validated against the event_types catalog — a typo is rejected with a clear error, not a silent ' +
+        'empty result. When you filter, the tool auto-scans forward past empty pages, so a returned "count": 0 with no ' +
+        '"nextLink" means truly no matches, while "moreToScan": true means the per-call scan budget was hit (pass ' +
+        'nextLink as "continuation" to keep scanning). ' +
         'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
         'interactive queries; raise it (up to 1000) for forensics-grade exact recall. For broad analysis, use ' +
         'pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole nextLink string as "continuation" ' +
@@ -507,13 +511,17 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
     async (args) => withToolTelemetry('query_raw_events', async () => {
       try {
         const { tenantId, sessionId, eventType, severity, source, startedAfter, startedBefore, pageSize, continuation } = args;
+        if (eventType) assertKnownEventType(eventType);
         const basePath = pickGlobalOrTenantPath('/api/global/raw/events', '/api/raw/events');
         const path = followNextLink(
           basePath,
           { tenantId, sessionId, eventType, severity, source, startedAfter, startedBefore, pageSize },
           continuation,
         );
-        const data = await apiFetch(path);
+        // severity/source (and eventType/time on the single-session path) are post-filtered
+        // in-memory, so a page can be empty while matches sit further ahead. Auto-exhaust
+        // forward so the model isn't misled by an empty-but-continuable page.
+        const data = await scanUntilMatch(path, basePath);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.events);
       } catch (error: unknown) {
         return toolError('query_raw_events', args, error);

@@ -1,9 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath } from '../client.js';
+import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath, scanUntilMatch } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema } from './shared.js';
 import { toolError } from './error-handler.js';
+import { assertKnownEventType, assertKnownDevicePropertyKeys } from '../resource-catalog.js';
 
 // ── Session summary constants ───────────────────────────────────────────
 
@@ -61,6 +62,10 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
         'aggregate fits in <10KB. ' +
         'For VERSION sweeps use `agentVersionPrefix=2.0.` or `imeAgentVersionPrefix=1.23.` instead of one call per build — ' +
         'matches every patch in the line in a single response. ' +
+        'deviceProperties key prefixes are validated against the event_types catalog — a typo is rejected with a clear ' +
+        'error, not a silent empty result. For deviceProperties / serial / geo / time filters the tool auto-scans ' +
+        'forward past empty pages, so a returned "count": 0 with no "nextLink" means truly no matches, while ' +
+        '"moreToScan": true means the per-call scan budget was hit (pass nextLink as "continuation" to keep scanning). ' +
         'This endpoint is fully paginated — there is no truncation. Default pageSize=200 is tuned for interactive queries; ' +
         'raise it (up to 1000) for full sweeps. Pass the whole nextLink string as "continuation" so all backend-echoed ' +
         'query params round-trip correctly.',
@@ -117,12 +122,18 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
         // delegate the URL assembly to it.
         const queryParams: Record<string, string | number | boolean | undefined | null> = { ...rest, tenantId, pageSize };
         if (deviceProperties) {
+          // Reject typo'd key prefixes (e.g. "tmp_status.x") so a bad filter is a
+          // clear error, not a silent count:0 indistinguishable from a real miss.
+          assertKnownDevicePropertyKeys(Object.keys(deviceProperties));
           for (const [key, value] of Object.entries(deviceProperties)) {
             queryParams[`prop.${key}`] = value;
           }
         }
         const path = followNextLink(basePath, queryParams, continuation);
-        const data = await apiFetch(path);
+        // deviceProperties + scan-path filters (serial, geo, time, …) are post-filtered
+        // in-memory by the backend, so a page can be empty yet still carry a nextLink.
+        // Auto-exhaust forward so the model never sees a misleading empty-but-continuable page.
+        const data = await scanUntilMatch(path, basePath);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.sessions);
       } catch (error: unknown) {
         return toolError('search_sessions', args, error);
@@ -157,6 +168,10 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
     async (args) => withToolTelemetry('search_sessions_by_event', async () => {
       try {
         const { eventType, tenantId, pageSize, continuation } = args;
+        // eventType is the sole filter and is applied server-side (EventTypeIndex OData),
+        // so an empty page never carries a nextLink — no auto-exhaust needed. But validate
+        // the type so a typo is a clear error rather than a silent empty result.
+        assertKnownEventType(eventType);
         const basePath = pickGlobalOrTenantPath('/api/global/search/sessions-by-event', '/api/search/sessions-by-event');
         const path = followNextLink(
           basePath,
@@ -215,6 +230,10 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
         'Use this when search_events returns incomplete results and you need the full unfiltered event stream, ' +
         'or for root cause analysis when you need every event in chronological sequence. ' +
         'If you omit tenantId, the backend auto-resolves it from the session' + (ga ? ' (Global Admin can access any tenant)' : '') + '. ' +
+        'eventType is validated against the event_types catalog — a typo is rejected with a clear error, not a silent ' +
+        'empty result. When you filter, the tool auto-scans forward past empty pages, so a returned "count": 0 is ' +
+        'meaningful: with no "nextLink" it means truly no matching events; with "moreToScan": true it means the ' +
+        'per-call scan budget was hit before a match (pass nextLink as "continuation" to keep scanning). ' +
         'Pagination: if the response includes "nextLink", more events are available — call this tool again and pass the ' +
         'whole nextLink string (e.g. "/api/sessions/{id}/events?pageSize=...&continuation=...&tenantId=...") as ' +
         '"continuation". The tool follows it verbatim so query params the backend echoes (tenantId, ' +
@@ -236,15 +255,17 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
     async (args) => withToolTelemetry('get_session_events', async () => {
       try {
         const { sessionId, tenantId, pageSize, continuation, eventType, severity, source } = args;
-        // Filters live server-side now — count and nextLink stay coherent (a non-zero
-        // nextLink with count: 0 means "filter didn't match in this page; more raw rows
-        // ahead — follow nextLink to keep scanning").
+        if (eventType) assertKnownEventType(eventType);
+        const basePath = `/api/sessions/${sessionId}/events`;
         const path = followNextLink(
-          `/api/sessions/${sessionId}/events`,
+          basePath,
           { tenantId, pageSize, eventType, severity, source },
           continuation,
         );
-        const data = await apiFetch(path);
+        // eventType/severity/source are post-filtered in-memory over the session's
+        // event partition, so a page can be empty while matches sit on a later page.
+        // Auto-exhaust forward so the model isn't misled by an empty-but-continuable page.
+        const data = await scanUntilMatch(path, basePath);
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.events);
       } catch (error: unknown) {
         return toolError('get_session_events', args, error);
