@@ -398,6 +398,11 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
         'When the query implies a problem (error/fail/stuck/timeout…), ranking lifts failure/Warning events and damps ' +
         'benign Info/Trace events. `matchedSessionIds` lists the distinct sessions behind the ranked hits (drill into ' +
         'these next); `sessionsSearchedCount` is how many sessions were scanned. ' +
+        'IMPORTANT — cross-session recall is event-TYPE-driven: with no sessionId, the scan first maps your keywords to ' +
+        'known event types (see the event_types catalog) and only fetches events of those types. A concept that has no ' +
+        'event type of its own (e.g. "certificate") will NOT surface cross-session even when it lives inside another ' +
+        'event\'s data/message — so if a keyword maps to no event type, that info is likely buried elsewhere: pass a ' +
+        'sessionId (which scans EVERY field of EVERY event in that session) or search by a related event type instead. ' +
         'Provide sessionId to search within one session, or omit for a fast (single-page-per-type) cross-session scan. ' +
         'This is a bounded scan: check the returned `truncated` flag — if true, recall is incomplete, so escalate to ' +
         'deep_search_events for a broader multi-page scan or narrow the query as `recallNote` suggests.',
@@ -550,6 +555,12 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
         'benign Info/Trace events so a successful enrollment can\'t outrank a real error. ' +
         '`matchedSessionIds` lists the distinct sessions behind the ranked hits (drill into these next); ' +
         '`sessionsSearchedCount` is how many sessions were scanned. ' +
+        'IMPORTANT — cross-session recall is event-TYPE-driven: with no sessionId the scan maps your keywords to known ' +
+        'event types (see the event_types catalog) and only fetches events of those types; it then scores ALL their ' +
+        'fields including full DataJson, but a concept with no event type of its own (e.g. "certificate") is never ' +
+        'reached cross-session even when it lives inside another event\'s data. If `keywordsUsed` shows your key term ' +
+        'mapped to no event type, that info is likely buried elsewhere — pass a sessionId (scans EVERY field of EVERY ' +
+        'event in the session, complete and untruncated) or search by a related event type. ' +
         'Check the `truncated` flag: if true, the scan hit its page/time budget (or fell back to recent failed ' +
         'sessions) and recall is incomplete — narrow the query as `recallNote` suggests. ' +
         'Provide sessionId to search within one session (complete, no truncation), or omit to search across sessions.' +
