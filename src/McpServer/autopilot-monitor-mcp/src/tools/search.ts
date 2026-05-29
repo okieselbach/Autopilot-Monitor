@@ -428,13 +428,33 @@ const SYNONYM_LOOKUP: ReadonlyMap<string, readonly string[]> = (() => {
   return m;
 })();
 
-/** True if the keyword, or any of its synonyms, matches `text` (prefix-aware). */
+/**
+ * Match a SYNONYM at word granularity (whole word, or a shared word-prefix of >= MIN_PREFIX_LEN),
+ * never as a mid-word substring. Synonyms are short (stall/hang/reset/…) and the loose substring
+ * check used for literal keywords would mis-fire — e.g. "stall" sits inside "in[stall]", "hang"
+ * inside "c[hang]e" — making a "timeout" query spuriously match every app_install_* event. Word-
+ * level matching keeps the useful equivalences (reboot↔restart, stuck↔timeout) without those
+ * false positives.
+ */
+function synonymMatchesWord(text: string, term: string): boolean {
+  if (term.length < MIN_PREFIX_LEN) return false;
+  for (const word of text.split(/[\s_\-.:,/]+/)) {
+    if (word === term) return true;
+    if (word.length >= MIN_PREFIX_LEN) {
+      const prefixLen = Math.min(word.length, term.length, MIN_PREFIX_LEN + 2);
+      if (word.slice(0, prefixLen) === term.slice(0, prefixLen)) return true;
+    }
+  }
+  return false;
+}
+
+/** True if the keyword (loose, prefix-aware) or any of its synonyms (word-level) matches `text`. */
 function keywordMatchesField(text: string, keyword: string): boolean {
   if (prefixAwareMatch(text, keyword)) return true;
   const group = SYNONYM_LOOKUP.get(keyword);
   if (!group) return false;
   for (const term of group) {
-    if (term !== keyword && prefixAwareMatch(text, term)) return true;
+    if (term !== keyword && synonymMatchesWord(text, term)) return true;
   }
   return false;
 }

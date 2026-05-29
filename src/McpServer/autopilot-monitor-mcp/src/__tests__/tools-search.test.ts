@@ -343,6 +343,13 @@ describe('scoreEvent — synonym-aware matching', () => {
     expect(s).not.toBeNull();
     expect(s!.matchedKeywords).toEqual(['stuck']);
   });
+
+  it('does NOT let a short synonym match mid-word ("stall"⊂"install", "hang"⊂"change")', () => {
+    // Regression: "timeout"→synonym "stall" must not match app_install_started via the "stall"
+    // inside "install"; likewise "hang" must not match network_state_change via "change".
+    expect(scoreEvent({ eventType: 'app_install_started', severity: 'Info' }, ['timeout'], false)).toBeNull();
+    expect(scoreEvent({ eventType: 'network_state_change', severity: 'Info' }, ['timeout'], false)).toBeNull();
+  });
 });
 
 describe('diversifyBySession', () => {
