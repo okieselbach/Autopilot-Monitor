@@ -35,8 +35,8 @@ export function registerPrompts(server: McpServer, ga: boolean): void {
               'Follow this order:\n' +
               `1. Call get_session_summary(sessionId="${sessionId}") first — it gives status, the ` +
               'noise-filtered key-event timeline, aggregate stats, and any rule analysis in one shot.\n' +
-              '2. If the summary shows errors or a failure, escalate: use search_events_semantic ' +
-              '(TIER 1) for the failing area, then get_session_events (TIER 2) for the full ' +
+              '2. If the summary shows errors or a failure, escalate: use search_events ' +
+              '(hybrid; depth="deep" if the fast pass is thin) for the failing area, then get_session_events for the full ' +
               'chronological stream around the first error. Follow nextLink until the relevant window is covered.\n' +
               '3. Cross-check the rule analysis (it carries probable cause + remediation). If the summary ' +
               'reported keyEventsTruncated, pull the raw events rather than trusting the capped list.\n\n' +

@@ -210,9 +210,9 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
     {
       title: 'Get Session Events',
       description:
-        'TIER 2 — RAW EVENT RETRIEVAL (fallback when semantic search misses). ' +
+        'RAW EVENT RETRIEVAL (fallback when ranked search misses). ' +
         'Returns up to pageSize events from a single session. Filter by eventType, severity, or source (app name). ' +
-        'Use this when search_events_semantic returns incomplete results and you need the full unfiltered event stream, ' +
+        'Use this when search_events returns incomplete results and you need the full unfiltered event stream, ' +
         'or for root cause analysis when you need every event in chronological sequence. ' +
         'If you omit tenantId, the backend auto-resolves it from the session' + (ga ? ' (Global Admin can access any tenant)' : '') + '. ' +
         'Pagination: if the response includes "nextLink", more events are available — call this tool again and pass the ' +

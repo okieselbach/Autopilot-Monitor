@@ -479,10 +479,10 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
     {
       title: 'Query Raw Events',
       description:
-        'TIER 2 — RAW CROSS-SESSION EVENT QUERY (fallback for broader scope). ' +
+        'RAW CROSS-SESSION EVENT QUERY (fallback for broader scope). ' +
         'Query raw enrollment events with flexible filters across sessions. ' +
         (ga ? 'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' : '') +
-        'Use this when search_events_semantic does not cover the time range or session scope you need, ' +
+        'Use this when search_events does not cover the time range or session scope you need, ' +
         'or when you need exact event-type filtering across many sessions. Returns raw event data. ' +
         'This endpoint is fully paginated — there is no truncation. The default pageSize=200 is tuned for typical ' +
         'interactive queries; raise it (up to 1000) for forensics-grade exact recall. For broad analysis, use ' +

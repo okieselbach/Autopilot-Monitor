@@ -1,8 +1,8 @@
 /**
- * Unit tests for the cross-session paginated fan-out used by
- * search_events_semantic / deep_search_events. These are deterministic and run
- * WITHOUT a backend token: fetchEventsViaIndex takes an injectable page fetcher
- * and clock, so we drive it with canned pages instead of the live API.
+ * Unit tests for the cross-session paginated fan-out used by search_events.
+ * These are deterministic and run WITHOUT a backend token: fetchEventsViaIndex
+ * takes an injectable page fetcher and clock, so we drive it with canned pages
+ * instead of the live API.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -259,27 +259,89 @@ describe('selectEventTypeCandidates (lexical + semantic blend)', () => {
   });
 
   it('keeps lexical matches first, then appends semantic-only additions', async () => {
-    const out = await selectEventTypeCandidates('bitlocker', ['bitlocker'], provider(['tpm_status', 'secureboot_status']));
-    expect(out[0]).toBe('bitlocker_status'); // lexical, precise → first
-    expect(out).toContain('tpm_status');
-    expect(out).toContain('secureboot_status');
+    const { candidates } = await selectEventTypeCandidates('bitlocker', ['bitlocker'], provider(['tpm_status', 'secureboot_status']));
+    expect(candidates[0]).toBe('bitlocker_status'); // lexical, precise → first
+    expect(candidates).toContain('tpm_status');
+    expect(candidates).toContain('secureboot_status');
+  });
+
+  it('returns the cosine score for each semantically-selected type', async () => {
+    const { semanticTypeScores } = await selectEventTypeCandidates('bitlocker', ['bitlocker'], provider(['tpm_status', 'secureboot_status']));
+    // provider scores are 1 - i*0.01 → tpm_status=1.0, secureboot_status=0.99.
+    expect(semanticTypeScores.get('tpm_status')).toBeCloseTo(1.0, 5);
+    expect(semanticTypeScores.get('secureboot_status')).toBeCloseTo(0.99, 5);
   });
 
   it('surfaces semantically-related types even when NO keyword matches lexically', async () => {
     // "encryption" matches no event-type name lexically; semantic maps it to bitlocker_status.
     expect(extractEventTypeCandidates(['encryption'])).toEqual([]);
-    const out = await selectEventTypeCandidates('disk encryption', ['encryption'], provider(['bitlocker_status']));
-    expect(out).toEqual(['bitlocker_status']);
+    const { candidates, semanticTypeScores } = await selectEventTypeCandidates('disk encryption', ['encryption'], provider(['bitlocker_status']));
+    expect(candidates).toEqual(['bitlocker_status']);
+    expect(semanticTypeScores.get('bitlocker_status')).toBeCloseTo(1.0, 5);
   });
 
-  it('degrades to keyword-only when no vector index is available', async () => {
-    expect(await selectEventTypeCandidates('bitlocker', ['bitlocker'], undefined)).toEqual(['bitlocker_status']);
-    expect(await selectEventTypeCandidates('bitlocker', ['bitlocker'], provider([], { size: 0 }))).toEqual(['bitlocker_status']);
+  it('degrades to keyword-only (empty semantic scores) when no vector index is available', async () => {
+    const noIndex = await selectEventTypeCandidates('bitlocker', ['bitlocker'], undefined);
+    expect(noIndex.candidates).toEqual(['bitlocker_status']);
+    expect(noIndex.semanticTypeScores.size).toBe(0);
+    const emptyIndex = await selectEventTypeCandidates('bitlocker', ['bitlocker'], provider([], { size: 0 }));
+    expect(emptyIndex.candidates).toEqual(['bitlocker_status']);
+    expect(emptyIndex.semanticTypeScores.size).toBe(0);
   });
 
   it('falls back to keyword-only if the embedder throws', async () => {
     const out = await selectEventTypeCandidates('bitlocker', ['bitlocker'], provider(['tpm_status'], { throws: true }));
-    expect(out).toEqual(['bitlocker_status']);
+    expect(out.candidates).toEqual(['bitlocker_status']);
+    expect(out.semanticTypeScores.size).toBe(0);
+  });
+});
+
+describe('scoreEvent — semantic floor (the core recall fix)', () => {
+  it('surfaces a semantically-selected event with ZERO keyword overlap instead of dropping it', () => {
+    // The regression: query maps to system_reboot_detected via the vector index, but no
+    // query word matches the event lexically. Pre-fix this returned null → 0 results.
+    const semanticTypeScores = new Map([['system_reboot_detected', 0.45]]);
+    const ev = { eventType: 'system_reboot_detected', severity: 'Info' };
+    const s = scoreEvent(ev, ['machine', 'unexpectedly'], false, semanticTypeScores);
+    expect(s).not.toBeNull();
+    expect(s!.matchedKeywords).toEqual([]);
+    expect(s!.bestFields).toEqual(['eventType(semantic)']);
+    expect(s!.score).toBeGreaterThanOrEqual(0.15); // always clears the fast-tier minScore (0.1)
+  });
+
+  it('still returns null with no keyword match AND no semantic score (single-session / legacy)', () => {
+    expect(scoreEvent({ eventType: 'system_reboot_detected' }, ['machine'], false)).toBeNull();
+    expect(scoreEvent({ eventType: 'system_reboot_detected' }, ['machine'], false, new Map())).toBeNull();
+  });
+
+  it('ranks a strong lexical match above a semantic-only one', () => {
+    const semanticTypeScores = new Map([['network_state_change', 0.4]]);
+    const lexical = scoreEvent({ eventType: 'certificate_error', severity: 'Error' }, ['certificate', 'error'], false, semanticTypeScores);
+    const semanticOnly = scoreEvent({ eventType: 'network_state_change', severity: 'Info' }, ['certificate', 'error'], false, semanticTypeScores);
+    expect(lexical!.score).toBeGreaterThan(semanticOnly!.score);
+  });
+
+  it('scales the floor with cosine — a closer type outranks a looser one', () => {
+    const close = scoreEvent({ eventType: 'a' }, ['x'], false, new Map([['a', 0.9]]));
+    const loose = scoreEvent({ eventType: 'b' }, ['x'], false, new Map([['b', 0.31]]));
+    expect(close!.score).toBeGreaterThan(loose!.score);
+  });
+});
+
+describe('scoreEvent — synonym-aware matching', () => {
+  it('matches a query word to its synonym in the event type (restarted → reboot)', () => {
+    // "restarted" is not a literal substring of system_reboot_detected, but "reboot" (its
+    // synonym) is — so the event matches lexically, no semantic floor needed.
+    const s = scoreEvent({ eventType: 'system_reboot_detected', severity: 'Info' }, ['restarted'], false);
+    expect(s).not.toBeNull();
+    expect(s!.matchedKeywords).toEqual(['restarted']);
+    expect(s!.bestFields).toContain('eventType');
+  });
+
+  it('matches "stuck" to a timeout/stall event', () => {
+    const s = scoreEvent({ eventType: 'app_install_timeout' }, ['stuck'], false);
+    expect(s).not.toBeNull();
+    expect(s!.matchedKeywords).toEqual(['stuck']);
   });
 });
 

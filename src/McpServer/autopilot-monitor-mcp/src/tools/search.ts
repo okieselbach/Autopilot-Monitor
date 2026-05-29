@@ -66,6 +66,24 @@ const MAX_EVENT_TYPE_CANDIDATES = 16;
 const SEMANTIC_TYPE_MIN_SCORE = 0.3;
 
 /**
+ * Per-event score floor for an event whose TYPE was selected semantically. This is the fix
+ * for the core defect: without it, the lexical per-event scorer returns null for any event
+ * with zero literal keyword overlap, silently discarding the very events the semantic
+ * type-selection just fetched (e.g. a `system_reboot_detected` event for the query "machine
+ * restarted unexpectedly"). The floor lets such an event survive and rank, scaled by cosine
+ * so a closer type ranks higher. `SEMANTIC_FLOOR_MIN` is deliberately above the Tier-1
+ * default minScore (0.1) so a semantic-only hit is never dropped; a strong lexical match
+ * (which can reach 1.0) still outranks it.
+ */
+const SEMANTIC_FLOOR_MIN = 0.15;
+const SEMANTIC_FLOOR_SPAN = 0.35; // floor at cosine=1.0 ≈ MIN + SPAN; at cosine=0.3 == MIN.
+
+/** Clamp a number into [0, 1]. */
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/**
  * Hard cap on sessions scanned by the legacy fallback. The backend /search/sessions
  * endpoint bounds results via `pageSize` (the old `limit` param was removed in the
  * pagination rollout — passing it was a silent no-op that returned the full ~50-row
@@ -80,6 +98,17 @@ const SEMANTIC_BUDGET: FetchBudget = { maxPagesPerType: 3, wallClockMs: 12_000 }
 
 /** Tier-3 (deep): wide multi-page recall, bounded by a generous wall-clock. */
 const DEEP_BUDGET: FetchBudget = { maxPagesPerType: 20, wallClockMs: 40_000 };
+
+/**
+ * `depth` presets for the unified search_events tool. "fast" is the former TIER-1 (quick,
+ * a few pages per type); "deep" is the former TIER-3 (broad multi-page scan + a lower
+ * threshold so weakly-matching events still surface). Each sets the budget plus the default
+ * topK/minScore the caller falls back to when it doesn't pass them explicitly.
+ */
+const DEPTH_PRESETS = {
+  fast: { budget: SEMANTIC_BUDGET, defaultTopK: 10, defaultMinScore: 0.1 },
+  deep: { budget: DEEP_BUDGET, defaultTopK: 20, defaultMinScore: 0.05 },
+} as const;
 
 /** Injectable page fetcher — production hits the backend; tests pass a fake. */
 type PageFetcher = (path: string) => Promise<RawEventsPage>;
@@ -173,34 +202,53 @@ function recallSummary(searchMethod: string, truncated: boolean): { truncated: b
 }
 
 /**
+ * Result of event-type candidate selection: the ordered candidate list for the index walk,
+ * plus the per-type semantic cosine scores (eventType → score) so the per-event scorer can
+ * apply a semantic floor. `semanticTypeScores` is empty when no vector index is available.
+ */
+export type EventTypeCandidates = { candidates: string[]; semanticTypeScores: Map<string, number> };
+
+/**
  * Pick event-type candidates for the cross-session index walk by BLENDING lexical and
  * semantic signals: keyword/prefix matches first (high precision), then the semantically
  * closest types from the vector-indexed catalog (recall for queries whose words don't
  * appear in any type name, e.g. "app stuck downloading" → download_progress). Degrades to
  * keyword-only when no vector index is available (fuse backend / not yet indexed / error).
+ *
+ * The returned `semanticTypeScores` map carries each semantically-selected type's cosine
+ * score downstream so scoreEvent() can floor (not discard) those events — without it the
+ * semantic selection would be silently neutralized by the lexical per-event gate.
  */
 export async function selectEventTypeCandidates(
   query: string,
   keywords: string[],
   eventTypeIndex?: SearchProvider,
-): Promise<string[]> {
+): Promise<EventTypeCandidates> {
   const keywordCandidates = extractEventTypeCandidates(keywords);
-  if (!eventTypeIndex || eventTypeIndex.size === 0) return keywordCandidates;
+  const semanticTypeScores = new Map<string, number>();
+  if (!eventTypeIndex || eventTypeIndex.size === 0) {
+    return { candidates: keywordCandidates, semanticTypeScores };
+  }
 
-  let semantic: string[] = [];
+  const semantic: string[] = [];
   try {
     const hits = await eventTypeIndex.search(query, {
       topK: MAX_EVENT_TYPE_CANDIDATES,
       minScore: SEMANTIC_TYPE_MIN_SCORE,
     });
-    semantic = hits
-      .map((h) => (h.metadata as { eventType?: string }).eventType)
-      .filter((t): t is string => typeof t === 'string');
+    for (const h of hits) {
+      const et = (h.metadata as { eventType?: string }).eventType;
+      if (typeof et === 'string') {
+        semantic.push(et);
+        // Keep the best cosine if a type were ever returned twice.
+        if (h.score > (semanticTypeScores.get(et) ?? 0)) semanticTypeScores.set(et, h.score);
+      }
+    }
   } catch {
-    return keywordCandidates; // embedding failure must never break search
+    return { candidates: keywordCandidates, semanticTypeScores: new Map() }; // embedding failure must never break search
   }
   // Keyword (precise) first, then semantic-only additions (recall). Caller caps to top-N.
-  return [...new Set([...keywordCandidates, ...semantic])];
+  return { candidates: [...new Set([...keywordCandidates, ...semantic])], semanticTypeScores };
 }
 
 /** Fetch events for a single session, or across sessions via the paginated index walk. */
@@ -211,18 +259,21 @@ async function fetchSessionEvents(
   budget: FetchBudget = DEEP_BUDGET,
   query = '',
   eventTypeIndex?: SearchProvider,
-): Promise<{ events: EventEntry[]; sessionIds: string[]; searchMethod: string; truncated: boolean }> {
+): Promise<{ events: EventEntry[]; sessionIds: string[]; searchMethod: string; truncated: boolean; semanticTypeScores: Map<string, number> }> {
+  const noSemanticScores = new Map<string, number>();
+
   // Single-session: direct fetch. The backend returns the full (unpaginated)
   // event list for one session, so this path is complete — never truncated.
+  // No event-type pre-selection runs here, so ranking stays pure-keyword.
   if (sessionId) {
     const q = buildQuery({ tenantId } as Record<string, string | undefined>);
     const data = await apiFetch(`/api/sessions/${sessionId}/events${q}`) as { events?: EventEntry[] };
-    return { events: data?.events ?? [], sessionIds: [sessionId], searchMethod: 'direct-session', truncated: false };
+    return { events: data?.events ?? [], sessionIds: [sessionId], searchMethod: 'direct-session', truncated: false, semanticTypeScores: noSemanticScores };
   }
 
   // Multi-session: paginated index walk per candidate event type.
   if (queryKeywords && queryKeywords.length > 0) {
-    const ranked = await selectEventTypeCandidates(query, queryKeywords, eventTypeIndex);
+    const { candidates: ranked, semanticTypeScores } = await selectEventTypeCandidates(query, queryKeywords, eventTypeIndex);
     if (ranked.length > 0) {
       // Cap the per-type fan-out to the most-relevant types. If we dropped any,
       // recall is partial → flag truncated rather than silently narrowing. (Legacy
@@ -235,7 +286,7 @@ async function fetchSessionEvents(
         // No event appears in more than one single-type walk, so the only
         // overlap across walks is sessions — union them.
         const sessionIds = [...new Set(events.map((e) => e._sessionId).filter(Boolean) as string[])];
-        return { events, sessionIds, searchMethod: 'index-paginated', truncated: truncated || candidatesDropped };
+        return { events, sessionIds, searchMethod: 'index-paginated', truncated: truncated || candidatesDropped, semanticTypeScores };
       }
       // Every type errored before returning a page → fall through to legacy.
     }
@@ -266,7 +317,7 @@ async function fetchSessionEvents(
       } catch { return [] as EventEntry[]; }
     }),
   );
-  return { events: allEvents.flat(), sessionIds: ids, searchMethod: 'legacy-failed-sessions', truncated: true };
+  return { events: allEvents.flat(), sessionIds: ids, searchMethod: 'legacy-failed-sessions', truncated: true, semanticTypeScores: noSemanticScores };
 }
 
 const KEYWORD_STOP_WORDS = new Set([
@@ -352,6 +403,42 @@ function prefixAwareMatch(text: string, keyword: string): boolean {
   return false;
 }
 
+/**
+ * Concept synonym groups for per-event matching. A query keyword matches a field if the
+ * keyword OR any term in its group matches — counted as a SINGLE matched keyword, so
+ * synonyms never dilute coverage/normalization. Kept small and high-precision: each group
+ * is a true paraphrase of an enrollment concept the agent commonly asks about with
+ * non-canonical words (e.g. "restarted" for system_reboot_detected, "stuck" for a timeout).
+ * Groups are symmetric — every term maps to the whole group.
+ */
+const KEYWORD_SYNONYM_GROUPS: readonly string[][] = [
+  ['reboot', 'rebooted', 'restart', 'restarted', 'reset'],
+  ['timeout', 'timedout', 'stall', 'stalled', 'stuck', 'hang', 'hung'],
+  ['hello', 'whfb', 'passwordless'],
+  ['download', 'downloading', 'transfer', 'transferred', 'transferring'],
+  ['install', 'installation', 'installing', 'setup'],
+];
+
+/** Term → its full synonym group (incl. itself), built once. */
+const SYNONYM_LOOKUP: ReadonlyMap<string, readonly string[]> = (() => {
+  const m = new Map<string, readonly string[]>();
+  for (const group of KEYWORD_SYNONYM_GROUPS) {
+    for (const term of group) m.set(term, group);
+  }
+  return m;
+})();
+
+/** True if the keyword, or any of its synonyms, matches `text` (prefix-aware). */
+function keywordMatchesField(text: string, keyword: string): boolean {
+  if (prefixAwareMatch(text, keyword)) return true;
+  const group = SYNONYM_LOOKUP.get(keyword);
+  if (!group) return false;
+  for (const term of group) {
+    if (term !== keyword && prefixAwareMatch(text, term)) return true;
+  }
+  return false;
+}
+
 /** Field weights for scoring — eventType is the most discriminating field. */
 const FIELD_WEIGHTS = {
   eventType: 3.0,
@@ -384,8 +471,23 @@ function severityIntentFactor(e: EventEntry, boostFailures: boolean): number {
   return 1;
 }
 
-/** Score an event against query keywords with weighted field matching. */
-export function scoreEvent(e: EventEntry, queryKeywords: string[], boostFailures = false): ScoredEvent | null {
+/**
+ * Score an event against query keywords with weighted, synonym-aware field matching.
+ *
+ * `semanticTypeScores` (optional) carries the cosine score of each event type that was
+ * selected semantically for the cross-session walk. An event whose type appears there gets
+ * a semantic FLOOR, so it survives and ranks even with zero literal keyword overlap — this
+ * is what keeps the semantic type-selection from being silently neutralized by the lexical
+ * gate (e.g. `system_reboot_detected` for "machine restarted unexpectedly"). A strong
+ * lexical match still outranks a semantic-only one. Omitted (single-session / legacy) → the
+ * scorer behaves exactly as a pure-keyword scorer and returns null on no keyword match.
+ */
+export function scoreEvent(
+  e: EventEntry,
+  queryKeywords: string[],
+  boostFailures = false,
+  semanticTypeScores?: Map<string, number>,
+): ScoredEvent | null {
   const fields: Array<{ name: string; text: string; weight: number }> = [
     { name: 'eventType', text: (e.eventType ?? '').toLowerCase(), weight: FIELD_WEIGHTS.eventType },
     { name: 'message', text: (e.message ?? '').toLowerCase(), weight: FIELD_WEIGHTS.message },
@@ -402,7 +504,7 @@ export function scoreEvent(e: EventEntry, queryKeywords: string[], boostFailures
     let kwBestWeight = 0;
     let kwBestField = '';
     for (const field of fields) {
-      if (field.text && prefixAwareMatch(field.text, kw)) {
+      if (field.text && keywordMatchesField(field.text, kw)) {
         if (field.weight > kwBestWeight) {
           kwBestWeight = field.weight;
           kwBestField = field.name;
@@ -416,23 +518,34 @@ export function scoreEvent(e: EventEntry, queryKeywords: string[], boostFailures
     }
   }
 
-  if (matched.length === 0) return null;
+  // Semantic floor for events whose type was selected by the vector index.
+  const cosine = semanticTypeScores?.get(e.eventType ?? '') ?? 0;
+  const semanticFloor = cosine >= SEMANTIC_TYPE_MIN_SCORE
+    ? SEMANTIC_FLOOR_MIN + clamp01((cosine - SEMANTIC_TYPE_MIN_SCORE) / (1 - SEMANTIC_TYPE_MIN_SCORE)) * SEMANTIC_FLOOR_SPAN
+    : 0;
 
-  // Normalize: max possible = all keywords matching in eventType (weight 3.0)
+  if (matched.length === 0 && semanticFloor === 0) return null;
+
+  // Lexical score: normalize (max = all keywords matching in eventType, weight 3.0) +
+  // coverage bonus, then align with problem intent.
   const maxPossible = queryKeywords.length * FIELD_WEIGHTS.eventType;
-  const normalizedScore = totalScore / maxPossible;
-
-  // Bonus for matching MORE keywords (coverage matters)
+  const normalizedScore = maxPossible > 0 ? totalScore / maxPossible : 0;
   const coverageBonus = (matched.length / queryKeywords.length) * 0.2;
+  const intent = severityIntentFactor(e, boostFailures);
+  const lexicalScore = (normalizedScore + coverageBonus) * intent;
 
-  // Align ranking with problem intent before clamping into [0, 1].
-  const score = Math.min((normalizedScore + coverageBonus) * severityIntentFactor(e, boostFailures), 1.0);
+  // Semantic-only matches are damped by intent too, so a benign Info event of a
+  // loosely-related type can't outrank a real failure on a problem query.
+  const semanticScore = semanticFloor * intent;
+
+  const score = Math.min(Math.max(lexicalScore, semanticScore), 1.0);
 
   return {
     index: 0, // set by caller
     score,
     matchedKeywords: matched,
-    bestFields: Array.from(bestFields),
+    // No literal keyword hit → the event surfaced purely on semantic type-relevance.
+    bestFields: matched.length > 0 ? Array.from(bestFields) : ['eventType(semantic)'],
   };
 }
 
@@ -496,54 +609,68 @@ export function registerSearchTools(
   eventTypeIndex: SearchProvider | undefined,
   ga: boolean,
 ): void {
-  // Tool 9: search_events_semantic — weighted keyword search
+  // Tool 9: search_events — hybrid keyword + semantic event search (depth: fast | deep)
   server.registerTool(
-    'search_events_semantic',
+    'search_events',
     {
-      title: 'Search Events (Semantic)',
+      title: 'Search Events',
       description:
-        'TIER 1 — FAST EVENT SEARCH (try this first). ' +
-        'Hybrid: per-event ranking is keyword-based (prefix-aware, e.g. "install" matches "app_install_failed", ' +
-        'weighted eventType > data), while cross-session candidate event types are selected both lexically AND ' +
-        'semantically (vector catalog) — so "app stuck downloading" finds download_progress even with no word overlap. ' +
+        'HYBRID EVENT SEARCH (try this first for ranked hits). ' +
+        'Cross-session candidate event TYPES are selected semantically (vector embeddings) AND lexically; per-event ' +
+        'ranking blends prefix-aware, synonym-aware keyword matching with the event type\'s semantic relevance — so ' +
+        'intent-only queries surface even with no literal word overlap (e.g. "machine restarted unexpectedly" finds ' +
+        'system_reboot_detected; "app stuck downloading" finds download_progress). Hits that matched purely on ' +
+        'semantic type-relevance (no keyword) are flagged `semanticOnly`; `semanticOnlyCount` totals them. ' +
         'Problem queries (error/fail/stuck/timeout…) lift failure/Warning events and damp benign Info/Trace. ' +
-        '`matchedSessionIds` are the sessions behind the ranked hits (drill in next); `sessionsSearchedCount` is how ' +
-        'many were scanned. ' +
+        '`depth`: "fast" (default) is quick; "deep" scans more pages per type with a lower threshold for exhaustive ' +
+        'recall when accuracy is critical. Returns the top `topK` (NOT every match) — compare resultCount vs ' +
+        'eventsMatched. `matchedSessionIds` are the sessions behind the ranked hits (drill in next); ' +
+        '`sessionsSearchedCount` is how many were scanned. ' +
         'IMPORTANT — cross-session recall is event-TYPE-driven: without a sessionId the scan maps the query to known ' +
-        'event types (see event_types catalog) and fetches only those. A concept with no matching event type still ' +
+        'event types (see event_types catalog) and fetches only those. A concept with no related event type still ' +
         'won\'t surface cross-session even when it sits inside another event\'s data — pass a sessionId (scans EVERY ' +
-        'field of EVERY event) for that. ' +
-        'Bounded scan: if `truncated` is true, recall is incomplete — escalate to deep_search_events or narrow per `recallNote`.',
+        'field of EVERY event, complete) for that. ' +
+        'If `truncated` is true, recall is incomplete — narrow per `recallNote` or use depth="deep".' +
+        (ga ? ' Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant.' : ''),
       inputSchema: {
-        query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
+        query: z.string().describe('Natural language description of what to find (e.g. "machine restarted unexpectedly", "app download stuck", "certificate error")'),
         sessionId: SessionIdSchema.optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
         tenantId: z.string().optional().describe(ga ? 'Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.' : 'Optional tenant ID. Defaults to your tenant.'),
-        topK: z.coerce.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
-        minScore: z.coerce.number().min(0).max(1).optional().default(0.1)
-          .describe('Minimum relevance score (0-1, default 0.1). Events matching at least one keyword in any field pass this threshold.'),
+        depth: z.enum(['fast', 'deep']).optional().default('fast')
+          .describe('"fast" (default): a few pages per type, quick. "deep": broad multi-page scan per type with a lower threshold, for exhaustive recall when accuracy is critical.'),
+        topK: z.coerce.number().min(1).max(50).optional()
+          .describe('Number of matching events to return (1-50). Defaults: 10 (fast) / 20 (deep).'),
+        minScore: z.coerce.number().min(0).max(1).optional()
+          .describe('Minimum relevance score (0-1). Defaults: 0.1 (fast) / 0.05 (deep). Lower surfaces weaker matches.'),
+        keywords: z.array(z.string()).optional()
+          .describe('Additional exact keywords for matching. Auto-extracted from query if omitted.'),
         guaranteedTopRanked: z.coerce.number().min(0).max(50).optional().default(3)
           .describe('How many top results (by pure relevance score) are locked to the head in rank order, exempt from cross-session diversification. Default 3 keeps the strongest hits on top while spreading the rest across sessions. Set =topK to trust the ranking and disable diversification entirely; set 0 for maximum session diversity. Ignored for single-session (sessionId) searches.'),
       },
       annotations: READ_ONLY,
     },
-    async (args) => withToolTelemetry('search_events_semantic', async () => {
+    async (args) => withToolTelemetry('search_events', async () => {
       try {
-        const { query, sessionId, tenantId, topK, minScore, guaranteedTopRanked } = args;
+        const { query, sessionId, tenantId, depth, keywords, guaranteedTopRanked } = args;
+        const preset = DEPTH_PRESETS[depth];
+        const topK = args.topK ?? preset.defaultTopK;
+        const minScore = args.minScore ?? preset.defaultMinScore;
 
         // Extract keywords FIRST so we can use them for index-based pre-filtering
-        const queryKeywords = extractKeywords(query);
+        const queryKeywords = keywords ?? extractKeywords(query);
         if (queryKeywords.length === 0) {
           return toolResultText(
             { query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' },
             MAX_RESULT_SIZE_CHARS.small);
         }
 
-        const { events, sessionIds, searchMethod, truncated } = await fetchSessionEvents(sessionId, tenantId, queryKeywords, SEMANTIC_BUDGET, query, eventTypeIndex);
+        const { events, sessionIds, searchMethod, truncated, semanticTypeScores } =
+          await fetchSessionEvents(sessionId, tenantId, queryKeywords, preset.budget, query, eventTypeIndex);
 
         const boostFailures = queryHasProblemIntent(queryKeywords);
         const scored: Array<ScoredEvent & { event: EventEntry }> = [];
         for (let i = 0; i < events.length; i++) {
-          const result = scoreEvent(events[i], queryKeywords, boostFailures);
+          const result = scoreEvent(events[i], queryKeywords, boostFailures, semanticTypeScores);
           if (result && result.score >= minScore) {
             scored.push({ ...result, index: i, event: events[i] });
           }
@@ -554,6 +681,8 @@ export function registerSearchTools(
           score: Math.round(s.score * 1000) / 1000,
           matchedKeywords: s.matchedKeywords,
           bestFields: s.bestFields,
+          // Present only when true — surfaced purely on semantic type-relevance, no keyword hit.
+          semanticOnly: s.matchedKeywords.length === 0 ? true : undefined,
           sessionId: s.event._sessionId ?? sessionId,
           eventType: s.event.eventType,
           severity: s.event.severity,
@@ -565,22 +694,25 @@ export function registerSearchTools(
 
         // Distinct session UUIDs behind the ranked hits — the set to drill into next.
         const matchedSessionIds = [...new Set(results.map((r) => r.sessionId).filter(Boolean))];
+        const semanticOnlyCount = results.filter((r) => r.semanticOnly).length;
 
         return toolResultText({
           query,
-          searchBackend: 'weighted-keyword',
+          searchBackend: 'hybrid-keyword-semantic',
+          depth,
           searchMethod,
           keywordsUsed: queryKeywords,
           sessionsSearchedCount: sessionIds.length,
           eventsFetched: events.length,
           eventsMatched: scored.length,
           resultCount: results.length,
+          semanticOnlyCount,
           matchedSessionIds,
           ...recallSummary(searchMethod, truncated),
           results,
         }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
-        return toolError('search_events_semantic', args, error);
+        return toolError('search_events', args, error);
       }
     })
   );
@@ -649,108 +781,4 @@ export function registerSearchTools(
     })
   );
 
-  // Tool 23: deep_search_events — same scoring, broader paginated scan + lower thresholds
-  server.registerTool(
-    'deep_search_events',
-    {
-      title: 'Deep Search Events',
-      description:
-        'TIER 3 — DEEP SEARCH (thorough, use when accuracy is critical). ' +
-        'Same hybrid model as search_events_semantic (keyword per-event ranking + lexical-AND-semantic event-type ' +
-        'selection) but lower thresholds and a broader multi-page scan per type, ranking across ALL fields incl. full ' +
-        'DataJson. Problem queries (error/fail/stuck/timeout…) lift failure/Warning events and damp benign Info/Trace. ' +
-        'Returns the top `topK` (NOT every match) — compare ' +
-        '`resultCount` vs `eventsMatched`; use get_session_events / search_sessions_by_event for full per-event recall. ' +
-        '`matchedSessionIds` are the sessions behind the ranked hits (drill in next); `sessionsSearchedCount` is how ' +
-        'many were scanned. ' +
-        'IMPORTANT — cross-session recall is event-TYPE-driven: without a sessionId the scan maps the query to known ' +
-        'event types (lexically + semantically; see event_types catalog) and fetches only those. A concept with no ' +
-        'matching event type still won\'t surface cross-session even when it sits inside another event\'s data — pass ' +
-        'a sessionId (scans EVERY field of EVERY event, complete) for that. ' +
-        'If `truncated` is true, recall is incomplete — narrow per `recallNote`.' +
-        (ga ? ' Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant.' : ''),
-      inputSchema: {
-        query: z.string().describe('Natural language description of what to find (e.g. "app download stuck", "certificate error", "disk space low")'),
-        sessionId: SessionIdSchema.optional().describe('Search within a specific session. If omitted, searches across recent failed sessions.'),
-        tenantId: z.string().optional().describe(ga ? 'Tenant ID. Required for non-Global Admin users; Global Admin can omit to search across tenants.' : 'Optional tenant ID. Defaults to your tenant.'),
-        topK: z.coerce.number().min(1).max(50).optional().default(20)
-          .describe('Max results to return (1-50, default 20). Higher default for thoroughness.'),
-        minScore: z.coerce.number().min(0).max(1).optional().default(0.05)
-          .describe('Min relevance score (0-1, default 0.05). Very low so weakly-matching events still surface.'),
-        keywords: z.array(z.string()).optional()
-          .describe('Additional exact keywords for matching. Auto-extracted from query if omitted.'),
-        guaranteedTopRanked: z.coerce.number().min(0).max(50).optional().default(3)
-          .describe('How many top results (by pure relevance score) are locked to the head in rank order, exempt from cross-session diversification. Default 3 keeps the strongest hits on top while spreading the rest across sessions. Set =topK to trust the ranking and disable diversification entirely; set 0 for maximum session diversity. Ignored for single-session (sessionId) searches.'),
-      },
-      annotations: READ_ONLY,
-    },
-    async (args) => withToolTelemetry('deep_search_events', async () => {
-      try {
-        const { query, sessionId, tenantId, topK, minScore, keywords, guaranteedTopRanked } = args;
-
-        // Extract keywords FIRST for index-based pre-filtering
-        const queryKeywords = keywords ?? extractKeywords(query);
-        if (queryKeywords.length === 0) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({ query, resultCount: 0, results: [], note: 'No searchable keywords extracted from query.' }),
-            }],
-            _meta: { 'anthropic/maxResultSizeChars': MAX_RESULT_SIZE_CHARS.small },
-          };
-        }
-
-        const { events, sessionIds, searchMethod, truncated } = await fetchSessionEvents(sessionId, tenantId, queryKeywords, DEEP_BUDGET, query, eventTypeIndex);
-
-        if (events.length === 0) {
-          return toolResultText(
-            { query, searchMethod, resultCount: 0, eventsMatched: 0, results: [],
-              note: 'No events found.', ...recallSummary(searchMethod, truncated) },
-            MAX_RESULT_SIZE_CHARS.small);
-        }
-
-        const boostFailures = queryHasProblemIntent(queryKeywords);
-        const scored: Array<ScoredEvent & { event: EventEntry }> = [];
-        for (let i = 0; i < events.length; i++) {
-          const result = scoreEvent(events[i], queryKeywords, boostFailures);
-          if (result && result.score >= minScore) {
-            scored.push({ ...result, index: i, event: events[i] });
-          }
-        }
-
-        scored.sort((a, b) => b.score - a.score);
-        const results = diversifyBySession(scored, topK, 2, guaranteedTopRanked).map((s) => ({
-          score: Math.round(s.score * 1000) / 1000,
-          matchedKeywords: s.matchedKeywords,
-          bestFields: s.bestFields,
-          sessionId: s.event._sessionId ?? sessionId,
-          eventType: s.event.eventType,
-          severity: s.event.severity,
-          source: s.event.source,
-          phase: s.event.phase,
-          timestamp: s.event.timestamp,
-          message: s.event.message,
-        }));
-
-        // Distinct session UUIDs behind the ranked hits — the set to drill into next.
-        const matchedSessionIds = [...new Set(results.map((r) => r.sessionId).filter(Boolean))];
-
-        return toolResultText({
-          query,
-          searchBackend: 'weighted-keyword',
-          searchMethod,
-          keywordsUsed: queryKeywords,
-          sessionsSearchedCount: sessionIds.length,
-          eventsFetched: events.length,
-          eventsMatched: scored.length,
-          resultCount: results.length,
-          matchedSessionIds,
-          ...recallSummary(searchMethod, truncated),
-          results,
-        }, MAX_RESULT_SIZE_CHARS.small);
-      } catch (error: unknown) {
-        return toolError('deep_search_events', args, error);
-      }
-    })
-  );
 }

@@ -162,8 +162,8 @@ export function SectionMcpIntegration() {
                   <td className="py-2 text-gray-600">Find devices affected by a specific CVE. Returns sessions where the vulnerability was detected during enrollment.</td>
                 </tr>
                 <tr>
-                  <td className="py-2 pr-4 font-mono text-xs text-blue-700">search_events_semantic</td>
-                  <td className="py-2 text-gray-600">Fuzzy/semantic search across event messages. Useful when you don&apos;t know the exact event type but can describe what happened.</td>
+                  <td className="py-2 pr-4 font-mono text-xs text-blue-700">search_events</td>
+                  <td className="py-2 text-gray-600">Hybrid keyword + semantic event search. Maps a natural-language description to the right event types even with no literal word overlap (e.g. &quot;machine restarted unexpectedly&quot;). Use depth=&quot;deep&quot; for exhaustive recall.</td>
                 </tr>
                 <tr>
                   <td className="py-2 pr-4 font-mono text-xs text-blue-700">search_knowledge</td>
@@ -370,8 +370,8 @@ export function SectionMcpIntegration() {
           />
           <ExampleWorkflow
             prompt="Find enrollments with BitLocker issues"
-            description="Uses search_events_semantic with a natural language query to find sessions mentioning BitLocker errors, or search_sessions with deviceProperties filter on bitlocker_status."
-            tools={["search_events_semantic", "search_sessions"]}
+            description="Uses search_events with a natural language query to find sessions mentioning BitLocker errors, or search_sessions with deviceProperties filter on bitlocker_status."
+            tools={["search_events", "search_sessions"]}
           />
           <ExampleWorkflow
             prompt="How has the failure rate changed this week?"
