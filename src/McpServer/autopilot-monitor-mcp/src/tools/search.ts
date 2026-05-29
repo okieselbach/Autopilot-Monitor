@@ -417,7 +417,7 @@ export function diversifyBySession<T extends { event: EventEntry }>(
   scoredDesc: T[],
   topK: number,
   perSession = 2,
-  guaranteedTop = 2,
+  guaranteedTop = 3,
 ): T[] {
   const counts = new Map<string, number>();
   const picked: T[] = [];
@@ -479,8 +479,8 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
         topK: z.coerce.number().min(1).max(30).optional().default(10).describe('Number of matching events to return (1-30, default 10)'),
         minScore: z.coerce.number().min(0).max(1).optional().default(0.1)
           .describe('Minimum relevance score (0-1, default 0.1). Events matching at least one keyword in any field pass this threshold.'),
-        guaranteedTopRanked: z.coerce.number().min(0).max(50).optional().default(2)
-          .describe('How many top results (by pure relevance score) are locked to the head in rank order, exempt from cross-session diversification. Default 2 keeps the strongest hits on top while spreading the rest across sessions. Set =topK to trust the ranking and disable diversification entirely; set 0 for maximum session diversity. Ignored for single-session (sessionId) searches.'),
+        guaranteedTopRanked: z.coerce.number().min(0).max(50).optional().default(3)
+          .describe('How many top results (by pure relevance score) are locked to the head in rank order, exempt from cross-session diversification. Default 3 keeps the strongest hits on top while spreading the rest across sessions. Set =topK to trust the ranking and disable diversification entirely; set 0 for maximum session diversity. Ignored for single-session (sessionId) searches.'),
       },
       annotations: READ_ONLY,
     },
@@ -636,8 +636,8 @@ export function registerSearchTools(server: McpServer, knowledgeBase: SearchProv
           .describe('Min relevance score (0-1, default 0.05). Very low so weakly-matching events still surface.'),
         keywords: z.array(z.string()).optional()
           .describe('Additional exact keywords for matching. Auto-extracted from query if omitted.'),
-        guaranteedTopRanked: z.coerce.number().min(0).max(50).optional().default(2)
-          .describe('How many top results (by pure relevance score) are locked to the head in rank order, exempt from cross-session diversification. Default 2 keeps the strongest hits on top while spreading the rest across sessions. Set =topK to trust the ranking and disable diversification entirely; set 0 for maximum session diversity. Ignored for single-session (sessionId) searches.'),
+        guaranteedTopRanked: z.coerce.number().min(0).max(50).optional().default(3)
+          .describe('How many top results (by pure relevance score) are locked to the head in rank order, exempt from cross-session diversification. Default 3 keeps the strongest hits on top while spreading the rest across sessions. Set =topK to trust the ranking and disable diversification entirely; set 0 for maximum session diversity. Ignored for single-session (sessionId) searches.'),
       },
       annotations: READ_ONLY,
     },

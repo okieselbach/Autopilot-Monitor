@@ -249,9 +249,9 @@ describe('diversifyBySession', () => {
   const ev = (sid: string, score: number) => ({ event: { _sessionId: sid }, score });
 
   it('surfaces a second session instead of a third event from the same one', () => {
-    // Score order: A, A, A, B, C. Default perSession=2 → A,A then B.
+    // Score order: A, A, A, B, C. guaranteedTop=2 → lock A,A then per-session cap surfaces B.
     const scored = [ev('A', 9), ev('A', 8), ev('A', 7), ev('B', 6), ev('C', 5)];
-    const out = diversifyBySession(scored, 3);
+    const out = diversifyBySession(scored, 3, 2, 2);
     expect(out.map((s) => s.event._sessionId)).toEqual(['A', 'A', 'B']);
   });
 
