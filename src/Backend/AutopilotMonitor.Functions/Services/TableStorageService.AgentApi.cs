@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
@@ -487,6 +488,40 @@ namespace AutopilotMonitor.Functions.Services
             // client-side filters; callers should follow nextLink until absent for
             // forensics-grade exact-count semantics (Plan §"consume until absent").
             return new RawPage<SessionSummary>(sessions, nextRawToken);
+        }
+
+        /// <summary>
+        /// Literal-row variant of <see cref="SearchSessionsByScanPageAsync"/> backing
+        /// <c>/api/raw/sessions</c>. Reuses the exact same OData push-down
+        /// (<see cref="BuildSearchScanFilter"/>) and residual client-side predicate
+        /// (<see cref="MatchesScanClientFilters"/>) as the enriched scan path, but emits the raw
+        /// <c>SessionsIndex</c> rows verbatim (every stored column) instead of mapped
+        /// <see cref="SessionSummary"/> DTOs. The <see cref="MapIndexEntityToSessionSummary"/> call
+        /// is used only to evaluate the keep/drop predicate — the DTO itself is discarded.
+        /// </summary>
+        public async Task<RawPage<IReadOnlyDictionary<string, object?>>> SearchSessionsRawPageAsync(
+            string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation)
+        {
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            var indexTableClient = _tableServiceClient.GetTableClient(Constants.TableNames.SessionsIndex);
+            var oDataFilter = BuildSearchScanFilter(tenantId, filter);
+
+            var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                client: indexTableClient,
+                filter: oDataFilter,
+                pageSize: pageSize,
+                continuation: continuation);
+
+            var rows = new List<IReadOnlyDictionary<string, object?>>(entities.Count);
+            foreach (var entity in entities)
+            {
+                var session = MapIndexEntityToSessionSummary(entity);
+                if (!MatchesScanClientFilters(session, filter)) continue;
+                rows.Add(RawEntityProjection.ToDictionary(entity));
+            }
+
+            return new RawPage<IReadOnlyDictionary<string, object?>>(rows, nextRawToken);
         }
 
         private async Task<RawPage<SessionSummary>> SearchSessionsByDeviceSnapshotPageAsync(

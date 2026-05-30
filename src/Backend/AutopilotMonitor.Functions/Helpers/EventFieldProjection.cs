@@ -6,13 +6,17 @@ using AutopilotMonitor.Shared.Models;
 namespace AutopilotMonitor.Functions.Helpers
 {
     /// <summary>
-    /// Optional field projection for <see cref="EnrollmentEvent"/> rows served by the raw-event
-    /// reader endpoints (<c>/api/raw/events</c>, <c>/api/global/raw/events</c>,
-    /// <c>/api/sessions/{id}/events</c>). Mirrors the <c>fields=</c> feature on
-    /// <c>QueryRawSessionsFunction</c>: callers that only need to count or aggregate can request a
-    /// lean subset and skip the heavy <see cref="EnrollmentEvent.Data"/> payload (a single
-    /// <c>app_install_failed</c> event can be tens of KB), which otherwise dominates the response.
+    /// Optional field projection for the <b>enriched</b> <see cref="EnrollmentEvent"/> stream served
+    /// by <c>/api/sessions/{id}/events</c> (the <c>get_session_events</c> tool). Callers that only
+    /// need to count or aggregate can request a lean subset and skip the heavy
+    /// <see cref="EnrollmentEvent.Data"/> payload (a single <c>app_install_failed</c> event can be
+    /// tens of KB), which otherwise dominates the response.
     /// </summary>
+    /// <remarks>
+    /// NOT used by the raw event reader (<c>/api/raw/events</c>): that endpoint returns literal
+    /// stored rows via <c>RawEntityProjection</c> with no DTO mapping and no error-code enrichment.
+    /// This projector deliberately operates on the typed, enriched model instead.
+    /// </remarks>
     /// <remarks>
     /// Projection is presentation-only — it never participates in continuation-token fingerprints,
     /// so flipping <c>fields=</c> between pages does not invalidate a cursor.

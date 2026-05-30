@@ -140,6 +140,36 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<RawPage<EnrollmentEvent>> GetSessionEventsPageAsync(
             string tenantId, string sessionId, int pageSize, string? continuation);
 
+        // --- Raw (literal-row) reads ---
+        // These power the deliberately-unenriched /api/raw/* tools: they return the stored
+        // Azure-Table columns verbatim (as plain dictionaries — no DTO mapping, no error-code
+        // enrichment) so the "raw" tools honour their name. The enriched equivalents are
+        // SearchSessionsPageAsync / GetSessionEvents*Async above.
+
+        /// <summary>
+        /// Literal-row sibling of <see cref="SearchSessionsPageAsync"/>: same filter + pagination
+        /// semantics, but yields the raw <c>SessionsIndex</c> rows (every stored column, PascalCase,
+        /// incl. PartitionKey/RowKey/Timestamp) instead of curated <see cref="SessionSummary"/> DTOs.
+        /// </summary>
+        Task<RawPage<IReadOnlyDictionary<string, object?>>> SearchSessionsRawPageAsync(
+            string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation);
+
+        /// <summary>
+        /// Literal-row sibling of <see cref="GetSessionEventsPageAsync"/>: yields the raw
+        /// <c>Events</c> rows for a session (DataJson as the stored string, Severity/Phase as the
+        /// stored ints) instead of mapped <see cref="EnrollmentEvent"/> objects. Items are ordered
+        /// by Sequence ascending.
+        /// </summary>
+        Task<RawPage<IReadOnlyDictionary<string, object?>>> GetSessionEventsRawPageAsync(
+            string tenantId, string sessionId, int pageSize, string? continuation);
+
+        /// <summary>
+        /// Literal-row sibling of <see cref="GetSessionEventsByTypeAsync"/>: yields raw
+        /// <c>Events</c> rows of one event type for a session, ordered by Sequence ascending.
+        /// </summary>
+        Task<List<IReadOnlyDictionary<string, object?>>> GetSessionEventsRawByTypeAsync(
+            string tenantId, string sessionId, string eventType, int maxResults = 200);
+
         // --- Search ---
         Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string? tenantId, string query, int limit = 10);
         Task<List<SessionSummary>> SearchSessionsAsync(string? tenantId, SessionSearchFilter filter);

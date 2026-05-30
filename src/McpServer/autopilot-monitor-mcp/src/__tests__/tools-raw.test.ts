@@ -66,39 +66,76 @@ suite('query_table', () => {
 });
 
 suite('query_raw_sessions', () => {
-  it('should return raw sessions (cross-tenant)', async () => {
-    const data = await apiFetch<any>(`/api/global/raw/sessions?limit=3`);
+  // Raw = literal SessionsIndex rows: PascalCase columns incl. PartitionKey/RowKey/Timestamp.
+  it('should return raw rows with literal stored columns (cross-tenant)', async () => {
+    const data = await apiFetch<any>(`/api/global/raw/sessions?pageSize=3`);
     expect(data).toHaveProperty('sessions');
     expect(Array.isArray(data.sessions)).toBe(true);
     expect(data.sessions.length).toBeLessThanOrEqual(3);
-  });
-
-  it('should filter by status', async () => {
-    const data = await apiFetch<any>(`/api/global/raw/sessions?status=Succeeded&limit=2`);
-    for (const s of data.sessions) {
-      expect(s.status).toBe('Succeeded');
+    if (data.sessions.length > 0) {
+      const s = data.sessions[0];
+      // Literal table shape — identity + status as stored.
+      expect(s).toHaveProperty('PartitionKey');
+      expect(s).toHaveProperty('RowKey');
+      expect(s).toHaveProperty('Status');
     }
   });
 
-  it('should support field projection', async () => {
+  it('should filter by status (PascalCase Status column)', async () => {
+    const data = await apiFetch<any>(`/api/global/raw/sessions?status=Succeeded&pageSize=2`);
+    for (const s of data.sessions) {
+      expect(s.Status).toBe('Succeeded');
+    }
+  });
+
+  it('should expose columns the old whitelist dropped (e.g. OsEdition / ImeAgentVersion)', async () => {
+    // The raw row carries every stored column; at least one of these should be present on real data.
+    const data = await apiFetch<any>(`/api/global/raw/sessions?status=Succeeded&pageSize=5`);
+    if (data.sessions.length === 0) return;
+    const anyHasFormerlyDropped = data.sessions.some(
+      (s: any) => 'OsEdition' in s || 'ImeAgentVersion' in s || 'FailureSource' in s || 'GeoCountry' in s,
+    );
+    expect(anyHasFormerlyDropped).toBe(true);
+  });
+
+  it('should support pass-through field projection (case-insensitive, keeps real columns)', async () => {
     const data = await apiFetch<any>(
-      `/api/global/raw/sessions?fields=sessionId,status&limit=2`,
+      `/api/global/raw/sessions?fields=Status,OsEdition&pageSize=2`,
     );
     expect(data.sessions.length).toBeGreaterThan(0);
     const s = data.sessions[0];
-    expect(s).toHaveProperty('sessionId');
-    expect(s).toHaveProperty('status');
+    // Requested + always-kept identity columns present; non-requested narrowed away.
+    expect(s).toHaveProperty('PartitionKey');
+    expect(s).toHaveProperty('RowKey');
+    expect(s).toHaveProperty('Status');
+    expect(s).not.toHaveProperty('Manufacturer');
+  });
+
+  it('should accept the new device/hardware filters', async () => {
+    // enrollmentType is a real SessionsIndex column — every returned row must match.
+    const data = await apiFetch<any>(`/api/global/raw/sessions?enrollmentType=v2&pageSize=3`);
+    for (const s of data.sessions) {
+      expect(s.EnrollmentType).toBe('v2');
+    }
   });
 });
 
 suite('query_raw_events', () => {
-  it('should return events for a tenant', async () => {
+  it('should return literal raw event rows (unenriched)', async () => {
     if (!knownTenantId) return;
     const data = await apiFetch<any>(
-      `/api/raw/events?tenantId=${knownTenantId}&eventType=enrollment_complete&limit=2`,
+      `/api/raw/events?tenantId=${knownTenantId}&eventType=enrollment_complete&pageSize=2`,
     );
     expect(data).toHaveProperty('events');
     expect(Array.isArray(data.events)).toBe(true);
+    if (data.events.length > 0) {
+      const e = data.events[0];
+      // Raw shape: PascalCase columns, DataJson as a raw string (not parsed), Severity as an int.
+      expect(e).toHaveProperty('EventType');
+      expect(e).toHaveProperty('RowKey');
+      if ('DataJson' in e && e.DataJson != null) expect(typeof e.DataJson).toBe('string');
+      if ('Severity' in e && e.Severity != null) expect(typeof e.Severity).toBe('number');
+    }
   });
 });
 

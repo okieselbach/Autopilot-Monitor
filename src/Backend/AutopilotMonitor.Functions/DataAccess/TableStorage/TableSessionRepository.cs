@@ -139,6 +139,15 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<RawPage<EnrollmentEvent>> GetSessionEventsPageAsync(string tenantId, string sessionId, int pageSize, string? continuation)
             => _storage.GetSessionEventsPageAsync(tenantId, sessionId, pageSize, continuation);
 
+        public Task<RawPage<IReadOnlyDictionary<string, object?>>> SearchSessionsRawPageAsync(string? tenantId, SessionSearchFilter filter, int pageSize, string? continuation)
+            => _storage.SearchSessionsRawPageAsync(tenantId, filter, pageSize, continuation);
+
+        public Task<RawPage<IReadOnlyDictionary<string, object?>>> GetSessionEventsRawPageAsync(string tenantId, string sessionId, int pageSize, string? continuation)
+            => _storage.GetSessionEventsRawPageAsync(tenantId, sessionId, pageSize, continuation);
+
+        public Task<List<IReadOnlyDictionary<string, object?>>> GetSessionEventsRawByTypeAsync(string tenantId, string sessionId, string eventType, int maxResults = 200)
+            => _storage.GetSessionEventsRawByTypeAsync(tenantId, sessionId, eventType, maxResults);
+
         public Task<List<QuickSearchResult>> QuickSearchSessionsAsync(string? tenantId, string query, int limit = 10)
             => _storage.QuickSearchSessionsAsync(tenantId, query, limit);
 

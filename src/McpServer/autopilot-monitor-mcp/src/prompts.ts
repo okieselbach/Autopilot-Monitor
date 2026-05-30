@@ -110,7 +110,8 @@ export function registerPrompts(server: McpServer, ga: boolean): void {
                 `Compare Monitor Agent versions over the last ${window} days and tell me whether the newest build is healthy.\n\n` +
                 `1. Call get_platform_metrics(days=${window}) for the per-agent-version CPU/memory/network breakdown.\n` +
                 '2. For success-rate-by-version, use query_raw_sessions with a lean projection ' +
-                '(fields="sessionId,status,agentVersion,startedAt"). Sweep each version line with agentVersionPrefix ' +
+                '(fields="Status,AgentVersion,StartedAt" — raw rows use the literal PascalCase column names). ' +
+                'Sweep each version line with agentVersionPrefix ' +
                 '(e.g. "2.0.") rather than one call per build, and follow nextLink for full counts.\n' +
                 `3. Optionally call get_metrics(days=${window}) for the overall failure-rate baseline to compare against.\n\n` +
                 'Report a per-version table: session count, success rate, avg CPU, avg working set. Flag any version ' +

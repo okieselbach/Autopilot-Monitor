@@ -80,6 +80,17 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             var agentVersionPrefix = query["agentVersionPrefix"];
             var imeAgentVersion = query["imeAgentVersion"];
             var imeAgentVersionPrefix = query["imeAgentVersionPrefix"];
+            // Device/hardware scalar filters — parity with search_sessions so the raw tool is a true
+            // superset, not a subset. All are already supported by SessionSearchFilter +
+            // BuildSearchScanFilter / MatchesScanClientFilters; we only plumb the query params through.
+            var manufacturer = query["manufacturer"];
+            var model = query["model"];
+            var enrollmentType = query["enrollmentType"];
+            var deviceName = query["deviceName"];
+            var osBuild = query["osBuild"];
+            var geoCountry = query["geoCountry"];
+            var isPreProvisioned = query["isPreProvisioned"];
+            var isHybridJoin = query["isHybridJoin"];
             var fieldsParam = query["fields"];
 
             var pagination = SearchSessionsPagination.ParsePagination(query);
@@ -99,11 +110,21 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 AgentVersionPrefix = string.IsNullOrEmpty(agentVersionPrefix) ? null : agentVersionPrefix,
                 ImeAgentVersion = string.IsNullOrEmpty(imeAgentVersion) ? null : imeAgentVersion,
                 ImeAgentVersionPrefix = string.IsNullOrEmpty(imeAgentVersionPrefix) ? null : imeAgentVersionPrefix,
+                Manufacturer = string.IsNullOrEmpty(manufacturer) ? null : manufacturer,
+                Model = string.IsNullOrEmpty(model) ? null : model,
+                EnrollmentType = string.IsNullOrEmpty(enrollmentType) ? null : enrollmentType,
+                DeviceName = string.IsNullOrEmpty(deviceName) ? null : deviceName,
+                OsBuild = string.IsNullOrEmpty(osBuild) ? null : osBuild,
+                GeoCountry = string.IsNullOrEmpty(geoCountry) ? null : geoCountry,
             };
             if (!string.IsNullOrEmpty(startedAfter) && DateTime.TryParse(startedAfter, out var after))
                 filter.StartedAfter = after;
             if (!string.IsNullOrEmpty(startedBefore) && DateTime.TryParse(startedBefore, out var before))
                 filter.StartedBefore = before;
+            if (!string.IsNullOrEmpty(isPreProvisioned) && bool.TryParse(isPreProvisioned, out var pp))
+                filter.IsPreProvisioned = pp;
+            if (!string.IsNullOrEmpty(isHybridJoin) && bool.TryParse(isHybridJoin, out var hj))
+                filter.IsHybridJoin = hj;
 
             var callerTenantId = TenantHelper.GetTenantId(req);
 
@@ -124,22 +145,12 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 }
             }
 
-            var page = await _sessionRepo.SearchSessionsPageAsync(tenantId, filter, pagination.PageSize, azureToken);
+            var page = await _sessionRepo.SearchSessionsRawPageAsync(tenantId, filter, pagination.PageSize, azureToken);
 
-            // Optional field projection (raw-tool feature) is applied on top of the
-            // paginated SessionSummary set; it doesn't affect cursor mechanics.
-            object sessionsPayload;
-            if (!string.IsNullOrEmpty(fieldsParam))
-            {
-                var fieldSet = new HashSet<string>(
-                    fieldsParam.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                    StringComparer.OrdinalIgnoreCase);
-                sessionsPayload = page.Items.Select(s => ProjectFields(s, fieldSet)).ToList();
-            }
-            else
-            {
-                sessionsPayload = page.Items;
-            }
+            // Raw projection: the rows are the literal SessionsIndex columns. Optional fields= is a
+            // pure pass-through (narrow, never silently drop a real column); empty fields= returns
+            // every stored column. It's presentation-only and doesn't touch cursor mechanics.
+            var sessionsPayload = RawEntityProjection.Project(page.Items, fieldsParam);
 
             string? nextLink = null;
             if (!string.IsNullOrEmpty(page.NextRawToken))
@@ -156,46 +167,6 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 sessions = sessionsPayload,
                 nextLink,
             });
-        }
-
-        private static Dictionary<string, object?> ProjectFields(SessionSummary session, HashSet<string> fields)
-        {
-            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-
-            if (fields.Contains("sessionId")) dict["sessionId"] = session.SessionId;
-            if (fields.Contains("tenantId")) dict["tenantId"] = session.TenantId;
-            if (fields.Contains("status")) dict["status"] = session.Status.ToString();
-            if (fields.Contains("serialNumber")) dict["serialNumber"] = session.SerialNumber;
-            if (fields.Contains("manufacturer")) dict["manufacturer"] = session.Manufacturer;
-            if (fields.Contains("model")) dict["model"] = session.Model;
-            if (fields.Contains("deviceName")) dict["deviceName"] = session.DeviceName;
-            if (fields.Contains("osBuild")) dict["osBuild"] = session.OsBuild;
-            if (fields.Contains("osName")) dict["osName"] = session.OsName;
-            if (fields.Contains("startedAt")) dict["startedAt"] = session.StartedAt;
-            if (fields.Contains("completedAt")) dict["completedAt"] = session.CompletedAt;
-            if (fields.Contains("durationSeconds")) dict["durationSeconds"] = session.DurationSeconds;
-            if (fields.Contains("currentPhase")) dict["currentPhase"] = session.CurrentPhase;
-            if (fields.Contains("failureReason")) dict["failureReason"] = session.FailureReason;
-            if (fields.Contains("eventCount")) dict["eventCount"] = session.EventCount;
-            if (fields.Contains("enrollmentType")) dict["enrollmentType"] = session.EnrollmentType;
-            if (fields.Contains("isPreProvisioned")) dict["isPreProvisioned"] = session.IsPreProvisioned;
-            if (fields.Contains("isUserDriven")) dict["isUserDriven"] = session.IsUserDriven;
-            if (fields.Contains("isHybridJoin")) dict["isHybridJoin"] = session.IsHybridJoin;
-            if (fields.Contains("agentVersion")) dict["agentVersion"] = session.AgentVersion;
-            if (fields.Contains("geoCountry")) dict["geoCountry"] = session.GeoCountry;
-
-            // If no fields matched, return a sensible default subset rather than empty.
-            if (dict.Count == 0)
-            {
-                dict["sessionId"] = session.SessionId;
-                dict["tenantId"] = session.TenantId;
-                dict["status"] = session.Status.ToString();
-                dict["serialNumber"] = session.SerialNumber;
-                dict["startedAt"] = session.StartedAt;
-                dict["completedAt"] = session.CompletedAt;
-            }
-
-            return dict;
         }
     }
 }

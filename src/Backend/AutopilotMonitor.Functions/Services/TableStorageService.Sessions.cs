@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Security;
 using AutopilotMonitor.Shared;
@@ -1852,6 +1853,82 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogError(ex, "Failed to get events by type {EventType} for session {SessionId}", eventType, sessionId);
                 return new List<EnrollmentEvent>();
+            }
+        }
+
+        /// <summary>
+        /// Literal-row variant of <see cref="GetSessionEventsPageAsync"/> backing the single-session
+        /// path of <c>/api/raw/events</c>. Emits the raw <c>Events</c> rows verbatim (DataJson as the
+        /// stored string, Severity/Phase as the stored ints, no error-code enrichment) instead of
+        /// mapped <see cref="EnrollmentEvent"/> objects. Items are ordered by Sequence ascending —
+        /// the same authoritative order the mapped path uses.
+        /// </summary>
+        public async Task<RawPage<IReadOnlyDictionary<string, object?>>> GetSessionEventsRawPageAsync(
+            string tenantId, string sessionId, int pageSize, string? continuation)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+            if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize), "pageSize must be >= 1");
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+                var partitionKey = $"{tenantId}_{sessionId}";
+
+                var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                    client: tableClient,
+                    filter: $"PartitionKey eq '{partitionKey}'",
+                    pageSize: pageSize,
+                    continuation: continuation);
+
+                var rows = entities
+                    .OrderBy(e => e.GetInt64("Sequence") ?? 0L)
+                    .Select(e => (IReadOnlyDictionary<string, object?>)RawEntityProjection.ToDictionary(e))
+                    .ToList();
+
+                return new RawPage<IReadOnlyDictionary<string, object?>>(rows, nextRawToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get raw events page for session {SessionId}", sessionId);
+                return RawPage<IReadOnlyDictionary<string, object?>>.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Literal-row variant of <see cref="GetSessionEventsByTypeAsync"/> backing the cross-session
+        /// path of <c>/api/raw/events</c>. Returns raw <c>Events</c> rows of one event type for a
+        /// session, ordered by Sequence ascending.
+        /// </summary>
+        public async Task<List<IReadOnlyDictionary<string, object?>>> GetSessionEventsRawByTypeAsync(
+            string tenantId, string sessionId, string eventType, int maxResults = 200)
+        {
+            SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
+            SecurityValidator.EnsureValidGuid(sessionId, nameof(sessionId));
+
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.Events);
+                var rows = new List<(long Seq, IReadOnlyDictionary<string, object?> Row)>();
+
+                var partitionKey = $"{tenantId}_{sessionId}";
+                var filter = $"PartitionKey eq '{ODataSanitizer.EscapeValue(partitionKey)}' and EventType eq '{ODataSanitizer.EscapeValue(eventType)}'";
+
+                var query = tableClient.QueryAsync<TableEntity>(
+                    filter: filter,
+                    maxPerPage: maxResults);
+
+                await foreach (var entity in query)
+                {
+                    rows.Add((entity.GetInt64("Sequence") ?? 0L, RawEntityProjection.ToDictionary(entity)));
+                }
+
+                return rows.OrderBy(r => r.Seq).Select(r => r.Row).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get raw events by type {EventType} for session {SessionId}", eventType, sessionId);
+                return new List<IReadOnlyDictionary<string, object?>>();
             }
         }
 

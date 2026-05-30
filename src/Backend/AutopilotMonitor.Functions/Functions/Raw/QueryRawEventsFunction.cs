@@ -130,16 +130,18 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                     }
                 }
 
-                var sessionPage = await _sessionRepo.GetSessionEventsPageAsync(
+                var sessionPage = await _sessionRepo.GetSessionEventsRawPageAsync(
                     tenantId, sessionId, pagination.PageSize, singleAzureToken);
 
                 var filtered = ApplyClientFilters(
                     sessionPage.Items.ToList(), eventType, severity, source, startedAfter, startedBefore);
-                filtered = filtered.OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
-                // Skip error-code enrichment when the projection drops Data (enrichment only writes
-                // into Data) — pure work avoidance for lean fields= queries.
-                if (EventFieldProjection.WantsData(fields))
-                    ErrorCodeEnricher.EnrichEvents(filtered);
+                filtered = filtered
+                    .OrderBy(RawTimestamp)
+                    .ThenBy(RawSequence)
+                    .ToList();
+                // No error-code enrichment here by design: the raw endpoint returns the stored
+                // bytes verbatim (DataJson as the stored string). Decoded error meanings live on
+                // the enriched get_session_events / search_events tools.
 
                 string? singleNextLink = null;
                 if (!string.IsNullOrEmpty(sessionPage.NextRawToken))
@@ -156,7 +158,7 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 {
                     tenantId,
                     count = filtered.Count,
-                    events = EventFieldProjection.Project(filtered, fields),
+                    events = RawEntityProjection.Project(filtered, fields),
                     nextLink = singleNextLink,
                 });
             }
@@ -192,20 +194,18 @@ namespace AutopilotMonitor.Functions.Functions.Raw
                 tenantId, eventType, source, severity, phase: null,
                 pageSize: pagination.PageSize, continuation: azureToken);
 
-            var events = new List<EnrollmentEvent>();
+            var events = new List<IReadOnlyDictionary<string, object?>>();
             foreach (var session in sessionsPage.Items)
             {
-                var sessionEvents = await _sessionRepo.GetSessionEventsByTypeAsync(
+                var sessionEvents = await _sessionRepo.GetSessionEventsRawByTypeAsync(
                     session.TenantId, session.SessionId, eventType, maxResults: 200);
                 events.AddRange(sessionEvents.Where(e =>
-                    (string.IsNullOrEmpty(severity) || e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)) &&
-                    (string.IsNullOrEmpty(source) || (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase))));
+                    MatchesSeverity(e, severity) && MatchesSource(e, source)));
             }
 
             events = ApplyDateFilters(events, startedAfter, startedBefore)
-                .OrderBy(e => e.Timestamp).ThenBy(e => e.Sequence).ToList();
-            if (EventFieldProjection.WantsData(fields))
-                ErrorCodeEnricher.EnrichEvents(events);
+                .OrderBy(RawTimestamp).ThenBy(RawSequence).ToList();
+            // No enrichment — raw rows only (see single-session path).
 
             string? nextLink = null;
             if (!string.IsNullOrEmpty(sessionsPage.NextRawToken))
@@ -222,32 +222,78 @@ namespace AutopilotMonitor.Functions.Functions.Raw
             {
                 tenantId,
                 count = events.Count,
-                events = EventFieldProjection.Project(events, fields),
+                events = RawEntityProjection.Project(events, fields),
                 nextLink,
             });
         }
 
-        private static List<EnrollmentEvent> ApplyClientFilters(
-            List<EnrollmentEvent> events, string? eventType, string? severity, string? source,
+        // ── Raw-row filtering helpers ─────────────────────────────────────────
+        // These operate on the literal stored columns (PascalCase) instead of the typed
+        // EnrollmentEvent. They preserve the exact match semantics of the former enriched path:
+        // eventType exact, severity by enum NAME (Severity is stored as an Int32), source substring.
+
+        private static List<IReadOnlyDictionary<string, object?>> ApplyClientFilters(
+            List<IReadOnlyDictionary<string, object?>> events, string? eventType, string? severity, string? source,
             string? startedAfter, string? startedBefore)
         {
             if (!string.IsNullOrEmpty(eventType))
-                events = events.Where(e => e.EventType == eventType).ToList();
+                events = events.Where(e => string.Equals(RawString(e, "EventType"), eventType, StringComparison.Ordinal)).ToList();
             if (!string.IsNullOrEmpty(severity))
-                events = events.Where(e => e.Severity.ToString().Equals(severity, StringComparison.OrdinalIgnoreCase)).ToList();
+                events = events.Where(e => MatchesSeverity(e, severity)).ToList();
             if (!string.IsNullOrEmpty(source))
-                events = events.Where(e => (e.Source ?? "").Contains(source, StringComparison.OrdinalIgnoreCase)).ToList();
+                events = events.Where(e => MatchesSource(e, source)).ToList();
             return ApplyDateFilters(events, startedAfter, startedBefore);
         }
 
-        private static List<EnrollmentEvent> ApplyDateFilters(
-            List<EnrollmentEvent> events, string? startedAfter, string? startedBefore)
+        private static List<IReadOnlyDictionary<string, object?>> ApplyDateFilters(
+            List<IReadOnlyDictionary<string, object?>> events, string? startedAfter, string? startedBefore)
         {
             if (!string.IsNullOrEmpty(startedAfter) && DateTime.TryParse(startedAfter, out var after))
-                events = events.Where(e => e.Timestamp >= after).ToList();
+                events = events.Where(e => RawTimestamp(e) >= after).ToList();
             if (!string.IsNullOrEmpty(startedBefore) && DateTime.TryParse(startedBefore, out var before))
-                events = events.Where(e => e.Timestamp <= before).ToList();
+                events = events.Where(e => RawTimestamp(e) <= before).ToList();
             return events;
+        }
+
+        private static bool MatchesSeverity(IReadOnlyDictionary<string, object?> row, string? severity)
+            => string.IsNullOrEmpty(severity) ||
+               string.Equals(RawSeverityName(row), severity, StringComparison.OrdinalIgnoreCase);
+
+        private static bool MatchesSource(IReadOnlyDictionary<string, object?> row, string? source)
+            => string.IsNullOrEmpty(source) ||
+               (RawString(row, "Source") ?? string.Empty).Contains(source, StringComparison.OrdinalIgnoreCase);
+
+        private static string? RawString(IReadOnlyDictionary<string, object?> row, string key)
+            => row.TryGetValue(key, out var v) ? v?.ToString() : null;
+
+        private static DateTime RawTimestamp(IReadOnlyDictionary<string, object?> row)
+        {
+            if (row.TryGetValue("Timestamp", out var v) && v != null)
+            {
+                switch (v)
+                {
+                    case DateTimeOffset dto: return dto.UtcDateTime;
+                    case DateTime dt: return dt;
+                    default:
+                        if (DateTime.TryParse(v.ToString(), out var parsed)) return parsed;
+                        break;
+                }
+            }
+            return DateTime.MinValue;
+        }
+
+        private static long RawSequence(IReadOnlyDictionary<string, object?> row)
+            => row.TryGetValue("Sequence", out var v) && v != null && long.TryParse(v.ToString(), out var n) ? n : 0L;
+
+        // Severity is stored as an Int32; map it back to the EventSeverity name so the severity=
+        // filter keeps the same "by name" semantics the enriched path used. Unknown ints fall back
+        // to the raw number string.
+        private static string? RawSeverityName(IReadOnlyDictionary<string, object?> row)
+        {
+            if (!row.TryGetValue("Severity", out var v) || v == null) return null;
+            if (int.TryParse(v.ToString(), out var n))
+                return Enum.IsDefined(typeof(EventSeverity), n) ? ((EventSeverity)n).ToString() : n.ToString();
+            return v.ToString();
         }
     }
 }

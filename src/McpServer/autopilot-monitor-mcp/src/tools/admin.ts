@@ -483,7 +483,12 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         'Query raw enrollment events with flexible filters across sessions. ' +
         (ga ? 'Omit tenantId for cross-tenant search (Global Admin), or specify tenantId for single-tenant. ' : '') +
         'Use this when search_events does not cover the time range or session scope you need, ' +
-        'or when you need exact event-type filtering across many sessions. Returns raw event data. ' +
+        'or when you need exact event-type filtering across many sessions. ' +
+        'Returns the LITERAL stored Events rows — every column verbatim, PascalCase, incl. ' +
+        'PartitionKey/RowKey/Timestamp. It is deliberately UNENRICHED: "DataJson" is the raw stored ' +
+        'string (not parsed), Severity/Phase are the raw ints, and there are no decoded Win32/NTSTATUS ' +
+        'error meanings. For the enriched/structured stream (parsed Data, decoded error text) use ' +
+        'get_session_events or search_events instead. ' +
         'eventType is validated against the event_types catalog — a typo is rejected with a clear error, not a silent ' +
         'empty result. When you filter, the tool auto-scans forward past empty pages, so a returned "count": 0 with no ' +
         '"nextLink" means truly no matches, while "moreToScan": true means the per-call scan budget was hit (pass ' +
@@ -493,9 +498,10 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         'pageSize=1000 and follow nextLink repeatedly until absent. Pass the whole nextLink string as "continuation" ' +
         'so all backend-echoed query params round-trip correctly. Note: pageSize is the index-scan cadence — a single ' +
         'indexed session can contribute multiple events, so total events per page may exceed pageSize. ' +
-        'For COUNTING / AGGREGATION pass a lean `fields=` projection (e.g. `fields=eventType,severity,timestamp`) — ' +
-        'this drops the heavy per-event `data` payload (a single app_install_failed event can be tens of KB), so ' +
-        'responses stay small; `data` is included only when you list it explicitly. ' +
+        'For COUNTING / AGGREGATION pass a lean `fields=` projection (e.g. `fields=EventType,Severity,Timestamp`) — ' +
+        'a pure pass-through over the real column names that drops the heavy `DataJson` payload (a single ' +
+        'app_install_failed event can be tens of KB), so responses stay small; PartitionKey + RowKey are always ' +
+        'kept. ' +
         (ga ? 'When querying by sessionId you may omit tenantId — it is auto-resolved from the session (Global Admin).' : ''),
       inputSchema: {
         tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant search, or to auto-resolve from a sessionId query (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
@@ -506,7 +512,7 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         startedAfter: z.string().optional().describe('ISO 8601 datetime — only events after this'),
         startedBefore: z.string().optional().describe('ISO 8601 datetime — only events before this'),
         fields: z.string().optional()
-          .describe('Comma-separated lean projection (e.g. "eventType,severity,timestamp,message"). Drops the heavy "data" payload unless "data" is listed. Valid keys: eventId, sessionId, tenantId, eventType, severity, source, phase, phaseName, timestamp, receivedAt, message, sequence, rowKey, originalTimestamp, timestampClamped, causedByTransitionStepIndex, causedBySignalOrdinal, data.'),
+          .describe('Comma-separated pass-through projection over the literal stored column names (case-insensitive); narrows the row but never drops a real column. PartitionKey + RowKey are always kept. Stored columns: PartitionKey, RowKey, Timestamp, EventId, SessionId, EventType, Severity (int), Source, Phase (int), Message, Sequence, DataJson (raw string), ReceivedAt, OriginalTimestamp, TimestampClamped, CausedByTransitionStepIndex, CausedBySignalOrdinal. Omit for the full raw row.'),
         pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
           .describe('Page size (1-1000, default 200). Controls index-scan depth per call; follow nextLink for more.'),
         continuation: z.string().optional()
@@ -541,10 +547,14 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
     {
       title: 'Query Raw Sessions',
       description:
-        'Query raw session data with flexible filters and field projection. ' +
+        'Returns the LITERAL stored SessionsIndex rows — every column verbatim, PascalCase, incl. ' +
+        'PartitionKey/RowKey/Timestamp (e.g. OsEdition, OsDisplayVersion, ImeAgentVersion, GeoRegion/City/Loc, ' +
+        'FailureSource, CurrentPhaseDetail, LastEventAt, ResumedAt, StalledAt, PlatformScriptCount, DeletionState, ...). ' +
+        'For the curated/typed view (camelCase summary, durationSeconds, deviceProperties filtering) use ' +
+        'search_sessions or get_session instead. ' +
         (ga ? 'Specify tenantId for a specific tenant, or omit for cross-tenant access (Global Admin only). ' : '') +
-        'For COUNTING / AGGREGATION queries pass `fields=sessionId,status,agentVersion,startedAt` (or similar lean subset) — ' +
-        'avoids the response cap that fat raw rows trip. ' +
+        'For COUNTING / AGGREGATION pass a lean `fields=Status,AgentVersion,StartedAt` (or similar) — a pure pass-through ' +
+        'over the real column names that avoids the response cap fat raw rows trip; PartitionKey + RowKey are always kept. ' +
         'For VERSION sweeps use `agentVersionPrefix=2.0.` instead of one call per build. ' +
         'This endpoint is fully paginated — there is no truncation. Default pageSize=200; raise it (up to 1000) for bulk pulls. ' +
         'Pass the whole nextLink string as "continuation" so all backend-echoed query params round-trip correctly.',
@@ -560,7 +570,15 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         imeAgentVersion: z.string().optional().describe('IME Agent version (exact match, e.g. "1.23.456.789")'),
         imeAgentVersionPrefix: z.string().optional()
           .describe('IME Agent version prefix (e.g. "1.23."). Mutually exclusive with imeAgentVersion.'),
-        fields: z.string().optional().describe('Comma-separated fields to return (e.g. "sessionId,status,startedAt,serialNumber,durationSeconds")'),
+        manufacturer: z.string().optional().describe('Hardware manufacturer (exact match)'),
+        model: z.string().optional().describe('Hardware model (exact match)'),
+        enrollmentType: z.enum(['v1', 'v2']).optional().describe('Enrollment rail'),
+        deviceName: z.string().optional().describe('Device name (prefix match)'),
+        osBuild: z.string().optional().describe('OS build (prefix match, e.g. "26100")'),
+        geoCountry: z.string().optional().describe('Geo country code (exact match, e.g. "DE")'),
+        isPreProvisioned: z.boolean().optional().describe('Filter pre-provisioned (white-glove) sessions'),
+        isHybridJoin: z.boolean().optional().describe('Filter hybrid AAD-join sessions'),
+        fields: z.string().optional().describe('Comma-separated pass-through projection over the literal stored column names (case-insensitive, PascalCase, e.g. "Status,OsEdition,ImeAgentVersion,GeoCity"); narrows the row but never drops a real column. PartitionKey + RowKey are always kept. Omit for the full raw row.'),
         pageSize: z.coerce.number().int().min(1).max(1000).optional().default(200)
           .describe('Page size (1-1000, default 200). Returns this many sessions per call; follow nextLink to fetch more.'),
         continuation: z.string().optional()
@@ -571,12 +589,14 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
     async (args) => withToolTelemetry('query_raw_sessions', async () => {
       try {
         const { tenantId, status, startedAfter, startedBefore, serialNumber, agentVersion, agentVersionPrefix,
-          imeAgentVersion, imeAgentVersionPrefix, fields, pageSize, continuation } = args;
+          imeAgentVersion, imeAgentVersionPrefix, manufacturer, model, enrollmentType, deviceName, osBuild,
+          geoCountry, isPreProvisioned, isHybridJoin, fields, pageSize, continuation } = args;
         const basePath = pickGlobalOrTenantPath('/api/global/raw/sessions', '/api/raw/sessions');
         const path = followNextLink(
           basePath,
           { tenantId, status, startedAfter, startedBefore, serialNumber, agentVersion, agentVersionPrefix,
-            imeAgentVersion, imeAgentVersionPrefix, fields, pageSize },
+            imeAgentVersion, imeAgentVersionPrefix, manufacturer, model, enrollmentType, deviceName, osBuild,
+            geoCountry, isPreProvisioned, isHybridJoin, fields, pageSize },
           continuation,
         );
         const data = await apiFetch(path);
