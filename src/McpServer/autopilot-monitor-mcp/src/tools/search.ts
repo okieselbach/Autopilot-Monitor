@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
 import type { SearchProvider } from '../search-provider.js';
-import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema } from './shared.js';
+import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema, isBenignHealthDetectionReport } from './shared.js';
 import { toolError } from './error-handler.js';
 import { ALL_EVENT_TYPES } from '../resource-catalog.js';
 
@@ -631,6 +631,9 @@ type ScoredEvent = {
  */
 function severityIntentFactor(e: EventEntry, boostFailures: boolean): number {
   if (!boostFailures) return 1;
+  // A compliant health-script detection mis-stamped script_failed/Error is benign — damp it
+  // like an Info event so it can't outrank (or sit alongside) real failures on a problem query.
+  if (isBenignHealthDetectionReport(e.eventType, e.data)) return 0.6;
   const sev = (e.severity ?? '').toLowerCase();
   const type = (e.eventType ?? '').toLowerCase();
   if (sev === 'error' || sev === 'critical' || type.includes('failed') || type === 'error_detected') return 1.5;

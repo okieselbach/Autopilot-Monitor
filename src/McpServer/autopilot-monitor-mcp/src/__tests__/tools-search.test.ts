@@ -18,6 +18,38 @@ import {
 } from '../tools/search.js';
 import { scanLexical } from '../search-provider.js';
 import type { SearchDocument } from '../search-provider.js';
+import { isBenignHealthDetectionReport } from '../tools/shared.js';
+
+describe('isBenignHealthDetectionReport', () => {
+  const det = (over: Record<string, unknown> = {}) =>
+    ({ scriptType: 'remediation', scriptPart: 'detection', complianceResult: 'True', ...over });
+
+  it('true for a compliant remediation detection stamped script_failed', () => {
+    expect(isBenignHealthDetectionReport('script_failed', det())).toBe(true);
+  });
+  it('true for a non-compliant detection too (verdict, not crash)', () => {
+    expect(isBenignHealthDetectionReport('script_failed', det({ complianceResult: 'False', exitCode: '1' }))).toBe(true);
+  });
+  it('true for post-detection phase', () => {
+    expect(isBenignHealthDetectionReport('script_failed', det({ scriptPart: 'post-detection' }))).toBe(true);
+  });
+  it('false when IME explicitly reported result=Failed (authoritative failure)', () => {
+    expect(isBenignHealthDetectionReport('script_failed', det({ result: 'Failed' }))).toBe(false);
+  });
+  it('false for the remediation phase itself (a real crash there is a failure)', () => {
+    expect(isBenignHealthDetectionReport('script_failed', det({ scriptPart: 'remediation' }))).toBe(false);
+  });
+  it('false for platform scripts', () => {
+    expect(isBenignHealthDetectionReport('script_failed', { scriptType: 'platform', exitCode: '1' })).toBe(false);
+  });
+  it('false for non-failure event types (only guards mis-stamped script_failed rows)', () => {
+    expect(isBenignHealthDetectionReport('script_completed', det())).toBe(false);
+  });
+  it('tolerates snake_case keys and missing data', () => {
+    expect(isBenignHealthDetectionReport('script_failed', { script_type: 'remediation', script_part: 'detection' })).toBe(true);
+    expect(isBenignHealthDetectionReport('script_failed', undefined)).toBe(false);
+  });
+});
 
 type Page = { events?: Array<Record<string, unknown>>; nextLink?: string };
 
@@ -335,6 +367,38 @@ describe('scoreEvent — severity-intent alignment', () => {
 
   it('returns null when no keyword matches', () => {
     expect(scoreEvent({ eventType: 'network_state_change', severity: 'Info' }, keywords, true)).toBeNull();
+  });
+});
+
+describe('scoreEvent — benign health-detection report is damped, not boosted', () => {
+  // A compliant health-script detection mis-stamped script_failed/Error must not ride the
+  // failure boost: it should rank like an Info event so it stops polluting problem queries.
+  const keywords = ['compliance', 'script', 'failed'];
+  const benignDetection = {
+    eventType: 'script_failed', severity: 'Error',
+    data: { scriptType: 'remediation', scriptPart: 'detection', complianceResult: 'True', exitCode: '0' },
+    message: 'Remediation script 55f2e743: compliance=True (exit: 0)',
+  };
+  const realScriptFailure = {
+    eventType: 'script_failed', severity: 'Error',
+    data: { scriptType: 'remediation', scriptPart: 'remediation', exitCode: '1' },
+    message: 'Remediation script crashed',
+  };
+
+  it('ranks the benign compliant detection below a real script failure on a problem query', () => {
+    const benign = scoreEvent(benignDetection, keywords, true)!;
+    const real = scoreEvent(realScriptFailure, keywords, true)!;
+    expect(benign.score).toBeLessThan(real.score);
+  });
+
+  it('damps the benign detection by the Info factor (0.6) not the failure factor (1.5)', () => {
+    // Single low-weight keyword keeps the unboosted score < 1 so the ×0.6 damp is exact
+    // (a multi-keyword match would clamp the unboosted score to 1.0 first).
+    const kw = ['compliance'];
+    const boosted = scoreEvent(benignDetection, kw, true)!;
+    const unboosted = scoreEvent(benignDetection, kw, false)!;
+    expect(unboosted.score).toBeLessThan(1);
+    expect(boosted.score).toBeCloseTo(unboosted.score * 0.6, 5);
   });
 });
 

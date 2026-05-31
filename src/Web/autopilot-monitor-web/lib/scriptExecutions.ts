@@ -215,22 +215,20 @@ export function reduceScriptEvents(events: ScriptInputEvent[]): ScriptItem[] {
     const stderr = typeof d.stderr === "string" ? d.stderr : undefined;
     const hasStderr = !!stderr && stderr.trim().length > 0;
 
-    // State derivation — three rules in priority order:
-    //   1. stderr present → Failed. Consistent across script types: any time a script
-    //      writes to stderr the user wants visibility, even if exit was 0. Per user
-    //      preference (debrief 2026-05-11): "exit 0 bedeutet zwar success aber wenn auf
-    //      stderr was gezeigt wird sollte es failed sein".
-    //   2. Phase-aware exit handling: detection / post-detection use exit code as a
-    //      compliance verdict (not a crash signal), so non-zero exit alone is NOT
-    //      failure for those phases. Only remediation phase + platform scripts route
-    //      non-zero exit to Failed.
+    // State derivation — rules in priority order (mirrors the agent's EmitScriptCompleted):
+    //   1. Phase-aware exemption: detection / post-detection are *compliance reports*, not
+    //      crash signals. Their outcome is the compliance verdict, so NEITHER a non-zero exit
+    //      NOR stderr forces Failed for those phases — detection PowerShell routinely leaks
+    //      benign probe errors to stderr while still reporting compliant. Non-compliance is
+    //      conveyed by complianceResult and rendered amber via isNonCompliantReport, not Failed.
+    //   2. Otherwise (platform scripts, the remediation phase) stderr OR non-zero exit → Failed.
+    //      Per user preference (debrief 2026-05-11): stderr on those scripts wants visibility.
     //   3. Defensive: explicit script_failed eventType OR result === "Failed" → Failed.
     const isHealthComplianceReport = scriptType === "remediation"
       && (scriptPart === "detection" || scriptPart === "post-detection");
     const isFailureSignal = evt.eventType === "script_failed"
-      || hasStderr
-      || (!isHealthComplianceReport && exitCode != null && exitCode !== 0)
-      || d.result === "Failed";
+      || d.result === "Failed"
+      || (!isHealthComplianceReport && (hasStderr || (exitCode != null && exitCode !== 0)));
 
     const candidate: ScriptItem = {
       policyId,

@@ -1080,8 +1080,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
                 stdout: "Inventory Updated 2026-05-11",
                 stderr: "Invoke-WebRequest : The remote name could not be resolved");
 
-            // stderr present → adapter routes to script_failed (stderr-as-failure rule).
-            var info = Assert.Single(f.InfoEvents(SharedEventTypes.ScriptFailed));
+            // Detection is a compliance report — stderr (and exit code) are exempt from forcing
+            // failure, so this stays script_completed. Non-compliance is carried by
+            // complianceResult=False (rendered amber via isNonCompliantReport), not as an Error.
+            Assert.Empty(f.InfoEvents(SharedEventTypes.ScriptFailed));
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.ScriptCompleted));
             Assert.Equal("e39d92ae-20bd-4b37-b36a-838abe50ac89", info.Payload!["policyId"]);
             Assert.Equal("detection", info.Payload["scriptPart"]);
             Assert.Equal("False", info.Payload["complianceResult"]);
@@ -1089,6 +1092,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.SignalAdapters
             Assert.Equal("System", info.Payload["runContext"]);
             Assert.Equal("Inventory Updated 2026-05-11", info.Payload["stdout"]);
             Assert.Contains("Invoke-WebRequest", info.Payload["stderr"]);
+        }
+
+        [Fact]
+        public void HealthScriptDetectionResult_compliant_with_stderr_stays_script_completed_Info()
+        {
+            // Regression for the search_events / errorCount pollution: a fully compliant health
+            // detection (complianceResult=True, exit 0) whose PowerShell leaked a benign probe
+            // error to stderr (e.g. Get-ChildItem path-not-found) MUST NOT be stamped
+            // script_failed / Error. The compliance verdict is authoritative for detection phases.
+            using var f = new ImeLogTrackerAdapterFixture();
+            using var adapter = new ImeLogTrackerAdapter(f.Tracker, f.Ingress, f.Clock);
+
+            f.Tracker.HandleHealthScriptDetectionResultForTest(
+                "55f2e743-dc79-44b8-a32e-f58db396abf7",
+                "True", "pre",
+                exitCode: 0,
+                runContext: "User",
+                stdout: "InventoryDate: 18-05 20:07  WUInventory:OK",
+                stderr: "Get-ChildItem : Cannot find path 'HKEY_LOCAL_MACHINE\\SYSTEM\\...\\JoinInfo' because it does not exist.");
+
+            Assert.Empty(f.InfoEvents(SharedEventTypes.ScriptFailed));
+            var info = Assert.Single(f.InfoEvents(SharedEventTypes.ScriptCompleted));
+            Assert.Equal("detection", info.Payload!["scriptPart"]);
+            Assert.Equal("True", info.Payload["complianceResult"]);
+            Assert.Equal("0", info.Payload["exitCode"]);
+            Assert.Equal(EventSeverity.Info.ToString(), info.Payload[SignalPayloadKeys.Severity]);
         }
 
         [Fact]

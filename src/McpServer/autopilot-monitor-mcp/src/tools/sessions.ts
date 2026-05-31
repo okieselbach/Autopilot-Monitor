@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { apiFetch, buildQuery, followNextLink, pickGlobalOrTenantPath, scanUntilMatch } from '../client.js';
 import { withToolTelemetry } from '../telemetry.js';
-import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema } from './shared.js';
+import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema, isBenignHealthDetectionReport } from './shared.js';
 import { toolError } from './error-handler.js';
 import { assertKnownEventType, assertKnownDevicePropertyKeys } from '../resource-catalog.js';
 
@@ -349,7 +349,11 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
         let appSkipped = 0;
         for (const e of allEvents) {
           const sev = String(e.severity ?? '');
-          if (sev === 'Error' || sev === 'Critical') errorCount++;
+          // A compliant health-script detection mis-stamped script_failed/Error is benign —
+          // exclude it so a green session's errorCount isn't inflated by routine compliance reports.
+          const benign = isBenignHealthDetectionReport(
+            String(e.eventType ?? ''), e.data as Record<string, unknown> | undefined);
+          if (!benign && (sev === 'Error' || sev === 'Critical')) errorCount++;
           if (sev === 'Warning') warningCount++;
           const et = String(e.eventType ?? '');
           if (et === 'app_install_started') appTotal++;
@@ -376,6 +380,9 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
         });
 
         const relevanceScore = (e: Record<string, unknown>): number => {
+          // Benign compliant detection mis-stamped Error → rank as info-level, not top.
+          if (isBenignHealthDetectionReport(
+            String(e.eventType ?? ''), e.data as Record<string, unknown> | undefined)) return 10;
           const sev = SEVERITY_RANK[String(e.severity ?? '')] ?? -1;
           if (sev >= 3) return 100;                        // Error/Critical
           if (PHASE_EVENT_TYPES.has(String(e.eventType ?? ''))) return 60;

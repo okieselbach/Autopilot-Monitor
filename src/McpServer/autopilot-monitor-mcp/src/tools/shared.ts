@@ -16,6 +16,34 @@ export const SessionIdSchema = z
     'sessionId must be a UUID (e.g. "e259c121-1234-4abc-9def-0123456789ab")',
   );
 
+/**
+ * Read-side guard for the historical / in-flight `script_failed` rows that the agent
+ * mis-stamped `Severity=Error`. A health-script DETECTION / post-detection event is a
+ * *compliance report*, not a crash: its authoritative outcome is the compliance verdict,
+ * and detection PowerShell routinely leaks benign probe errors to stderr while still
+ * reporting compliant. The agent historically routed those to `script_failed` / Error,
+ * which inflated `errorCount` and ranked them #1 in `search_events` on green sessions.
+ *
+ * Returns true when an event is one of those benign detection/post-detection reports and
+ * should therefore NOT be treated as an error for ranking or counting. Mirrors the agent's
+ * post-fix routing (detection/post-detection are non-failures unless IME reported
+ * `result === "Failed"`). The agent emit was corrected at the source; this guard de-pollutes
+ * the rows already stored before that build rolls out per-enrollment — without mutating them.
+ */
+export function isBenignHealthDetectionReport(
+  eventType: string | undefined,
+  data: Record<string, unknown> | undefined,
+): boolean {
+  if (eventType !== 'script_failed' || !data) return false;
+  const scriptType = String(data.scriptType ?? data.script_type ?? '').toLowerCase();
+  if (scriptType !== 'remediation') return false;
+  const scriptPart = String(data.scriptPart ?? data.script_part ?? '').toLowerCase();
+  if (scriptPart !== 'detection' && scriptPart !== 'post-detection') return false;
+  // Explicit IME failure verdict is authoritative — keep it as an error.
+  if (String(data.result ?? '').toLowerCase() === 'failed') return false;
+  return true;
+}
+
 /** Read-only query tool — no side effects, idempotent, closed-world (our backend only). */
 export const READ_ONLY: ToolAnnotations = {
   readOnlyHint: true,

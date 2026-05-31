@@ -757,27 +757,30 @@ namespace AutopilotMonitor.Agent.V2.Core.SignalAdapters
         {
             if (script == null || string.IsNullOrEmpty(script.PolicyId)) return;
 
-            // Outcome classification — three rules in priority order:
-            //   1. stderr present → script_failed. Per user UX preference (debrief 2026-05-11):
-            //      consistent failure semantics across script types — any time a script writes
-            //      to stderr the user wants visibility, even if exit was 0 and IME reported
-            //      compliant. Eliminates the confusing case where a platform script with stderr
-            //      shows red but a remediation detection with stderr shows green.
-            //   2. Phase-aware exit handling: detection / post-detection use exit code as a
-            //      compliance verdict (not a crash signal), so non-zero exit alone is NOT
-            //      failure for those phases. Only remediation phase + platform scripts route
-            //      non-zero exit to script_failed.
-            //   3. Defensive: explicit Result=="Failed" → script_failed (V1 parity).
+            // Outcome classification — rules in priority order:
+            //   1. Phase-aware exemption: health-script detection / post-detection phases are
+            //      *compliance reports*, not crash signals. Their authoritative outcome is the
+            //      compliance verdict (complianceResult / RemediationStatus), so NEITHER a
+            //      non-zero exit code NOR stderr forces script_failed for those phases. Detection
+            //      PowerShell routinely leaks benign probe errors to stderr (e.g. Get-ChildItem
+            //      path-not-found) while still returning a valid compliant verdict — those must
+            //      not be stamped Error (it inflated errorCount and ranked #1 in search_events
+            //      on otherwise-green sessions). Non-compliance is carried by complianceResult and
+            //      rendered amber by the Web reducer (isNonCompliantReport), not as a failure.
+            //   2. For everything else (platform scripts, the remediation phase itself) stderr OR
+            //      a non-zero exit → script_failed. Per user UX preference (debrief 2026-05-11):
+            //      any time such a script writes to stderr the user wants visibility.
+            //   3. Defensive: explicit Result=="Failed" → script_failed (V1 parity), all phases.
             var isHealthScript = IsRemediation(script.ScriptType);
             var isHealthComplianceReport = isHealthScript
                 && (string.Equals(script.ScriptPart, "detection", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(script.ScriptPart, "post-detection", StringComparison.OrdinalIgnoreCase));
 
             var hasStderr = !string.IsNullOrWhiteSpace(script.Stderr);
-            var isFailure = hasStderr
-                            || string.Equals(script.Result, "Failed", StringComparison.OrdinalIgnoreCase)
+            var isFailure = string.Equals(script.Result, "Failed", StringComparison.OrdinalIgnoreCase)
                             || (!isHealthComplianceReport
-                                && script.ExitCode.HasValue && script.ExitCode.Value != 0);
+                                && (hasStderr
+                                    || (script.ExitCode.HasValue && script.ExitCode.Value != 0)));
             var severity = isFailure ? EventSeverity.Error : EventSeverity.Info;
             var eventType = isFailure ? SharedEventTypes.ScriptFailed : SharedEventTypes.ScriptCompleted;
 

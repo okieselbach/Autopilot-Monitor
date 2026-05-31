@@ -523,10 +523,13 @@ describe("reduceScriptEvents", () => {
     expect(items[0].state).toBe("Failed");
   });
 
-  it("HEALTH-SCRIPT detection with stderr present renders as Failed (consistency over compliance verdict)", () => {
-    // Earlier behavior: stderr-on-detection was just amber non-compliant. User wanted
-    // consistency: stderr present → Failed everywhere. This is the case from session
-    // e2929c97 (Inventory script with Invoke-WebRequest DNS error).
+  it("HEALTH-SCRIPT detection with stderr present is NOT Failed (compliance verdict is authoritative)", () => {
+    // Detection PowerShell routinely leaks benign probe errors to stderr (path-not-found,
+    // service-not-startable) while still returning a valid compliant verdict. Stamping those
+    // Failed inflated errorCount and ranked them #1 in search_events on green sessions, so
+    // stderr is exempt for detection/post-detection phases — the verdict (complianceResult)
+    // is authoritative. Real script crashes still surface via the remediation phase / platform
+    // scripts / explicit result="Failed".
     const items = reduceScriptEvents([
       finalEvent({
         eventType: "script_completed", ts: 0,
@@ -536,11 +539,29 @@ describe("reduceScriptEvents", () => {
           scriptPart: "detection",
           exitCode: 0,
           complianceResult: "True",
+          stderr: "Get-ChildItem : Cannot find path '...JoinInfo' because it does not exist.",
+        },
+      }),
+    ]);
+    expect(items[0].state).toBe("Success");
+  });
+
+  it("HEALTH-SCRIPT non-compliant detection with stderr is a NonCompliant report, not Failed", () => {
+    const items = reduceScriptEvents([
+      finalEvent({
+        eventType: "script_completed", ts: 0,
+        data: {
+          policyId: "p1",
+          scriptType: "remediation",
+          scriptPart: "detection",
+          exitCode: 1,
+          complianceResult: "False",
           stderr: "Invoke-WebRequest : The remote name could not be resolved",
         },
       }),
     ]);
-    expect(items[0].state).toBe("Failed");
+    expect(items[0].state).toBe("Success");
+    expect(isNonCompliantReport(items[0])).toBe(true);
   });
 
   it("whitespace-only stderr does not flip state to Failed", () => {
