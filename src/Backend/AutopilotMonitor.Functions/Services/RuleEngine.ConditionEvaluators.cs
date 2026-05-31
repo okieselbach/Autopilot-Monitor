@@ -22,7 +22,12 @@ namespace AutopilotMonitor.Functions.Services
         ///     (also passes when the event type itself is absent — common case for "no VM detected").
         ///   - All other operators: pass when at least one event of that type matches the
         ///     <see cref="RulePrecondition.Operator"/> against <see cref="RulePrecondition.Value"/>.
-        ///     Missing event type or missing field → fail closed (rule skipped).
+        ///     Missing event type → fail closed (rule skipped).
+        ///   - Pure event-type presence gate: when <see cref="RulePrecondition.DataField"/> is omitted,
+        ///     <c>exists</c>/<c>not_exists</c> test ONLY whether an event of that type occurs in the
+        ///     session — no field inspection. Enables session-level gates with no shared join field
+        ///     (e.g. "skip when an enrollment_complete event exists"). Any other operator without a
+        ///     field has nothing to compare → fail closed.
         /// </summary>
         private bool EvaluatePrecondition(RulePrecondition precondition, List<EnrollmentEvent> events)
         {
@@ -32,11 +37,22 @@ namespace AutopilotMonitor.Functions.Services
                 return false;
             }
 
-            if (string.IsNullOrEmpty(precondition.EventType) || string.IsNullOrEmpty(precondition.DataField))
+            if (string.IsNullOrEmpty(precondition.EventType))
                 return false;
 
             var matchingEvents = events.Where(e => MatchesEventType(e, precondition.EventType)).ToList();
             var op = precondition.Operator?.ToLowerInvariant() ?? string.Empty;
+
+            // No DataField → pure event-type presence gate (exists/not_exists only).
+            if (string.IsNullOrEmpty(precondition.DataField))
+            {
+                if (op == "not_exists") return matchingEvents.Count == 0;
+                if (op == "exists") return matchingEvents.Count > 0;
+                _logger.LogWarning(
+                    "Precondition for '{EventType}' uses operator '{Op}' without a dataField — failing closed",
+                    precondition.EventType, op);
+                return false;
+            }
 
             if (op == "not_exists")
             {

@@ -149,7 +149,7 @@ export const EVENT_TYPES_CATALOG = {
     'admin_marked_session',
   ],
   gather_events: ['gather_result', 'gather_rules_collection_started', 'gather_rules_collection_completed'],
-  termination_events: ['enrollment_summary_shown', 'reboot_triggered'],
+  termination_events: ['enrollment_summary_shown', 'reboot_triggered', 'session_timeout'],
   classification_events: ['enrollment_type_mismatch', 'decision_process_completion'],
   other: ['error_detected', 'log_entry', 'esp_resumed', 'esp_provisioning_settle_started'],
 } as const;

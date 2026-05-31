@@ -142,7 +142,11 @@ export function useSessionEvents({
       // >TIMELINE_PAGE_SIZE events the terminal event lives on page 2+, and a
       // first-batch-only check would miss it entirely.
       const isTerminalEvent = (e: EnrollmentEvent) =>
-        e.eventType === "enrollment_complete" || e.eventType === "enrollment_failed";
+        e.eventType === "enrollment_complete" ||
+        e.eventType === "enrollment_failed" ||
+        // Server-authored terminal: the maintenance sweep marks the session Failed and emits this
+        // in one pass, but sends no SignalR delta — so a live viewer's status can lag until refetch.
+        e.eventType === "session_timeout";
       let foundTerminalEvent = firstBatch.some(isTerminalEvent);
 
       let continuation = extractContinuation(firstData.nextLink);

@@ -55,6 +55,7 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IDistressReportRepository _distressReportRepo;
         private readonly IOpsEventRepository _opsEventRepo;
         private readonly OpsEventService _opsEventService;
+        private readonly Analyze.IAnalyzeOnEnrollmentEndProducer _analyzeProducer;
         private readonly IAzureMonitorMetricsReader _metricsReader;
         private readonly IPoisonQueueProbe _poisonQueueProbe;
         private readonly IConfiguration _configuration;
@@ -78,6 +79,7 @@ namespace AutopilotMonitor.Functions.Services
             IDistressReportRepository distressReportRepo,
             IOpsEventRepository opsEventRepo,
             OpsEventService opsEventService,
+            Analyze.IAnalyzeOnEnrollmentEndProducer analyzeProducer,
             IAzureMonitorMetricsReader metricsReader,
             IPoisonQueueProbe poisonQueueProbe,
             IConfiguration configuration,
@@ -96,6 +98,7 @@ namespace AutopilotMonitor.Functions.Services
             _distressReportRepo = distressReportRepo;
             _opsEventRepo = opsEventRepo;
             _opsEventService = opsEventService;
+            _analyzeProducer = analyzeProducer;
             _metricsReader = metricsReader;
             _poisonQueueProbe = poisonQueueProbe;
             _configuration = configuration;
@@ -314,9 +317,12 @@ namespace AutopilotMonitor.Functions.Services
                             // session was stuck. Best-effort — a snapshot read failure
                             // must never block the timeout transition itself.
                             string? snapshotJson = null;
+                            // Reused below to assign the synthetic session_timeout a Sequence after the
+                            // session's last event so it sorts last in the canonical Sequence order.
+                            List<EnrollmentEvent> sessionEvents = new();
                             try
                             {
-                                var sessionEvents = await _sessionRepo.GetSessionEventsAsync(
+                                sessionEvents = await _sessionRepo.GetSessionEventsAsync(
                                     session.TenantId, session.SessionId, maxResults: 1000);
                                 snapshotJson = FailureSnapshotBuilder.Build(sessionEvents, now);
                             }
@@ -326,7 +332,7 @@ namespace AutopilotMonitor.Functions.Services
                                     $"Failed to build failure snapshot for session {session.SessionId}; proceeding with timeout transition without snapshot");
                             }
 
-                            await _sessionRepo.UpdateSessionStatusAsync(
+                            var transitioned = await _sessionRepo.UpdateSessionStatusAsync(
                                 session.TenantId,
                                 session.SessionId,
                                 SessionStatus.Failed,
@@ -334,6 +340,35 @@ namespace AutopilotMonitor.Functions.Services
                                 failureSnapshotJson: snapshotJson
                             );
                             sessionCount++;
+
+                            // Parity with the agent max-lifetime path: the status flip alone is invisible to the
+                            // analyze pipeline (it fires on stream events, not on a repo status change), so a
+                            // server-timed-out session would otherwise analyze to totalIssues:0. Emit a terminal
+                            // session_timeout event into the stream and enqueue auto-analyze so ANALYZE-ENRL-002
+                            // fires. Gated on the real first transition (transitioned==true) so a re-run or an
+                            // already-terminal session can never produce a duplicate event. Best-effort — a
+                            // failure here must never break the maintenance sweep.
+                            if (transitioned)
+                            {
+                                try
+                                {
+                                    var timeoutEvent = BuildSessionTimeoutEvent(session, timeoutHours, sessionEvents, now);
+                                    await _sessionRepo.StoreEventsBatchAsync(new List<EnrollmentEvent> { timeoutEvent });
+
+                                    await _analyzeProducer.EnqueueAsync(new AnalyzeOnEnrollmentEndEnvelope
+                                    {
+                                        TenantId = session.TenantId,
+                                        SessionId = session.SessionId,
+                                        Reason = Analyze.AnalyzeOnEnrollmentEndHandler.ReasonEnrollmentFailed,
+                                        EnqueuedAt = now,
+                                    });
+                                }
+                                catch (Exception emitEx)
+                                {
+                                    _logger.LogWarning(emitEx,
+                                        $"Failed to emit session_timeout event / enqueue analyze for session {session.SessionId}; timeout transition stands");
+                                }
+                            }
                         }
 
                         totalSessionsTimedOut += sessionCount;
@@ -367,6 +402,41 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogError(ex, "Failed to check for stalled sessions");
             }
+        }
+
+        /// <summary>
+        /// Builds the server-authored <c>session_timeout</c> event injected into the stream when the
+        /// maintenance sweep graduates a stalled session to terminal Failed. Static + pure so the field
+        /// shape and the <see cref="EnrollmentEvent.Sequence"/> assignment (one past the session's last
+        /// event, so it sorts LAST in the canonical Sequence order rather than being interleaved) are
+        /// unit-testable without the full MaintenanceService dependency graph (analog to
+        /// <see cref="DecideAutoAction"/>). <paramref name="now"/> is the sweep timestamp; the event's
+        /// Timestamp is set to it so it also sorts last by time. See <c>MarkStalledSessionsAsTimedOutAsync</c>.
+        /// </summary>
+        internal static EnrollmentEvent BuildSessionTimeoutEvent(
+            SessionSummary session, int timeoutHours, IReadOnlyList<EnrollmentEvent> existingEvents, DateTime now)
+        {
+            var maxSequence = existingEvents != null && existingEvents.Count > 0
+                ? existingEvents.Max(e => e.Sequence)
+                : 0L;
+            return new EnrollmentEvent
+            {
+                TenantId = session.TenantId,
+                SessionId = session.SessionId,
+                EventType = AutopilotMonitor.Shared.Constants.EventTypes.SessionTimeout,
+                Source = "System.Maintenance",
+                Severity = EventSeverity.Error,
+                Phase = EnrollmentPhase.Unknown,
+                Timestamp = now,
+                Sequence = maxSequence + 1,
+                Message = $"Session timed out after {timeoutHours}h of inactivity (server-side maintenance sweep)",
+                Data = new Dictionary<string, object>
+                {
+                    ["timeoutHours"] = timeoutHours,
+                    ["startedAt"] = session.StartedAt.ToString("o"),
+                    ["source"] = "maintenance_sweep",
+                },
+            };
         }
 
         /// <summary>

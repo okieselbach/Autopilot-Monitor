@@ -130,6 +130,72 @@ public class RuleEnginePreconditionTests
     }
 
     /// <summary>
+    /// Pure event-type presence gate (no dataField): not_exists passes when NO event of that type
+    /// occurs in the session. This is the session-level gate ANALYZE-ENRL-002 uses to suppress a
+    /// timeout when a later enrollment_complete/enrollment_failed exists (no shared join field).
+    /// </summary>
+    [Fact]
+    public async Task NotExistsNoDataField_PassesWhenEventTypeAbsent()
+    {
+        var rule = MakeSecureBootRule(preconditions: new List<RulePrecondition>
+        {
+            new() { Source = "event_data", EventType = "os_info", Operator = "not_exists" }
+        });
+        var events = new List<EnrollmentEvent>
+        {
+            // No os_info event at all → pure-type not_exists passes.
+            SecureBootStatusEvent(uefiCA2023Status: "unknown", secureBootEnabled: "true")
+        };
+
+        var outcome = await RunAsync(rule, events);
+
+        Assert.Single(outcome.Results);
+    }
+
+    /// <summary>
+    /// Pure event-type presence gate: not_exists fails (rule skipped) when an event of that type
+    /// IS present — regardless of its data fields.
+    /// </summary>
+    [Fact]
+    public async Task NotExistsNoDataField_SkipsWhenEventTypePresent()
+    {
+        var rule = MakeSecureBootRule(preconditions: new List<RulePrecondition>
+        {
+            new() { Source = "event_data", EventType = "os_info", Operator = "not_exists" }
+        });
+        var events = new List<EnrollmentEvent>
+        {
+            OsInfoEvent(edition: "Pro"), // os_info present → gate closes
+            SecureBootStatusEvent(uefiCA2023Status: "unknown", secureBootEnabled: "true")
+        };
+
+        var outcome = await RunAsync(rule, events);
+
+        Assert.Empty(outcome.Results);
+    }
+
+    /// <summary>
+    /// Pure event-type presence gate: exists (no dataField) passes when an event of that type occurs.
+    /// </summary>
+    [Fact]
+    public async Task ExistsNoDataField_PassesWhenEventTypePresent()
+    {
+        var rule = MakeSecureBootRule(preconditions: new List<RulePrecondition>
+        {
+            new() { Source = "event_data", EventType = "os_info", Operator = "exists" }
+        });
+        var events = new List<EnrollmentEvent>
+        {
+            OsInfoEvent(edition: "Pro"),
+            SecureBootStatusEvent(uefiCA2023Status: "unknown", secureBootEnabled: "true")
+        };
+
+        var outcome = await RunAsync(rule, events);
+
+        Assert.Single(outcome.Results);
+    }
+
+    /// <summary>
     /// Missing event with comparison operator (equals, contains, …) → fail-closed (rule skipped).
     /// We refuse to fire a rule when its precondition can't be assessed; better silent than wrong.
     /// </summary>

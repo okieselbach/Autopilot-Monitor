@@ -408,6 +408,10 @@ namespace AutopilotMonitor.Shared
             public const string ServerActionExecuted      = "server_action_executed";
             public const string ServerActionFailed        = "server_action_failed";
             public const string AdminMarkedSession        = "admin_marked_session";
+            // Server-authored: emitted by the maintenance sweep when a stalled session crosses the
+            // SessionTimeoutHours (5h default) window and graduates to terminal Failed. Gives the
+            // analyze pipeline a terminal event to fire on (parity with the agent's enrollment_failed).
+            public const string SessionTimeout            = "session_timeout";
             public const string RemoteConfigFetchFailed   = "remote_config_fetch_failed";
             public const string AgentUnrestrictedModeChanged = "agent_unrestricted_mode_changed";
 
