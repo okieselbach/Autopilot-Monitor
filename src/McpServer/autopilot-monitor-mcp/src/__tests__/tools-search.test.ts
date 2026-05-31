@@ -14,7 +14,10 @@ import {
   selectEventTypeCandidates,
   diversifyBySession,
   prioritizeFailureTypes,
+  extractErrorCodeNeedles,
 } from '../tools/search.js';
+import { scanLexical } from '../search-provider.js';
+import type { SearchDocument } from '../search-provider.js';
 
 type Page = { events?: Array<Record<string, unknown>>; nextLink?: string };
 
@@ -522,5 +525,53 @@ describe('diversifyBySession', () => {
     const out = diversifyBySession(scored, 3, 2, 0);
     // No locked head; per-session cap (2) still surfaces B at rank 3.
     expect(out.map((s) => s.event._sessionId)).toEqual(['A', 'A', 'B']);
+  });
+});
+
+describe('extractErrorCodeNeedles', () => {
+  it('extracts a 0x-prefixed HRESULT and strips the prefix, lowercased', () => {
+    expect(extractErrorCodeNeedles('why did 0x87D1041C fail?')).toEqual(['87d1041c']);
+  });
+
+  it('extracts a bare HRESULT-shaped hex token (has an a-f letter)', () => {
+    expect(extractErrorCodeNeedles('error 87D1041C during ESP')).toEqual(['87d1041c']);
+  });
+
+  it('does not double-count the same code written with the 0x prefix', () => {
+    expect(extractErrorCodeNeedles('0x80070002')).toEqual(['80070002']);
+  });
+
+  it('ignores pure-decimal numbers (dates, counts, build numbers)', () => {
+    expect(extractErrorCodeNeedles('20260531 sessions on build 12345678')).toEqual([]);
+  });
+
+  it('returns nothing for a plain natural-language query', () => {
+    expect(extractErrorCodeNeedles('TPM not ready / BitLocker issues')).toEqual([]);
+  });
+
+  it('extracts multiple distinct codes, deduplicated', () => {
+    expect(extractErrorCodeNeedles('0x87D1041C and 0x80070002 and 0x87d1041c').sort())
+      .toEqual(['80070002', '87d1041c']);
+  });
+});
+
+describe('scanLexical (error-code fallback scan)', () => {
+  const docs: SearchDocument[] = [
+    { id: 'ANALYZE-ENRL-001', text: 'Enrollment Failed. When paired with HRESULT 0x87D1041C the detection rule did not match.', metadata: { type: 'analyze-rule' } },
+    { id: 'ANALYZE-DEV-001', text: 'TPM not ready. BitLocker cannot proceed until the TPM is provisioned.', metadata: { type: 'analyze-rule' } },
+  ];
+
+  it('finds the doc that names the code verbatim, scored 1.0, case-insensitively', () => {
+    const hits = scanLexical(docs, ['87d1041c']);
+    expect(hits.map((h) => h.id)).toEqual(['ANALYZE-ENRL-001']);
+    expect(hits[0].score).toBe(1);
+  });
+
+  it('returns nothing when no needle is present', () => {
+    expect(scanLexical(docs, ['deadbeef'])).toEqual([]);
+  });
+
+  it('returns nothing for an empty needle list', () => {
+    expect(scanLexical(docs, [])).toEqual([]);
   });
 });

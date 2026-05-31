@@ -486,6 +486,33 @@ function extractKeywords(query: string): string[] {
     .filter((w) => (w.length > 2 || DOMAIN_SHORT_KEYWORDS.has(w)) && (DOMAIN_SHORT_KEYWORDS.has(w) || !KEYWORD_STOP_WORDS.has(w)));
 }
 
+// ── Error-code fallback ─────────────────────────────────────────────────
+
+/**
+ * Pull opaque error-code tokens (HRESULT / Win32 / NTSTATUS hex) out of a query. These embed
+ * poorly — to a sentence-transformer "0x87D1041C" is near-random noise — so a semantic search can
+ * rank a rule that names the code verbatim below the default minScore (0.3) and drop it (observed:
+ * the TPM rule scored 0.259 for an error-code query). The returned needles are the lowercased hex
+ * cores with any `0x` prefix stripped, so a single case-insensitive substring scan matches whether
+ * the query or the indexed doc wrote the prefix (query "87D1041C" still finds doc "0x87D1041C").
+ *
+ * Bare (un-prefixed) hex must contain at least one a-f letter and be 6-8 chars, so plain decimal
+ * numbers — dates, counts, build numbers — never trigger the fallback. `0x`-prefixed tokens are
+ * always codes, so those accept 4-8 digits (covers short Win32 HRESULTs like 0x801c03ed).
+ */
+export function extractErrorCodeNeedles(query: string): string[] {
+  const needles = new Set<string>();
+  // 0x-prefixed hex (0x80070002, 0x87D1041C). The `x` is not in [0-9a-f], so the bare-hex pass
+  // below can never re-match the same digits — no double counting.
+  for (const m of query.matchAll(/\b0x([0-9a-f]{4,8})\b/gi)) needles.add(m[1].toLowerCase());
+  // Bare HRESULT-shaped hex: 6-8 chars with at least one a-f letter (87D1041C) — the letter
+  // requirement excludes pure decimals that aren't error codes.
+  for (const m of query.matchAll(/\b([0-9a-f]{6,8})\b/gi)) {
+    if (/[a-f]/i.test(m[1])) needles.add(m[1].toLowerCase());
+  }
+  return [...needles];
+}
+
 // ── Weighted keyword scoring ────────────────────────────────────────────
 
 /**
@@ -867,14 +894,19 @@ export function registerSearchTools(
         'Semantic/fuzzy search over the Autopilot Monitor knowledge base: analysis rules, gather rules, and IME log patterns. ' +
         'Use natural language queries like "app install timeout", "BitLocker issues", "detection script failure". ' +
         'Returns the most relevant rules and patterns ranked by similarity. ' +
-        'Great for finding remediation steps, understanding error patterns, or discovering relevant diagnostic rules.',
+        'Great for finding remediation steps, understanding error patterns, or discovering relevant diagnostic rules. ' +
+        'ERROR CODES: a query containing an HRESULT/Win32 hex code (e.g. "0x87D1041C", "0x80070002") also triggers a ' +
+        'literal substring fallback — any rule that names the code verbatim is returned regardless of minScore, since ' +
+        'such opaque codes embed poorly and the semantic score alone would miss them. Those hits are flagged `matchType: "error-code"`.',
       inputSchema: {
         query: z.string().describe('Natural language search query (e.g. "app download timeout", "TPM not ready", "ESP stuck")'),
         topK: z.coerce.number().min(1).max(20).optional().default(5).describe('Number of results to return (1-20, default 5)'),
         type: z.enum(['all', 'analyze-rule', 'gather-rule', 'ime-log-pattern']).optional().default('all')
           .describe('Filter by document type. Default: search all types.'),
-        minScore: z.coerce.number().min(0).max(1).optional().default(0.3)
-          .describe('Minimum similarity score threshold (0-1, default 0.3). Lower = more results, higher = stricter matching.'),
+        minScore: z.coerce.number().min(0).max(1).optional().default(0.25)
+          .describe('Minimum similarity score threshold (0-1, default 0.25). Lower = more results, higher = stricter matching. ' +
+            'Short keyword queries on all-MiniLM embeddings score low (a relevant-but-marginal hit lands ~0.25-0.35), so the ' +
+            'default is tuned to keep that band; error codes bypass this entirely via the literal fallback.'),
       },
       annotations: READ_ONLY,
     },
@@ -895,6 +927,21 @@ export function registerSearchTools(
         const fetchK = type === 'all' ? topK : topK * 3;
         let results = await knowledgeBase.search(query, { topK: fetchK, minScore });
 
+        // Error-code fallback: opaque HRESULT/Win32 tokens embed poorly, so the semantic score for a
+        // query like "0x87D1041C" can fall below minScore even though a rule names the code verbatim.
+        // Fold in literal substring matches, exempt from minScore and scored 1.0 so they rank first.
+        const needles = extractErrorCodeNeedles(query);
+        const errorCodeHitIds = new Set<string>();
+        if (needles.length > 0 && knowledgeBase.lexicalMatch) {
+          const byId = new Map(results.map((r) => [r.id, r] as const));
+          for (const hit of knowledgeBase.lexicalMatch(needles)) {
+            errorCodeHitIds.add(hit.id);
+            const existing = byId.get(hit.id);
+            if (!existing || hit.score > existing.score) byId.set(hit.id, hit);
+          }
+          results = [...byId.values()].sort((a, b) => b.score - a.score);
+        }
+
         if (type !== 'all') {
           results = results.filter((r) => r.metadata.type === type);
         }
@@ -908,12 +955,15 @@ export function registerSearchTools(
           title: r.metadata.title ?? r.metadata.description ?? r.id,
           content: r.text,
           metadata: r.metadata,
+          // Surfaced by literal error-code match rather than (or in addition to) semantic similarity.
+          matchType: errorCodeHitIds.has(r.id) ? ('error-code' as const) : undefined,
         }));
 
         return toolResultText({
           query,
           searchBackend: knowledgeBase.name,
           resultCount: formatted.length,
+          ...(needles.length > 0 ? { errorCodeFallback: { codes: needles, matchedCount: errorCodeHitIds.size } } : {}),
           results: formatted,
         }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {

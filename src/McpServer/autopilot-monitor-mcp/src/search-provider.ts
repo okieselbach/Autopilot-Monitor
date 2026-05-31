@@ -47,6 +47,34 @@ export interface SearchProvider {
    * Returns results sorted by descending relevance.
    */
   search(query: string, options?: SearchOptions): Promise<SearchResult[]>;
+
+  /**
+   * Literal, case-insensitive substring scan over indexed document text. Returns every doc whose
+   * text contains ANY needle, scored 1.0 (an exact token match is the strongest possible signal).
+   * This exists because opaque technical tokens — HRESULT/Win32 error codes like 0x87D1041C — embed
+   * poorly: to a sentence-transformer they are near-random noise, so the semantic search can rank a
+   * rule that names the code verbatim below minScore and drop it. The lexical scan is the deterministic
+   * fallback for that case. Optional — a provider that cannot expose document text omits it.
+   */
+  lexicalMatch?(needles: string[]): SearchResult[];
+}
+
+/**
+ * Shared literal-substring scan used by every provider's `lexicalMatch`. Matches case-insensitively
+ * against each document's `text`, returning a score-1.0 result per hit. Kept here (not duplicated per
+ * provider) so the fallback semantics are identical regardless of the active search backend.
+ */
+export function scanLexical(documents: SearchDocument[], needles: string[]): SearchResult[] {
+  const lowered = needles.map((n) => n.toLowerCase()).filter(Boolean);
+  if (lowered.length === 0) return [];
+  const hits: SearchResult[] = [];
+  for (const doc of documents) {
+    const text = doc.text.toLowerCase();
+    if (lowered.some((n) => text.includes(n))) {
+      hits.push({ id: doc.id, text: doc.text, metadata: doc.metadata, score: 1 });
+    }
+  }
+  return hits;
 }
 
 // ── Provider identifiers ─────────────────────────────────────

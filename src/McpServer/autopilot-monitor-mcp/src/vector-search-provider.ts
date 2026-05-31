@@ -8,6 +8,7 @@
 
 import type { FeatureExtractionPipeline } from '@huggingface/transformers';
 import type { SearchDocument, SearchOptions, SearchProvider, SearchResult } from './search-provider.js';
+import { scanLexical } from './search-provider.js';
 
 const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
 
@@ -94,5 +95,10 @@ export class VectorSearchProvider implements SearchProvider {
       .filter((r) => r.score >= minScore)
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
+  }
+
+  /** Literal substring fallback for opaque error-code tokens — see SearchProvider.lexicalMatch. */
+  lexicalMatch(needles: string[]): SearchResult[] {
+    return scanLexical(this.documents, needles);
   }
 }

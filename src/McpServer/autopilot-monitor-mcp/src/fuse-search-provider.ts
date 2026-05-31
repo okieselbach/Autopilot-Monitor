@@ -8,6 +8,7 @@
 
 import Fuse from 'fuse.js';
 import type { SearchDocument, SearchOptions, SearchProvider, SearchResult } from './search-provider.js';
+import { scanLexical } from './search-provider.js';
 
 export class FuseSearchProvider implements SearchProvider {
   readonly name = 'fuse';
@@ -53,5 +54,10 @@ export class FuseSearchProvider implements SearchProvider {
       }))
       .filter((r) => r.score >= minScore)
       .slice(0, topK);
+  }
+
+  /** Literal substring fallback for opaque error-code tokens — see SearchProvider.lexicalMatch. */
+  lexicalMatch(needles: string[]): SearchResult[] {
+    return scanLexical(this.documents, needles);
   }
 }
