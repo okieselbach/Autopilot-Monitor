@@ -11,7 +11,7 @@ import { ALL_EVENT_TYPES } from '../resource-catalog.js';
 
 type EventEntry = {
   eventType?: string; severity?: string; source?: string;
-  message?: string; timestamp?: string; phase?: string;
+  message?: string; timestamp?: string; phase?: string | number;
   data?: Record<string, unknown>; _sessionId?: string;
   sessionId?: string;
 };
@@ -76,8 +76,14 @@ export function prioritizeFailureTypes(types: string[]): string[] {
 // The `truncated` flag is therefore honest: true only when a walk stopped at
 // its page or wall-clock budget (a genuine recall gap), never when it drained.
 
-/** Page shape returned by /api/raw/events (cross-session, single event type). */
-type RawEventsPage = { events?: EventEntry[]; nextLink?: string };
+/**
+ * Page shape returned by /api/raw/events (cross-session, single event type). The rows are the
+ * stored Azure-Table columns *verbatim* (RawEntityProjection): PascalCase keys, `Severity`/`Phase`
+ * as ints, `DataJson` as a JSON string, `PartitionKey` = `{tenantId}_{sessionId}`. They are NOT the
+ * enriched camelCase `EventEntry` shape — normalizeRawEvent() bridges that gap before scoring.
+ */
+type RawEventRow = Record<string, unknown>;
+type RawEventsPage = { events?: RawEventRow[]; nextLink?: string };
 
 /** Bounds the per-type page walk so a single tool call can't run unbounded. */
 type FetchBudget = { maxPagesPerType: number; wallClockMs: number };
@@ -145,6 +151,82 @@ const DEPTH_PRESETS = {
   deep: { budget: DEEP_BUDGET, defaultTopK: 20, defaultMinScore: 0.05 },
 } as const;
 
+/**
+ * EventSeverity enum (C# `EnrollmentEvent.EventSeverity`) → name. The raw endpoint stores
+ * Severity as the underlying Int32; the enriched endpoints emit the name string. We map back
+ * to the name so scoreEvent's severity-intent logic (`sev === 'error'`/'warning'/'info'…) and
+ * the displayed `severity` field behave identically on both paths.
+ */
+const EVENT_SEVERITY_NAMES: Record<number, string> = {
+  [-1]: 'Trace', 0: 'Debug', 1: 'Info', 2: 'Warning', 3: 'Error', 4: 'Critical',
+};
+
+/** Normalize a raw Severity value (int, numeric string, or already a name) to its enum name. */
+function rawSeverityToName(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  if (typeof v === 'number') return EVENT_SEVERITY_NAMES[v] ?? String(v);
+  if (typeof v === 'string') {
+    if (v.trim() === '') return undefined;
+    const n = Number(v);
+    if (Number.isInteger(n) && String(n) === v.trim()) return EVENT_SEVERITY_NAMES[n] ?? v;
+    return v; // already a name (e.g. "Error")
+  }
+  return undefined;
+}
+
+/** Parse a raw DataJson string into an object for keyword scoring; tolerate an already-parsed object. */
+function parseRawData(v: unknown): Record<string, unknown> | undefined {
+  if (v == null) return undefined;
+  if (typeof v === 'object') return v as Record<string, unknown>;
+  if (typeof v === 'string') {
+    if (v === '') return undefined;
+    try {
+      const parsed = JSON.parse(v) as unknown;
+      return parsed !== null && typeof parsed === 'object'
+        ? (parsed as Record<string, unknown>)
+        : { value: parsed };
+    } catch {
+      return { raw: v }; // malformed JSON still searchable as text
+    }
+  }
+  return undefined;
+}
+
+/** Recover the sessionId from a `{tenantId}_{sessionId}` PartitionKey (GUIDs never contain `_`). */
+function sessionIdFromPartitionKey(pk: unknown): string | undefined {
+  if (typeof pk !== 'string') return undefined;
+  const i = pk.indexOf('_');
+  return i >= 0 ? pk.slice(i + 1) : undefined;
+}
+
+/**
+ * Map a verbatim raw /api/raw/events row into the camelCase `EventEntry` the scorer and result
+ * projection expect. THIS is the cross-session-regression fix: the walk was switched to the raw
+ * endpoint (PascalCase, int Severity/Phase, string DataJson), but scoreEvent/_sessionId extraction
+ * still read camelCase — so every fetched event scored 0 and yielded no session. Defensive: reads
+ * PascalCase first, falls back to the camelCase key, so it is correct whichever shape a page carries
+ * (the enriched single-session/legacy paths never flow through here, but the fallback keeps tests
+ * and any future endpoint change honest).
+ */
+export function normalizeRawEvent(raw: RawEventRow): EventEntry {
+  const sessionId =
+    (raw.SessionId as string | undefined) ??
+    (raw.sessionId as string | undefined) ??
+    (raw._sessionId as string | undefined) ??
+    sessionIdFromPartitionKey(raw.PartitionKey);
+  return {
+    eventType: (raw.EventType ?? raw.eventType) as string | undefined,
+    message: (raw.Message ?? raw.message) as string | undefined,
+    source: (raw.Source ?? raw.source) as string | undefined,
+    severity: rawSeverityToName(raw.Severity ?? raw.severity),
+    phase: (raw.Phase ?? raw.phase) as string | number | undefined,
+    timestamp: (raw.Timestamp ?? raw.timestamp) as string | undefined,
+    data: parseRawData(raw.DataJson ?? raw.data),
+    sessionId,
+    _sessionId: sessionId,
+  };
+}
+
 /** Injectable page fetcher — production hits the backend; tests pass a fake. */
 type PageFetcher = (path: string) => Promise<RawEventsPage>;
 
@@ -192,7 +274,8 @@ export async function fetchEventsViaIndex(
       }
       anySucceeded = true;
       for (const e of page.events ?? []) {
-        events.push({ ...e, _sessionId: e.sessionId ?? e._sessionId });
+        // Bridge the raw PascalCase row → enriched camelCase EventEntry the scorer expects.
+        events.push(normalizeRawEvent(e));
       }
       pages++;
 

@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   fetchEventsViaIndex,
+  normalizeRawEvent,
   scoreEvent,
   queryHasProblemIntent,
   extractEventTypeCandidates,
@@ -171,6 +172,115 @@ describe('fetchEventsViaIndex', () => {
     expect(res.events).toHaveLength(0);
     expect(res.anySucceeded).toBe(true);
     expect(res.truncated).toBe(false);
+  });
+
+  // Regression lock for the cross-session "0 matches" bug: /api/raw/events returns rows in
+  // VERBATIM PascalCase (EventType/Severity-as-int/DataJson-as-string/PartitionKey), not the
+  // enriched camelCase shape. fetchEventsViaIndex must normalize them so _sessionId is extracted
+  // (sessionsSearchedCount) and the fields are present for scoreEvent (eventsMatched). The former
+  // camelCase-only fixtures masked the defect.
+  it('normalizes verbatim PascalCase raw rows so _sessionId and scorable fields survive', async () => {
+    const tenant = '11111111-1111-1111-1111-111111111111';
+    const sess = '22222222-2222-2222-2222-222222222222';
+    const pages: Record<string, Page> = {
+      [`${BASE}?eventType=app_install_failed&pageSize=200`]: {
+        events: [
+          {
+            PartitionKey: `${tenant}_${sess}`,
+            RowKey: '20260531120000000_0000000042',
+            SessionId: sess,
+            TenantId: tenant,
+            EventType: 'app_install_failed',
+            Severity: 3, // int → "Error"
+            Source: 'IME',
+            Phase: 2,
+            Message: 'Installation is timeout',
+            DataJson: '{"AppName":"Contoso VPN","ErrorCode":"0x87D13B66"}',
+          },
+        ],
+      },
+    };
+
+    const res = await fetchEventsViaIndex(
+      ['app_install_failed'], BASE, undefined,
+      { maxPagesPerType: 10, wallClockMs: 60_000 },
+      fakeFetcher(pages), fakeClock(),
+    );
+
+    expect(res.events).toHaveLength(1);
+    const ev = res.events[0];
+    expect(ev._sessionId).toBe(sess); // was undefined pre-fix → sessionsSearchedCount:0
+    expect(ev.eventType).toBe('app_install_failed');
+    expect(ev.severity).toBe('Error'); // int 3 mapped back to the enum name
+    expect(ev.message).toBe('Installation is timeout');
+    // The normalized event must actually score (was 0 matches pre-fix).
+    const scored = scoreEvent(ev, ['app', 'install', 'timeout'], true);
+    expect(scored).not.toBeNull();
+    expect(scored!.score).toBeGreaterThan(0);
+  });
+
+  it('recovers sessionId from the PartitionKey when the SessionId column is absent', async () => {
+    const tenant = '33333333-3333-3333-3333-333333333333';
+    const sess = '44444444-4444-4444-4444-444444444444';
+    const pages: Record<string, Page> = {
+      [`${BASE}?eventType=error_detected&pageSize=200`]: {
+        events: [{ PartitionKey: `${tenant}_${sess}`, EventType: 'error_detected', Severity: 3 }],
+      },
+    };
+
+    const res = await fetchEventsViaIndex(
+      ['error_detected'], BASE, undefined,
+      { maxPagesPerType: 10, wallClockMs: 60_000 },
+      fakeFetcher(pages), fakeClock(),
+    );
+
+    expect(res.events[0]._sessionId).toBe(sess);
+  });
+});
+
+describe('normalizeRawEvent (raw PascalCase → enriched camelCase)', () => {
+  it('maps every stored column and recovers the session id', () => {
+    const ev = normalizeRawEvent({
+      PartitionKey: 'tenant_abc_sess',
+      SessionId: 'abc-session',
+      EventType: 'system_reboot_detected',
+      Severity: 1,
+      Source: 'Agent',
+      Phase: 4,
+      Message: 'machine restarted',
+      DataJson: '{"Reason":"WindowsUpdate"}',
+      Timestamp: '2026-05-31T12:00:00Z',
+    });
+    expect(ev.eventType).toBe('system_reboot_detected');
+    expect(ev.severity).toBe('Info'); // 1 → Info
+    expect(ev.source).toBe('Agent');
+    expect(ev.phase).toBe(4);
+    expect(ev.message).toBe('machine restarted');
+    expect(ev.data).toEqual({ Reason: 'WindowsUpdate' });
+    expect(ev._sessionId).toBe('abc-session'); // explicit column wins over PartitionKey
+    expect(ev.sessionId).toBe('abc-session');
+  });
+
+  it('maps the full severity int range to enum names', () => {
+    const sev = (n: number) => normalizeRawEvent({ Severity: n }).severity;
+    expect(sev(-1)).toBe('Trace');
+    expect(sev(0)).toBe('Debug');
+    expect(sev(1)).toBe('Info');
+    expect(sev(2)).toBe('Warning');
+    expect(sev(3)).toBe('Error');
+    expect(sev(4)).toBe('Critical');
+  });
+
+  it('tolerates malformed DataJson (kept searchable as raw text)', () => {
+    expect(normalizeRawEvent({ DataJson: '{not json' }).data).toEqual({ raw: '{not json' });
+    expect(normalizeRawEvent({ DataJson: '' }).data).toBeUndefined();
+  });
+
+  it('falls back to camelCase keys (already-enriched row passes through unchanged)', () => {
+    const ev = normalizeRawEvent({ eventType: 'log_entry', severity: 'Warning', sessionId: 's9', message: 'x' });
+    expect(ev.eventType).toBe('log_entry');
+    expect(ev.severity).toBe('Warning'); // name preserved as-is
+    expect(ev._sessionId).toBe('s9');
   });
 });
 
