@@ -61,9 +61,10 @@ public class HealthCheckServiceMcpServerTests
 
         var check = await svc.CheckMcpServerAsync();
 
-        // Scaled-to-zero cold start is a warning, not a hard outage.
+        // Failure to wake the scaled-to-zero container within the budget is a warning,
+        // not a hard outage (a re-check may still succeed once it finishes warming).
         Assert.Equal("warning", check.Status);
-        Assert.Contains("cold-starting", check.Message);
+        Assert.Contains("could not be reached", check.Message);
     }
 
     /// <summary>

@@ -135,5 +135,30 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
 
             return response;
         }
+
+        /// <summary>
+        /// GET /api/health/mcp
+        /// Standalone MCP-server reachability probe (visible to all authenticated users).
+        /// Split out from health/detailed because the MCP Container App scales to zero and a
+        /// probe may need to wake it — keeping it on its own endpoint lets the dashboard render
+        /// every other card immediately and fold this slow check in incrementally when it
+        /// resolves, instead of blocking the whole page on a cold start.
+        /// </summary>
+        [Function("McpHealthCheck")]
+        public async Task<HttpResponseData> GetMcpHealthCheck(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "health/mcp")] HttpRequestData req)
+        {
+            // Authentication enforced by PolicyEnforcementMiddleware (AuthenticatedUser).
+            var check = await _healthCheckService.CheckMcpServerAsync();
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(new
+            {
+                timestamp = DateTime.UtcNow,
+                check
+            });
+
+            return response;
+        }
     }
 }

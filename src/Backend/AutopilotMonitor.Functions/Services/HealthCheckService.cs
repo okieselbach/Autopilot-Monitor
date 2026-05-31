@@ -44,11 +44,15 @@ public class HealthCheckService
             Checks = new List<HealthCheck>()
         };
 
+        // NOTE: CheckMcpServerAsync is deliberately NOT part of this batch. The MCP
+        // Container App scales to zero on idle, so a probe may need to wake it and can
+        // take many seconds. Bundling it here would block the entire dashboard on that
+        // one slow check. It is exposed via its own endpoint (GET health/mcp) that the
+        // frontend fetches independently and folds into the card grid incrementally.
         var checks = await Task.WhenAll(
             CheckStorageBackendAsync(),
             CheckProcessingBackendAsync(),
             CheckAgentBinariesAsync(),
-            CheckMcpServerAsync(),
             CheckSignalRQuotaAsync(),
             CheckPoisonQueuesAsync()
         );
@@ -178,9 +182,16 @@ public class HealthCheckService
     /// Probes the MCP server's public <c>/health</c> endpoint (which sits in front of the
     /// <c>/mcp</c> access guard, so no auth is required) and surfaces reachability + the
     /// deployed MCP build version. Visible to all authenticated users, so the server URL is
-    /// deliberately NOT included in the message or details. The MCP Container App runs with
-    /// minReplicas=0, so the first probe after idle may incur a cold start within the 10s
-    /// timeout — a slow-but-successful probe still reports healthy.
+    /// deliberately NOT included in the message or details.
+    /// <para>
+    /// The Container App runs with minReplicas=0 and scales to zero on idle. Azure Container
+    /// Apps holds an inbound request while it activates a cold replica, so this probe doubles
+    /// as the wake signal — a generous timeout (<c>McpServerHealthTimeoutSeconds</c>, default
+    /// 30s) gives the cold start time to complete and report healthy. Only when the server
+    /// cannot be woken within that budget is it a warning; a reachable-but-erroring server
+    /// (non-2xx) is unhealthy. This is exposed via its own <c>health/mcp</c> endpoint, never
+    /// the blocking all-checks batch, so the dashboard never waits on the wake.
+    /// </para>
     /// </summary>
     internal async Task<HealthCheck> CheckMcpServerAsync()
     {
@@ -192,11 +203,16 @@ public class HealthCheckService
 
         var baseUrl = (_configuration["McpServerUrl"] ?? Constants.McpServerBaseUrl).TrimEnd('/');
         var healthUrl = $"{baseUrl}/health";
+        var timeoutSeconds = ParsePositiveInt("McpServerHealthTimeoutSeconds", 30);
+
+        // A cold start that takes longer than this is treated as a successful wake rather
+        // than an instant-warm hit, so the message can say so.
+        const long WarmHitThresholdMs = 2500;
 
         try
         {
             var client = _httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(10);
+            client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var response = await client.GetAsync(healthUrl);
@@ -212,7 +228,9 @@ public class HealthCheckService
             var version = await TryReadMcpVersionAsync(response);
 
             check.Status = "healthy";
-            check.Message = $"MCP server reachable ({sw.ElapsedMilliseconds}ms)";
+            check.Message = sw.ElapsedMilliseconds > WarmHitThresholdMs
+                ? $"MCP server woke from idle and is reachable ({sw.ElapsedMilliseconds}ms)"
+                : $"MCP server reachable ({sw.ElapsedMilliseconds}ms)";
             if (!string.IsNullOrWhiteSpace(version))
             {
                 check.Details = new Dictionary<string, object> { ["Version"] = version };
@@ -220,14 +238,13 @@ public class HealthCheckService
         }
         catch (Exception ex) when (ex is TaskCanceledException or OperationCanceledException or HttpRequestException)
         {
-            // Timeout or connection failure. The Container App scales to zero on idle and
-            // only starts serving /health after a multi-second cold start (knowledge-base +
-            // embeddings load), so this is most often a warming instance, not an outage —
-            // classify as a warning so an idle dashboard load does not raise a false alarm.
-            // This very probe wakes the scaler, so a re-check shortly after should go green.
+            // Timeout or connection failure after the full wake budget. The probe held the
+            // request long enough for a cold replica to activate, so a failure here means the
+            // server could not be woken — surface as a warning (not a hard outage: the next
+            // re-check may still succeed once it finishes warming).
             check.Status = "warning";
-            check.Message = "MCP server not responding — it may be cold-starting (scaled to zero on idle). Re-check in a moment.";
-            _logger.LogWarning(ex, "MCP server health probe did not respond (possible cold start)");
+            check.Message = $"MCP server could not be reached within {timeoutSeconds}s — it may still be warming up. Re-check in a moment.";
+            _logger.LogWarning(ex, "MCP server health probe did not respond within {TimeoutSeconds}s (wake attempt failed)", timeoutSeconds);
         }
         catch (Exception ex)
         {

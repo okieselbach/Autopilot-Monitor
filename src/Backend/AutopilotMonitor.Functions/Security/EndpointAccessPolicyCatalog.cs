@@ -309,6 +309,7 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "global/customs-archive/{tenantId}/{historyRowKey}/{archiveRowKey}",       EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("DELETE", "global/customs-archive/{tenantId}/{historyRowKey}",                       EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("GET",    "health/detailed",            EndpointPolicy.AuthenticatedUser),
+        new("GET",    "health/mcp",                 EndpointPolicy.AuthenticatedUser),
         new("POST",   "rules/reseed-from-github",   EndpointPolicy.GlobalAdminOnly),
         new("GET",    "vulnerability/unmatched-software", EndpointPolicy.GlobalAdminOnly),
         new("GET",    "vulnerability/software-inventory", EndpointPolicy.GlobalAdminOnly),
