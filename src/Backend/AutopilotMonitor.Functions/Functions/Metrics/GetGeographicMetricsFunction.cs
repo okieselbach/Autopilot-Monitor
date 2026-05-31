@@ -83,6 +83,14 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             // Group sessions by location key
             var groups = geoSessions.GroupBy(s => GetLocationKey(s, groupBy)).ToList();
 
+            // The grouping level decides which structured fields are meaningful.
+            // A country-grouped row aggregates many cities, so carrying the first
+            // session's GeoCity/GeoRegion would mislabel a nationwide figure with
+            // an arbitrary sample city (e.g. "Washington, DC" for all of "US").
+            // Blank the finer-than-group fields; keep Loc as a representative
+            // point so the map can still position a pin for the group.
+            var level = (groupBy ?? "city").ToLowerInvariant();
+
             var locations = new List<LocationMetrics>();
 
             foreach (var group in groups)
@@ -134,8 +142,8 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 {
                     LocationKey = group.Key,
                     Country = first.GeoCountry,
-                    Region = first.GeoRegion,
-                    City = first.GeoCity,
+                    Region = level == "country" ? string.Empty : first.GeoRegion,
+                    City = (level == "country" || level == "region") ? string.Empty : first.GeoCity,
                     Loc = first.GeoLoc,
                     SessionCount = group.Count(),
                     Succeeded = succeeded.Count,

@@ -40,6 +40,61 @@ export function extractTenantList(data: unknown): Record<string, unknown>[] {
   });
 }
 
+/**
+ * Infer the geographic grouping level from a locationKey's segment count, so the
+ * backend (which matches by reconstructing the same delimited key for a given
+ * groupBy) resolves country/region keys — not just city keys. Mirrors
+ * GetGeographicMetricsFunction.GetLocationKey:
+ *   country → "US"                       (1 segment)
+ *   region  → "Saxony, DE"               (2 segments)
+ *   city    → "Falkenstein, Saxony, DE"  (3 segments)
+ * Best-effort fallback for the raw-locationKey path; the structured
+ * country/region/city path is the robust drilldown.
+ */
+export function inferGeoGroupBy(locationKey: string): 'country' | 'region' | 'city' {
+  const segments = locationKey.split(',').length;
+  return segments >= 3 ? 'city' : segments === 2 ? 'region' : 'country';
+}
+
+/**
+ * Translate get_geographic_sessions location inputs into backend query params.
+ * A raw locationKey wins (carries an inferred groupBy so non-city keys resolve);
+ * otherwise structured country/region/city are forwarded verbatim and matched
+ * against the actual Geo* fields server-side. Returns {} when neither is given.
+ */
+export function buildGeoLocationParams(input: {
+  locationKey?: string; country?: string; region?: string; city?: string;
+}): Record<string, string | undefined> {
+  const { locationKey, country, region, city } = input;
+  if (locationKey) {
+    return { locationKey, groupBy: inferGeoGroupBy(locationKey) };
+  }
+  if (country) {
+    return { country, region: region || undefined, city: city || undefined };
+  }
+  return {};
+}
+
+/**
+ * Echo the effective window + session cap for get_platform_metrics. The backend
+ * analyzes only the newest `sessionLimit` sessions inside the window (default
+ * 100), so on busy installs a wider `days` changes nothing — `truncated` flags
+ * when the cap was hit (more sessions than analyzed likely exist). Prefers the
+ * backend's clamped echo over the requested values.
+ */
+export function platformWindowEcho(
+  raw: { windowDays?: number; sessionLimit?: number },
+  requested: { days: number; limit: number },
+  sessionsAnalyzed: number,
+): { windowDays: number; sessionLimit: number; truncated: boolean } {
+  const sessionLimit = raw.sessionLimit ?? requested.limit;
+  return {
+    windowDays: raw.windowDays ?? requested.days,
+    sessionLimit,
+    truncated: sessionsAnalyzed >= sessionLimit,
+  };
+}
+
 export function registerAdminTools(server: McpServer, ga: boolean): void {
   // Tool 11: get_api_usage — Global Admin only; not registered for normal users
   // (the `if (ga)` guards the whole single server.registerTool(...) statement).
@@ -121,17 +176,19 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
       title: 'Geographic Sessions',
       description:
         'Drill into a specific geographic location and list its enrollment sessions (lean rows). ' +
-        'Either provide locationKey (from get_geographic_metrics results, e.g. "Falkenstein, Saxony, DE") ' +
-        'or use country/region/city filters to find sessions by location. ' +
+        'Preferred: pass the structured country / region / city you saw in get_geographic_metrics ' +
+        '(country alone lists the whole country; add region, then city, to narrow). ' +
+        'Alternatively pass locationKey verbatim from a get_geographic_metrics row (e.g. "US", ' +
+        '"Saxony, DE", or "Falkenstein, Saxony, DE") — any grouping level resolves. ' +
         'A busy location can hold thousands of sessions, so results are paged: the default pageSize is 50 ' +
         'and the response carries a "nextLink" when more remain — pass that whole string back as "continuation" ' +
         'to get the next slice, and stop when nextLink is absent. (Pagination is applied to the location result ' +
         'set, so raise pageSize for fewer round-trips when you need a full sweep.)',
       inputSchema: {
-        locationKey: z.string().optional().describe('Location key from get_geographic_metrics (e.g. "Falkenstein, Saxony, DE"). If provided, country/region/city are ignored.'),
-        country: z.string().optional().describe('2-letter country code filter (e.g. "DE", "US", "CH"). Used when locationKey is not provided.'),
-        region: z.string().optional().describe('Region/state filter (e.g. "Saxony", "North Carolina"). Used with country.'),
-        city: z.string().optional().describe('City filter (e.g. "Falkenstein"). Used with country.'),
+        locationKey: z.string().optional().describe('Location key copied verbatim from a get_geographic_metrics row (e.g. "US", "Saxony, DE", "Falkenstein, Saxony, DE"). Any grouping level works. If provided, country/region/city are ignored.'),
+        country: z.string().optional().describe('Country filter, matched against the session GeoCountry exactly as shown by get_geographic_metrics (typically a 2-letter code, e.g. "DE", "US", "CH"). Used when locationKey is not provided; lists the whole country on its own.'),
+        region: z.string().optional().describe('Region/state filter (e.g. "Saxony", "North Carolina"). Optional; used with country to narrow.'),
+        city: z.string().optional().describe('City filter (e.g. "Falkenstein"). Optional; used with country to narrow.'),
         tenantId: z.string().optional().describe(ga ? 'Tenant ID. Omit for cross-tenant view (Global Admin only).' : 'Optional tenant ID. Defaults to your tenant.'),
         days: z.coerce.number().int().min(1).max(365).optional().default(30)
           .describe('Time range in days (1-365). Defaults to 30.'),
@@ -144,14 +201,12 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
     },
     async (args) => withToolTelemetry('get_geographic_sessions', async () => {
       try {
-        const { tenantId, country, region, city, pageSize, continuation, ...rest } = args;
-        const params: Record<string, string | number | undefined> = { ...rest };
+        const { tenantId, locationKey, country, region, city, pageSize, continuation, ...rest } = args;
+        const params: Record<string, string | number | undefined> = {
+          ...rest,
+          ...buildGeoLocationParams({ locationKey, country, region, city }),
+        };
         if (tenantId) params.tenantId = tenantId;
-        if (!params.locationKey && country) {
-          const parts = [city, region, country].filter(Boolean);
-          params.locationKey = parts.join(', ');
-          params.groupBy = city ? 'city' : region ? 'region' : 'country';
-        }
         const prefix = pickGlobalOrTenantPath('/api/global/metrics', '/api/metrics');
         const data = await apiFetch(`${prefix}/geographic/sessions${buildQuery(params)}`) as
           { success?: boolean; sessions?: unknown[]; totalCount?: number };
@@ -193,10 +248,15 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         'Get aggregated platform-level agent performance metrics across recent sessions. ' +
         'Returns: avg/max/p95 CPU, memory (working set, private bytes), network (bytes up/down, latency, requests), ' +
         'top sessions by CPU/memory, and per-agent-version breakdown. Global Admin only. ' +
+        'Only the newest maxSessions sessions inside the window are analyzed (default 100), so on a ' +
+        'busy install widening days alone may not change the result — raise maxSessions to widen the ' +
+        'sample. The response echoes sessionLimit and a truncated flag when the cap was hit. ' +
         'days accepts any value 1-365 (e.g. 5, 7, 12, 30, 90).',
       inputSchema: {
         days: z.coerce.number().int().min(1).max(365).optional().default(30)
           .describe('Time window in days (1-365). Defaults to 30.'),
+        maxSessions: z.coerce.number().int().min(1).max(2000).optional().default(100)
+          .describe('Newest N sessions in the window to analyze (1-2000, default 100). Raise for a wider sample on busy installs.'),
       },
       annotations: READ_ONLY,
     },
@@ -209,13 +269,16 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
           avgPrivateBytes: number; avgLatency: number;
           totalBytesUp: number; totalBytesDown: number; totalRequests: number;
         };
-        const raw = await apiFetch(`/api/global/metrics/platform${buildQuery({ days: args.days })}`) as { sessions?: SessionMetric[] };
+        const raw = await apiFetch(`/api/global/metrics/platform${buildQuery({ days: args.days, limit: args.maxSessions })}`) as
+          { sessions?: SessionMetric[]; windowDays?: number; sessionLimit?: number };
         const sessions = raw?.sessions ?? [];
+        const requested = { days: args.days, limit: args.maxSessions };
         if (sessions.length === 0) {
           return toolResultText(
-            { windowDays: args.days, sessionsAnalyzed: 0, message: 'No performance data available' },
+            { ...platformWindowEcho(raw, requested, 0), sessionsAnalyzed: 0, message: 'No performance data available' },
             MAX_RESULT_SIZE_CHARS.small);
         }
+        const windowEcho = platformWindowEcho(raw, requested, sessions.length);
 
         const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
         const p95 = (arr: number[]) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length * 0.95)] ?? 0; };
@@ -248,7 +311,9 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         })).sort((a, b) => b.sessions - a.sessions);
 
         const summary = {
-          windowDays: args.days,
+          windowDays: windowEcho.windowDays,
+          sessionLimit: windowEcho.sessionLimit,
+          truncated: windowEcho.truncated,
           sessionsAnalyzed: sessions.length,
           cpu: { avgPercent: round(avg(cpus)), maxPercent: round(Math.max(...maxCpus)), p95Percent: round(p95(maxCpus)) },
           memory: {

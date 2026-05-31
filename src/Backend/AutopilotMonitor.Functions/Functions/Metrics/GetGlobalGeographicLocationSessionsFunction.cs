@@ -34,10 +34,14 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var locationKey = query["locationKey"];
-                if (string.IsNullOrEmpty(locationKey))
+                var country = query["country"];
+                // Accept either the legacy opaque locationKey (web UI pairs it with groupBy)
+                // or structured country/region/city filters matched against actual Geo*
+                // fields — robust to key formatting and partial (country-only) drilldowns.
+                if (string.IsNullOrEmpty(locationKey) && string.IsNullOrEmpty(country))
                 {
                     var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await badRequest.WriteAsJsonAsync(new { success = false, message = "locationKey parameter is required" });
+                    await badRequest.WriteAsJsonAsync(new { success = false, message = "locationKey or country parameter is required" });
                     return badRequest;
                 }
 
@@ -52,14 +56,16 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 // for a location without leaving the cross-tenant endpoint.
                 var filterTenantId = query["tenantId"];
 
-                _logger.LogInformation("Fetching global sessions for location '{LocationKey}' ({Days}d, groupBy={GroupBy}, full={Full}, tenantFilter={Tenant}) (User: {UserEmail})",
-                    locationKey, days, groupBy, full, filterTenantId ?? "(none)", userEmail);
+                _logger.LogInformation("Fetching global sessions for location '{LocationKey}' ({Days}d, groupBy={GroupBy}, country={Country}, full={Full}, tenantFilter={Tenant}) (User: {UserEmail})",
+                    locationKey ?? "(none)", days, groupBy, country ?? "(none)", full, filterTenantId ?? "(none)", userEmail);
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
                 var sessions = string.IsNullOrEmpty(filterTenantId)
                     ? await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1))
                     : await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), filterTenantId);
-                var filtered = GetGeographicLocationSessionsFunction.FilterSessionsByLocation(sessions, locationKey, groupBy);
+                var filtered = !string.IsNullOrEmpty(locationKey)
+                    ? GetGeographicLocationSessionsFunction.FilterSessionsByLocation(sessions, locationKey, groupBy)
+                    : GetGeographicLocationSessionsFunction.FilterSessionsByFields(sessions, country!, query["region"], query["city"]);
 
                 var appSummaries = string.IsNullOrEmpty(filterTenantId)
                     ? await _metricsRepo.GetAllAppInstallSummariesAsync()

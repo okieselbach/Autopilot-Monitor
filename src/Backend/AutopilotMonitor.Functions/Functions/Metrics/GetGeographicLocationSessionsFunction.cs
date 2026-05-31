@@ -35,10 +35,15 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                 var locationKey = query["locationKey"];
-                if (string.IsNullOrEmpty(locationKey))
+                var country = query["country"];
+                // Accept either the legacy opaque locationKey (still used by the web UI,
+                // which always pairs it with groupBy) or structured country/region/city
+                // filters matched against the actual Geo* fields. The structured path is
+                // robust to key formatting and partial (country-only) drilldowns.
+                if (string.IsNullOrEmpty(locationKey) && string.IsNullOrEmpty(country))
                 {
                     var badRequest = req.CreateResponse(HttpStatusCode.BadRequest);
-                    await badRequest.WriteAsJsonAsync(new { success = false, message = "locationKey parameter is required" });
+                    await badRequest.WriteAsJsonAsync(new { success = false, message = "locationKey or country parameter is required" });
                     return badRequest;
                 }
 
@@ -55,12 +60,14 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 // full LocationSessionRow shape.
                 var full = string.Equals(query["full"], "1", StringComparison.Ordinal);
 
-                _logger.LogInformation("Fetching sessions for location '{LocationKey}' tenant {TenantId} ({Days}d, groupBy={GroupBy}, full={Full})",
-                    locationKey, tenantId, days, groupBy, full);
+                _logger.LogInformation("Fetching sessions for location '{LocationKey}' tenant {TenantId} ({Days}d, groupBy={GroupBy}, country={Country}, full={Full})",
+                    locationKey ?? "(none)", tenantId, days, groupBy, country ?? "(none)", full);
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
                 var sessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantId);
-                var filtered = FilterSessionsByLocation(sessions, locationKey, groupBy);
+                var filtered = !string.IsNullOrEmpty(locationKey)
+                    ? FilterSessionsByLocation(sessions, locationKey, groupBy)
+                    : FilterSessionsByFields(sessions, country!, query["region"], query["city"]);
 
                 var appSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
                 var rows = BuildRows(filtered, appSummaries);
@@ -91,6 +98,28 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
             return sessions
                 .Where(s => !string.IsNullOrEmpty(s.GeoCountry))
                 .Where(s => GetGeographicMetricsFunction.GetLocationKey(s, groupBy) == locationKey)
+                .OrderByDescending(s => s.StartedAt)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Matches sessions against the structured Geo* fields rather than a
+        /// reconstructed delimited key. <paramref name="country"/> is required;
+        /// <paramref name="region"/> and <paramref name="city"/> are optional
+        /// wildcards that progressively narrow the result. Case-insensitive so a
+        /// country code or region/city label from get_geographic_metrics resolves
+        /// regardless of casing — and so a country-only drilldown returns every
+        /// session in that country (the broken case the opaque-key path produced
+        /// 0 results for).
+        /// </summary>
+        internal static List<SessionSummary> FilterSessionsByFields(
+            List<SessionSummary> sessions, string country, string? region, string? city)
+        {
+            return sessions
+                .Where(s => !string.IsNullOrEmpty(s.GeoCountry))
+                .Where(s => string.Equals(s.GeoCountry, country, StringComparison.OrdinalIgnoreCase))
+                .Where(s => string.IsNullOrEmpty(region) || string.Equals(s.GeoRegion, region, StringComparison.OrdinalIgnoreCase))
+                .Where(s => string.IsNullOrEmpty(city) || string.Equals(s.GeoCity, city, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(s => s.StartedAt)
                 .ToList();
         }
