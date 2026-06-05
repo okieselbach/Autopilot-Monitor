@@ -42,10 +42,17 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     return bad;
                 }
 
+                // "Exclude deletions" view: drop per-session deletion bookkeeping
+                // server-side so a cleanup-heavy window still fills a page with
+                // real entries. Folded into the fingerprint scope so a token
+                // minted for one view can't be replayed against the other.
+                var excludeDeletions = string.Equals(query["excludeDeletions"], "true", StringComparison.OrdinalIgnoreCase);
+                var fingerprintScope = excludeDeletions ? "audit:tenant:nodel" : "audit:tenant";
+
                 _logger.LogInformation(
-                    "Fetching audit logs (tenant={TenantId}, dateFrom={DateFrom}, dateTo={DateTo}, pageSize={PageSize}, hasContinuation={HasContinuation}) for user {User}",
+                    "Fetching audit logs (tenant={TenantId}, dateFrom={DateFrom}, dateTo={DateTo}, pageSize={PageSize}, hasContinuation={HasContinuation}, excludeDeletions={ExcludeDeletions}) for user {User}",
                     tenantId, parsed.DateFrom, parsed.DateTo,
-                    parsed.PageSize?.ToString() ?? "all", parsed.Continuation != null,
+                    parsed.PageSize?.ToString() ?? "all", parsed.Continuation != null, excludeDeletions,
                     userIdentifier);
 
                 if (parsed.PageSize == null)
@@ -59,7 +66,7 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 {
                     if (!DateWindowPagination.TryAcceptContinuation(
                             parsed.Continuation,
-                            scope: "audit:tenant",
+                            scope: fingerprintScope,
                             callerTenantId: tenantId,
                             dateFrom: parsed.DateFrom,
                             dateTo: parsed.DateTo,
@@ -79,13 +86,13 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 }
 
                 var page = await _maintenanceRepo.GetAuditLogsPageAsync(
-                    tenantId, parsed.DateFrom, parsed.DateTo, parsed.PageSize.Value, azureToken);
+                    tenantId, parsed.DateFrom, parsed.DateTo, parsed.PageSize.Value, azureToken, excludeDeletions);
 
                 string? nextLink = null;
                 if (!string.IsNullOrEmpty(page.NextRawToken))
                 {
                     var fp = DateWindowPagination.Fingerprint(
-                        scope: "audit:tenant",
+                        scope: fingerprintScope,
                         callerTenantId: tenantId,
                         dateFrom: parsed.DateFrom,
                         dateTo: parsed.DateTo);
@@ -95,7 +102,10 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                         pageSize: parsed.PageSize.Value,
                         wireContinuation: wireToken,
                         dateFrom: parsed.DateFrom,
-                        dateTo: parsed.DateTo);
+                        dateTo: parsed.DateTo,
+                        extras: excludeDeletions
+                            ? new[] { new KeyValuePair<string, string?>("excludeDeletions", "true") }
+                            : null);
                 }
 
                 return await req.OkAsync(new

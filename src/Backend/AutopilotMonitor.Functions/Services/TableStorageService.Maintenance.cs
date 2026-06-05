@@ -128,20 +128,30 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         public Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(
-            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation,
+            bool excludeDeletions = false)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
-            return FetchAuditLogPageInternalAsync(BuildAuditLogFilter(tenantId, dateFrom, dateTo), pageSize, continuation);
+            return FetchAuditLogPageInternalAsync(
+                BuildAuditLogFilter(tenantId, dateFrom, dateTo, excludeDeletions), pageSize, continuation);
         }
 
         public Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(
-            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation,
+            bool excludeDeletions = false)
         {
             // Cross-tenant: per-tenant fan-out + merge by RowKey. Without this
             // fan-out Azure pages by (PK asc, RK asc) cross-partition, surfacing
             // tenants alphabetically rather than newest-first globally.
-            return FetchAllAuditLogsPageAsync(dateFrom, dateTo, pageSize, continuation);
+            return FetchAllAuditLogsPageAsync(dateFrom, dateTo, pageSize, continuation, excludeDeletions);
         }
+
+        // Upper bound on Azure round-trips per page when back-filling past
+        // excluded rows. With server-side filtering each round-trip advances
+        // the scan by up to ~1000 rows, so this tolerates a window of ~tens of
+        // thousands of consecutive deletion entries before a page can come back
+        // short (still non-empty progress — the caller just clicks Next).
+        private const int AuditLogMaxFillRoundTrips = 20;
 
         private async Task<RawPage<AuditLogEntry>> FetchAuditLogPageInternalAsync(
             string? filter, int pageSize, string? continuation)
@@ -150,19 +160,42 @@ namespace AutopilotMonitor.Functions.Services
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
-                var (entities, nextRawToken) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
-                    client: tableClient,
-                    filter: filter,
-                    pageSize: pageSize,
-                    continuation: continuation);
 
                 // RowKey scheme is `!{revtick}_{guid}` so Azure-native (PK asc, RK asc)
                 // already yields newest-first within the partition. No re-sort needed.
                 // Legacy entries (bare GUID RowKey) sort *after* all new entries because
                 // '!' (0x21) precedes hex digits — they appear at the tail of the result
                 // in undefined order until they age out of the date window.
-                var logs = new List<AuditLogEntry>(entities.Count);
-                foreach (var entity in entities) logs.Add(MapToAuditLogEntry(entity));
+                //
+                // Back-fill loop: a server-side exclusion (e.g. "exclude
+                // deletions") can make a single Azure page return far fewer than
+                // pageSize matches — during a cleanup sweep the first scanned
+                // rows may all be deletion bookkeeping. We follow the opaque
+                // continuation until we have at least pageSize matches or the
+                // partition is exhausted, then return the last consumed page's
+                // token. Accumulating whole Azure pages (rather than trimming to
+                // pageSize) keeps that token gap-free, so we may overshoot by up
+                // to one Azure page — harmless for the caller. Without an
+                // exclusion the first page already fills, so the loop exits
+                // immediately and behaviour is unchanged.
+                var logs = new List<AuditLogEntry>(pageSize);
+                string? nextRawToken = continuation;
+                var roundTrips = 0;
+                do
+                {
+                    var (entities, token) = await AzureTablesPaginator.FetchPageAsync<TableEntity>(
+                        client: tableClient,
+                        filter: filter,
+                        pageSize: pageSize,
+                        continuation: nextRawToken);
+                    foreach (var entity in entities) logs.Add(MapToAuditLogEntry(entity));
+                    nextRawToken = token;
+                    roundTrips++;
+                }
+                while (logs.Count < pageSize
+                    && !string.IsNullOrEmpty(nextRawToken)
+                    && roundTrips < AuditLogMaxFillRoundTrips);
+
                 return new RawPage<AuditLogEntry>(logs, nextRawToken);
             }
             catch (Exception ex)
@@ -173,7 +206,7 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         private async Task<RawPage<AuditLogEntry>> FetchAllAuditLogsPageAsync(
-            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation, bool excludeDeletions)
         {
             if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
             try
@@ -219,7 +252,7 @@ namespace AutopilotMonitor.Functions.Services
                 var fetchTasks = activeTenantIds.Select(async tid =>
                 {
                     continuations.TryGetValue(tid, out var prior);
-                    var tenantFilter = BuildAuditLogFilterWithRowKeyBound(tid, dateFrom, dateTo, prior?.LastRowKey);
+                    var tenantFilter = BuildAuditLogFilterWithRowKeyBound(tid, dateFrom, dateTo, prior?.LastRowKey, excludeDeletions);
                     var fetched = new List<(string RowKey, AuditLogEntry Item)>();
                     await foreach (var e in tableClient.QueryAsync<TableEntity>(filter: tenantFilter, maxPerPage: pageSize))
                     {
@@ -259,14 +292,30 @@ namespace AutopilotMonitor.Functions.Services
         // and remain reachable via raw table queries.
         private const string AuditLogSuppressedPerformer = "System.Maintenance";
 
-        private static string BuildAuditLogFilterWithRowKeyBound(
-            string tenantId, DateTime? dateFrom, DateTime? dateTo, string? lastRowKey)
+        // Per-session deletion bookkeeping. A single cleanup run emits one
+        // `deletion_started` + one `deletion_completed` audit row per session,
+        // so a retention sweep can flood the table with thousands of these.
+        // They carry the triggering operator's UPN (not System.Maintenance), so
+        // the performer exclusion above does not catch them. The "exclude
+        // deletions" audit view drops them server-side so they never consume a
+        // page slot. Keep in sync with the actions written by
+        // SessionDeletionProducer.cs.
+        private const string AuditLogDeletionStartedAction = "deletion_started";
+        private const string AuditLogDeletionCompletedAction = "deletion_completed";
+
+        internal static string DeletionExclusionClause()
+            => $"Action ne '{AuditLogDeletionStartedAction}' and Action ne '{AuditLogDeletionCompletedAction}'";
+
+        internal static string BuildAuditLogFilterWithRowKeyBound(
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, string? lastRowKey, bool excludeDeletions)
         {
             var clauses = new List<string>
             {
                 $"PartitionKey eq '{tenantId}'",
                 $"PerformedBy ne '{AuditLogSuppressedPerformer}'",
             };
+            if (excludeDeletions)
+                clauses.Add(DeletionExclusionClause());
             if (!string.IsNullOrEmpty(lastRowKey))
                 clauses.Add($"RowKey gt '{lastRowKey!.Replace("'", "''")}'");
             if (dateFrom.HasValue)
@@ -292,12 +341,16 @@ namespace AutopilotMonitor.Functions.Services
         // sortable; the user-defined "Timestamp" property is set by LogAuditEntry
         // for parity with the model. We filter on the system Timestamp since it
         // is always indexed.
-        private static string? BuildAuditLogFilter(string? tenantId, DateTime? dateFrom, DateTime? dateTo)
+        internal static string? BuildAuditLogFilter(string? tenantId, DateTime? dateFrom, DateTime? dateTo, bool excludeDeletions = false)
         {
             var clauses = new List<string>
             {
                 $"PerformedBy ne '{AuditLogSuppressedPerformer}'",
             };
+            if (excludeDeletions)
+            {
+                clauses.Add(DeletionExclusionClause());
+            }
             if (!string.IsNullOrEmpty(tenantId))
             {
                 clauses.Add($"PartitionKey eq '{tenantId}'");

@@ -403,19 +403,21 @@ export const api = {
 
   // ── Audit ─────────────────────────────────────────────────────────────────
   audit: {
-    logs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string }) =>
+    logs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string; excludeDeletions?: boolean }) =>
       `${API_BASE_URL}/api/audit/logs${qs({
         dateFrom: opts?.dateFrom,
         dateTo: opts?.dateTo,
         pageSize: opts?.pageSize?.toString(),
         continuation: opts?.continuation,
+        excludeDeletions: opts?.excludeDeletions ? 'true' : undefined,
       })}`,
-    globalLogs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string }) =>
+    globalLogs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string; excludeDeletions?: boolean }) =>
       `${API_BASE_URL}/api/global/audit/logs${qs({
         dateFrom: opts?.dateFrom,
         dateTo: opts?.dateTo,
         pageSize: opts?.pageSize?.toString(),
         continuation: opts?.continuation,
+        excludeDeletions: opts?.excludeDeletions ? 'true' : undefined,
       })}`,
   },
 

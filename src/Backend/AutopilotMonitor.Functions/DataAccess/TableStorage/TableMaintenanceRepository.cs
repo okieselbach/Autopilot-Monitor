@@ -37,12 +37,14 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             => _storage.GetAllAuditLogsAsync(dateFrom, dateTo);
 
         public Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(
-            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
-            => _storage.GetAuditLogsPageAsync(tenantId, dateFrom, dateTo, pageSize, continuation);
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation,
+            bool excludeDeletions = false)
+            => _storage.GetAuditLogsPageAsync(tenantId, dateFrom, dateTo, pageSize, continuation, excludeDeletions);
 
         public Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(
-            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation)
-            => _storage.GetAllAuditLogsPageAsync(dateFrom, dateTo, pageSize, continuation);
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation,
+            bool excludeDeletions = false)
+            => _storage.GetAllAuditLogsPageAsync(dateFrom, dateTo, pageSize, continuation, excludeDeletions);
 
         public Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate)
             => _storage.GetSessionsOlderThanAsync(tenantId, cutoffDate);

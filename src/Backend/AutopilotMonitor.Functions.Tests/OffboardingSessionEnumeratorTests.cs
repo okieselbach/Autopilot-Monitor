@@ -106,8 +106,8 @@ public class OffboardingSessionEnumeratorTests
         public Task<bool> LogAuditEntryAsync(string tenantId, string action, string entityType, string entityId, string performedBy, Dictionary<string, string>? details = null) => throw new NotImplementedException();
         public Task<List<AuditLogEntry>> GetAuditLogsAsync(string tenantId, DateTime? dateFrom = null, DateTime? dateTo = null) => throw new NotImplementedException();
         public Task<List<AuditLogEntry>> GetAllAuditLogsAsync(DateTime? dateFrom = null, DateTime? dateTo = null) => throw new NotImplementedException();
-        public Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation) => throw new NotImplementedException();
-        public Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation) => throw new NotImplementedException();
+        public Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation, bool excludeDeletions = false) => throw new NotImplementedException();
+        public Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation, bool excludeDeletions = false) => throw new NotImplementedException();
         public Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate) => throw new NotImplementedException();
         public Task<List<SessionSummary>> GetSessionsByDateRangeAsync(DateTime startDate, DateTime endDate, string? tenantId = null) => throw new NotImplementedException();
         public Task<List<SessionSummary>> GetStalledSessionsAsync(string tenantId, DateTime cutoffTime) => throw new NotImplementedException();

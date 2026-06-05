@@ -87,6 +87,12 @@ export default function AuditPage() {
 
   const { globalAdminMode } = useAdminMode();
 
+  // The DEFAULT view ("All (excl. deletions)") is resolved server-side: the
+  // backend drops per-session deletion bookkeeping and back-fills the page, so
+  // a cleanup-heavy window still returns a full page of real entries instead of
+  // an all-deletions page that the client would strip down to nothing.
+  const excludeDeletions = actionFilter === 'DEFAULT';
+
   const fetchPage = useCallback(async (
     nextContinuation: string | null,
     isInitial: boolean,
@@ -99,6 +105,7 @@ export default function AuditPage() {
         dateTo: dateToIso,
         pageSize: PAGE_SIZE,
         continuation: nextContinuation ?? undefined,
+        excludeDeletions,
       };
       const endpoint = globalAdminMode ? api.audit.globalLogs(opts) : api.audit.logs(opts);
       const response = await authenticatedFetch(endpoint, getAccessToken);
@@ -124,7 +131,7 @@ export default function AuditPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [addNotification, dateFromIso, dateToIso, getAccessToken, globalAdminMode]);
+  }, [addNotification, dateFromIso, dateToIso, getAccessToken, globalAdminMode, excludeDeletions]);
 
   // Initial / window-change fetch resets pagination state.
   // fetchPage is intentionally excluded from deps: its identity churns whenever
@@ -142,7 +149,7 @@ export default function AuditPage() {
     setPageNumber(1);
     fetchPage(null, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, globalAdminMode, dateFromIso, dateToIso]);
+  }, [tenantId, globalAdminMode, dateFromIso, dateToIso, excludeDeletions]);
 
   const handleRefresh = () => {
     fetchPage(continuation, false);

@@ -33,13 +33,20 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// in the given window. The returned <see cref="RawPage{T}"/> carries the
         /// underlying store's opaque continuation token; <c>null</c> when this
         /// page was the last. Items in each page are sorted newest-first.
+        /// When <paramref name="excludeDeletions"/> is set, per-session deletion
+        /// bookkeeping (<c>deletion_started</c>/<c>deletion_completed</c>) is
+        /// filtered out server-side and the page is back-filled to up to
+        /// <paramref name="pageSize"/> real entries, so a cleanup-heavy window
+        /// never yields an empty page.
         /// </summary>
         Task<RawPage<AuditLogEntry>> GetAuditLogsPageAsync(
-            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation);
+            string tenantId, DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation,
+            bool excludeDeletions = false);
 
         /// <summary>Cross-tenant variant of <see cref="GetAuditLogsPageAsync"/> (Global Admin only).</summary>
         Task<RawPage<AuditLogEntry>> GetAllAuditLogsPageAsync(
-            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation);
+            DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation,
+            bool excludeDeletions = false);
 
         // --- Data Retention Queries ---
         Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate);
