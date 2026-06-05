@@ -1164,8 +1164,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 }
                 else if (!isNoise)
                 {
-                    if (isFailure)
-                        transitions.Add(new SubcategoryTransition(sub.Name, oldState, sub.State, true));
+                    // Any other real state change (e.g. succeeded -> in_progress retry,
+                    // failed -> in_progress recovery, in_progress -> notStarted reset) is a
+                    // non-failure transition. Record it so the subcategory_state_change event
+                    // carries it; without this the change is silently dropped (observability gap).
+                    transitions.Add(new SubcategoryTransition(sub.Name, oldState, sub.State, false));
                 }
             }
 
