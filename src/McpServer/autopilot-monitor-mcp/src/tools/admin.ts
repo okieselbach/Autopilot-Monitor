@@ -146,17 +146,19 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         'The daily and global breakdowns are Global Admin only; the per-user (userId) view also works for a ' +
         'Tenant Admin querying a user within their own tenant. ' +
         'The global per-record breakdown spans every user/endpoint and can run to thousands of rows, so results ' +
-        'are paged: the default pageSize is 200 and the response carries a "nextLink" when more remain — pass that ' +
-        'whole string back as "continuation" to get the next slice, and stop when nextLink is absent. Narrow with ' +
-        'dateFrom/dateTo (default is the full retention window) or daily=true for a compact summary.',
+        'are paged: the default pageSize is 50 (these per-record rows are verbose — a bare no-arg call stays under the ' +
+        'inline response budget) and the response carries a "nextLink" when more remain — pass that whole string back ' +
+        'as "continuation" to get the next slice, and stop when nextLink is absent. Raise pageSize (up to 2000) to ' +
+        'amortize round-trips on a full sweep. Narrow with dateFrom/dateTo (default is the full retention window) or ' +
+        'daily=true for a compact summary.',
       inputSchema: {
         userId: z.string().optional().describe('Specific user object ID to query usage for'),
         tenantId: z.string().optional().describe('Filter usage by tenant ID'),
         dateFrom: z.string().optional().describe('Start date (YYYY-MM-DD)'),
         dateTo: z.string().optional().describe('End date (YYYY-MM-DD)'),
         daily: z.boolean().optional().default(false).describe('Return daily aggregated summary instead of per-endpoint breakdown'),
-        pageSize: z.coerce.number().int().min(1).max(2000).optional().default(200)
-          .describe('Rows to return per call (1-2000, default 200). Follow nextLink for more; raise it for full sweeps.'),
+        pageSize: z.coerce.number().int().min(1).max(2000).optional().default(50)
+          .describe('Rows to return per call (1-2000, default 50 — these per-record rows are verbose). Follow nextLink for more; raise it for full sweeps.'),
         continuation: z.string().optional()
           .describe('Pass the whole nextLink string from the prior response to fetch the next slice.'),
       },
