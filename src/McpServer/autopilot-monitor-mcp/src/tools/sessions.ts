@@ -5,6 +5,7 @@ import { withToolTelemetry } from '../telemetry.js';
 import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema, isBenignHealthDetectionReport } from './shared.js';
 import { toolError } from './error-handler.js';
 import { assertKnownEventType, assertKnownDevicePropertyKeys } from '../resource-catalog.js';
+import { interpolateAnalysisResults } from '../interpolate-rule-template.js';
 
 // ── Session summary constants ───────────────────────────────────────────
 
@@ -207,7 +208,9 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
         let analysisData: unknown = null;
         if (includeAnalysis) {
           try {
-            analysisData = await apiFetch(`/api/sessions/${sessionId}/analysis${q}`);
+            // Substitute {{token}} placeholders from matchedConditions so the raw
+            // explanation/remediation text never leaks literal {{reason}}/{{appName}}/...
+            analysisData = interpolateAnalysisResults(await apiFetch(`/api/sessions/${sessionId}/analysis${q}`));
           } catch {
             // analysis may not exist yet
           }
@@ -413,6 +416,9 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
 
         let analysis = null;
         if (analysisData) {
+          // Resolve {{token}} placeholders from each result's matchedConditions
+          // before mapping, so issues carry readable text not raw {{...}} tokens.
+          interpolateAnalysisResults(analysisData);
           const a = analysisData as Record<string, unknown>;
           const results = (a.results ?? []) as Array<Record<string, unknown>>;
           analysis = {
