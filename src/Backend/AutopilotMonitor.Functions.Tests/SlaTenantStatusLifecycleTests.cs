@@ -392,28 +392,17 @@ public class SlaTenantStatusLifecycleTests
         Assert.DoesNotContain(h.NotificationsSent, n => n.Type == "sla_breach");
     }
 
-    [Fact]
-    public async Task ConsecutiveFailures_InlinePath_PersistsAndRespectsCooldown()
+    // Builds an inline-path SlaBreachEvaluationService wired to the shared StatusRepo, a
+    // TenantConfigurationService backed by `config`, and a session page of `recentPage`.
+    // Returns the service plus the captured in-app notification types for assertions.
+    private static (SlaBreachEvaluationService Service, List<string> Captured) BuildInlineService(
+        InMemorySlaStatusRepository statusRepo, TenantConfiguration config, List<SessionSummary> recentPage)
     {
-        var h = new Harness();
-        var config = CreateConfig(consecutive: true, consecThreshold: 3);
-        // Inline path uses TenantConfigurationService — set up indirectly via _configService mock.
-        // Simulate the inline flow directly.
-        h.SetRecentSessions(TenantId, new List<SessionSummary>
-        {
-            new() { TenantId = TenantId, SessionId = "s1", Status = SessionStatus.Failed },
-            new() { TenantId = TenantId, SessionId = "s2", Status = SessionStatus.Failed },
-            new() { TenantId = TenantId, SessionId = "s3", Status = SessionStatus.Failed },
-        });
-
-        // Need TenantConfigurationService to return the config — switch out via TenantConfigurationService mock.
-        // Since Harness builds its own, replicate config retrieval through the configRepo mock chain:
         var memCache = new MemoryCache(new MemoryCacheOptions());
         var configRepoMock = new Mock<IConfigRepository>();
         configRepoMock.Setup(r => r.GetTenantConfigurationAsync(TenantId)).ReturnsAsync(config);
         var tenantConfigSvc = new TenantConfigurationService(configRepoMock.Object, NullLogger<TenantConfigurationService>.Instance, memCache);
 
-        // Rebuild Service with this tenantConfigSvc but share StatusRepo for assertions.
         var notifRepo = new Mock<ITenantNotificationRepository>();
         notifRepo.Setup(r => r.AddNotificationAsync(It.IsAny<string>(), It.IsAny<GlobalNotification>())).ReturnsAsync(true);
         var notif = new Mock<TenantNotificationService>(notifRepo.Object, new FakeSignalRNotificationService(), NullLogger<TenantNotificationService>.Instance);
@@ -427,12 +416,7 @@ public class SlaTenantStatusLifecycleTests
         var maintenanceRepo = new Mock<IMaintenanceRepository>();
         var sessionRepo = new Mock<ISessionRepository>();
         sessionRepo.Setup(r => r.GetSessionsPageAsync(TenantId, It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<string?>()))
-            .ReturnsAsync(new RawPage<SessionSummary>(new List<SessionSummary>
-            {
-                new() { TenantId = TenantId, SessionId = "s1", Status = SessionStatus.Failed },
-                new() { TenantId = TenantId, SessionId = "s2", Status = SessionStatus.Failed },
-                new() { TenantId = TenantId, SessionId = "s3", Status = SessionStatus.Failed },
-            }, null));
+            .ReturnsAsync(new RawPage<SessionSummary>(recentPage, null));
 
         var webhook = new WebhookNotificationService(new HttpClient(), NullLogger<WebhookNotificationService>.Instance);
         var alertDispatch = new OpsAlertDispatchService(adminCfg.Object,
@@ -448,9 +432,27 @@ public class SlaTenantStatusLifecycleTests
         var svc = new SlaBreachEvaluationService(
             tenantConfigSvc, configRepoMock.Object, maintenanceRepo.Object, sessionRepo.Object,
             metricsRepo.Object,
-            webhook, notif.Object, h.StatusRepo, adminCfg.Object, opsSvc,
+            webhook, notif.Object, statusRepo, adminCfg.Object, opsSvc,
             new TelemetryClient(new TelemetryConfiguration()),
             NullLogger<SlaBreachEvaluationService>.Instance);
+
+        return (svc, captured);
+    }
+
+    private static List<SessionSummary> FailedPage(int count)
+    {
+        var list = new List<SessionSummary>();
+        for (int i = 0; i < count; i++)
+            list.Add(new SessionSummary { TenantId = TenantId, SessionId = $"s{i}", Status = SessionStatus.Failed });
+        return list;
+    }
+
+    [Fact]
+    public async Task ConsecutiveFailures_InlinePath_PersistsAndRespectsCooldown()
+    {
+        var h = new Harness();
+        var config = CreateConfig(consecutive: true, consecThreshold: 3);
+        var (svc, captured) = BuildInlineService(h.StatusRepo, config, FailedPage(3));
 
         var failedSession = new SessionSummary { TenantId = TenantId, SessionId = "s3", Status = SessionStatus.Failed, DeviceName = "DEV-01", FailureReason = "timeout" };
 
@@ -465,6 +467,30 @@ public class SlaTenantStatusLifecycleTests
         // Immediate second invocation → throttled
         await svc.EvaluateSessionCompletionAsync(TenantId, failedSession);
         Assert.Single(captured); // still one
+    }
+
+    [Fact]
+    public async Task ConsecutiveFailures_InlinePath_SubMinimumThreshold_FallsBackToDefaultOfFive()
+    {
+        var h = new Harness();
+        // Mis-set / unset threshold (< 2) must fall back to the canonical default of 5,
+        // not be clamped to 2 — keeping the inline raise window in lock-step with the timer.
+        var config = CreateConfig(consecutive: true, consecThreshold: 1);
+        var failedSession = new SessionSummary { TenantId = TenantId, SessionId = "x", Status = SessionStatus.Failed, DeviceName = "DEV-01", FailureReason = "timeout" };
+
+        // Only 3 consecutive failures available → below the effective threshold of 5 → no breach.
+        var (svc3, captured3) = BuildInlineService(h.StatusRepo, config, FailedPage(3));
+        await svc3.EvaluateSessionCompletionAsync(TenantId, failedSession);
+        Assert.Null(await h.StatusRepo.GetAsync(TenantId));
+        Assert.Empty(captured3);
+
+        // 5 consecutive failures → breach fires and records the effective threshold (5).
+        var (svc5, captured5) = BuildInlineService(h.StatusRepo, config, FailedPage(5));
+        await svc5.EvaluateSessionCompletionAsync(TenantId, failedSession);
+        var row = await h.StatusRepo.GetAsync(TenantId);
+        Assert.True(row!.ConsecutiveFailures_IsActive);
+        Assert.Equal(5, row.ConsecutiveFailures_Count);
+        Assert.Single(captured5, t => t == "sla_consecutive_failures");
     }
 
     [Fact]

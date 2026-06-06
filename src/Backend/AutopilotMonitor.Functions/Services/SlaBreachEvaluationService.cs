@@ -196,7 +196,7 @@ namespace AutopilotMonitor.Functions.Services
             RawPage<SessionSummary>? recentSessions = null;
             if (config.SlaNotifyOnConsecutiveFailures)
             {
-                var threshold = Math.Max(config.SlaConsecutiveFailureThreshold, 2);
+                var threshold = EffectiveConsecutiveFailureThreshold(config);
                 recentSessions = await _sessionRepo.GetSessionsPageAsync(
                     config.TenantId, days: null, pageSize: threshold, continuation: null);
             }
@@ -293,7 +293,7 @@ namespace AutopilotMonitor.Functions.Services
                 // --- ConsecutiveFailures (timer detects resolve only) ---
                 if (status.ConsecutiveFailures_IsActive && config.SlaNotifyOnConsecutiveFailures && recentSessions != null)
                 {
-                    var threshold = Math.Max(config.SlaConsecutiveFailureThreshold, 2);
+                    var threshold = EffectiveConsecutiveFailureThreshold(config);
                     var allFailed = recentSessions.Items.Count >= threshold
                         && recentSessions.Items.Take(threshold).All(s => s.Status == SessionStatus.Failed);
 
@@ -625,8 +625,7 @@ namespace AutopilotMonitor.Functions.Services
                 if (config == null || !config.SlaNotifyOnConsecutiveFailures)
                     return;
 
-                var threshold = config.SlaConsecutiveFailureThreshold;
-                if (threshold < 2) threshold = 5;
+                var threshold = EffectiveConsecutiveFailureThreshold(config);
 
                 var page = await _sessionRepo.GetSessionsPageAsync(tenantId, days: null, pageSize: threshold, continuation: null);
                 if (page.Items.Count < threshold)
@@ -721,6 +720,15 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
+
+        // Canonical effective consecutive-failure threshold. A configured value below the
+        // minimum sensible window (< 2, i.e. unset or mis-set) falls back to the default of 5
+        // — the same default used by the model, DB read, and the web UI. Using a single helper
+        // for both the inline raise path and the timer resolve path guarantees the raise and
+        // resolve windows stay symmetric (otherwise a breach raised at 5-in-a-row could be
+        // resolved by the timer as soon as the top 2 weren't both failed).
+        private static int EffectiveConsecutiveFailureThreshold(TenantConfiguration config)
+            => config.SlaConsecutiveFailureThreshold < 2 ? 5 : config.SlaConsecutiveFailureThreshold;
 
         private async Task<TimeSpan> GetCooldownAsync()
         {
