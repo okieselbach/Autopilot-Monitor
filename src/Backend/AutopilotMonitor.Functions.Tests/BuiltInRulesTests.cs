@@ -87,6 +87,48 @@ public class BuiltInRulesTests
     }
 
     [Fact]
+    public void BuiltInAnalyzeRules_AutoLogon_rules_have_expected_shape()
+    {
+        var rules = BuiltInAnalyzeRules.GetAll();
+
+        // SEC-002: broad AutoLogon warning, default-on, NOT a template.
+        var sec002 = rules.FirstOrDefault(r => r.RuleId == "ANALYZE-SEC-002");
+        Assert.NotNull(sec002);
+        Assert.True(sec002!.Enabled, "ANALYZE-SEC-002 should be enabled by default");
+        Assert.Equal("warning", sec002.Severity);
+        Assert.True(sec002.TemplateVariables == null || sec002.TemplateVariables.Count == 0);
+        Assert.Contains(sec002.Conditions, c => c.DataField == "checks.autologon_enabled");
+
+        // The sysinternals confidence factor must be backed by a real (non-required) condition
+        // carrying the same signal — otherwise the `exists` factor can never match (dead factor).
+        var sec002SysFactor = sec002.ConfidenceFactors?.FirstOrDefault(f => f.Signal == "sysinternals_suspected");
+        Assert.NotNull(sec002SysFactor);
+        Assert.Contains(sec002.Conditions, c =>
+            c.Signal == "sysinternals_suspected"
+            && c.DataField == "checks.sysinternals_autologon_suspected"
+            && !c.Required);
+
+        // SEC-003: plaintext password, default-on, escalated.
+        var sec003 = rules.FirstOrDefault(r => r.RuleId == "ANALYZE-SEC-003");
+        Assert.NotNull(sec003);
+        Assert.True(sec003!.Enabled, "ANALYZE-SEC-003 should be enabled by default");
+        Assert.Equal("high", sec003.Severity);
+        Assert.Contains(sec003.Conditions, c => c.DataField == "checks.default_password_present");
+
+        // SEC-004: kiosk allow-list TEMPLATE — disabled until configured.
+        var sec004 = rules.FirstOrDefault(r => r.RuleId == "ANALYZE-SEC-004");
+        Assert.NotNull(sec004);
+        Assert.False(sec004!.Enabled, "ANALYZE-SEC-004 is a template and must ship disabled");
+        Assert.NotNull(sec004.TemplateVariables);
+        var tv = Assert.Single(sec004.TemplateVariables);
+        Assert.Equal("allowed_autologon_users", tv.Name);
+        Assert.Equal(1, tv.ConditionIndex);
+        Assert.Equal("value", tv.Field);
+        Assert.Equal("not_in", sec004.Conditions[1].Operator);
+        Assert.Equal("checks.default_user_name", sec004.Conditions[1].DataField);
+    }
+
+    [Fact]
     public void BuiltInAnalyzeRules_ANALYZE_ID_001_IsTemplate()
     {
         var rules = BuiltInAnalyzeRules.GetAll();

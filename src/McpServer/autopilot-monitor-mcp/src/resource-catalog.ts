@@ -137,6 +137,7 @@ export const EVENT_TYPES_CATALOG = {
   security_events: [
     'integrity_bypass_analysis',
     'local_admin_analysis',
+    'autologon_analysis',
     'security_warning',
     'security_audit',
     'provisioning_package_scan',

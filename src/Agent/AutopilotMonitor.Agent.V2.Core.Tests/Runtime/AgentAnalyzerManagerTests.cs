@@ -33,7 +33,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
             new InformationalEventPost(new FakeSignalIngressSink(), new VirtualClock(new DateTime(2026, 4, 23, 10, 0, 0, DateTimeKind.Utc)));
 
         [Fact]
-        public void Initialize_respects_toggle_all_off_registers_no_analyzers()
+        public void Initialize_with_all_toggles_off_still_registers_always_on_AutoLogon()
         {
             using var tmp = new TempDirectory();
             var sut = new AgentAnalyzerManager(
@@ -46,7 +46,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
                 });
 
             sut.Initialize();
-            Assert.Empty(sut.Analyzers);
+            // AutoLogonAnalyzer has no toggle — it is always registered.
+            var names = sut.Analyzers.Select(a => a.Name).ToList();
+            Assert.Equal(new[] { "AutoLogonAnalyzer" }, names);
         }
 
         [Fact]
@@ -67,7 +69,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
             Assert.Contains("LocalAdminAnalyzer", names);
             Assert.DoesNotContain("SoftwareInventoryAnalyzer", names);
             Assert.Contains("IntegrityBypassAnalyzer", names);
-            Assert.Equal(2, sut.Analyzers.Count);
+            // AutoLogonAnalyzer is always-on, in addition to the two enabled toggled analyzers.
+            Assert.Contains("AutoLogonAnalyzer", names);
+            Assert.Equal(3, sut.Analyzers.Count);
         }
 
         [Fact]
@@ -81,6 +85,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
             var names = sut.Analyzers.Select(a => a.Name).ToList();
             Assert.Contains("LocalAdminAnalyzer", names);
             Assert.Contains("IntegrityBypassAnalyzer", names);
+            Assert.Contains("AutoLogonAnalyzer", names);
             Assert.DoesNotContain("SoftwareInventoryAnalyzer", names);
         }
 
@@ -180,7 +185,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
         }
 
         [Fact]
-        public void RunShutdown_is_safe_on_empty_analyzer_list()
+        public void RunShutdown_is_safe_with_only_the_always_on_AutoLogon_analyzer()
         {
             using var tmp = new TempDirectory();
             var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), NewPost(),
@@ -193,6 +198,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
             sut.Initialize();
             var ex = Record.Exception(() => sut.RunShutdown());
             Assert.Null(ex);
+        }
+
+        [Fact]
+        public void RunDeviceSetupCompleteAutoLogonCheck_emits_one_device_setup_autologon_event()
+        {
+            using var tmp = new TempDirectory();
+            var sink = new FakeSignalIngressSink();
+            var post = new InformationalEventPost(sink,
+                new VirtualClock(new DateTime(2026, 6, 6, 12, 0, 0, DateTimeKind.Utc)));
+            var sut = new AgentAnalyzerManager(Config(), NewLogger(tmp.Path), post,
+                new AnalyzerConfiguration
+                {
+                    EnableLocalAdminAnalyzer = false,
+                    EnableSoftwareInventoryAnalyzer = false,
+                    EnableIntegrityBypassAnalyzer = false,
+                });
+
+            sut.RunDeviceSetupCompleteAutoLogonCheck();
+
+            var events = sink.Posted.Where(p => p.Payload != null
+                && p.Payload.TryGetValue("eventType", out var et)
+                && et == AutopilotMonitor.Shared.Constants.EventTypes.AutoLogonAnalysis).ToList();
+            Assert.Single(events);
+            var data = Assert.IsType<System.Collections.Generic.Dictionary<string, object>>(events[0].TypedPayload);
+            Assert.Equal("device_setup_complete", data["triggered_at"]);
         }
     }
 }

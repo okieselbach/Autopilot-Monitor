@@ -408,6 +408,12 @@ namespace AutopilotMonitor.Shared
             // cannot iterate the aggregate scan event's packages[] array). Drives the PPKG
             // analyze rules incl. the per-tenant allow-list template (not_regex on `identity`).
             public const string ProvisioningPackageDetected = "provisioning_package_detected";
+            // AutoLogon scan — runs at DeviceSetup-phase completion and at final shutdown. Reports
+            // raw facts only (Winlogon registry indicators; DefaultPassword presence-only, never the
+            // value) at Info severity. Backend analyze-rules (ANALYZE-SEC-002/003) judge the facts:
+            // an active AutoLogon is a Warning, a plaintext DefaultPassword on disk is escalated.
+            // AutoLogon may be legitimate (kiosk deployment) OR an enrollment/OOBE manipulation vector.
+            public const string AutoLogonAnalysis         = "autologon_analysis";
 
             // Termination / diagnostics / server actions
             public const string EnrollmentSummaryShown    = "enrollment_summary_shown";

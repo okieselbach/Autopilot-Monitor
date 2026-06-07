@@ -148,6 +148,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                     // at step 14) and analyzerManager (created in the onIngressReady hook at step 13b)
                     // are both live. Disposed in the same finally block as the rest of the lifecycle.
                     WhiteGloveInventoryTrigger whiteGloveInventoryTrigger = null;
+                    AutoLogonDeviceSetupTrigger autoLogonDeviceSetupTrigger = null;
 
                     // Single-rail refactor (plan §5.1) — lifecycle events flow through
                     // InformationalEventPost. The post is constructed inside the
@@ -452,10 +453,19 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                                 host: componentFactory.EspAndHelloHost,
                                 onTrigger: () => analyzerManager?.RunWhiteGlovePart1InventorySnapshot(),
                                 logger: logger);
+
+                            // AutoLogon scan at DeviceSetup-phase completion — first point at which
+                            // a device-targeted provisioning script/app could write the Winlogon
+                            // AutoLogon keys. Final shutdown re-scans via RunShutdown for user-phase
+                            // changes. Same host + lifecycle as the WG inventory trigger above.
+                            autoLogonDeviceSetupTrigger = new AutoLogonDeviceSetupTrigger(
+                                host: componentFactory.EspAndHelloHost,
+                                onTrigger: () => analyzerManager?.RunDeviceSetupCompleteAutoLogonCheck(),
+                                logger: logger);
                         }
                         else
                         {
-                            logger.Warning("WhiteGloveInventoryTrigger not wired — componentFactory.EspAndHelloHost is null after orchestrator.Start.");
+                            logger.Warning("WhiteGloveInventoryTrigger / AutoLogonDeviceSetupTrigger not wired — componentFactory.EspAndHelloHost is null after orchestrator.Start.");
                         }
 
                         // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start (PR-A) detected
@@ -618,6 +628,9 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                         // analyzerManager. Idempotent: Dispose unsubscribes via Interlocked guard.
                         try { whiteGloveInventoryTrigger?.Dispose(); }
                         catch (Exception ex) { logger.Warning($"WhiteGloveInventoryTrigger.Dispose threw: {ex.Message}"); }
+
+                        try { autoLogonDeviceSetupTrigger?.Dispose(); }
+                        catch (Exception ex) { logger.Warning($"AutoLogonDeviceSetupTrigger.Dispose threw: {ex.Message}"); }
 
                         // L4 gap-closure (2026-05-15): defensive fallback emit for any path
                         // that returned to finally without claiming the gate — e.g. a future

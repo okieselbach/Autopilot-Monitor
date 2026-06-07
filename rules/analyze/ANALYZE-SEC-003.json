@@ -1,0 +1,49 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-SEC-003",
+  "title": "AutoLogon plaintext password stored in registry",
+  "description": "Fires when the AutoLogon analyzer reports a DefaultPassword value present in Winlogon. A plaintext AutoLogon password stored in the registry is readable by any local administrator and is a credential exposure — more severe than AutoLogon alone (the Sysinternals Autologon tool deliberately avoids this by storing the secret in the LSA instead).",
+  "severity": "high",
+  "category": "security",
+  "version": "1.0.0",
+  "enabled": true,
+  "trigger": "single",
+  "baseConfidence": 90,
+  "conditions": [
+    {
+      "signal": "default_password_present",
+      "source": "event_type",
+      "eventType": "autologon_analysis",
+      "dataField": "checks.default_password_present",
+      "operator": "equals",
+      "value": "true",
+      "required": true
+    }
+  ],
+  "confidenceThreshold": 40,
+  "explanation": "This device has a **plaintext AutoLogon password stored in the registry** (`DefaultPassword` under `HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon`). This value is readable by any local administrator and exposes the AutoLogon account's credentials in clear text.\n\nEven when AutoLogon itself is intended (e.g. a kiosk), the password should never be left as a registry value. The Sysinternals Autologon tool stores the secret as an encrypted LSA secret precisely to avoid this; a plaintext `DefaultPassword` usually means a script or manual edit wrote the credentials directly.\n\nNote: the agent only reports the *presence* of this value — it never reads or transmits the password itself.",
+  "remediation": [
+    {
+      "title": "Remove the plaintext password",
+      "steps": [
+        "Delete the DefaultPassword value under HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+        "If AutoLogon is still required, reconfigure it with the Sysinternals Autologon tool so the secret is stored as an encrypted LSA secret rather than a registry value",
+        "Rotate the exposed account's password, since it may have been readable on disk"
+      ]
+    },
+    {
+      "title": "Reduce blast radius",
+      "steps": [
+        "Verify the AutoLogon account is the least-privileged account that satisfies the use case (not a domain or local admin where avoidable)",
+        "For kiosk scenarios, prefer Assigned Access / kiosk profiles over a raw AutoLogon credential"
+      ]
+    }
+  ],
+  "relatedDocs": [
+    {
+      "title": "Sysinternals Autologon (encrypted LSA-secret password storage)",
+      "url": "https://learn.microsoft.com/en-us/sysinternals/downloads/autologon"
+    }
+  ],
+  "tags": ["security", "autologon", "winlogon", "credentials", "plaintext-password"]
+}

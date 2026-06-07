@@ -1016,6 +1016,7 @@ export function SectionAgentInternals() {
               ["configmgr_client_detected", "EnrollmentTracker", "ConfigMgr co-management detected"],
               ["local_admin_analysis", "LocalAdminAnalyzer", "Local admin audit"],
               ["software_inventory_analysis", "SoftwareInventoryAnalyzer", "Software inventory + delta"],
+              ["autologon_analysis", "AutoLogonAnalyzer", "Winlogon AutoLogon facts (kiosk / manipulation)"],
               ["security_warning", "GatherRuleCollectors", "Security finding from gather rule"],
             ]}
           />

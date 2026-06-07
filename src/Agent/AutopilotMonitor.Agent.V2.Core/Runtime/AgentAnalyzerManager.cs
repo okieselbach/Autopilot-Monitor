@@ -95,6 +95,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                 _logger.Info("IntegrityBypassAnalyzer disabled by remote config");
             }
 
+            // AutoLogon analyzer is ALWAYS registered (no remote-config toggle): it reports raw
+            // Winlogon facts at Info severity and the grading lives in backend analyze-rules. Its
+            // startup run is a no-op; it fires at DeviceSetup-phase completion and at final shutdown.
+            _analyzers.Add(new AutoLogonAnalyzer(
+                _configuration.SessionId,
+                _configuration.TenantId,
+                _post,
+                _logger));
+            _logger.Info("AutoLogonAnalyzer registered (always-on)");
+
             _logger.Info($"Analyzers initialized: {_analyzers.Count} active");
         }
 
@@ -147,6 +157,37 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                     _logger.Error($"Analyzer {analyzer.Name} threw during shutdown", ex);
                 }
             }
+        }
+
+        /// <summary>
+        /// Runs ONLY the <see cref="AutoLogonAnalyzer"/> at DeviceSetup-phase completion. Triggered
+        /// by <c>AutoLogonDeviceSetupTrigger</c> when the agent observes
+        /// <c>DeviceSetupProvisioningComplete</c>. Captures any AutoLogon injected by a
+        /// device-targeted provisioning script / app before the user phase; the eventual final
+        /// shutdown re-scans via <see cref="RunShutdown"/> to capture user-phase changes.
+        /// </summary>
+        public void RunDeviceSetupCompleteAutoLogonCheck()
+        {
+            if (!_initialised) Initialize();
+            if (_analyzers.Count == 0) return;
+
+            foreach (var analyzer in _analyzers)
+            {
+                if (analyzer is not AutoLogonAnalyzer autoLogonAnalyzer) continue;
+
+                try
+                {
+                    _logger.Info("DeviceSetup complete — running AutoLogonAnalyzer.AnalyzeAtDeviceSetupComplete()");
+                    autoLogonAnalyzer.AnalyzeAtDeviceSetupComplete();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("AutoLogonAnalyzer threw during DeviceSetup-complete check", ex);
+                }
+                return; // AutoLogonAnalyzer is registered at most once
+            }
+
+            _logger.Warning("DeviceSetup-complete AutoLogon check requested but AutoLogonAnalyzer is not registered");
         }
 
         /// <summary>
