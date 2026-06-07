@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { shouldSkipLowBytesTotal, shouldSkipNoActivity } from "@/lib/downloadProgressFilters";
+import { formatBytes, formatThroughput, formatDuration } from "@/lib/formatting";
+import DoBreakdownBar from "./DoBreakdownBar";
 
 interface DownloadEvent {
   timestamp: string;
@@ -53,22 +55,6 @@ interface DownloadItem {
   doStats?: DoStats | null;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
-
-function formatSpeed(bps: number): string {
-  if (bps === 0) return "0 B/s";
-  const k = 1024;
-  const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
-  const i = Math.floor(Math.log(bps) / Math.log(k));
-  return `${(bps / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
-
 function formatDoMode(mode: number): string {
   switch (mode) {
     case 0: return "Background";
@@ -78,17 +64,6 @@ function formatDoMode(mode: number): string {
     case 100: return "Bypass";
     default: return `Mode ${mode}`;
   }
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
 }
 
 function parseDoDurationMs(duration: string): number {
@@ -105,7 +80,7 @@ function parseDoDurationMs(duration: string): number {
 function formatDoDuration(duration: string): string {
   const ms = parseDoDurationMs(duration);
   if (ms <= 0) return duration || "N/A";
-  return formatDuration(ms);
+  return formatDuration(Math.floor(ms / 1000));
 }
 
 export default function DownloadProgress({ events, summaryStats }: DownloadProgressProps) {
@@ -288,7 +263,7 @@ export default function DownloadProgress({ events, summaryStats }: DownloadProgr
           )}
           {totalDuration != null && (
             <span className="text-xs text-gray-400">
-              — Total: {formatDuration(totalDuration)}
+              — Total: {formatDuration(Math.floor(totalDuration / 1000))}
             </span>
           )}
           {totalP2P != null && (
@@ -376,7 +351,7 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                 </div>
                 <div className="flex items-center space-x-3 text-xs text-gray-500 flex-shrink-0 ml-2">
                   {!dl.isComplete && !dl.isSkipped && dl.downloadRateBps > 0 && (
-                    <span className="font-medium text-blue-600">{formatSpeed(dl.downloadRateBps)}</span>
+                    <span className="font-medium text-blue-600">{formatThroughput(dl.downloadRateBps, "0 B/s")}</span>
                   )}
                   {dl.eventData && Object.keys(dl.eventData).length > 0 && (
                     <button
@@ -417,7 +392,7 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
               {!dl.isSkipped && !dl.isComplete && dl.bytesTotal === 0 && dl.bytesDownloaded > 0 && (
                 <div className="mt-1 text-xs text-gray-500">
                   Downloaded: {formatBytes(dl.bytesDownloaded)}
-                  {dl.downloadRateBps > 0 && ` at ${formatSpeed(dl.downloadRateBps)}`}
+                  {dl.downloadRateBps > 0 && ` at ${formatThroughput(dl.downloadRateBps, "0 B/s")}`}
                 </div>
               )}
 
@@ -448,9 +423,7 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                     const peerBytes = dl.doStats.bytesFromPeers;
                     const cacheBytes = dl.doStats.bytesFromCacheServer;
                     const httpBytes = Math.max(0, dl.doStats.bytesFromHttp - cacheBytes);
-                    const peerPct = (peerBytes / total) * 100;
-                    const cachePct = (cacheBytes / total) * 100;
-                    const httpPct = Math.max(0, 100 - peerPct - cachePct);
+                    const cachePct = total > 0 ? (cacheBytes / total) * 100 : 0;
                     // LAN + LinkLocal combined for breakdown line — both are "local network"
                     const localPeers = dl.doStats.bytesFromLanPeers + dl.doStats.bytesFromLinkLocalPeers;
                     const cachePctRounded = cachePct >= 1 ? Math.round(cachePct) : Math.round(cachePct * 10) / 10;
@@ -501,24 +474,14 @@ function DownloadItem({ download: dl, progressPercent }: { download: DownloadIte
                           </div>
                         )}
                       </div>
-                      {/* Peers (green) | MCC (purple) | HTTP (blue) */}
-                      <div className="mt-1.5 w-full h-1.5 bg-gray-200 rounded-full overflow-hidden flex">
-                        <div
-                          className="h-full bg-green-400"
-                          style={{ width: `${peerPct}%` }}
-                          title={`${peerPct.toFixed(1)}% from peers`}
-                        />
-                        <div
-                          className="h-full bg-purple-400"
-                          style={{ width: `${cachePct}%` }}
-                          title={`${cachePct.toFixed(1)}% from Connected Cache${dl.doStats.cacheHost ? ` (${dl.doStats.cacheHost})` : ""}`}
-                        />
-                        <div
-                          className="h-full bg-blue-400"
-                          style={{ width: `${httpPct}%` }}
-                          title={`${httpPct.toFixed(1)}% from HTTP/CDN`}
-                        />
-                      </div>
+                      <DoBreakdownBar
+                        className="mt-1.5"
+                        peers={peerBytes}
+                        cacheServer={cacheBytes}
+                        http={httpBytes}
+                        total={total}
+                        cacheHost={dl.doStats.cacheHost}
+                      />
                     </div>
                     );
                   })()}

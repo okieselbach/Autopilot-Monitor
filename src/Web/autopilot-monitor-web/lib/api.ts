@@ -220,8 +220,13 @@ export const api = {
       `${API_BASE_URL}/api/metrics/rule-stats${qs({ startDate, endDate, ruleType })}`,
     globalRuleStats: (startDate?: string, endDate?: string, ruleType?: string, tenantId?: string) =>
       `${API_BASE_URL}/api/global/metrics/rule-stats${qs({ startDate, endDate, ruleType, tenantId })}`,
+    vulnerability: (days?: number, topN?: number) =>
+      `${API_BASE_URL}/api/metrics/vulnerability${qs({ days: days?.toString(), topN: topN?.toString() })}`,
     globalVulnerability: (days?: number, topN?: number, tenantId?: string) =>
       `${API_BASE_URL}/api/global/metrics/vulnerability${qs({ days: days?.toString(), topN: topN?.toString(), tenantId })}`,
+    // Tenant-scoped installed-software inventory (JWT-scoped; MemberRead).
+    softwareInventory: () =>
+      `${API_BASE_URL}/api/metrics/software-inventory`,
     sla: (tenantId?: string, months?: number, fresh?: boolean) =>
       `${API_BASE_URL}/api/metrics/sla${qs({ tenantId, months: months?.toString(), fresh: fresh ? "1" : undefined })}`,
     globalSla: (tenantId: string, months?: number, fresh?: boolean) =>
@@ -471,6 +476,9 @@ export const api = {
         take: take !== undefined ? String(take) : undefined,
       })}`,
     ignoredSoftware: () => `${API_BASE_URL}/api/vulnerability/ignored-software`,
+    // Global-Admin per-tenant software inventory (cross-tenant; tenantId required).
+    softwareInventory: (tenantId: string) =>
+      `${API_BASE_URL}/api/vulnerability/software-inventory${qs({ tenantId })}`,
   },
 
   // ── MCP Users ─────────────────────────────────────────────────────────────
