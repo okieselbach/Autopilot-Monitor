@@ -397,6 +397,17 @@ namespace AutopilotMonitor.Shared
             public const string IntegrityBypassAnalysis   = "integrity_bypass_analysis";
             public const string LocalAdminAnalysis        = "local_admin_analysis";
             public const string SecurityWarning           = "security_warning";
+            // Provisioning-package (PPKG) scan — one-shot at DeviceSetup-phase start. Reports raw
+            // facts only (file/registry presence + best-effort content indicators); a backend
+            // analyze-rule judges whether a PPKG is unexpected for the tenant. PPKGs can come from
+            // legitimate bulk enrollment OR be a pre/in-enrollment manipulation vector.
+            public const string ProvisioningPackageScan   = "provisioning_package_scan";
+            // One event per detected PPKG artifact (registry package, .ppkg file, OR
+            // Recovery\Customizations residue file; source field distinguishes them), carrying
+            // SCALAR identity fields so analyze rules can match per package (the rule engine
+            // cannot iterate the aggregate scan event's packages[] array). Drives the PPKG
+            // analyze rules incl. the per-tenant allow-list template (not_regex on `identity`).
+            public const string ProvisioningPackageDetected = "provisioning_package_detected";
 
             // Termination / diagnostics / server actions
             public const string EnrollmentSummaryShown    = "enrollment_summary_shown";

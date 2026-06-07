@@ -1,0 +1,54 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-SEC-006",
+  "title": "Unexpected Provisioning Package (Allow-List)",
+  "description": "Template rule. Fires only for provisioning packages (PPKG) whose identity is NOT on your allow-list. Use this to suppress known-good vendor/recovery packages while still catching unexpected ones. This rule is OFF by default: enable it, set your allow-list regex, then disable the always-on rule ANALYZE-SEC-005 so only non-allow-listed packages alert.",
+  "severity": "warning",
+  "category": "security",
+  "version": "1.0.0",
+  "enabled": false,
+  "baseConfidence": 80,
+  "conditions": [
+    {
+      "signal": "ppkg_not_allowlisted",
+      "source": "event_data",
+      "eventType": "provisioning_package_detected",
+      "dataField": "identity",
+      "operator": "not_regex",
+      "value": "Dell Recovery|HP Recovery|Lenovo Recovery",
+      "required": true
+    }
+  ],
+  "confidenceThreshold": 40,
+  "explanation": "A provisioning package (PPKG) was detected whose identity does NOT match your configured allow-list.\n\n- **Unexpected package:** `{{identity}}`\n\nThe `identity` value combines the package name, .ppkg file name, ownerType and packageId, so your allow-list regex can match an approved package by any of these. Packages that DO match your allow-list (e.g. OEM recovery packages) are intentionally ignored by this rule.\n\nIf this package should be allowed, add it to the allow-list regex (the 'value' of the 'ppkg_not_allowlisted' condition). If it is genuinely unexpected on a pure-Autopilot device, treat it as a potential manipulation and investigate how it was applied.",
+  "remediation": [
+    {
+      "title": "Triage the unexpected package",
+      "steps": [
+        "Open the provisioning_package_scan event for the full inventory and the matching provisioning_package_detected event for this package's identity",
+        "Decide: is this a known-good package that should be allow-listed, or genuinely unexpected?",
+        "If known-good: extend the allow-list regex (e.g. add 'Acme Recovery' as 'Dell Recovery|HP Recovery|Acme Recovery')",
+        "If unexpected: investigate the application path (USB media, C:\\Recovery\\Customizations residue, custom image) and the device's chain of custody"
+      ]
+    },
+    {
+      "title": "Activate the allow-list workflow (2-step)",
+      "steps": [
+        "Enable this rule and set the allow-list regex to match your approved vendor/recovery packages (case-insensitive)",
+        "Verify it behaves as expected on a known device",
+        "Disable the always-on rule ANALYZE-SEC-005 so only non-allow-listed packages alert going forward"
+      ]
+    }
+  ],
+  "tags": ["security", "provisioning-package", "ppkg", "allow-list", "template"],
+  "templateVariables": [
+    {
+      "name": "allowed_packages",
+      "label": "Allowed provisioning packages (regex)",
+      "description": "Case-insensitive regex matched against each package's `identity` (name | fileName | ownerType | packageId). Packages matching this pattern are treated as approved and do NOT alert. Combine multiple with '|', e.g. 'Dell Recovery|HP Recovery|CONTOSO-BULK'.",
+      "conditionIndex": 0,
+      "field": "value",
+      "placeholder": "Dell Recovery|HP Recovery|Lenovo Recovery"
+    }
+  ]
+}

@@ -261,6 +261,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 clock: clock,
                 logger: logger));
 
+            // Provisioning-package (PPKG) scan — kernel host, NOT scan-at-Start. Arms a one-shot
+            // scan that fires when the ESP DeviceSetup phase begins (or desktop arrival as the
+            // no-ESP / WDP v2 fallback): the agent may run a long time via bootstrap before any
+            // PPKG is applied, so scanning at Start would inspect an empty machine. Emits a single
+            // provisioning_package_scan event with raw facts; a backend rule judges intent.
+            hosts.Add(new ProvisioningPackageHost(
+                sessionId: sessionId,
+                tenantId: tenantId,
+                ingress: ingress,
+                clock: clock,
+                logger: logger));
+
             // Dev / test — if --replay-log-dir is set, the tracker reads from the replay folder
             // with SimulationMode ON + the configured SpeedFactor instead of tailing the live
             // IME log folder. Production agents leave ReplayLogDir empty.

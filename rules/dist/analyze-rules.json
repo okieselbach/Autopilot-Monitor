@@ -1432,6 +1432,106 @@
         "ca2023",
         "compliance"
       ]
+    },
+    {
+      "ruleId": "ANALYZE-SEC-005",
+      "title": "Provisioning Package Detected",
+      "description": "Detects that one or more provisioning packages (PPKG) were present on the device during enrollment. PPKGs can inject local accounts, certificates, Wi-Fi/VPN profiles, apps (MSI/EXE) and scripts before or during Autopilot. They may be legitimate (bulk enrollment, OEM recovery) or a manipulation vector. This rule is ON by default so any PPKG is surfaced in every tenant. To suppress known-good packages, enable the template rule ANALYZE-SEC-006, set your allow-list, then disable this rule.",
+      "severity": "warning",
+      "category": "security",
+      "version": "1.0.0",
+      "enabled": true,
+      "baseConfidence": 80,
+      "conditions": [
+        {
+          "signal": "ppkg_detected",
+          "source": "event_data",
+          "eventType": "provisioning_package_detected",
+          "dataField": "identity",
+          "operator": "exists",
+          "value": "",
+          "required": true
+        }
+      ],
+      "confidenceThreshold": 40,
+      "explanation": "A provisioning package (PPKG) artifact was detected on this device during enrollment.\n\n- **Detected package:** `{{identity}}`\n\nProvisioning packages can apply local accounts, certificates, Wi-Fi/VPN profiles, applications (MSI/EXE) and scripts. They are legitimate in bulk-enrollment and OEM-recovery scenarios, but a PPKG appearing on a device that is expected to be \"pure Autopilot\" can also indicate tampering.\n\nReview the `provisioning_package_scan` event in this session for the full inventory (file names, registry package metadata such as ownerType/installTime, and best-effort content indicators).\n\n**To stop alerting on known-good packages (2-step):** enable the template rule **ANALYZE-SEC-006 (Unexpected Provisioning Package)**, set its allow-list regex to match your approved vendor/recovery packages, then disable this rule. ANALYZE-SEC-006 then only fires for packages that are NOT on your allow-list.",
+      "remediation": [
+        {
+          "title": "Verify the provisioning package is expected",
+          "steps": [
+            "Open the provisioning_package_scan event and review ppkgFiles + packages (packageId, name, ownerType, rank, installTime)",
+            "Confirm whether the package matches a known source: bulk-enrollment PPKG, OEM recovery package, or an internal provisioning workflow",
+            "Cross-check the device model/vendor — OEM recovery PPKGs are common and usually benign",
+            "If the package is unexpected for a pure-Autopilot device, treat it as a potential manipulation and investigate how it was applied (USB, Recovery\\Customizations, image)",
+            "To allow known-good packages going forward, enable ANALYZE-SEC-006, set the allow-list, then disable this rule"
+          ]
+        }
+      ],
+      "tags": [
+        "security",
+        "provisioning-package",
+        "ppkg",
+        "tamper"
+      ]
+    },
+    {
+      "ruleId": "ANALYZE-SEC-006",
+      "title": "Unexpected Provisioning Package (Allow-List)",
+      "description": "Template rule. Fires only for provisioning packages (PPKG) whose identity is NOT on your allow-list. Use this to suppress known-good vendor/recovery packages while still catching unexpected ones. This rule is OFF by default: enable it, set your allow-list regex, then disable the always-on rule ANALYZE-SEC-005 so only non-allow-listed packages alert.",
+      "severity": "warning",
+      "category": "security",
+      "version": "1.0.0",
+      "enabled": false,
+      "baseConfidence": 80,
+      "conditions": [
+        {
+          "signal": "ppkg_not_allowlisted",
+          "source": "event_data",
+          "eventType": "provisioning_package_detected",
+          "dataField": "identity",
+          "operator": "not_regex",
+          "value": "Dell Recovery|HP Recovery|Lenovo Recovery",
+          "required": true
+        }
+      ],
+      "confidenceThreshold": 40,
+      "explanation": "A provisioning package (PPKG) was detected whose identity does NOT match your configured allow-list.\n\n- **Unexpected package:** `{{identity}}`\n\nThe `identity` value combines the package name, .ppkg file name, ownerType and packageId, so your allow-list regex can match an approved package by any of these. Packages that DO match your allow-list (e.g. OEM recovery packages) are intentionally ignored by this rule.\n\nIf this package should be allowed, add it to the allow-list regex (the 'value' of the 'ppkg_not_allowlisted' condition). If it is genuinely unexpected on a pure-Autopilot device, treat it as a potential manipulation and investigate how it was applied.",
+      "remediation": [
+        {
+          "title": "Triage the unexpected package",
+          "steps": [
+            "Open the provisioning_package_scan event for the full inventory and the matching provisioning_package_detected event for this package's identity",
+            "Decide: is this a known-good package that should be allow-listed, or genuinely unexpected?",
+            "If known-good: extend the allow-list regex (e.g. add 'Acme Recovery' as 'Dell Recovery|HP Recovery|Acme Recovery')",
+            "If unexpected: investigate the application path (USB media, C:\\Recovery\\Customizations residue, custom image) and the device's chain of custody"
+          ]
+        },
+        {
+          "title": "Activate the allow-list workflow (2-step)",
+          "steps": [
+            "Enable this rule and set the allow-list regex to match your approved vendor/recovery packages (case-insensitive)",
+            "Verify it behaves as expected on a known device",
+            "Disable the always-on rule ANALYZE-SEC-005 so only non-allow-listed packages alert going forward"
+          ]
+        }
+      ],
+      "tags": [
+        "security",
+        "provisioning-package",
+        "ppkg",
+        "allow-list",
+        "template"
+      ],
+      "templateVariables": [
+        {
+          "name": "allowed_packages",
+          "label": "Allowed provisioning packages (regex)",
+          "description": "Case-insensitive regex matched against each package's `identity` (name | fileName | ownerType | packageId). Packages matching this pattern are treated as approved and do NOT alert. Combine multiple with '|', e.g. 'Dell Recovery|HP Recovery|CONTOSO-BULK'.",
+          "conditionIndex": 0,
+          "field": "value",
+          "placeholder": "Dell Recovery|HP Recovery|Lenovo Recovery"
+        }
+      ]
     }
   ]
 }

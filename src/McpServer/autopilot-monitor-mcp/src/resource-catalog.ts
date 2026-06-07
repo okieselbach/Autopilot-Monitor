@@ -139,6 +139,8 @@ export const EVENT_TYPES_CATALOG = {
     'local_admin_analysis',
     'security_warning',
     'security_audit',
+    'provisioning_package_scan',
+    'provisioning_package_detected',
   ],
   vulnerability_events: ['software_inventory_analysis', 'vulnerability_report'],
   diagnostics_events: ['diagnostics_collecting', 'diagnostics_uploaded', 'diagnostics_upload_failed'],
