@@ -29,10 +29,10 @@ public static class MetricsMath
             var failed = g.Where(s => s.Status == "Failed").ToList();
             var total = g.Count();
 
-            var doTotal = g.Sum(s => s.DoTotalBytesDownloaded);
-            var doPeers = g.Sum(s => s.DoBytesFromPeers);
-            var doCacheServer = g.Sum(s => s.DoBytesFromCacheServer);
-            var doHttp = g.Sum(s => s.DoBytesFromHttp);
+            // DoAggregator is the single source for the DO rollup: it filters rows that actually
+            // carry DO telemetry (DoDownloadMode >= 0) and falls back to peers + http when a legacy
+            // row reports source bytes but no DoTotalBytesDownloaded — so that telemetry is not lost.
+            var doG = DoAggregator.Compute(g);
 
             return new
             {
@@ -44,11 +44,11 @@ public static class MetricsMath
                 avgDurationSeconds = completed.Count > 0 ? Math.Round(completed.Average(s => s.DurationSeconds), 0) : 0,
                 maxDurationSeconds = completed.Count > 0 ? completed.Max(s => s.DurationSeconds) : 0,
                 avgDownloadBytes = completed.Count > 0 ? (long)completed.Average(s => s.DownloadBytes) : 0,
-                doTotalBytesDownloaded = doTotal,
-                doBytesFromPeers = doPeers,
-                doBytesFromCacheServer = doCacheServer,
-                doBytesFromHttp = doHttp,
-                peerOffloadPercent = OffloadPercent(doPeers + doCacheServer, doTotal),
+                doTotalBytesDownloaded = doG.TotalBytesDownloaded,
+                doBytesFromPeers = doG.BytesFromPeers,
+                doBytesFromCacheServer = doG.BytesFromCacheServer,
+                doBytesFromHttp = doG.BytesFromHttp,
+                peerOffloadPercent = OffloadPercent(doG.BytesFromPeers + doG.BytesFromCacheServer, doG.TotalBytesDownloaded),
                 topFailureCodes = failed
                     .Where(f => !string.IsNullOrEmpty(f.FailureCode))
                     .GroupBy(f => f.FailureCode)
@@ -68,10 +68,7 @@ public static class MetricsMath
             .Take(10)
             .ToList();
 
-        var totalBytes = summaryList.Sum(s => s.DoTotalBytesDownloaded);
-        var fromPeers = summaryList.Sum(s => s.DoBytesFromPeers);
-        var fromCacheServer = summaryList.Sum(s => s.DoBytesFromCacheServer);
-        var fromHttp = summaryList.Sum(s => s.DoBytesFromHttp);
+        var doAll = DoAggregator.Compute(summaryList);
 
         return new
         {
@@ -82,11 +79,11 @@ public static class MetricsMath
             topFailingApps,
             deliveryOptimization = new
             {
-                totalBytesDownloaded = totalBytes,
-                fromPeers,
-                fromCacheServer,
-                fromHttp,
-                peerOffloadPercent = OffloadPercent(fromPeers + fromCacheServer, totalBytes),
+                totalBytesDownloaded = doAll.TotalBytesDownloaded,
+                fromPeers = doAll.BytesFromPeers,
+                fromCacheServer = doAll.BytesFromCacheServer,
+                fromHttp = doAll.BytesFromHttp,
+                peerOffloadPercent = OffloadPercent(doAll.BytesFromPeers + doAll.BytesFromCacheServer, doAll.TotalBytesDownloaded),
             }
         };
     }

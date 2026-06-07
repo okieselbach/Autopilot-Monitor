@@ -283,8 +283,11 @@ export default function InstallsTab({ scope, timeRange }: InstallsTabProps) {
 
 /** Delivery Optimization summary: peer/MCC offload % + bytes saved + sourcing bar. */
 function DoCard({ rollup, days }: { rollup: DeliveryOptimizationRollup | null; days: number }) {
-  if (!rollup || rollup.totalBytesDownloaded <= 0) return null;
-  const total = rollup.totalBytesDownloaded;
+  if (!rollup) return null;
+  // Fall back to the sum of sources so legacy rows that report peer/HTTP bytes but no
+  // total (the backend already applies the same fallback) still render the card.
+  const total = Math.max(rollup.totalBytesDownloaded, rollup.fromPeers + rollup.fromCacheServer + rollup.fromHttp);
+  if (total <= 0) return null;
   // Pure CDN = everything not served by peers or the Connected Cache. Keeps the bar's HTTP
   // segment from double-counting MCC (which DO also reports inside BytesFromHttp).
   const pureCdn = Math.max(0, total - rollup.fromPeers - rollup.fromCacheServer);

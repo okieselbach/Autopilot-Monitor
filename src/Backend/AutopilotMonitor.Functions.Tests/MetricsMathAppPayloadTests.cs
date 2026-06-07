@@ -43,12 +43,12 @@ public class MetricsMathAppPayloadTests
         {
             new()
             {
-                AppName = "Contoso App", Status = "Succeeded", DurationSeconds = 30,
+                AppName = "Contoso App", Status = "Succeeded", DurationSeconds = 30, DoDownloadMode = 0,
                 DoTotalBytesDownloaded = 600, DoBytesFromPeers = 400, DoBytesFromCacheServer = 0, DoBytesFromHttp = 200,
             },
             new()
             {
-                AppName = "Contoso App", Status = "Succeeded", DurationSeconds = 40,
+                AppName = "Contoso App", Status = "Succeeded", DurationSeconds = 40, DoDownloadMode = 0,
                 DoTotalBytesDownloaded = 400, DoBytesFromPeers = 0, DoBytesFromCacheServer = 100, DoBytesFromHttp = 300,
             },
         };
@@ -64,6 +64,28 @@ public class MetricsMathAppPayloadTests
     }
 
     [Fact]
+    public void DeliveryOptimization_FallsBackToPeersPlusHttpWhenTotalMissing()
+    {
+        // Legacy telemetry: source bytes are reported but DoTotalBytesDownloaded is 0. The rollup
+        // must fall back to peers + http for the denominator so the data is not silently dropped.
+        var summaries = new List<AppInstallSummary>
+        {
+            new()
+            {
+                AppName = "Legacy App", Status = "Succeeded", DurationSeconds = 20, DoDownloadMode = 0,
+                DoTotalBytesDownloaded = 0, DoBytesFromPeers = 300, DoBytesFromHttp = 100,
+            },
+        };
+
+        var doRollup = Build(summaries).GetProperty("deliveryOptimization");
+
+        Assert.Equal(400, doRollup.GetProperty("totalBytesDownloaded").GetInt64());
+        Assert.Equal(300, doRollup.GetProperty("fromPeers").GetInt64());
+        // peerOffloadPercent = 300 / 400 = 75%
+        Assert.Equal(75d, doRollup.GetProperty("peerOffloadPercent").GetDouble());
+    }
+
+    [Fact]
     public void PerApp_CarriesDoFieldsAndFailureCodes()
     {
         var summaries = new List<AppInstallSummary>
@@ -72,7 +94,7 @@ public class MetricsMathAppPayloadTests
             new() { AppName = "App A", Status = "Failed", FailureCode = "0x80070005" },
             new()
             {
-                AppName = "App A", Status = "Succeeded", DurationSeconds = 10,
+                AppName = "App A", Status = "Succeeded", DurationSeconds = 10, DoDownloadMode = 0,
                 DoTotalBytesDownloaded = 200, DoBytesFromPeers = 50,
             },
         };
