@@ -132,6 +132,40 @@ export function paginateUsage(
   };
 }
 
+/**
+ * Page client-side over a software-inventory payload. The inventory endpoints
+ * ({@code /api/metrics/software-inventory}, {@code /api/vulnerability/software-inventory})
+ * return the full per-tenant inventory in one shot (no server-side cursor): a busy
+ * tenant can run to hundreds of rows and overflow the inline response budget. We slice
+ * the {@code inventory} array and echo every other top-level field (success/tenantId/
+ * total/matched/unmatched) verbatim. The "continuation" carries an integer offset
+ * (inv-offset:N); each page re-reads the same set, so raise pageSize to amortize
+ * round-trips on a full sweep. Mirrors {@link paginateUsage}. Exported for unit testing.
+ */
+export function paginateInventory(
+  data: unknown,
+  pageSize: number,
+  continuation?: string,
+): Record<string, unknown> {
+  if (!data || typeof data !== 'object') return { inventory: [], total: 0, count: 0, offset: 0, nextLink: null };
+  const obj = data as Record<string, unknown>;
+  if (!Array.isArray(obj.inventory)) return obj; // unexpected shape — pass through untouched rather than mangle it
+  const all = obj.inventory as unknown[];
+  const m = continuation ? /^inv-offset:(\d+)$/.exec(continuation) : null;
+  const offset = m ? parseInt(m[1], 10) : 0;
+  const slice = all.slice(offset, offset + pageSize);
+  const nextOffset = offset + pageSize;
+  const nextLink = nextOffset < all.length ? `inv-offset:${nextOffset}` : null;
+  const { inventory: _inventory, ...rest } = obj;
+  return {
+    ...rest,
+    count: slice.length,
+    offset,
+    inventory: slice,
+    nextLink,
+  };
+}
+
 export function registerAdminTools(server: McpServer, ga: boolean): void {
   // Tool 11: get_api_usage — Global Admin only; not registered for normal users
   // (the `if (ga)` guards the whole single server.registerTool(...) statement).
@@ -910,6 +944,110 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
         return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_vulnerability_summary', args, error);
+      }
+    })
+  );
+
+  // Tool: get_app_install_metrics — per-app install health over a time window.
+  // Registered for ALL callers; role-aware routing (mirrors get_usage_metrics) unlocks the
+  // MemberRead tenant endpoint for non-GA instead of a blanket 403.
+  server.registerTool(
+    'get_app_install_metrics',
+    {
+      title: 'App Install Metrics',
+      description:
+        'Get aggregated app-install health for Autopilot enrollments over a time window: the top failing apps ' +
+        '(with failure counts, failure rate, and their most common failure codes), the slowest apps by average ' +
+        'install duration, and a fleet "deliveryOptimization" rollup — total bytes downloaded and how much came ' +
+        'from peers / Microsoft Connected Cache (MCC) vs. the CDN, plus a peerOffloadPercent (bandwidth saved by ' +
+        'not pulling from the internet). Use this to answer "which app breaks or slows down my enrollments?" and ' +
+        '"how much install bandwidth is served locally?". ' +
+        (ga
+          ? 'Omit tenantId for the cross-tenant fleet aggregate (Global Admin), or pass tenantId to scope to a single tenant. '
+          : '') +
+        'days accepts any value 1-365 (default 30).',
+      inputSchema: {
+        tenantId: z.string().optional().describe(ga
+          ? 'Filter to a single tenant (Global Admin only). Omit for the cross-tenant fleet aggregate.'
+          : 'Optional; ignored — metrics are scoped to your tenant.'),
+        days: z.coerce.number().int().min(1).max(365).optional().default(30)
+          .describe('Time window in days (1-365). Defaults to 30. Filters apps by install StartedAt.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => withToolTelemetry('get_app_install_metrics', async () => {
+      try {
+        const { tenantId, days } = args;
+        // GA → /api/global/metrics/app (tenantId is a filter); Tenant-Admin → /api/metrics/app
+        // (JWT-scoped; tenantId ignored).
+        const path = pickGlobalOrTenantPath('/api/global/metrics/app', '/api/metrics/app');
+        const data = await apiFetch(`${path}${buildQuery({ tenantId, days })}`);
+        return toolResultText(data, MAX_RESULT_SIZE_CHARS.small);
+      } catch (error: unknown) {
+        return toolError('get_app_install_metrics', args, error);
+      }
+    })
+  );
+
+  // Tool: get_software_inventory — installed-software catalog from the SoftwareInventory table.
+  // Registered for ALL callers, but role-aware: a non-GA caller only ever sees their own tenant's
+  // inventory (no tenantId / no cross-tenant scope in the schema — nothing to leak or tempt with).
+  // A Global Admin additionally gets a tenantId selector and a cross-tenant "unmatched" (CPE-gap)
+  // scope. Both inventory endpoints return everything at once, so the per-tenant inventory is paged
+  // client-side (paginateInventory); the unmatched scope uses the backend's own skip/take cursor.
+  server.registerTool(
+    'get_software_inventory',
+    {
+      title: 'Software Inventory',
+      description: ga
+        ? 'List installed software discovered on enrolled devices, deduplicated per tenant (normalized vendor/name/' +
+          'version, publisher, registry source, CPE mapping for vulnerability correlation, session count, last seen). ' +
+          'scope="inventory" (default) returns one tenant\'s full catalog — pass tenantId to choose the tenant. ' +
+          'scope="unmatched" returns the cross-tenant list of software with no CPE mapping yet (the CPE-mapping gaps), ' +
+          'ranked by how many sessions reference them. ' +
+          'Results are paged: when "nextLink" is present, pass that whole string back as "continuation"; stop when it is absent.'
+        : 'List the installed software discovered on your tenant\'s enrolled devices, deduplicated (normalized ' +
+          'vendor/name/version, publisher, registry source, how many sessions reference it, last seen). ' +
+          'Use this to see your device software portfolio. ' +
+          'Results are paged: when "nextLink" is present, pass that whole string back as "continuation"; stop when it is absent.',
+      inputSchema: {
+        ...(ga ? {
+          tenantId: z.string().optional()
+            .describe('Tenant whose inventory to read (required for scope="inventory" as Global Admin; ignored for scope="unmatched").'),
+          scope: z.enum(['inventory', 'unmatched']).optional().default('inventory')
+            .describe('"inventory" = one tenant\'s full software catalog (needs tenantId). "unmatched" = cross-tenant software with no CPE mapping yet.'),
+        } : {}),
+        pageSize: z.coerce.number().int().min(1).max(500).optional().default(100)
+          .describe('Page size (1-500, default 100). Follow nextLink to fetch more.'),
+        continuation: z.string().optional()
+          .describe('The "continuation"/"nextLink" value from a prior response to fetch the next page.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => withToolTelemetry('get_software_inventory', async () => {
+      try {
+        const { tenantId, scope, pageSize, continuation } = args as {
+          tenantId?: string; scope?: 'inventory' | 'unmatched'; pageSize: number; continuation?: string;
+        };
+        // GA-only cross-tenant CPE-gap view. The backend paginates server-side (skip/take), so we
+        // map our integer continuation onto skip and synthesize the nextLink from total.
+        if (ga && scope === 'unmatched') {
+          const m = continuation ? /^unmatched-offset:(\d+)$/.exec(continuation) : null;
+          const skip = m ? parseInt(m[1], 10) : 0;
+          const data = await apiFetch(`/api/vulnerability/unmatched-software${buildQuery({ skip, take: pageSize })}`) as { software?: unknown[]; total?: number };
+          const total = data?.total ?? 0;
+          const nextOffset = skip + pageSize;
+          const nextLink = nextOffset < total ? `unmatched-offset:${nextOffset}` : null;
+          return toolResultText({ ...data, offset: skip, nextLink }, MAX_RESULT_SIZE_CHARS.adminStream);
+        }
+        // Per-tenant inventory. GA → /api/vulnerability/software-inventory (needs tenantId);
+        // Tenant-Admin → /api/metrics/software-inventory (JWT-scoped; tenantId not in schema).
+        // Endpoint returns the whole inventory in one shot, so page it client-side.
+        const path = pickGlobalOrTenantPath('/api/vulnerability/software-inventory', '/api/metrics/software-inventory');
+        const data = await apiFetch(`${path}${buildQuery({ tenantId })}`);
+        return toolResultText(paginateInventory(data, pageSize, continuation), MAX_RESULT_SIZE_CHARS.adminStream);
+      } catch (error: unknown) {
+        return toolError('get_software_inventory', args, error);
       }
     })
   );

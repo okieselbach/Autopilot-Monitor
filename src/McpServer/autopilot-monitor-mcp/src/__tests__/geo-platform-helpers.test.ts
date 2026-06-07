@@ -7,7 +7,7 @@
  *    sessions; the cap and a truncated flag are now surfaced.
  */
 import { describe, it, expect } from 'vitest';
-import { inferGeoGroupBy, buildGeoLocationParams, platformWindowEcho, paginateUsage } from '../tools/admin.js';
+import { inferGeoGroupBy, buildGeoLocationParams, platformWindowEcho, paginateUsage, paginateInventory } from '../tools/admin.js';
 
 describe('inferGeoGroupBy', () => {
   it('treats a single-segment key as country', () => {
@@ -117,5 +117,45 @@ describe('paginateUsage', () => {
 
   it('handles a null/non-object payload defensively', () => {
     expect(paginateUsage(null, 200)).toEqual({ records: [], totalCount: 0, count: 0, offset: 0, nextLink: null });
+  });
+});
+
+describe('paginateInventory', () => {
+  const inventory = Array.from({ length: 5 }, (_, i) => ({ normalizedName: `app-${i}`, cpeUri: '' }));
+  const payload = { success: true, tenantId: 't1', total: 5, matched: 0, unmatched: 5, inventory };
+
+  it('slices the first page and emits a nextLink while more remain, echoing summary fields', () => {
+    const out = paginateInventory(payload, 2);
+    expect(out.success).toBe(true);
+    expect(out.tenantId).toBe('t1'); // top-level summary fields echoed verbatim
+    expect(out.total).toBe(5);
+    expect(out.matched).toBe(0);
+    expect(out.count).toBe(2);
+    expect(out.offset).toBe(0);
+    expect(out.inventory).toEqual(inventory.slice(0, 2));
+    expect(out.nextLink).toBe('inv-offset:2');
+  });
+
+  it('follows a continuation cursor to the next slice', () => {
+    const out = paginateInventory(payload, 2, 'inv-offset:2');
+    expect(out.offset).toBe(2);
+    expect(out.inventory).toEqual(inventory.slice(2, 4));
+    expect(out.nextLink).toBe('inv-offset:4');
+  });
+
+  it('drops nextLink on the final page', () => {
+    const out = paginateInventory(payload, 2, 'inv-offset:4');
+    expect(out.count).toBe(1);
+    expect(out.inventory).toEqual(inventory.slice(4));
+    expect(out.nextLink).toBeNull();
+  });
+
+  it('passes an unexpected shape (no inventory array) through untouched', () => {
+    const weird = { success: true, tenantId: 't1', somethingElse: 42 };
+    expect(paginateInventory(weird, 200)).toEqual(weird);
+  });
+
+  it('handles a null/non-object payload defensively', () => {
+    expect(paginateInventory(null, 200)).toEqual({ inventory: [], total: 0, count: 0, offset: 0, nextLink: null });
   });
 });

@@ -43,51 +43,10 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var allSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
-                // Aggregate: slowest apps (avg duration) and top failing apps
-                var appGroups = summaries.GroupBy(s => s.AppName).Select(g =>
-                {
-                    var completed = g.Where(s => s.Status == "Succeeded").ToList();
-                    var failed = g.Where(s => s.Status == "Failed").ToList();
-                    var total = g.Count();
-
-                    return new
-                    {
-                        appName = g.Key,
-                        totalInstalls = total,
-                        succeeded = completed.Count,
-                        failed = failed.Count,
-                        failureRate = total > 0 ? Math.Round((double)failed.Count / total * 100, 1) : 0,
-                        avgDurationSeconds = completed.Count > 0 ? Math.Round(completed.Average(s => s.DurationSeconds), 0) : 0,
-                        maxDurationSeconds = completed.Count > 0 ? completed.Max(s => s.DurationSeconds) : 0,
-                        avgDownloadBytes = completed.Count > 0 ? (long)completed.Average(s => s.DownloadBytes) : 0,
-                        topFailureCodes = failed
-                            .Where(f => !string.IsNullOrEmpty(f.FailureCode))
-                            .GroupBy(f => f.FailureCode)
-                            .OrderByDescending(fc => fc.Count())
-                            .Take(3)
-                            .Select(fc => new { code = fc.Key, count = fc.Count() })
-                    };
-                }).ToList();
-
-                var slowestApps = MetricsMath.SelectSlowestApps(
-                    appGroups, a => a.succeeded, a => (double)a.avgDurationSeconds, minSamples: 3, take: 10);
-
-                var topFailingApps = appGroups
-                    .Where(a => a.failed > 0)
-                    .OrderByDescending(a => a.failed)
-                    .ThenByDescending(a => a.failureRate)
-                    .Take(10)
-                    .ToList();
-
+                // Aggregation (slowest/failing ranking + Delivery Optimization rollup) is shared
+                // verbatim with the global function; see MetricsMath.BuildAppMetricsPayload.
                 var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteAsJsonAsync(new
-                {
-                    success = true,
-                    totalApps = appGroups.Count,
-                    totalInstalls = summaries.Count,
-                    slowestApps,
-                    topFailingApps
-                });
+                await response.WriteAsJsonAsync(MetricsMath.BuildAppMetricsPayload(summaries));
 
                 return response;
             }

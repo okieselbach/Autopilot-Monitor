@@ -1,3 +1,5 @@
+using AutopilotMonitor.Shared.Models;
+
 namespace AutopilotMonitor.Functions.Helpers;
 
 /// <summary>
@@ -5,6 +7,94 @@ namespace AutopilotMonitor.Functions.Helpers;
 /// </summary>
 public static class MetricsMath
 {
+    /// <summary>
+    /// Builds the complete app-metrics response object from a (pre-time-filtered) set of app
+    /// install summaries. Single source of truth for both the tenant (<c>metrics/app</c>) and
+    /// global (<c>global/metrics/app</c>) functions, which previously carried a verbatim copy of
+    /// this GroupBy aggregation — keeping the Delivery Optimization rollup and the slowest/failing
+    /// ranking in one place removes that drift risk.
+    ///
+    /// The Delivery Optimization rollup sums bytes across every row in an app group (not just the
+    /// successful ones): DO telemetry is recorded during the download regardless of the install's
+    /// final status. Peer bytes and Microsoft Connected Cache (MCC) bytes are reported separately —
+    /// MCC is counted apart from peers by DO — and offload% credits both as "not pulled from the CDN".
+    /// </summary>
+    public static object BuildAppMetricsPayload(IEnumerable<AppInstallSummary> summaries)
+    {
+        var summaryList = summaries as IList<AppInstallSummary> ?? summaries.ToList();
+
+        var appGroups = summaryList.GroupBy(s => s.AppName).Select(g =>
+        {
+            var completed = g.Where(s => s.Status == "Succeeded").ToList();
+            var failed = g.Where(s => s.Status == "Failed").ToList();
+            var total = g.Count();
+
+            var doTotal = g.Sum(s => s.DoTotalBytesDownloaded);
+            var doPeers = g.Sum(s => s.DoBytesFromPeers);
+            var doCacheServer = g.Sum(s => s.DoBytesFromCacheServer);
+            var doHttp = g.Sum(s => s.DoBytesFromHttp);
+
+            return new
+            {
+                appName = g.Key,
+                totalInstalls = total,
+                succeeded = completed.Count,
+                failed = failed.Count,
+                failureRate = total > 0 ? Math.Round((double)failed.Count / total * 100, 1) : 0,
+                avgDurationSeconds = completed.Count > 0 ? Math.Round(completed.Average(s => s.DurationSeconds), 0) : 0,
+                maxDurationSeconds = completed.Count > 0 ? completed.Max(s => s.DurationSeconds) : 0,
+                avgDownloadBytes = completed.Count > 0 ? (long)completed.Average(s => s.DownloadBytes) : 0,
+                doTotalBytesDownloaded = doTotal,
+                doBytesFromPeers = doPeers,
+                doBytesFromCacheServer = doCacheServer,
+                doBytesFromHttp = doHttp,
+                peerOffloadPercent = OffloadPercent(doPeers + doCacheServer, doTotal),
+                topFailureCodes = failed
+                    .Where(f => !string.IsNullOrEmpty(f.FailureCode))
+                    .GroupBy(f => f.FailureCode)
+                    .OrderByDescending(fc => fc.Count())
+                    .Take(3)
+                    .Select(fc => new { code = fc.Key, count = fc.Count() })
+            };
+        }).ToList();
+
+        var slowestApps = SelectSlowestApps(
+            appGroups, a => a.succeeded, a => (double)a.avgDurationSeconds, minSamples: 3, take: 10);
+
+        var topFailingApps = appGroups
+            .Where(a => a.failed > 0)
+            .OrderByDescending(a => a.failed)
+            .ThenByDescending(a => a.failureRate)
+            .Take(10)
+            .ToList();
+
+        var totalBytes = summaryList.Sum(s => s.DoTotalBytesDownloaded);
+        var fromPeers = summaryList.Sum(s => s.DoBytesFromPeers);
+        var fromCacheServer = summaryList.Sum(s => s.DoBytesFromCacheServer);
+        var fromHttp = summaryList.Sum(s => s.DoBytesFromHttp);
+
+        return new
+        {
+            success = true,
+            totalApps = appGroups.Count,
+            totalInstalls = summaryList.Count,
+            slowestApps,
+            topFailingApps,
+            deliveryOptimization = new
+            {
+                totalBytesDownloaded = totalBytes,
+                fromPeers,
+                fromCacheServer,
+                fromHttp,
+                peerOffloadPercent = OffloadPercent(fromPeers + fromCacheServer, totalBytes),
+            }
+        };
+    }
+
+    /// <summary>Share of total bytes (0-100, one decimal) not pulled from the CDN. 0 when no bytes.</summary>
+    private static double OffloadPercent(long offloaded, long total)
+        => total > 0 ? Math.Round((double)offloaded / total * 100, 1) : 0;
+
     /// <summary>
     /// Calculates the nearest-rank percentile of an ascending-sorted value list,
     /// rounded to one decimal place. Callers MUST pass values pre-sorted ascending.
