@@ -137,12 +137,12 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Monitoring",
     visibility: "adminOrOperator",
     items: [
+      { id: "progress", label: "Progress Portal", href: "/progress", icon: <MonitorIcon /> },
+      { id: "geographic-performance", label: "Geographic Perf.", href: "/geographic-performance", icon: <GlobeAltIcon /> },
       { id: "fleet-health", label: "Fleet Health", href: "/fleet-health", icon: <ChartBarIcon /> },
+      { id: "sla", label: "SLA Compliance", href: "/sla", icon: <ShieldCheckIcon /> },
       { id: "apps", label: "Software", href: "/apps", icon: <CubeIcon /> },
       { id: "usage-metrics", label: "Usage Metrics", href: "/usage-metrics", icon: <TrendingUpIcon /> },
-      { id: "geographic-performance", label: "Geographic Perf.", href: "/geographic-performance", icon: <GlobeAltIcon /> },
-      { id: "sla", label: "SLA Compliance", href: "/sla", icon: <ShieldCheckIcon /> },
-      { id: "progress", label: "Progress Portal", href: "/progress", icon: <MonitorIcon /> },
     ],
   },
   {
