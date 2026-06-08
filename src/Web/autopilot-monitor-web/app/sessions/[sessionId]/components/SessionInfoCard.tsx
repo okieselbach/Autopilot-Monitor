@@ -14,6 +14,9 @@ interface SessionInfoCardProps {
 }
 
 export default function SessionInfoCard({ session, enrollmentDuration, displayStatus, isGatherRulesSession, ntpOffset, configMgrDetected }: SessionInfoCardProps) {
+  const lastContactTooltip = session.lastEventAt
+    ? `Last contact: ${new Date(session.lastEventAt).toLocaleString([], { dateStyle: "short", timeStyle: "medium" })}`
+    : undefined;
   return (
     <div className="bg-white shadow rounded-lg p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
@@ -52,9 +55,9 @@ export default function SessionInfoCard({ session, enrollmentDuration, displaySt
           copyText={session.sessionId}
         />
         <InfoItem label="Status" value={<StatusBadge status={displayStatus} failureReason={session.failureReason} failureSource={session.failureSource} adminMarkedAction={session.adminMarkedAction} />} />
-        <InfoItem label="Started" value={new Date(session.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} />
-        <InfoItem label="Duration" value={enrollmentDuration ?? `${Math.round(session.durationSeconds / 60)} min`} />
-        <InfoItem label="Events" value={session.eventCount.toString()} />
+        <InfoItem label="Started" value={new Date(session.startedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} tooltip={lastContactTooltip} />
+        <InfoItem label="Duration" value={enrollmentDuration ?? `${Math.round(session.durationSeconds / 60)} min`} tooltip={lastContactTooltip} />
+        <InfoItem label="Events" value={session.eventCount.toString()} tooltip={lastContactTooltip} />
       </div>
       {ntpOffset && Math.abs(ntpOffset.offsetSeconds) > 30 && (
         <div className="mt-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
@@ -87,7 +90,7 @@ export default function SessionInfoCard({ session, enrollmentDuration, displaySt
   );
 }
 
-function InfoItem({ label, value, copyText }: { label: string; value: React.ReactNode; copyText?: string }) {
+function InfoItem({ label, value, copyText, tooltip }: { label: string; value: React.ReactNode; copyText?: string; tooltip?: string }) {
   const [copied, setCopied] = useState(false);
 
   const copyValue = async () => {
@@ -102,10 +105,10 @@ function InfoItem({ label, value, copyText }: { label: string; value: React.Reac
   };
 
   return (
-    <div>
+    <div title={tooltip}>
       <div className="text-sm font-medium text-gray-500">{label}</div>
       <div className="mt-1 group flex items-center gap-1.5">
-        <div className="text-sm text-gray-900 break-all">{value}</div>
+        <div className={`text-sm text-gray-900 break-all${tooltip ? " cursor-help" : ""}`}>{value}</div>
         {copyText && (
           <button
             type="button"
