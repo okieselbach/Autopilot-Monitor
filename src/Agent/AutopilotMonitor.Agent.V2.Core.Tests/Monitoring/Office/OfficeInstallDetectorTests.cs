@@ -157,8 +157,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
         }
 
         [Fact]
-        public void Scenario_value_change_emits_one_progress_event()
+        public void Scenario_value_churn_alone_emits_no_progress_heartbeat()
         {
+            // Field session 58d52632: during an active C2R operation the worker rewrites the
+            // undocumented Scenario values many times/second and the subtree RegNotify watcher fires on
+            // each write. Those raw values are NOT a surfaced progress dimension, so churn alone must NOT
+            // emit progress (it previously produced bursts of identical, frozen-% progress events).
             var s1 = ActiveStreaming();
             s1.ScenarioValues["INSTALL\\CurrentOperation"] = "Downloading";
             using var rig = new Rig(s1);
@@ -166,7 +170,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             rig.Sut.OnWorkerStarted(); // started
 
             var s2 = ActiveStreaming();
-            s2.ScenarioValues["INSTALL\\CurrentOperation"] = "Applying"; // changed value
+            s2.ScenarioValues["INSTALL\\CurrentOperation"] = "Applying"; // churn only — no version/DO movement
+            rig.Current = s2;
+            rig.Sut.OnRegistryChanged();
+            rig.Sut.OnRegistryChanged();
+
+            var events = rig.OfficeEvents();
+            Assert.Single(events);
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[0]));
+        }
+
+        [Fact]
+        public void Version_change_emits_one_progress_event()
+        {
+            using var rig = new Rig(ActiveStreaming());
+
+            rig.Sut.OnWorkerStarted(); // started
+
+            var s2 = ActiveStreaming();
+            s2.VersionToReport = "16.0.20026.20140"; // real forward movement
             rig.Current = s2;
             rig.Sut.OnRegistryChanged(); // progress
 

@@ -193,9 +193,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         private static string PhaseOf(OfficeC2RSnapshot snap) => "Installing";
 
         /// <summary>
-        /// Stable signature of everything we treat as "progress". A change in any of these (registry
-        /// phase/version/scenario-value, or a DO byte advance) emits one progress event; an unchanged
-        /// signature emits nothing — this keeps the detector heartbeat-free.
+        /// Stable signature of the <b>observable</b> progress dimensions only — the values we actually
+        /// surface in the payload and that represent real forward movement: the reported version, the
+        /// active scenario name, and the DO download (bytes / percent). A change in any of these emits
+        /// one progress event; an unchanged signature emits nothing — keeping the detector heartbeat-free.
+        /// <para>
+        /// The raw <c>Scenario</c> value dict is deliberately EXCLUDED. During an active C2R operation
+        /// the worker rewrites those undocumented values many times per second, and the RegNotify watcher
+        /// (subtree) fires on each write. Folding that churn into the signature produced bursts of
+        /// progress events within the same second that all carried an identical, frozen download-% (the
+        /// 3s DO sample had not advanced) and no surfaced cause — pure noise (field session 58d52632).
+        /// Progress is therefore tied to observable movement, which naturally paces it to the DO cadence;
+        /// the registry push still drives error-code discovery (and, later, TasksState phase detection).
+        /// </para>
         /// </summary>
         private static string BuildProgressSignature(OfficeC2RSnapshot snap, OfficeDoSample? doSample)
         {
@@ -204,11 +214,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                 "version=" + (snap.VersionToReport ?? string.Empty),
                 "scenario=" + (snap.ActiveScenarioName ?? string.Empty),
             };
-            if (snap.ScenarioValues != null && snap.ScenarioValues.Count > 0)
-            {
-                foreach (var kv in snap.ScenarioValues.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-                    parts.Add(kv.Key + "=" + kv.Value);
-            }
             if (doSample != null)
             {
                 parts.Add("doBytes=" + doSample.TotalBytesDownloaded);
