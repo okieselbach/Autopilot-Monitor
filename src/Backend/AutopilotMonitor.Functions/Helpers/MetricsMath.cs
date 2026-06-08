@@ -88,6 +88,186 @@ public static class MetricsMath
         };
     }
 
+    /// <summary>
+    /// Builds the complete Fleet Health response from the (already time-windowed) session list.
+    /// Single source of truth for the tenant (<c>metrics/fleet-health</c>) and global
+    /// (<c>global/metrics/fleet-health</c>) functions. Replaces the previous client-side path that
+    /// drained up to 200k raw sessions into the browser and ran these aggregations on the main
+    /// thread. Semantics are preserved verbatim from that client code, notably: success rate is
+    /// over ALL sessions (not just terminal ones), and average duration counts every
+    /// non-in-progress session that carries a positive duration (failures included).
+    /// </summary>
+    public static FleetHealthMetrics BuildFleetHealthPayload(IReadOnlyList<SessionSummary> sessions, int days)
+    {
+        int succeeded = 0, failed = 0, inProgress = 0;
+        long completedDurationSeconds = 0;
+        int completedWithDurationCount = 0;
+
+        foreach (var s in sessions)
+        {
+            switch (s.Status)
+            {
+                case SessionStatus.Succeeded: succeeded++; break;
+                case SessionStatus.Failed: failed++; break;
+                case SessionStatus.InProgress: inProgress++; break;
+            }
+
+            if (s.Status != SessionStatus.InProgress && s.DurationSeconds is int d && d > 0)
+            {
+                completedDurationSeconds += d;
+                completedWithDurationCount++;
+            }
+        }
+
+        int total = sessions.Count;
+        var stats = new FleetHealthStats
+        {
+            Total = total,
+            Succeeded = succeeded,
+            Failed = failed,
+            InProgress = inProgress,
+            SuccessRate = total > 0 ? Math.Round((double)succeeded / total * 100, 1) : 0,
+            AvgDurationMinutes = completedWithDurationCount > 0
+                ? (int)Math.Round((double)completedDurationSeconds / completedWithDurationCount / 60.0, MidpointRounding.AwayFromZero)
+                : 0,
+        };
+
+        return new FleetHealthMetrics
+        {
+            Success = true,
+            Days = days,
+            Stats = stats,
+            DailyData = BuildFleetDailyData(sessions, days),
+            FailureReasons = BuildFleetFailureReasons(sessions),
+            ModelHealth = BuildFleetModelHealth(sessions),
+            SlowestModels = BuildFleetSlowestModels(sessions),
+            TopFailingModels = BuildFleetTopFailingModels(sessions),
+            ComputedAt = DateTime.UtcNow,
+        };
+    }
+
+    /// <summary>
+    /// One point per day in the window, oldest-first, so every day renders even with zero
+    /// enrollments. Sessions are bucketed by their StartedAt calendar day, treated as UTC to
+    /// match the rest of the stats pipeline (see AggregateSessionStats' UTC-midnight boundary).
+    /// </summary>
+    private static List<FleetDailyPoint> BuildFleetDailyData(IReadOnlyList<SessionSummary> sessions, int days)
+    {
+        var buckets = new Dictionary<string, (int Success, int Failed)>();
+        foreach (var s in sessions)
+        {
+            if (s.Status != SessionStatus.Succeeded && s.Status != SessionStatus.Failed) continue;
+            var key = s.StartedAt.ToString("yyyy-MM-dd");
+            buckets.TryGetValue(key, out var cur);
+            if (s.Status == SessionStatus.Succeeded) cur.Success++;
+            else cur.Failed++;
+            buckets[key] = cur;
+        }
+
+        var result = new List<FleetDailyPoint>(days);
+        var today = DateTime.UtcNow.Date;
+        for (int i = days - 1; i >= 0; i--)
+        {
+            var date = today.AddDays(-i).ToString("yyyy-MM-dd");
+            buckets.TryGetValue(date, out var c);
+            result.Add(new FleetDailyPoint { Date = date, Success = c.Success, Failed = c.Failed });
+        }
+        return result;
+    }
+
+    private static List<FleetFailureReason> BuildFleetFailureReasons(IReadOnlyList<SessionSummary> sessions)
+    {
+        var reasons = new Dictionary<string, int>();
+        foreach (var s in sessions)
+        {
+            if (s.Status != SessionStatus.Failed) continue;
+            var reason = string.IsNullOrEmpty(s.FailureReason) ? "Unknown" : s.FailureReason;
+            // Collapse very long reasons to a 50-char prefix so near-identical messages group.
+            if (reason.Length > 50) reason = reason.Substring(0, 50) + "...";
+            reasons[reason] = reasons.GetValueOrDefault(reason) + 1;
+        }
+        return reasons
+            .OrderByDescending(kv => kv.Value)
+            .Take(5)
+            .Select(kv => new FleetFailureReason { Reason = kv.Key, Count = kv.Value })
+            .ToList();
+    }
+
+    private static List<FleetModelHealth> BuildFleetModelHealth(IReadOnlyList<SessionSummary> sessions)
+    {
+        var models = new Dictionary<string, FleetModelHealth>();
+        foreach (var s in sessions)
+        {
+            var key = FleetModelKey(s);
+            if (!models.TryGetValue(key, out var m))
+            {
+                m = new FleetModelHealth { Model = key };
+                models[key] = m;
+            }
+            m.Total++;
+            if (s.Status == SessionStatus.Succeeded) m.Succeeded++;
+        }
+        return models.Values
+            .OrderByDescending(m => m.Total)
+            .Take(6)
+            .ToList();
+    }
+
+    private static List<FleetSlowModel> BuildFleetSlowestModels(IReadOnlyList<SessionSummary> sessions)
+    {
+        var acc = new Dictionary<string, (long TotalDuration, int Count)>();
+        foreach (var s in sessions)
+        {
+            if (s.Status != SessionStatus.Succeeded) continue;
+            if (s.DurationSeconds is not int d || d <= 0) continue;
+            var key = FleetModelKey(s);
+            acc.TryGetValue(key, out var cur);
+            acc[key] = (cur.TotalDuration + d, cur.Count + 1);
+        }
+        return acc
+            .Select(kv => new FleetSlowModel
+            {
+                Model = kv.Key,
+                AvgMinutes = (int)Math.Round((double)kv.Value.TotalDuration / kv.Value.Count / 60.0, MidpointRounding.AwayFromZero),
+                Count = kv.Value.Count,
+            })
+            .OrderByDescending(m => m.AvgMinutes)
+            .Take(5)
+            .ToList();
+    }
+
+    private static List<FleetFailingModel> BuildFleetTopFailingModels(IReadOnlyList<SessionSummary> sessions)
+    {
+        var acc = new Dictionary<string, (int Failed, int Total)>();
+        foreach (var s in sessions)
+        {
+            var key = FleetModelKey(s);
+            acc.TryGetValue(key, out var cur);
+            cur.Total++;
+            if (s.Status == SessionStatus.Failed) cur.Failed++;
+            acc[key] = cur;
+        }
+        return acc
+            .Where(kv => kv.Value.Failed > 0)
+            .Select(kv => new FleetFailingModel
+            {
+                Model = kv.Key,
+                Failed = kv.Value.Failed,
+                Total = kv.Value.Total,
+                FailureRate = (int)Math.Round((double)kv.Value.Failed / kv.Value.Total * 100, MidpointRounding.AwayFromZero),
+            })
+            .OrderByDescending(m => m.Failed)
+            .Take(5)
+            .ToList();
+    }
+
+    /// <summary>"{Manufacturer} {Model}" trimmed, or "Unknown" when both are blank.</summary>
+    private static string FleetModelKey(SessionSummary s)
+    {
+        var key = $"{s.Manufacturer} {s.Model}".Trim();
+        return string.IsNullOrEmpty(key) ? "Unknown" : key;
+    }
+
     /// <summary>Share of total bytes (0-100, one decimal) not pulled from the CDN. 0 when no bytes.</summary>
     private static double OffloadPercent(long offloaded, long total)
         => total > 0 ? Math.Round((double)offloaded / total * 100, 1) : 0;
