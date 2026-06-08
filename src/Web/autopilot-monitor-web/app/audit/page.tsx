@@ -31,7 +31,7 @@ type EntityTypeFilter = string;
 // are explicitly auditing cleanup runs.
 const NOISY_ACTIONS = new Set(['deletion_started', 'deletion_completed']);
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 15;
 
 function defaultIsoDateFrom(): string {
   // 30 days ago, ISO 8601 UTC, midnight — matches the backend's default
