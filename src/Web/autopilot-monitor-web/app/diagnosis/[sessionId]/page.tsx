@@ -34,6 +34,18 @@ export default function DiagnosisPage() {
   const lastFetchedSessionId = useRef<string | null>(null);
   const hasJoinedGroups = useRef(false);
   const sessionIdRef = useRef(sessionId);
+  // Eager tenant hydration lets the session + analysis fetches run in parallel,
+  // so the loading gate must wait for BOTH — otherwise a fast analysis response
+  // (or a slow/failed session fetch) would clear loading while `session` is
+  // still null and the page would flash a wrong IN PROGRESS / empty state.
+  const sessionFetchDone = useRef(false);
+  const analysisFetchDone = useRef(false);
+
+  const finishLoadingWhenSettled = () => {
+    if (sessionFetchDone.current && analysisFetchDone.current) {
+      setLoading(false);
+    }
+  };
 
   const { on, off, isConnected, joinGroup, leaveGroup } = useSignalR();
   const { tenantId } = useTenant();
@@ -49,7 +61,10 @@ export default function DiagnosisPage() {
     if (lastFetchedSessionId.current !== sessionId) {
       hasInitialFetch.current = false;
       lastFetchedSessionId.current = sessionId;
+      sessionFetchDone.current = false;
+      analysisFetchDone.current = false;
       setSessionTenantId(null);
+      setLoading(true);
     }
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
@@ -150,6 +165,9 @@ export default function DiagnosisPage() {
         console.error("Failed to fetch session details:", error);
         addNotification('error', 'Backend Not Reachable', 'Unable to load session details. Please check your connection.', 'diagnosis-fetch-error');
       }
+    } finally {
+      sessionFetchDone.current = true;
+      finishLoadingWhenSettled();
     }
   };
 
@@ -201,7 +219,8 @@ export default function DiagnosisPage() {
         console.error("Failed to fetch analysis results:", error);
       }
     } finally {
-      setLoading(false);
+      analysisFetchDone.current = true;
+      finishLoadingWhenSettled();
     }
   };
 
