@@ -353,7 +353,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // RegNotifyChangeKeyValue, stop via Process.Exited. No idle polling. Constructed first so
             // the DO host can share its process-start signal and feed Office DO stats back to it.
             // Kill-switchable via remote config.
-            OfficeInstallDetectorHost officeHost = null;
+            OfficeInstallDetectorHost? officeHost = null;
             if (collectors.EnableOfficeInstallDetector)
             {
                 officeHost = new OfficeInstallDetectorHost(
@@ -380,7 +380,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     intervalSeconds: collectors.DeliveryOptimizationIntervalSeconds,
                     imeHost: _imeLogHost,
                     officeProcessWatcher: officeHost?.ProcessWatcher,
-                    onOfficeDoSample: officeHost != null ? officeHost.SubmitDoSample : (Action<Monitoring.Telemetry.Office.OfficeDoSample>)null);
+                    onOfficeDoSample: officeHost != null ? officeHost.SubmitDoSample : (Action<Monitoring.Telemetry.Office.OfficeDoSample>?)null);
                 hosts.Add(doHost);
             }
 
