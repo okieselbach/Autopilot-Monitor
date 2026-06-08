@@ -7,9 +7,20 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import dynamic from "next/dynamic";
 import { SlaGauge } from "@/components/charts/SlaGauge";
-import AppLineChart from "@/components/charts/AppLineChart";
 import { chartColors } from "@/components/charts/chartTheme";
+
+// recharts (~300 kB) only renders below the fold here. Lazy-load it so it
+// stays out of the /sla route chunk until the trend chart is actually shown.
+const AppLineChart = dynamic(() => import("@/components/charts/AppLineChart"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-64 items-center justify-center text-sm text-gray-400">
+      Loading chart…
+    </div>
+  ),
+});
 import { trackEvent } from "@/lib/appInsights";
 import { useGlobalAdminScope } from "@/hooks";
 import { GlobalAdminBanner } from "@/components/GlobalAdminBanner";

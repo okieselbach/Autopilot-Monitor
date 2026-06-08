@@ -1,15 +1,30 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDecisionGraph } from "./hooks/useDecisionGraph";
 import { useSessionSignals } from "./hooks/useSessionSignals";
 import { useSessionAnchorEvents } from "./hooks/useSessionAnchorEvents";
-import { DecisionGraph } from "./components/DecisionGraph";
 import { SignalStream } from "./components/SignalStream";
 import { LifecycleAnchors } from "./components/LifecycleAnchors";
+
+// @xyflow/react + dagre (~250 kB) are only needed on the "graph" tab. Defer
+// them so opening the inspector on signals/anchors/verifier doesn't pay for
+// the graph libraries (and their CSS).
+const DecisionGraph = dynamic(
+  () => import("./components/DecisionGraph").then((m) => m.DecisionGraph),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded border border-gray-200 bg-white p-8 text-center text-gray-500">
+        Loading decision graph…
+      </div>
+    ),
+  },
+);
 
 type Tab = "graph" | "signals" | "anchors" | "verifier";
 

@@ -3,6 +3,16 @@ import withBundleAnalyzer from "@next/bundle-analyzer";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  experimental: {
+    // Rewrite these heavy packages to per-module imports so unused exports are
+    // tree-shaken out of the route chunks that touch them.
+    optimizePackageImports: [
+      "recharts",
+      "@xyflow/react",
+      "@microsoft/signalr",
+      "@azure/msal-react",
+    ],
+  },
   async redirects() {
     return [
       // Permanent redirect for old /landing URL — all SEO equity flows to /

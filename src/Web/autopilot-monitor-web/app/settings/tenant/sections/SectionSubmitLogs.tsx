@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { zipSync } from "fflate";
 import { useAuth } from "../../../../contexts/AuthContext";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { api } from "@/lib/api";
@@ -32,6 +31,8 @@ async function bundleFiles(files: File[], zipName: string): Promise<{ base64: st
   for (const f of files) {
     entries[f.name] = new Uint8Array(await f.arrayBuffer());
   }
+  // Load fflate on demand so it stays out of the settings route chunk.
+  const { zipSync } = await import("fflate");
   const zipped = zipSync(entries);
   const base64 = btoa(zipped.reduce((data, byte) => data + String.fromCharCode(byte), ""));
   return { base64, fileName: zipName };

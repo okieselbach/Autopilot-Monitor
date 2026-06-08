@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { zipSync } from "fflate";
 import { Session, EnrollmentEvent, RuleResult } from "@/types";
 
 const MAX_AGENT_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -109,6 +108,9 @@ export default function ReportSessionModal({
         const buffer = await file.arrayBuffer();
         entries[file.name] = new Uint8Array(buffer);
       }
+      // fflate is only needed when zipping multi-file uploads — load on demand
+      // (module is cached after first import) to keep it out of the route chunk.
+      const { zipSync } = await import("fflate");
       const zipped = zipSync(entries);
       screenshotBase64 = btoa(
         zipped.reduce((data, byte) => data + String.fromCharCode(byte), "")
@@ -124,6 +126,7 @@ export default function ReportSessionModal({
       for (const file of agentLogFiles) {
         entries[file.name] = new Uint8Array(await file.arrayBuffer());
       }
+      const { zipSync } = await import("fflate");
       const zipped = zipSync(entries);
       agentLogBase64 = btoa(
         zipped.reduce((data, byte) => data + String.fromCharCode(byte), "")
