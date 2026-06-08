@@ -190,115 +190,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Single(rig.OfficeEvents());
         }
 
-        // ---------------------------------------------------------------- progress (no heartbeat)
+        // ---------------------------------------------------------------- no progress events
 
         [Fact]
-        public void Registry_change_without_real_delta_emits_no_progress_heartbeat()
+        public void Do_samples_after_start_emit_no_progress_events()
         {
+            // Progress was removed: a per-poll download-% is noise for Office (Connected-Cache delivery
+            // is near-instant and the multi-job aggregate never yields a clean 0→100 bar — field session
+            // 7da7dead). DO samples only update the data summarized once on completed.
             using var rig = new Rig(ActiveStreaming());
 
             rig.Sut.OnWorkerStarted(); // started
-            rig.Sut.OnRegistryChanged(); // identical snapshot — must NOT emit progress
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 2, FileSize = 1000, TotalBytesDownloaded = 250 });
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 3, FileSize = 1000, TotalBytesDownloaded = 620 });
             rig.Sut.OnRegistryChanged();
 
             var events = rig.OfficeEvents();
             Assert.Single(events);
             Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[0]));
-        }
-
-        [Fact]
-        public void Scenario_value_churn_alone_emits_no_progress_heartbeat()
-        {
-            // Field session 58d52632: during an active C2R operation the worker rewrites the
-            // undocumented Scenario values many times/second and the subtree RegNotify watcher fires on
-            // each write. Those raw values are NOT a surfaced progress dimension, so churn alone must NOT
-            // emit progress (it previously produced bursts of identical, frozen-% progress events).
-            var s1 = ActiveStreaming();
-            s1.ScenarioValues["INSTALL\\CurrentOperation"] = "Downloading";
-            using var rig = new Rig(s1);
-
-            rig.Sut.OnWorkerStarted(); // started
-
-            var s2 = ActiveStreaming();
-            s2.ScenarioValues["INSTALL\\CurrentOperation"] = "Applying"; // churn only — no version/DO movement
-            rig.Current = s2;
-            rig.Sut.OnRegistryChanged();
-            rig.Sut.OnRegistryChanged();
-
-            var events = rig.OfficeEvents();
-            Assert.Single(events);
-            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[0]));
-        }
-
-        [Fact]
-        public void Version_change_emits_one_progress_event()
-        {
-            using var rig = new Rig(ActiveStreaming());
-
-            rig.Sut.OnWorkerStarted(); // started
-
-            var s2 = ActiveStreaming();
-            s2.VersionToReport = "16.0.20026.20140"; // real forward movement
-            rig.Current = s2;
-            rig.Sut.OnRegistryChanged(); // progress
-
-            var events = rig.OfficeEvents();
-            Assert.Equal(2, events.Count);
-            Assert.Equal(Constants.EventTypes.OfficeInstallProgress, EventType(events[1]));
-        }
-
-        // ---------------------------------------------------------------- DO folding
-
-        [Fact]
-        public void Office_do_sample_folds_download_percent_into_progress()
-        {
-            using var rig = new Rig(ActiveStreaming());
-
-            rig.Sut.OnWorkerStarted(); // started
-
-            rig.Sut.OnOfficeDoSample(new OfficeDoSample
-            {
-                JobCount = 2,
-                FileSize = 1000,
-                TotalBytesDownloaded = 250,
-                BytesFromPeers = 100,
-                BytesFromHttp = 150,
-                PercentPeerCaching = 40,
-                DownloadMode = 1,
-            });
-
-            var events = rig.OfficeEvents();
-            Assert.Equal(2, events.Count);
-            var progress = events[1];
-            Assert.Equal(Constants.EventTypes.OfficeInstallProgress, EventType(progress));
-
-            var data = Data(progress);
-            Assert.Equal(250L, data["doTotalBytesDownloaded"]);
-            Assert.Equal(25, data["downloadPercent"]);
-            Assert.Equal(2, data["doJobCount"]);
-        }
-
-        [Fact]
-        public void Repeated_identical_do_sample_emits_no_progress()
-        {
-            using var rig = new Rig(ActiveStreaming());
-            rig.Sut.OnWorkerStarted();
-
-            var sample = new OfficeDoSample { JobCount = 1, FileSize = 1000, TotalBytesDownloaded = 250 };
-            rig.Sut.OnOfficeDoSample(sample);          // progress (bytes advanced)
-            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 1, FileSize = 1000, TotalBytesDownloaded = 250 }); // same bytes — no progress
-
-            var events = rig.OfficeEvents();
-            Assert.Equal(2, events.Count); // started + one progress only
         }
 
         // ---------------------------------------------------------------- completion (filesystem proof)
 
         [Fact]
-        public void TryFinalizeCompletion_with_core_binaries_emits_completed()
+        public void TryFinalizeCompletion_with_core_binaries_emits_completed_with_do_summary()
         {
             using var rig = new Rig(ActiveStreaming());
             rig.Sut.OnWorkerStarted(); // started
+
+            // A DO sample during the download — its breakdown is summarized once on completed.
+            // MCC network: BytesFromHttp includes the cache-server bytes → pure CDN = 1000-800 = 200.
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample
+            {
+                JobCount = 3,
+                FileSize = 1200,
+                TotalBytesDownloaded = 1000,
+                BytesFromCacheServer = 800,
+                BytesFromHttp = 1000,
+                BytesFromPeers = 0,
+                DownloadMode = 1,
+            });
 
             // Download ended + worker gone; the integrate phase has laid down the binaries on disk.
             rig.Current = CompletedIdle();          // InstallationPath-bearing snapshot, no error
@@ -314,6 +245,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal("Info", Severity(completed));
             Assert.Equal(true, Data(completed)["coreBinariesPresent"]);
             Assert.Equal("16.0.17628.20144", Data(completed)["versionReached"]);
+
+            var summary = Assert.IsType<Dictionary<string, object>>(Data(completed)["doSummary"]);
+            Assert.Equal(1000L, summary["totalBytesDownloaded"]);
+            Assert.Equal(800L, summary["bytesFromCacheServer"]);
+            Assert.Equal(200L, summary["bytesFromCdn"]);   // 1000 http - 800 cache
+            Assert.Equal(0L, summary["bytesFromPeers"]);
+            Assert.Equal(80, summary["percentFromCacheServer"]);
+            Assert.Equal(20, summary["percentFromCdn"]);
         }
 
         [Fact]
@@ -418,6 +357,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
         public void IsNonZeroNumericCode_only_treats_nonzero_numbers_as_errors(string? value, bool expected)
         {
             Assert.Equal(expected, OfficeInstallDetector.IsNonZeroNumericCode(value!));
+        }
+
+        // ---------------------------------------------------------------- core-binary on-disk probe
+
+        [Fact]
+        public void CoreBinariesPresentOnDisk_true_for_any_core_binary_under_enumerated_version_folder()
+        {
+            using var tmp = new TempDirectory();
+            // {InstallationPath}\root\Office16\EXCEL.EXE — version folder enumerated, not hardcoded.
+            var versionDir = System.IO.Path.Combine(tmp.Path, "root", "Office16");
+            System.IO.Directory.CreateDirectory(versionDir);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(versionDir, "EXCEL.EXE"), "stub");
+
+            Assert.True(OfficeInstallDetector.CoreBinariesPresentOnDisk(tmp.Path, NewLogger(tmp.Path)));
+        }
+
+        [Fact]
+        public void CoreBinariesPresentOnDisk_false_when_absent_or_path_invalid()
+        {
+            using var tmp = new TempDirectory();
+            System.IO.Directory.CreateDirectory(System.IO.Path.Combine(tmp.Path, "root", "Office16")); // no binaries
+            var logger = NewLogger(tmp.Path);
+
+            Assert.False(OfficeInstallDetector.CoreBinariesPresentOnDisk(tmp.Path, logger));
+            Assert.False(OfficeInstallDetector.CoreBinariesPresentOnDisk(null, logger));
+            Assert.False(OfficeInstallDetector.CoreBinariesPresentOnDisk(System.IO.Path.Combine(tmp.Path, "does-not-exist"), logger));
         }
 
         // ---------------------------------------------------------------- ctor

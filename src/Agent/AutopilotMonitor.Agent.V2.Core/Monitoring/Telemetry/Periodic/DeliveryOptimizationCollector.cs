@@ -44,15 +44,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
         // Office is not an IME app, so we deliberately do NOT emit download_progress/do_telemetry for it
         // (that would create a phantom app in the backend AppInstallSummary).
         private readonly Action<OfficeDoSample> _onOfficeDoSample;
-        private readonly Action _onOfficeDownloadEnded;
 
         // Keep-awake sources for an Office install (any keeps us polling): the worker process is up
         // (_officeActive), an Office-CDN job was seen in the last poll (_officeJobsSeenLastPoll), or the
         // registry hinted an install is imminent (_officeExpectedPolls — a bounded probe window so a
         // Scenario\INSTALL that never produces a download does not keep us awake forever).
+        // Completion is NOT derived from the DO aggregate (unreliable: multi-job churn + Connected-Cache
+        // — see OfficeBinaryWatcher); we only surface started + progress here.
         private volatile bool _officeActive;
         private bool _officeJobsSeenLastPoll;
-        private bool _officeEndedNotified;
         private int _officeExpectedPolls;
 
         // Bounded probe budget after a registry "Office expected" hint, in polls (~ this × interval).
@@ -82,15 +82,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             Func<AppPackageStateList> getPackageStates,
             Action<AppPackageState> onDoTelemetryReceived,
             string logDirectory,
-            Action<OfficeDoSample> onOfficeDoSample = null,
-            Action onOfficeDownloadEnded = null)
+            Action<OfficeDoSample> onOfficeDoSample = null)
             : base(sessionId, tenantId, post, logger, intervalSeconds)
         {
             _getPackageStates = getPackageStates ?? throw new ArgumentNullException(nameof(getPackageStates));
             _onDoTelemetryReceived = onDoTelemetryReceived;
             _logFilePath = Path.Combine(logDirectory, LogFileName);
             _onOfficeDoSample = onOfficeDoSample;
-            _onOfficeDownloadEnded = onOfficeDownloadEnded;
         }
 
         /// <summary>Start dormant — timer does not fire until WakeUp() is called.</summary>
@@ -142,8 +140,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
         /// </summary>
         public void NotifyOfficeExpected()
         {
+            // Re-open the bounded probe window. The registry watcher can fire many times per second on
+            // ClickToRun value churn, so only log (at Debug) when the window actually (re)opens from
+            // closed — never a per-fire INFO line (field session 7da7dead logged ~4000 of them).
+            bool windowWasClosed = _officeExpectedPolls <= 0;
             _officeExpectedPolls = OfficeExpectedProbePolls;
-            Logger.Info("[DeliveryOptimizationCollector] Office install expected (registry Scenario\\INSTALL) — probing DO for Office CDN jobs");
+            if (windowWasClosed)
+                Logger.Debug("[DeliveryOptimizationCollector] Office install expected (registry Scenario\\INSTALL) — probing DO for Office CDN jobs");
             WakeUp();
         }
 
@@ -468,10 +471,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             }
 
             // Hand aggregated Office DO stats to the OfficeInstallDetector (folded into office_install_*).
-            // Unconditional now (Rev 3): the first sample with jobs is the detector's start trigger; a
-            // subsequent disappearance / 100% is the download-ended signal that arms the host's close.
+            // Unconditional (Rev 3): the first sample with jobs is the detector's start trigger; later
+            // samples fold a real download-% into progress. Completion is handled separately by the
+            // OfficeBinaryWatcher (the DO aggregate is unreliable for it), so we do NOT signal "ended".
             var officeJobsThisPoll = officeJobCount > 0;
-            var officeComplete = officeFileSize > 0 && officeTotalBytes >= officeFileSize;
 
             if (officeJobsThisPoll && _onOfficeDoSample != null)
             {
@@ -494,17 +497,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                 {
                     Logger.Warning($"[DeliveryOptimizationCollector] onOfficeDoSample threw: {ex.Message}");
                 }
-            }
-
-            // Download-ended signal (once): Office-CDN jobs were present and have now disappeared, or a
-            // job reached 100%. Arms the OfficeInstallDetectorHost's close/completion-probe schedule.
-            var officeDownloadEnded = !_officeEndedNotified &&
-                ((officeJobsThisPoll && officeComplete) || (!officeJobsThisPoll && _officeJobsSeenLastPoll));
-            if (officeDownloadEnded)
-            {
-                _officeEndedNotified = true;
-                try { _onOfficeDownloadEnded?.Invoke(); }
-                catch (Exception ex) { Logger.Warning($"[DeliveryOptimizationCollector] onOfficeDownloadEnded threw: {ex.Message}"); }
             }
 
             _officeJobsSeenLastPoll = officeJobsThisPoll;

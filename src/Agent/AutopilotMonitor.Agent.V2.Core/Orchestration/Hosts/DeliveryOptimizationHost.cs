@@ -52,8 +52,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     catch (Exception ex) { logger.Warning($"DeliveryOptimizationHost: OnDoTelemetryReceived invocation threw: {ex.Message}"); }
                 },
                 logDirectory: Environment.ExpandEnvironmentVariables(Constants.LogDirectory),
-                onOfficeDoSample: officeHost != null ? officeHost.SubmitDoSample : (Action<OfficeDoSample>?)null,
-                onOfficeDownloadEnded: officeHost != null ? officeHost.NotifyOfficeDownloadEnded : (Action?)null);
+                onOfficeDoSample: officeHost != null ? officeHost.SubmitDoSample : (Action<OfficeDoSample>?)null);
         }
 
         public void Start()

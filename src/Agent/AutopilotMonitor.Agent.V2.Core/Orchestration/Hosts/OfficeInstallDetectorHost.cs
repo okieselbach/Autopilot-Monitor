@@ -8,61 +8,53 @@ using AutopilotMonitor.DecisionCore.Engine;
 namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 {
     /// <summary>
-    /// Lifecycle host for the event-driven <see cref="OfficeInstallDetector"/> (Rev 3). Owns the OS
-    /// watchers and orchestrates the pure detector core — no idle polling. The anchor is no longer the
-    /// late, transient <c>OfficeC2RClient.exe</c> worker: the Office-CDN Delivery-Optimization job
-    /// (surfaced by the DeliveryOptimizationCollector) and the <c>Scenario\INSTALL</c> registry key are
-    /// caught much earlier, so <c>office_install_started</c> pairs to the real download start.
+    /// Lifecycle host for the event-driven <see cref="OfficeInstallDetector"/> (Rev 4). Owns the OS
+    /// watchers and orchestrates the pure detector core — no idle polling. The anchor is the Office-CDN
+    /// Delivery-Optimization job and the <c>Scenario\INSTALL</c> registry key (caught far earlier than
+    /// the late, transient <c>OfficeC2RClient.exe</c> worker), so <c>office_install_started</c> pairs to
+    /// the real download start:
     /// <list type="bullet">
-    ///   <item><see cref="RegistryChangeWatcher"/> armed at <see cref="Start"/> (bootstrap fallback
-    ///     handles the not-yet-created ClickToRun key) → <c>OnRegistryChanged</c> (starts on
-    ///     <c>Scenario\INSTALL</c>; progress / error otherwise) AND raises <see cref="OfficeExpected"/>
-    ///     so the DO collector wakes to look for the Office-CDN job.</item>
+    ///   <item><see cref="RegistryChangeWatcher"/> armed at <see cref="Start"/> → <c>OnRegistryChanged</c>
+    ///     (starts on <c>Scenario\INSTALL</c>; progress / error otherwise) AND raises
+    ///     <see cref="OfficeExpected"/> (until the lifecycle starts) so the DO collector wakes to look
+    ///     for the Office-CDN job.</item>
     ///   <item><see cref="OfficeProcessWatcher"/> Started → <c>OnWorkerStarted</c> (an idempotent start
-    ///     trigger; cancels any pending close — the install is clearly still active). Stopped → arms the
-    ///     close schedule.</item>
+    ///     trigger). The Stopped signal is consumed by the DeliveryOptimizationHost (DO keep-awake), not
+    ///     here.</item>
     ///   <item><see cref="SubmitDoSample"/> (from the DO collector) → <c>OnOfficeDoSample</c> — the first
     ///     sample with jobs starts the lifecycle; later samples fold a real download-% into progress.</item>
-    ///   <item><see cref="NotifyOfficeDownloadEnded"/> (from the DO collector) → arms the close schedule.</item>
     /// </list>
     /// <para>
-    /// <b>Close + completion probe</b>: once the download has ended AND no worker is running, a settle
-    /// timer fires <c>TryFinalizeCompletion</c>. Completion is proven by the core Office binaries on disk
-    /// (C2R lays them down in the integrate phase, which can lag the download end), so a
-    /// <see cref="OfficeInstallDetector.CompletionOutcome.NotYet"/> result is retried on a bounded probe
-    /// schedule before the lifecycle is abandoned silently (never a false completed/failed).
+    /// <b>Completion</b> is driven by an <see cref="OfficeBinaryWatcher"/> — NOT the DO job aggregate,
+    /// which is unreliable for completion (multi-job churn never reaches an aggregate 100% and
+    /// Connected-Cache delivery makes the stream near-instant — field session 7da7dead). Once the
+    /// detector surfaces the <c>InstallationPath</c> (from the registry), the binary watcher fires when a
+    /// core Office binary appears on disk → <c>TryFinalizeCompletion</c> emits <c>office_install_completed</c>.
+    /// An explicit error code → failed. No binary ever appears → the lifecycle simply stays open and is
+    /// abandoned silently on dispose (never a false completed/failed).
     /// </para>
     /// </summary>
     internal sealed class OfficeInstallDetectorHost : ICollectorHost
     {
         private const string ClickToRunSubKey = @"SOFTWARE\Microsoft\Office\ClickToRun";
 
-        // Post-download completion probe schedule (the C2R integrate phase lays the binaries down after
-        // the stream ends). settleSeconds debounces the first attempt; then up to MaxCompletionProbes
-        // re-checks at CompletionProbeIntervalSeconds — generous enough for the lay-down, bounded so we
-        // never probe forever.
-        private const int CompletionProbeIntervalSeconds = 15;
-        private const int MaxCompletionProbes = 8;
-
         public string Name => OfficeInstallDetector.SourceName;
 
         private readonly OfficeInstallDetector _detector;
         private readonly OfficeProcessWatcher _processWatcher;
         private readonly AgentLogger _logger;
-        private readonly int _settleSeconds;
         private readonly object _lock = new object();
 
         private RegistryChangeWatcher? _registryWatcher;
-        private Timer? _closeTimer;
-        private bool _downloadEnded;
-        private bool _workerActive;
-        private int _probeAttempts;
+        private OfficeBinaryWatcher? _binaryWatcher;
+        private bool _pathObserved;       // InstallationPath known → stop poking the DO collector
         private bool _lifecycleEnded;
         private int _disposed;
 
         /// <summary>
-        /// Raised when a ClickToRun registry change suggests an Office install is imminent/active. The
-        /// DeliveryOptimizationHost subscribes and wakes its collector to probe for the Office-CDN job.
+        /// Raised (until the lifecycle has started) when a ClickToRun registry change suggests an Office
+        /// install is imminent. The DeliveryOptimizationHost subscribes and wakes its collector to probe
+        /// for the Office-CDN job.
         /// </summary>
         public event EventHandler? OfficeExpected;
 
@@ -77,13 +69,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             if (ingress == null) throw new ArgumentNullException(nameof(ingress));
             if (clock == null) throw new ArgumentNullException(nameof(clock));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _settleSeconds = settleSeconds;
 
             var post = new InformationalEventPost(ingress, clock);
-            _detector = new OfficeInstallDetector(sessionId, tenantId, post, logger, clock);
+            _detector = new OfficeInstallDetector(sessionId, tenantId, post, logger, clock,
+                onInstallationPathObserved: OnInstallationPathObserved);
             _processWatcher = new OfficeProcessWatcher(logger, settleSeconds);
             _processWatcher.Started += OnWorkerStarted;
-            _processWatcher.Stopped += OnWorkerStopped;
         }
 
         /// <summary>The shared Office worker start/stop signal — the DeliveryOptimizationHost subscribes.</summary>
@@ -92,12 +83,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <summary>Fold aggregated Office DO stats (from the DO collector) into the office_install_* events
         /// — the first sample with jobs also starts the lifecycle.</summary>
         public void SubmitDoSample(OfficeDoSample sample) => _detector.OnOfficeDoSample(sample);
-
-        /// <summary>The Office-CDN download has ended (jobs gone / 100%) — arm the close schedule.</summary>
-        public void NotifyOfficeDownloadEnded()
-        {
-            lock (_lock) { _downloadEnded = true; MaybeArmClose(); }
-        }
 
         public void Start()
         {
@@ -113,32 +98,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _processWatcher.Start();
         }
 
-        private void OnWorkerStarted(object? sender, EventArgs e)
-        {
-            lock (_lock)
-            {
-                _workerActive = true;
-                // A worker is running → the install is clearly still active; cancel any pending close.
-                CancelCloseTimer();
-            }
-            _detector.OnWorkerStarted();
-        }
-
-        private void OnWorkerStopped(object? sender, EventArgs e)
-        {
-            lock (_lock)
-            {
-                _workerActive = false;
-                MaybeArmClose();
-            }
-        }
+        private void OnWorkerStarted(object? sender, EventArgs e) => _detector.OnWorkerStarted();
 
         private void OnRegistryChanged(object? sender, EventArgs e)
         {
             _detector.OnRegistryChanged();
-            // Wake the DO collector to look for the Office-CDN job (until the lifecycle has ended).
+            // Wake the DO collector to look for the Office-CDN job — only until the lifecycle has started
+            // (the InstallationPath being observed). After that the collector is already sampling and
+            // re-poking it on every registry value churn is pure log noise (field session 7da7dead).
             bool raise;
-            lock (_lock) { raise = !_lifecycleEnded; }
+            lock (_lock) { raise = !_pathObserved && !_lifecycleEnded; }
             if (raise)
             {
                 try { OfficeExpected?.Invoke(this, EventArgs.Empty); }
@@ -147,53 +116,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         }
 
         // -----------------------------------------------------------------------
-        // Close + bounded completion probe. All state mutated under _lock.
+        // Completion: arm the binary watcher once the install path is known.
         // -----------------------------------------------------------------------
 
-        private void MaybeArmClose()
-        {
-            if (_lifecycleEnded || _closeTimer != null) return;
-            if (!_downloadEnded || _workerActive) return; // close only once download ended AND worker gone
-            _probeAttempts = 0;
-            _logger.Debug($"[OfficeInstallDetectorHost] download ended + worker gone — settling {_settleSeconds}s before completion check");
-            _closeTimer = new Timer(OnCloseTimer, null, TimeSpan.FromSeconds(Math.Max(0, _settleSeconds)), Timeout.InfiniteTimeSpan);
-        }
-
-        private void CancelCloseTimer()
-        {
-            _closeTimer?.Dispose();
-            _closeTimer = null;
-        }
-
-        private void OnCloseTimer(object? state)
+        private void OnInstallationPathObserved(string? installationPath)
         {
             lock (_lock)
             {
-                _closeTimer?.Dispose();
-                _closeTimer = null;
-                if (_lifecycleEnded || _disposed != 0) return;
-                // A worker reappeared during settle → the install is still going; stand down.
-                if (_workerActive) return;
-            }
+                _pathObserved = true; // stop raising OfficeExpected (lifecycle has started)
+                if (_lifecycleEnded || _binaryWatcher != null || string.IsNullOrEmpty(installationPath)) return;
 
+                _binaryWatcher = new OfficeBinaryWatcher(installationPath!, OfficeInstallDetector.CoreBinaries, _logger);
+                _binaryWatcher.BinaryAppeared += OnBinaryAppeared;
+                _binaryWatcher.Start();
+            }
+        }
+
+        private void OnBinaryAppeared(object? sender, EventArgs e)
+        {
             var outcome = _detector.TryFinalizeCompletion();
-            lock (_lock)
-            {
-                if (_lifecycleEnded || _disposed != 0) return;
-                if (outcome == OfficeInstallDetector.CompletionOutcome.NotYet)
-                {
-                    if (++_probeAttempts <= MaxCompletionProbes)
-                    {
-                        _logger.Debug($"[OfficeInstallDetectorHost] no on-disk completion proof yet — probe {_probeAttempts}/{MaxCompletionProbes} in {CompletionProbeIntervalSeconds}s");
-                        _closeTimer = new Timer(OnCloseTimer, null, TimeSpan.FromSeconds(CompletionProbeIntervalSeconds), Timeout.InfiniteTimeSpan);
-                        return;
-                    }
-                    // Exhausted — stop without emitting a terminal (conservative, no false completed/failed).
-                    _detector.AbandonSilently();
-                }
-                _lifecycleEnded = true;
-            }
-            DisposeRegistryWatcher();
+            if (outcome == OfficeInstallDetector.CompletionOutcome.NotYet) return; // FS event but probe disagreed — keep watching
+
+            lock (_lock) { _lifecycleEnded = true; }
+            DisposeWatchers();
         }
 
         public void Stop() => Dispose();
@@ -202,16 +147,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
             try { _processWatcher.Started -= OnWorkerStarted; } catch { }
-            try { _processWatcher.Stopped -= OnWorkerStopped; } catch { }
             try { _processWatcher.Dispose(); } catch { }
-            lock (_lock)
-            {
-                CancelCloseTimer();
-            }
-            DisposeRegistryWatcher();
+            _detector.AbandonSilently(); // latch terminal if still active — no event
+            DisposeWatchers();
         }
 
-        private void DisposeRegistryWatcher()
+        private void DisposeWatchers()
         {
             lock (_lock)
             {
@@ -220,6 +161,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     try { _registryWatcher.Changed -= OnRegistryChanged; } catch { }
                     try { _registryWatcher.Dispose(); } catch { }
                     _registryWatcher = null;
+                }
+                if (_binaryWatcher != null)
+                {
+                    try { _binaryWatcher.BinaryAppeared -= OnBinaryAppeared; } catch { }
+                    try { _binaryWatcher.Dispose(); } catch { }
+                    _binaryWatcher = null;
                 }
             }
         }

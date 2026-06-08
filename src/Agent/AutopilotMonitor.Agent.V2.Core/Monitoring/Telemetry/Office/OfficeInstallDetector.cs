@@ -62,14 +62,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // Core Office app binaries used as the on-disk completion proof. ANY of these present under
         // {InstallationPath}\root\* means the C2R lay-down finished — "any of", because a deployment can
         // exclude products (e.g. no Outlook), so requiring all would miss legitimate completions.
-        private static readonly string[] CoreBinaries = { "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "OUTLOOK.EXE" };
+        internal static readonly string[] CoreBinaries = { "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "OUTLOOK.EXE" };
 
         private readonly string _sessionId;
         private readonly string _tenantId;
         private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
         private readonly IClock _clock;
+        private readonly Action<string?>? _onInstallationPathObserved;
         private readonly object _lock = new object();
+        private bool _pathObservedRaised;
 
         // Test seam: when set, used instead of reading the live registry/process state. Production
         // never assigns it. Surfaced to the test assembly via InternalsVisibleTo.
@@ -86,22 +88,36 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
 
         private DetectorState _state = DetectorState.Idle;
         private DateTime? _startedAtUtc;
-        private string? _lastProgressSignature;
         private string? _startedTrigger;
         private OfficeDoSample? _lastDo;
+        private OfficeDoSample? _peakDo; // highest-bytes sample seen — basis for the completed doSummary
 
         public OfficeInstallDetector(
             string sessionId,
             string tenantId,
             InformationalEventPost post,
             AgentLogger logger,
-            IClock clock)
+            IClock clock,
+            Action<string?>? onInstallationPathObserved = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+            _onInstallationPathObserved = onInstallationPathObserved;
+        }
+
+        /// <summary>
+        /// Surfaces the C2R <c>InstallationPath</c> to the host (once) as soon as it is known, so the
+        /// host can arm the <see cref="OfficeBinaryWatcher"/> on the correct tree. Caller holds the lock.
+        /// </summary>
+        private void ObserveInstallationPath(OfficeC2RSnapshot snap)
+        {
+            if (_pathObservedRaised || string.IsNullOrEmpty(snap.InstallationPath)) return;
+            _pathObservedRaised = true;
+            try { _onInstallationPathObserved?.Invoke(snap.InstallationPath); }
+            catch (Exception ex) { _logger.Warning($"[{SourceName}] onInstallationPathObserved threw: {ex.Message}"); }
         }
 
         // -----------------------------------------------------------------------
@@ -149,8 +165,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
 
         /// <summary>
         /// Latest aggregated Office DO stats. The first sample carrying jobs is the EARLIEST and most
-        /// reliable start trigger (the Office-CDN download is visible long before the worker process);
-        /// subsequent samples fold a real download-% into progress.
+        /// reliable start trigger (the Office-CDN download is visible long before the worker process).
+        /// Later samples do NOT emit progress events — a per-sample download-% is noise for Office
+        /// (Connected-Cache delivery is near-instant and the multi-job aggregate never yields a clean
+        /// 0→100 bar — field session 7da7dead). They only update the DO data that is summarized once on
+        /// the completed event (bytes + Cache-Server / Peer / CDN split + duration).
         /// </summary>
         public void OnOfficeDoSample(OfficeDoSample sample)
         {
@@ -158,6 +177,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             lock (_lock)
             {
                 _lastDo = sample;
+                if (_peakDo == null || sample.TotalBytesDownloaded > _peakDo.TotalBytesDownloaded)
+                    _peakDo = sample;
                 if (_state == DetectorState.Terminal) return;
 
                 if (_state == DetectorState.Idle)
@@ -166,12 +187,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                     var snapStart = ReadSnapshotSafe();
                     if (snapStart == null) return;
                     BeginIfIdle("do", snapStart);
-                    return;
                 }
-
-                var snap = ReadSnapshotSafe();
-                if (snap == null) return;
-                EvaluateActive(snap);
+                // Active: no progress event — the sample only updates the DO summary data.
             }
         }
 
@@ -237,25 +254,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             _state = DetectorState.Active;
             _startedAtUtc = _clock.UtcNow;
             _startedTrigger = trigger;
-            _lastProgressSignature = BuildProgressSignature(snap, _lastDo);
+            ObserveInstallationPath(snap);
             EmitLifecycle(Constants.EventTypes.OfficeInstallStarted, snap, EventSeverity.Info, PhaseOf(snap), isTerminal: false);
         }
 
         private void EvaluateActive(OfficeC2RSnapshot snap)
         {
-            // An explicit numeric error code is the one in-flight terminal we trust.
-            if (!string.IsNullOrEmpty(snap.ErrorCode))
-            {
-                FinalizeFailed(snap);
-                return;
-            }
+            // Surface a late-arriving InstallationPath (e.g. when started via a DO job before the
+            // Configuration key was populated) so the host can arm the binary watcher.
+            ObserveInstallationPath(snap);
 
-            var sig = BuildProgressSignature(snap, _lastDo);
-            if (!string.Equals(sig, _lastProgressSignature, StringComparison.Ordinal))
-            {
-                _lastProgressSignature = sig;
-                EmitLifecycle(Constants.EventTypes.OfficeInstallProgress, snap, EventSeverity.Info, PhaseOf(snap), isTerminal: false);
-            }
+            // An explicit numeric error code is the one in-flight terminal we trust. There is no progress
+            // event — started + completed/failed only (a per-poll download-% is noise for Office).
+            if (!string.IsNullOrEmpty(snap.ErrorCode))
+                FinalizeFailed(snap);
         }
 
         private void FinalizeFailed(OfficeC2RSnapshot snap)
@@ -313,47 +325,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // single "Installing"; the terminal completion uses "Completed".
         private static string PhaseOf(OfficeC2RSnapshot snap) => "Installing";
 
-        /// <summary>
-        /// Stable signature of the <b>observable</b> progress dimensions only — the values we actually
-        /// surface in the payload and that represent real forward movement: the reported version, the
-        /// active scenario name, and the DO download (bytes / percent). A change in any of these emits
-        /// one progress event; an unchanged signature emits nothing — keeping the detector heartbeat-free.
-        /// <para>
-        /// The raw <c>Scenario</c> value dict is deliberately EXCLUDED. During an active C2R operation
-        /// the worker rewrites those undocumented values many times per second, and the RegNotify watcher
-        /// (subtree) fires on each write. Folding that churn into the signature produced bursts of
-        /// progress events within the same second that all carried an identical, frozen download-% (the
-        /// 3s DO sample had not advanced) and no surfaced cause — pure noise (field session 58d52632).
-        /// Progress is therefore tied to observable movement, which naturally paces it to the DO cadence;
-        /// the registry push still drives error-code discovery (and, later, TasksState phase detection).
-        /// </para>
-        /// </summary>
-        private static string BuildProgressSignature(OfficeC2RSnapshot snap, OfficeDoSample? doSample)
-        {
-            var parts = new List<string>
-            {
-                "version=" + (snap.VersionToReport ?? string.Empty),
-                "scenario=" + (snap.ActiveScenarioName ?? string.Empty),
-            };
-            if (doSample != null)
-            {
-                parts.Add("doBytes=" + doSample.TotalBytesDownloaded);
-                parts.Add("doPct=" + doSample.DownloadPercent);
-            }
-            return string.Join("|", parts);
-        }
-
         // -----------------------------------------------------------------------
         // Payload
         // -----------------------------------------------------------------------
 
         private void EmitLifecycle(string eventType, OfficeC2RSnapshot snap, EventSeverity severity, string phase, bool isTerminal, bool coreBinariesPresent = false)
         {
-            var data = BuildPayload(snap, phase, isTerminal, _lastDo);
+            var data = BuildPayload(snap, phase, isTerminal);
             if (!string.IsNullOrEmpty(_startedTrigger)) data["startedTrigger"] = _startedTrigger!;
             if (isTerminal && eventType == Constants.EventTypes.OfficeInstallCompleted)
+            {
                 data["coreBinariesPresent"] = coreBinariesPresent;
-            var message = BuildMessage(eventType, snap, phase, _lastDo);
+                // One-time Delivery-Optimization summary (how Office was delivered) — far more useful than
+                // a streaming download-% (which is noise under Connected-Cache + multi-job churn).
+                if (_peakDo != null) data["doSummary"] = BuildDoSummary(_peakDo);
+            }
+            var message = BuildMessage(eventType, snap);
 
             _post.Emit(new EnrollmentEvent
             {
@@ -369,7 +356,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             });
         }
 
-        internal Dictionary<string, object> BuildPayload(OfficeC2RSnapshot snap, string phase, bool isTerminal, OfficeDoSample? doSample)
+        internal Dictionary<string, object> BuildPayload(OfficeC2RSnapshot snap, string phase, bool isTerminal)
         {
             var elapsedSeconds = _startedAtUtc.HasValue
                 ? Math.Max(0, (int)(_clock.UtcNow - _startedAtUtc.Value).TotalSeconds)
@@ -391,21 +378,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                 { "scanErrors", (snap.Errors ?? new List<string>()).ToList() },
             };
 
-            if (doSample != null)
-            {
-                // Delivery Optimization download telemetry for Office's CDN content (folded in to
-                // avoid creating a phantom app in the backend AppInstallSummary — Office is not an IME app).
-                data["doJobCount"] = doSample.JobCount;
-                data["doFileSize"] = doSample.FileSize;
-                data["doTotalBytesDownloaded"] = doSample.TotalBytesDownloaded;
-                data["doBytesFromPeers"] = doSample.BytesFromPeers;
-                data["doBytesFromHttp"] = doSample.BytesFromHttp;
-                data["doBytesFromCacheServer"] = doSample.BytesFromCacheServer;
-                data["doPercentPeerCaching"] = doSample.PercentPeerCaching;
-                data["doDownloadMode"] = doSample.DownloadMode;
-                if (doSample.DownloadPercent.HasValue)
-                    data["downloadPercent"] = doSample.DownloadPercent.Value;
-            }
+            // No per-event download-% (it is noise for Office). The Delivery-Optimization breakdown is
+            // attached once to the completed event as doSummary (see EmitLifecycle / BuildDoSummary).
 
             if (isTerminal)
                 data["durationSeconds"] = elapsedSeconds;
@@ -415,16 +389,40 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             return data;
         }
 
-        private static string BuildMessage(string eventType, OfficeC2RSnapshot snap, string phase, OfficeDoSample? doSample)
+        /// <summary>
+        /// One-time Delivery-Optimization delivery breakdown for the completed event, built from the
+        /// highest-bytes sample seen. Splits the bytes into Connected-Cache-Server / peer / pure-CDN: on
+        /// MCC-enabled networks <c>BytesFromHttp</c> includes the cache-server bytes, so pure CDN is
+        /// <c>BytesFromHttp - BytesFromCacheServer</c> (see project DO-telemetry notes).
+        /// </summary>
+        private static Dictionary<string, object> BuildDoSummary(OfficeDoSample d)
+        {
+            long total = d.TotalBytesDownloaded;
+            long cacheServer = d.BytesFromCacheServer;
+            long peers = d.BytesFromPeers;
+            long cdn = Math.Max(0, d.BytesFromHttp - d.BytesFromCacheServer);
+            int Pct(long part) => total > 0 ? (int)Math.Min(100, (part * 100) / total) : 0;
+
+            return new Dictionary<string, object>
+            {
+                { "totalBytesDownloaded", total },
+                { "aggregateFileSize", d.FileSize },
+                { "jobCount", d.JobCount },
+                { "bytesFromCacheServer", cacheServer },
+                { "bytesFromPeers", peers },
+                { "bytesFromCdn", cdn },
+                { "percentFromCacheServer", Pct(cacheServer) },
+                { "percentFromPeers", Pct(peers) },
+                { "percentFromCdn", Pct(cdn) },
+                { "downloadMode", d.DownloadMode },
+            };
+        }
+
+        private static string BuildMessage(string eventType, OfficeC2RSnapshot snap)
         {
             var product = snap.Products != null && snap.Products.Count > 0 ? string.Join(",", snap.Products) : AppName;
-            var pct = doSample?.DownloadPercent;
             if (eventType == Constants.EventTypes.OfficeInstallStarted)
-                return $"{SourceName}: {product} install detected (phase={phase})";
-            if (eventType == Constants.EventTypes.OfficeInstallProgress)
-                return pct.HasValue
-                    ? $"{SourceName}: {product} install progress (phase={phase}, download {pct.Value}%)"
-                    : $"{SourceName}: {product} install progress (phase={phase})";
+                return $"{SourceName}: {product} install detected";
             if (eventType == Constants.EventTypes.OfficeInstallCompleted)
                 return $"{SourceName}: {product} install completed{(string.IsNullOrEmpty(snap.VersionToReport) ? string.Empty : $" (v{snap.VersionToReport})")}";
             return $"{SourceName}: {product} install failed{(string.IsNullOrEmpty(snap.ErrorCode) ? string.Empty : $" (code {snap.ErrorCode})")}";
