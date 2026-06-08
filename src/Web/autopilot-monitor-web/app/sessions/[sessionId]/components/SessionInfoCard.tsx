@@ -108,7 +108,7 @@ function InfoItem({ label, value, copyText, tooltip }: { label: string; value: R
     <div title={tooltip}>
       <div className="text-sm font-medium text-gray-500">{label}</div>
       <div className="mt-1 group flex items-center gap-1.5">
-        <div className={`text-sm text-gray-900 break-all${tooltip ? " cursor-help" : ""}`}>{value}</div>
+        <div className="text-sm text-gray-900 break-all">{value}</div>
         {copyText && (
           <button
             type="button"
