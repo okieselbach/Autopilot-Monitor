@@ -37,13 +37,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
         private readonly Action<AppPackageState> _onDoTelemetryReceived;
         private readonly string _logFilePath;
 
-        // Office C2R DO support: while an Office worker is active we keep polling even with no IME
-        // downloads, classify the non-IME Office-CDN jobs and hand aggregated stats to the
-        // OfficeInstallDetector (which folds them into the office_install_* events). Office is not an
-        // IME app, so we deliberately do NOT emit download_progress/do_telemetry for it (that would
-        // create a phantom app in the backend AppInstallSummary).
+        // Office C2R DO support (Rev 3): the Office-CDN download is visible in DO long before the
+        // OfficeC2RClient.exe worker appears, so we classify the non-IME Office-CDN jobs UNCONDITIONALLY
+        // (no longer gated on the worker) and hand aggregated stats to the OfficeInstallDetector — which
+        // folds them into the office_install_* events and treats the first sample as the start trigger.
+        // Office is not an IME app, so we deliberately do NOT emit download_progress/do_telemetry for it
+        // (that would create a phantom app in the backend AppInstallSummary).
         private readonly Action<OfficeDoSample> _onOfficeDoSample;
+        private readonly Action _onOfficeDownloadEnded;
+
+        // Keep-awake sources for an Office install (any keeps us polling): the worker process is up
+        // (_officeActive), an Office-CDN job was seen in the last poll (_officeJobsSeenLastPoll), or the
+        // registry hinted an install is imminent (_officeExpectedPolls — a bounded probe window so a
+        // Scenario\INSTALL that never produces a download does not keep us awake forever).
         private volatile bool _officeActive;
+        private bool _officeJobsSeenLastPoll;
+        private bool _officeEndedNotified;
+        private int _officeExpectedPolls;
+
+        // Bounded probe budget after a registry "Office expected" hint, in polls (~ this × interval).
+        private const int OfficeExpectedProbePolls = 20;
 
         private Runspace _runspace;
         private bool _permanentlyDisabled;
@@ -69,13 +82,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             Func<AppPackageStateList> getPackageStates,
             Action<AppPackageState> onDoTelemetryReceived,
             string logDirectory,
-            Action<OfficeDoSample> onOfficeDoSample = null)
+            Action<OfficeDoSample> onOfficeDoSample = null,
+            Action onOfficeDownloadEnded = null)
             : base(sessionId, tenantId, post, logger, intervalSeconds)
         {
             _getPackageStates = getPackageStates ?? throw new ArgumentNullException(nameof(getPackageStates));
             _onDoTelemetryReceived = onDoTelemetryReceived;
             _logFilePath = Path.Combine(logDirectory, LogFileName);
             _onOfficeDoSample = onOfficeDoSample;
+            _onOfficeDownloadEnded = onOfficeDownloadEnded;
         }
 
         /// <summary>Start dormant — timer does not fire until WakeUp() is called.</summary>
@@ -117,6 +132,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                 Logger.Info("[DeliveryOptimizationCollector] Office install active — sampling DO for Office CDN jobs");
                 WakeUp();
             }
+        }
+
+        /// <summary>
+        /// Office C2R early wake source (Rev 3): the RegistryChangeWatcher observed a
+        /// <c>…\ClickToRun\Scenario\INSTALL</c> key — an Office install is imminent, possibly before any
+        /// IME download or worker process. Wakes the collector for a bounded probe window so it can
+        /// catch the Office-CDN DO job at the very start of the download. Called from any thread.
+        /// </summary>
+        public void NotifyOfficeExpected()
+        {
+            _officeExpectedPolls = OfficeExpectedProbePolls;
+            Logger.Info("[DeliveryOptimizationCollector] Office install expected (registry Scenario\\INSTALL) — probing DO for Office CDN jobs");
+            WakeUp();
         }
 
         protected override void Collect()
@@ -165,7 +193,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                 }
             }
 
-            if (!hasActiveDownloads && !hasPendingEnrichment && !_officeActive)
+            // Office keep-awake: worker up, an Office-CDN job seen last poll, or a bounded registry-hint
+            // probe window still open. This lets us detect Office's DO download independent of the
+            // (late, transient) OfficeC2RClient.exe worker.
+            var officeKeepAwake = _officeActive || _officeJobsSeenLastPoll || _officeExpectedPolls > 0;
+
+            if (!hasActiveDownloads && !hasPendingEnrichment && !officeKeepAwake)
             {
                 Logger.Info("[DeliveryOptimizationCollector] Going dormant — no active downloads, pending enrichment or Office install");
                 _dormant = true;
@@ -363,10 +396,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                     : null;
                 if (pkg == null)
                 {
-                    // Not an IME app. While an Office install is active, accumulate the Office CDN
-                    // jobs for the OfficeInstallDetector (folded into office_install_*; NOT emitted as
-                    // download_progress to avoid a phantom app in the backend AppInstallSummary).
-                    if (_officeActive && IsOfficeCdnJob(sourceUrl))
+                    // Not an IME app. Accumulate Office-CDN jobs UNCONDITIONALLY (Rev 3) for the
+                    // OfficeInstallDetector (folded into office_install_*; NOT emitted as download_progress
+                    // to avoid a phantom app in the backend AppInstallSummary). No longer gated on the
+                    // worker process — the download is visible here long before OfficeC2RClient.exe runs.
+                    if (IsOfficeCdnJob(sourceUrl))
                     {
                         officeJobCount++;
                         officeFileSize += fileSize;
@@ -434,7 +468,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             }
 
             // Hand aggregated Office DO stats to the OfficeInstallDetector (folded into office_install_*).
-            if (_officeActive && officeJobCount > 0 && _onOfficeDoSample != null)
+            // Unconditional now (Rev 3): the first sample with jobs is the detector's start trigger; a
+            // subsequent disappearance / 100% is the download-ended signal that arms the host's close.
+            var officeJobsThisPoll = officeJobCount > 0;
+            var officeComplete = officeFileSize > 0 && officeTotalBytes >= officeFileSize;
+
+            if (officeJobsThisPoll && _onOfficeDoSample != null)
             {
                 int officePeerPct = officeTotalBytes > 0 ? (int)((officeBytesFromPeers * 100) / officeTotalBytes) : 0;
                 try
@@ -456,6 +495,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                     Logger.Warning($"[DeliveryOptimizationCollector] onOfficeDoSample threw: {ex.Message}");
                 }
             }
+
+            // Download-ended signal (once): Office-CDN jobs were present and have now disappeared, or a
+            // job reached 100%. Arms the OfficeInstallDetectorHost's close/completion-probe schedule.
+            var officeDownloadEnded = !_officeEndedNotified &&
+                ((officeJobsThisPoll && officeComplete) || (!officeJobsThisPoll && _officeJobsSeenLastPoll));
+            if (officeDownloadEnded)
+            {
+                _officeEndedNotified = true;
+                try { _onOfficeDownloadEnded?.Invoke(); }
+                catch (Exception ex) { Logger.Warning($"[DeliveryOptimizationCollector] onOfficeDownloadEnded threw: {ex.Message}"); }
+            }
+
+            _officeJobsSeenLastPoll = officeJobsThisPoll;
+            // Decrement the bounded registry-hint probe window only while no Office job is being seen.
+            if (!officeJobsThisPoll && _officeExpectedPolls > 0) _officeExpectedPolls--;
 
             // Write JSONL log only when overall state changed
             var fingerprint = ComputeFingerprint(logEntries);

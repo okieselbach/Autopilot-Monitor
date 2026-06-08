@@ -379,8 +379,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     logger: logger,
                     intervalSeconds: collectors.DeliveryOptimizationIntervalSeconds,
                     imeHost: _imeLogHost,
-                    officeProcessWatcher: officeHost?.ProcessWatcher,
-                    onOfficeDoSample: officeHost != null ? officeHost.SubmitDoSample : (Action<Monitoring.Telemetry.Office.OfficeDoSample>?)null);
+                    officeHost: officeHost);
                 hosts.Add(doHost);
             }
 

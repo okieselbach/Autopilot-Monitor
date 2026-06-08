@@ -18,23 +18,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
     /// — even when the Intune "integrated" Office app reports done to IME within 1-2 minutes while C2R
     /// keeps streaming/laying down the product for many more minutes.
     /// <para>
-    /// <b>Event-driven, no idle polling</b> (Rev 2). This class is the pure decision core; the
-    /// <c>OfficeInstallDetectorHost</c> owns the OS watchers and drives it:
+    /// <b>Event-driven, no idle polling</b> (Rev 3). This class is the pure decision core; the
+    /// <c>OfficeInstallDetectorHost</c> owns the OS watchers and drives it. The lifecycle anchor is no
+    /// longer the late, transient <c>OfficeC2RClient.exe</c> worker — whichever Office signal arrives
+    /// first opens the single install window (idempotent):
     /// <list type="bullet">
-    ///   <item><see cref="OnWorkerStarted"/> — Office C2R worker (OfficeC2RClient.exe) started
-    ///     (WMI <c>Win32_ProcessStartTrace</c> push or startup probe) → emit
-    ///     <see cref="Constants.EventTypes.OfficeInstallStarted"/>.</item>
+    ///   <item><see cref="OnOfficeDoSample"/> — aggregated Office-CDN Delivery-Optimization stats. The
+    ///     download is visible here long before the worker process, so the first sample carrying jobs is
+    ///     the EARLIEST start trigger; later samples fold a real download-% into progress.</item>
     ///   <item><see cref="OnRegistryChanged"/> — <c>RegNotifyChangeKeyValue</c> push on the ClickToRun
-    ///     key (Configuration value / Scenario subkey churn) → emit
-    ///     <see cref="Constants.EventTypes.OfficeInstallProgress"/> on real change only (no heartbeat).</item>
-    ///   <item><see cref="OnOfficeDoSample"/> — aggregated Delivery-Optimization stats for Office's CDN
-    ///     download (from the extended DeliveryOptimizationCollector). DO has no push API, so it is
-    ///     sampled while the worker is alive; a byte advance folds a real download-% into progress.</item>
-    ///   <item><see cref="OnWorkerStopped"/> — last worker exited. NOT treated as completion (the
-    ///     worker is a transient launcher; the C2R service installs on for minutes). Conservative v1:
-    ///     stop tracking, emit no terminal. Completion/failure (via Scenario\INSTALL\TasksState) is
-    ///     deferred to the live-install capture iteration. Only an explicit numeric error code finalizes
-    ///     as <see cref="Constants.EventTypes.OfficeInstallFailed"/>.</item>
+    ///     key. When idle and a <c>Scenario\INSTALL</c> key is present → start; when active → progress on
+    ///     real movement only (no heartbeat) or an explicit error code.</item>
+    ///   <item><see cref="OnWorkerStarted"/> — Office C2R worker started (WMI push / startup probe); an
+    ///     idempotent start trigger (no-op if the lifecycle already began).</item>
+    ///   <item><see cref="TryFinalizeCompletion"/> — called by the host after the download ended AND the
+    ///     worker is gone, on a bounded probe schedule. Completion is proven by the core Office binaries
+    ///     on disk under <c>{InstallationPath}\root\*</c> (the integrate phase lays them down after the
+    ///     stream ends). An explicit error code → failed; no proof after the probe budget →
+    ///     <see cref="AbandonSilently"/> (no false terminal).</item>
     /// </list>
     /// </para>
     /// <para>
@@ -58,6 +59,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // names against a field enrollment and widen only if needed.
         private static readonly string[] ErrorValueHints = { "errorcode", "hresult", "exitcode", "lasterror", "failurecode" };
 
+        // Core Office app binaries used as the on-disk completion proof. ANY of these present under
+        // {InstallationPath}\root\* means the C2R lay-down finished — "any of", because a deployment can
+        // exclude products (e.g. no Outlook), so requiring all would miss legitimate completions.
+        private static readonly string[] CoreBinaries = { "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "OUTLOOK.EXE" };
+
         private readonly string _sessionId;
         private readonly string _tenantId;
         private readonly InformationalEventPost _post;
@@ -69,11 +75,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // never assigns it. Surfaced to the test assembly via InternalsVisibleTo.
         internal Func<OfficeC2RSnapshot>? SnapshotProvider { get; set; }
 
+        // Test seam: when set, used instead of the real filesystem check for the core-binary completion
+        // proof. Receives the InstallationPath; returns true when a core Office binary exists on disk.
+        internal Func<string?, bool>? CoreBinariesProbe { get; set; }
+
         private enum DetectorState { Idle, Active, Terminal }
+
+        /// <summary>Outcome of a completion attempt — drives the host's bounded post-download probe.</summary>
+        internal enum CompletionOutcome { Completed, Failed, NotYet }
 
         private DetectorState _state = DetectorState.Idle;
         private DateTime? _startedAtUtc;
         private string? _lastProgressSignature;
+        private string? _startedTrigger;
         private OfficeDoSample? _lastDo;
 
         public OfficeInstallDetector(
@@ -94,7 +108,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // Event entry points (driven by the host's process + registry watchers)
         // -----------------------------------------------------------------------
 
-        /// <summary>Office C2R worker started — open the install window.</summary>
+        /// <summary>
+        /// Office C2R worker (OfficeC2RClient.exe) started. In Rev 3 this is no longer the primary
+        /// anchor — the worker is a late, transient launcher (it ran ~10 min AFTER the real download
+        /// began in field sessions 8353e03b / 58d52632). It is one of three idempotent start triggers;
+        /// whichever fires first opens the single install window.
+        /// </summary>
         public void OnWorkerStarted()
         {
             lock (_lock)
@@ -102,34 +121,54 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                 if (_state != DetectorState.Idle) return;
                 var snap = ReadSnapshotSafe();
                 if (snap == null) return;
-
-                _state = DetectorState.Active;
-                _startedAtUtc = _clock.UtcNow;
-                _lastProgressSignature = BuildProgressSignature(snap, _lastDo);
-                EmitLifecycle(Constants.EventTypes.OfficeInstallStarted, snap, EventSeverity.Info, PhaseOf(snap), isTerminal: false);
+                BeginIfIdle("process", snap);
             }
         }
 
-        /// <summary>ClickToRun registry changed — progress or a discovered error code.</summary>
+        /// <summary>
+        /// ClickToRun registry changed. When idle and a Scenario subkey (INSTALL/…) is present, this is
+        /// the earliest registry start signal; when already active it drives progress or surfaces an
+        /// explicit error code.
+        /// </summary>
         public void OnRegistryChanged()
         {
             lock (_lock)
             {
-                if (_state != DetectorState.Active) return;
+                if (_state == DetectorState.Terminal) return;
                 var snap = ReadSnapshotSafe();
                 if (snap == null) return;
+
+                if (_state == DetectorState.Idle)
+                {
+                    if (snap.ActiveScenarioPresent) BeginIfIdle("registry", snap);
+                    return;
+                }
                 EvaluateActive(snap);
             }
         }
 
-        /// <summary>Latest aggregated Office DO stats — folds a real download-% into progress.</summary>
+        /// <summary>
+        /// Latest aggregated Office DO stats. The first sample carrying jobs is the EARLIEST and most
+        /// reliable start trigger (the Office-CDN download is visible long before the worker process);
+        /// subsequent samples fold a real download-% into progress.
+        /// </summary>
         public void OnOfficeDoSample(OfficeDoSample sample)
         {
             if (sample == null) return;
             lock (_lock)
             {
                 _lastDo = sample;
-                if (_state != DetectorState.Active) return;
+                if (_state == DetectorState.Terminal) return;
+
+                if (_state == DetectorState.Idle)
+                {
+                    if (sample.JobCount <= 0) return; // a zero-job sample is not a start signal
+                    var snapStart = ReadSnapshotSafe();
+                    if (snapStart == null) return;
+                    BeginIfIdle("do", snapStart);
+                    return;
+                }
+
                 var snap = ReadSnapshotSafe();
                 if (snap == null) return;
                 EvaluateActive(snap);
@@ -137,24 +176,53 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         }
 
         /// <summary>
-        /// Last Office C2R worker exited. The worker (OfficeC2RClient.exe) is a transient launcher —
-        /// in the field (session 8353e03b) it lived only ~2s and kicked off the operation, while the
-        /// OfficeClickToRun.exe service ran the actual install for minutes afterwards. Its exit is
-        /// therefore NOT install completion. Emitting failed on worker-exit was a false-positive, so
-        /// we do NOT finalize here — we simply stop tracking and emit nothing.
-        /// <para>
-        /// Completion/failure detection is deferred (conservative v1): the registry has NO
-        /// <c>StreamingFinished</c> value and <c>Scenario\INSTALL</c> persists post-install, so neither
-        /// is a usable signal. The real completion signal is <c>Scenario\INSTALL\TasksState</c>
-        /// (per-task <c>TASKSTATE_COMPLETED</c> / <c>_INPROGRESS</c> / failure); the in-progress/failed
-        /// wording is being captured from a live install before it is wired up — see office-followup.
-        /// </para>
+        /// Attempt to finalize the lifecycle after the install window has closed (download ended AND the
+        /// worker is gone — orchestrated by the host with a settle/probe schedule). Completion is proven
+        /// by the core Office binaries existing on disk under <c>{InstallationPath}\root\*</c> (C2R lays
+        /// them down in the integrate phase, which can lag the download end), so the host calls this on a
+        /// bounded retry schedule. An explicit error code finalizes as failed. While neither holds, the
+        /// outcome is <see cref="CompletionOutcome.NotYet"/> and the lifecycle stays open.
         /// </summary>
-        public void OnWorkerStopped()
+        internal CompletionOutcome TryFinalizeCompletion()
         {
             lock (_lock)
             {
-                if (_state == DetectorState.Active) _state = DetectorState.Terminal; // stop; no terminal event
+                if (_state != DetectorState.Active) return CompletionOutcome.NotYet;
+
+                var snap = ReadSnapshotSafe();
+                if (snap == null) return CompletionOutcome.NotYet;
+
+                if (!string.IsNullOrEmpty(snap.ErrorCode))
+                {
+                    FinalizeFailed(snap);
+                    return CompletionOutcome.Failed;
+                }
+
+                if (ProbeCoreBinaries(snap.InstallationPath))
+                {
+                    _state = DetectorState.Terminal;
+                    EmitLifecycle(Constants.EventTypes.OfficeInstallCompleted, snap, EventSeverity.Info, "Completed", isTerminal: true, coreBinariesPresent: true);
+                    return CompletionOutcome.Completed;
+                }
+
+                return CompletionOutcome.NotYet;
+            }
+        }
+
+        /// <summary>
+        /// Stop tracking without emitting a terminal event. Called by the host when the bounded
+        /// completion-probe schedule is exhausted with no on-disk proof — conservative: we never emit a
+        /// false completed/failed when we cannot positively verify the outcome.
+        /// </summary>
+        public void AbandonSilently()
+        {
+            lock (_lock)
+            {
+                if (_state == DetectorState.Active)
+                {
+                    _state = DetectorState.Terminal;
+                    _logger.Info($"[{SourceName}] install window closed without on-disk completion proof — stopping silently (no terminal event)");
+                }
             }
         }
 
@@ -162,10 +230,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // State machine
         // -----------------------------------------------------------------------
 
+        /// <summary>Opens the single install window from whichever signal arrives first. Caller holds the lock.</summary>
+        private void BeginIfIdle(string trigger, OfficeC2RSnapshot snap)
+        {
+            if (_state != DetectorState.Idle) return;
+            _state = DetectorState.Active;
+            _startedAtUtc = _clock.UtcNow;
+            _startedTrigger = trigger;
+            _lastProgressSignature = BuildProgressSignature(snap, _lastDo);
+            EmitLifecycle(Constants.EventTypes.OfficeInstallStarted, snap, EventSeverity.Info, PhaseOf(snap), isTerminal: false);
+        }
+
         private void EvaluateActive(OfficeC2RSnapshot snap)
         {
-            // Conservative v1: the only terminal we trust is an explicit numeric error code. Completion
-            // is NOT claimed (TasksState-based detection lands with the live-install capture).
+            // An explicit numeric error code is the one in-flight terminal we trust.
             if (!string.IsNullOrEmpty(snap.ErrorCode))
             {
                 FinalizeFailed(snap);
@@ -187,9 +265,52 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             EmitLifecycle(Constants.EventTypes.OfficeInstallFailed, snap, EventSeverity.Error, "Failed", isTerminal: true);
         }
 
-        // Conservative v1: StreamingFinished does not exist in the C2R registry, so we cannot label
-        // Streaming vs Finalizing — report a single "Installing" phase until TasksState-based phase
-        // detection is added.
+        /// <summary>
+        /// True when a core Office binary exists on disk under <c>{InstallationPath}\root\*</c> (the C2R
+        /// version folder, e.g. <c>Office16</c>, is enumerated rather than hardcoded — a version literal
+        /// would be fragile). Fail-soft: any error returns false (no positive proof). The
+        /// <see cref="CoreBinariesProbe"/> seam overrides this in tests.
+        /// </summary>
+        private bool ProbeCoreBinaries(string? installationPath)
+        {
+            if (CoreBinariesProbe != null)
+            {
+                try { return CoreBinariesProbe(installationPath); }
+                catch { return false; }
+            }
+            return CoreBinariesPresentOnDisk(installationPath, _logger);
+        }
+
+        internal static bool CoreBinariesPresentOnDisk(string? installationPath, AgentLogger logger)
+        {
+            if (string.IsNullOrWhiteSpace(installationPath)) return false;
+            try
+            {
+                var root = System.IO.Path.Combine(installationPath!, "root");
+                if (!System.IO.Directory.Exists(root)) return false;
+
+                // Enumerate the version folder(s) under root (OfficeNN); avoids hardcoding the version.
+                foreach (var versionDir in System.IO.Directory.GetDirectories(root))
+                {
+                    foreach (var binary in CoreBinaries)
+                    {
+                        try
+                        {
+                            if (System.IO.File.Exists(System.IO.Path.Combine(versionDir, binary))) return true;
+                        }
+                        catch { /* probe the next candidate */ }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Debug($"[{SourceName}] core-binary probe failed for '{installationPath}': {ex.Message}");
+            }
+            return false;
+        }
+
+        // StreamingFinished does not exist in the C2R registry, so the in-flight phase is reported as a
+        // single "Installing"; the terminal completion uses "Completed".
         private static string PhaseOf(OfficeC2RSnapshot snap) => "Installing";
 
         /// <summary>
@@ -226,9 +347,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // Payload
         // -----------------------------------------------------------------------
 
-        private void EmitLifecycle(string eventType, OfficeC2RSnapshot snap, EventSeverity severity, string phase, bool isTerminal)
+        private void EmitLifecycle(string eventType, OfficeC2RSnapshot snap, EventSeverity severity, string phase, bool isTerminal, bool coreBinariesPresent = false)
         {
             var data = BuildPayload(snap, phase, isTerminal, _lastDo);
+            if (!string.IsNullOrEmpty(_startedTrigger)) data["startedTrigger"] = _startedTrigger!;
+            if (isTerminal && eventType == Constants.EventTypes.OfficeInstallCompleted)
+                data["coreBinariesPresent"] = coreBinariesPresent;
             var message = BuildMessage(eventType, snap, phase, _lastDo);
 
             _post.Emit(new EnrollmentEvent
@@ -263,6 +387,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                 { "streamingFinished", snap.StreamingFinished },
                 { "officeC2RClientRunning", snap.OfficeC2RClientRunning },
                 { "errorCode", (object?)snap.ErrorCode ?? string.Empty },
+                { "installationPath", snap.InstallationPath ?? string.Empty },
                 { "scanErrors", (snap.Errors ?? new List<string>()).ToList() },
             };
 
@@ -358,6 +483,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                     snap.Channel = ReadString(key, "UpdateChannel") ?? ReadString(key, "CDNBaseUrl");
                     snap.VersionToReport = ReadString(key, "VersionToReport") ?? ReadString(key, "ClientVersionToReport");
                     snap.StreamingFinished = IsTruthy(ReadString(key, "StreamingFinished"));
+                    snap.InstallationPath = ReadString(key, "InstallationPath");
                 }
             }
             catch (Exception ex)
@@ -485,6 +611,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         public string? Channel { get; set; }
         public string? Platform { get; set; }
         public string? VersionToReport { get; set; }
+        public string? InstallationPath { get; set; }
         public bool StreamingFinished { get; set; }
         public bool ActiveScenarioPresent { get; set; }
         public string? ActiveScenarioName { get; set; }

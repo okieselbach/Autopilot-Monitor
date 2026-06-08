@@ -17,7 +17,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly DeliveryOptimizationCollector _collector;
         private readonly ImeLogHost _imeHost;
         private readonly AgentLogger _logger;
-        private readonly OfficeProcessWatcher? _officeProcessWatcher;
+        private readonly OfficeInstallDetectorHost? _officeHost;
         private Action<AppPackageState, AppInstallationState, AppInstallationState>? _prevStateChanged;
         private Action<AppPackageState, AppInstallationState, AppInstallationState>? _chainedHandler;
         private int _disposed;
@@ -30,14 +30,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             AgentLogger logger,
             int intervalSeconds,
             ImeLogHost imeHost,
-            OfficeProcessWatcher? officeProcessWatcher = null,
-            Action<OfficeDoSample>? onOfficeDoSample = null)
+            OfficeInstallDetectorHost? officeHost = null)
         {
             if (ingress == null) throw new ArgumentNullException(nameof(ingress));
             if (clock == null) throw new ArgumentNullException(nameof(clock));
             _imeHost = imeHost;
             _logger = logger;
-            _officeProcessWatcher = officeProcessWatcher;
+            _officeHost = officeHost;
 
             var post = new InformationalEventPost(ingress, clock);
             _collector = new DeliveryOptimizationCollector(
@@ -53,7 +52,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     catch (Exception ex) { logger.Warning($"DeliveryOptimizationHost: OnDoTelemetryReceived invocation threw: {ex.Message}"); }
                 },
                 logDirectory: Environment.ExpandEnvironmentVariables(Constants.LogDirectory),
-                onOfficeDoSample: onOfficeDoSample);
+                onOfficeDoSample: officeHost != null ? officeHost.SubmitDoSample : (Action<OfficeDoSample>?)null,
+                onOfficeDownloadEnded: officeHost != null ? officeHost.NotifyOfficeDownloadEnded : (Action?)null);
         }
 
         public void Start()
@@ -76,12 +76,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             };
             _imeHost.Tracker.OnAppStateChanged = _chainedHandler;
 
-            // Second wake source: an Office C2R install (no IME package) keeps the collector polling
-            // so it can capture Office's DO CDN jobs.
-            if (_officeProcessWatcher != null)
+            // Office C2R wake sources (no IME package keeps the collector polling otherwise):
+            //  - the worker process up/down (keep-awake while a worker runs), and
+            //  - the early registry hint (Scenario\INSTALL) so we probe for the Office-CDN job before
+            //    any worker — this is what lets office_install_started pair to the real download start.
+            if (_officeHost != null)
             {
-                _officeProcessWatcher.Started += OnOfficeStarted;
-                _officeProcessWatcher.Stopped += OnOfficeStopped;
+                _officeHost.ProcessWatcher.Started += OnOfficeStarted;
+                _officeHost.ProcessWatcher.Stopped += OnOfficeStopped;
+                _officeHost.OfficeExpected += OnOfficeExpected;
             }
 
             _collector.Start();
@@ -90,6 +93,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
         private void OnOfficeStarted(object? sender, EventArgs e) => _collector.NotifyOfficeActive(true);
         private void OnOfficeStopped(object? sender, EventArgs e) => _collector.NotifyOfficeActive(false);
+        private void OnOfficeExpected(object? sender, EventArgs e) => _collector.NotifyOfficeExpected();
 
         public void Stop()
         {
@@ -103,10 +107,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             {
                 _imeHost.Tracker.OnAppStateChanged = _prevStateChanged;
             }
-            if (_officeProcessWatcher != null)
+            if (_officeHost != null)
             {
-                try { _officeProcessWatcher.Started -= OnOfficeStarted; } catch { }
-                try { _officeProcessWatcher.Stopped -= OnOfficeStopped; } catch { }
+                try { _officeHost.ProcessWatcher.Started -= OnOfficeStarted; } catch { }
+                try { _officeHost.ProcessWatcher.Stopped -= OnOfficeStopped; } catch { }
+                try { _officeHost.OfficeExpected -= OnOfficeExpected; } catch { }
             }
             _collector.Stop();
         }

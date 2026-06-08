@@ -96,19 +96,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
         // ---------------------------------------------------------------- idle guard
 
         [Fact]
-        public void Events_only_after_worker_started()
+        public void Non_start_signals_while_idle_emit_nothing()
         {
             using var rig = new Rig(CompletedIdle());
 
-            // No worker-start signal yet → registry/DO/stop are no-ops.
+            // A zero-job DO sample is not a start signal, and a registry change with no active scenario
+            // (already-installed/idle device) must not open a lifecycle.
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 0, FileSize = 0, TotalBytesDownloaded = 0 });
             rig.Sut.OnRegistryChanged();
-            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 1, FileSize = 100, TotalBytesDownloaded = 50 });
-            rig.Sut.OnWorkerStopped();
 
             Assert.Empty(rig.OfficeEvents());
         }
 
-        // ---------------------------------------------------------------- started
+        // ---------------------------------------------------------------- started (three triggers, idempotent)
 
         [Fact]
         public void Worker_started_emits_exactly_one_started_with_products_and_phase()
@@ -127,6 +127,56 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Contains("O365ProPlusRetail", (List<string>)data["products"]);
             Assert.Equal("Current", data["channel"]);
             Assert.Equal("x64", data["platform"]);
+            Assert.Equal("process", data["startedTrigger"]);
+        }
+
+        [Fact]
+        public void Office_do_job_alone_starts_lifecycle_earliest_trigger()
+        {
+            // The DO-CDN download is visible long before the worker process — the first sample carrying
+            // jobs is the earliest start trigger (no process, no registry scenario required).
+            using var rig = new Rig(ActiveStreaming());
+
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 2, FileSize = 1000, TotalBytesDownloaded = 100 });
+
+            var started = Assert.Single(rig.OfficeEvents());
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(started));
+            Assert.Equal("do", Data(started)["startedTrigger"]);
+        }
+
+        [Fact]
+        public void Registry_scenario_alone_starts_lifecycle()
+        {
+            using var rig = new Rig(ActiveStreaming());
+
+            rig.Sut.OnRegistryChanged(); // snapshot has ActiveScenarioPresent = true
+
+            var started = Assert.Single(rig.OfficeEvents());
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(started));
+            Assert.Equal("registry", Data(started)["startedTrigger"]);
+        }
+
+        [Fact]
+        public void Registry_change_without_active_scenario_does_not_start()
+        {
+            using var rig = new Rig(CompletedIdle()); // ActiveScenarioPresent = false
+
+            rig.Sut.OnRegistryChanged();
+
+            Assert.Empty(rig.OfficeEvents());
+        }
+
+        [Fact]
+        public void Start_is_idempotent_across_all_three_signals()
+        {
+            using var rig = new Rig(ActiveStreaming());
+
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 1, FileSize = 1000, TotalBytesDownloaded = 100 });
+            rig.Sut.OnRegistryChanged();
+            rig.Sut.OnWorkerStarted();
+
+            var started = Assert.Single(rig.OfficeEvents());
+            Assert.Equal("do", Data(started)["startedTrigger"]); // first signal wins
         }
 
         [Fact]
@@ -242,41 +292,92 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal(2, events.Count); // started + one progress only
         }
 
-        // ---------------------------------------------------------------- terminal (conservative v1)
+        // ---------------------------------------------------------------- completion (filesystem proof)
 
         [Fact]
-        public void Worker_stopped_emits_no_terminal_event()
+        public void TryFinalizeCompletion_with_core_binaries_emits_completed()
         {
-            // Conservative v1: the transient worker's exit is NOT install completion — no completed/
-            // failed is emitted (field session 8353e03b false-failed). started/progress only.
             using var rig = new Rig(ActiveStreaming());
+            rig.Sut.OnWorkerStarted(); // started
 
-            rig.Sut.OnWorkerStarted();        // started
-            rig.Current = CompletedIdle();
-            rig.Sut.OnWorkerStopped();         // must NOT emit a terminal
+            // Download ended + worker gone; the integrate phase has laid down the binaries on disk.
+            rig.Current = CompletedIdle();          // InstallationPath-bearing snapshot, no error
+            rig.Sut.CoreBinariesProbe = _ => true;  // a core Office binary exists under root\*
 
+            var outcome = rig.Sut.TryFinalizeCompletion();
+
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.Completed, outcome);
             var events = rig.OfficeEvents();
-            Assert.Single(events);
-            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[0]));
+            Assert.Equal(2, events.Count);
+            var completed = events[1];
+            Assert.Equal(Constants.EventTypes.OfficeInstallCompleted, EventType(completed));
+            Assert.Equal("Info", Severity(completed));
+            Assert.Equal(true, Data(completed)["coreBinariesPresent"]);
+            Assert.Equal("16.0.17628.20144", Data(completed)["versionReached"]);
         }
 
         [Fact]
-        public void After_worker_stopped_further_events_are_ignored()
+        public void TryFinalizeCompletion_without_binaries_returns_notyet_and_emits_nothing()
         {
             using var rig = new Rig(ActiveStreaming());
+            rig.Sut.OnWorkerStarted(); // started
 
-            rig.Sut.OnWorkerStarted();         // started
-            rig.Sut.OnWorkerStopped();         // stop tracking (no terminal)
+            rig.Sut.CoreBinariesProbe = _ => false; // integrate not finished / nothing on disk
 
-            // A brand-new worker / registry change must not re-trigger (one lifecycle).
-            rig.Current = ActiveStreaming();
+            var outcome = rig.Sut.TryFinalizeCompletion();
+
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.NotYet, outcome);
+            Assert.Single(rig.OfficeEvents()); // started only — no premature terminal
+        }
+
+        [Fact]
+        public void TryFinalizeCompletion_then_binaries_appear_completes_on_retry()
+        {
+            using var rig = new Rig(ActiveStreaming());
             rig.Sut.OnWorkerStarted();
-            rig.Sut.OnRegistryChanged();
+
+            rig.Sut.CoreBinariesProbe = _ => false;
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.NotYet, rig.Sut.TryFinalizeCompletion());
+
+            rig.Sut.CoreBinariesProbe = _ => true; // lay-down finished by the next probe
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.Completed, rig.Sut.TryFinalizeCompletion());
+
+            Assert.Equal(Constants.EventTypes.OfficeInstallCompleted, EventType(rig.OfficeEvents()[1]));
+        }
+
+        [Fact]
+        public void TryFinalizeCompletion_with_error_code_emits_failed()
+        {
+            using var rig = new Rig(ActiveStreaming());
+            rig.Sut.OnWorkerStarted();
+
+            var withError = CompletedIdle();
+            withError.ErrorCode = "17002";
+            rig.Current = withError;
+            rig.Sut.CoreBinariesProbe = _ => true; // error takes precedence over binary presence
+
+            var outcome = rig.Sut.TryFinalizeCompletion();
+
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.Failed, outcome);
+            Assert.Equal(Constants.EventTypes.OfficeInstallFailed, EventType(rig.OfficeEvents()[1]));
+        }
+
+        [Fact]
+        public void AbandonSilently_latches_terminal_without_an_event()
+        {
+            using var rig = new Rig(ActiveStreaming());
+            rig.Sut.OnWorkerStarted(); // started
+
+            rig.Sut.AbandonSilently();
+
+            // No terminal event, and the lifecycle is closed — further signals do nothing.
+            rig.Sut.CoreBinariesProbe = _ => true;
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.NotYet, rig.Sut.TryFinalizeCompletion());
+            rig.Current = ActiveStreaming();
             rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 1, FileSize = 100, TotalBytesDownloaded = 50 });
 
-            var events = rig.OfficeEvents();
-            Assert.Single(events);
-            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[0]));
+            Assert.Single(rig.OfficeEvents());
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(rig.OfficeEvents()[0]));
         }
 
         // ---------------------------------------------------------------- failed (error code only)
