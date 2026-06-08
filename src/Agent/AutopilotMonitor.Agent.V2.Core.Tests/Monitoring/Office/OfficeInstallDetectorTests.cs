@@ -122,7 +122,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal("Info", Severity(started));
 
             var data = Data(started);
-            Assert.Equal("Streaming", data["phase"]);
+            Assert.Equal("Installing", data["phase"]);
             Assert.Equal("INSTALL", data["scenario"]);
             Assert.Contains("O365ProPlusRetail", (List<string>)data["products"]);
             Assert.Equal("Current", data["channel"]);
@@ -220,70 +220,44 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal(2, events.Count); // started + one progress only
         }
 
-        // ---------------------------------------------------------------- completed
+        // ---------------------------------------------------------------- terminal (conservative v1)
 
         [Fact]
-        public void Worker_stopped_with_streaming_finished_emits_completed_with_version_and_duration()
+        public void Worker_stopped_emits_no_terminal_event()
         {
+            // Conservative v1: the transient worker's exit is NOT install completion — no completed/
+            // failed is emitted (field session 8353e03b false-failed). started/progress only.
             using var rig = new Rig(ActiveStreaming());
 
-            rig.Sut.OnWorkerStarted(); // started
-            rig.Clock.Advance(TimeSpan.FromSeconds(412));
-            rig.Current = CompletedIdle("16.0.17628.20144");
-            rig.Sut.OnWorkerStopped(); // completed
-
-            var events = rig.OfficeEvents();
-            Assert.Equal(2, events.Count);
-            var completed = events[1];
-            Assert.Equal(Constants.EventTypes.OfficeInstallCompleted, EventType(completed));
-            Assert.Equal("Info", Severity(completed));
-
-            var data = Data(completed);
-            Assert.Equal("Completed", data["phase"]);
-            Assert.Equal("16.0.17628.20144", data["versionReached"]);
-            Assert.Equal(412, data["durationSeconds"]);
-        }
-
-        [Fact]
-        public void Terminal_state_latches_no_further_events()
-        {
-            using var rig = new Rig(ActiveStreaming());
-
-            rig.Sut.OnWorkerStarted();
+            rig.Sut.OnWorkerStarted();        // started
             rig.Current = CompletedIdle();
-            rig.Sut.OnWorkerStopped(); // completed
-            rig.Current = ActiveStreaming();
-            rig.Sut.OnWorkerStarted(); // must NOT re-trigger (one lifecycle)
-            rig.Sut.OnRegistryChanged();
+            rig.Sut.OnWorkerStopped();         // must NOT emit a terminal
 
             var events = rig.OfficeEvents();
-            Assert.Equal(2, events.Count);
-            Assert.Equal(Constants.EventTypes.OfficeInstallCompleted, EventType(events[1]));
+            Assert.Single(events);
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[0]));
         }
 
-        // ---------------------------------------------------------------- failed
-
         [Fact]
-        public void Worker_stopped_without_streaming_finished_emits_failed_warning()
+        public void After_worker_stopped_further_events_are_ignored()
         {
             using var rig = new Rig(ActiveStreaming());
 
-            rig.Sut.OnWorkerStarted();
+            rig.Sut.OnWorkerStarted();         // started
+            rig.Sut.OnWorkerStopped();         // stop tracking (no terminal)
 
-            rig.Current = new OfficeC2RSnapshot
-            {
-                ConfigurationKeyPresent = true,
-                StreamingFinished = false,
-                ActiveScenarioPresent = false,
-                OfficeC2RClientRunning = false,
-            };
-            rig.Sut.OnWorkerStopped(); // failed (abandoned)
+            // A brand-new worker / registry change must not re-trigger (one lifecycle).
+            rig.Current = ActiveStreaming();
+            rig.Sut.OnWorkerStarted();
+            rig.Sut.OnRegistryChanged();
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 1, FileSize = 100, TotalBytesDownloaded = 50 });
 
             var events = rig.OfficeEvents();
-            Assert.Equal(2, events.Count);
-            Assert.Equal(Constants.EventTypes.OfficeInstallFailed, EventType(events[1]));
-            Assert.Equal("Warning", Severity(events[1]));
+            Assert.Single(events);
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[0]));
         }
+
+        // ---------------------------------------------------------------- failed (error code only)
 
         [Fact]
         public void Observed_error_code_during_progress_emits_failed_error_with_code()

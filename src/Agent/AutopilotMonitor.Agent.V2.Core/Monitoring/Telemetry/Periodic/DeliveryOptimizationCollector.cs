@@ -469,16 +469,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
                            $"{progressCount} progress updates, {matchCount} new matches ({_enrichedAppIds.Count} total enriched)");
         }
 
+        // Office C2R content CDN hosts — version-independent (a FileId build marker like "_16_0_" would
+        // break on older/newer Office versions). Field-validated against session 8353e03b: C2R uses BOTH
+        // the primary CDN officecdn.microsoft.com (registry OriginalCDNDomain) and the content CDN
+        // f.c2r.ts.cdn.office.net (registry FailoverDomain / PreferredCDNPrefix).
+        private static readonly string[] OfficeCdnHosts = { "cdn.office.net", "officecdn.microsoft.com" };
+
         /// <summary>
-        /// True when a DO job's SourceURL points at the Office CDN (Office C2R content), i.e. a job
-        /// that is not an IME Win32 app. TODO(office-followup): validate the exact SourceURL/FileId
-        /// shape against a real enrollment's do-status.jsonl and tighten if needed.
+        /// True when a DO job's SourceURL points at an Office C2R content CDN (not an IME Win32 app).
+        /// Matched purely by the stable CDN host so it survives Office version changes.
         /// </summary>
         private static bool IsOfficeCdnJob(string sourceUrl)
         {
             if (string.IsNullOrEmpty(sourceUrl)) return false;
-            return sourceUrl.IndexOf("officecdn", StringComparison.OrdinalIgnoreCase) >= 0
-                || sourceUrl.IndexOf("officeclient.microsoft.com", StringComparison.OrdinalIgnoreCase) >= 0;
+            foreach (var host in OfficeCdnHosts)
+                if (sourceUrl.IndexOf(host, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
         }
 
         // -----------------------------------------------------------------------

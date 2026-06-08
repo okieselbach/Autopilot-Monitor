@@ -30,9 +30,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
     ///   <item><see cref="OnOfficeDoSample"/> — aggregated Delivery-Optimization stats for Office's CDN
     ///     download (from the extended DeliveryOptimizationCollector). DO has no push API, so it is
     ///     sampled while the worker is alive; a byte advance folds a real download-% into progress.</item>
-    ///   <item><see cref="OnWorkerStopped"/> — last worker exited (<see cref="Process.Exited"/>) →
-    ///     emit <see cref="Constants.EventTypes.OfficeInstallCompleted"/> /
-    ///     <see cref="Constants.EventTypes.OfficeInstallFailed"/> with version + duration + DO summary.</item>
+    ///   <item><see cref="OnWorkerStopped"/> — last worker exited. NOT treated as completion (the
+    ///     worker is a transient launcher; the C2R service installs on for minutes). Conservative v1:
+    ///     stop tracking, emit no terminal. Completion/failure (via Scenario\INSTALL\TasksState) is
+    ///     deferred to the live-install capture iteration. Only an explicit numeric error code finalizes
+    ///     as <see cref="Constants.EventTypes.OfficeInstallFailed"/>.</item>
     /// </list>
     /// </para>
     /// <para>
@@ -134,15 +136,25 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             }
         }
 
-        /// <summary>Last Office C2R worker exited — resolve terminal completed / failed.</summary>
+        /// <summary>
+        /// Last Office C2R worker exited. The worker (OfficeC2RClient.exe) is a transient launcher —
+        /// in the field (session 8353e03b) it lived only ~2s and kicked off the operation, while the
+        /// OfficeClickToRun.exe service ran the actual install for minutes afterwards. Its exit is
+        /// therefore NOT install completion. Emitting failed on worker-exit was a false-positive, so
+        /// we do NOT finalize here — we simply stop tracking and emit nothing.
+        /// <para>
+        /// Completion/failure detection is deferred (conservative v1): the registry has NO
+        /// <c>StreamingFinished</c> value and <c>Scenario\INSTALL</c> persists post-install, so neither
+        /// is a usable signal. The real completion signal is <c>Scenario\INSTALL\TasksState</c>
+        /// (per-task <c>TASKSTATE_COMPLETED</c> / <c>_INPROGRESS</c> / failure); the in-progress/failed
+        /// wording is being captured from a live install before it is wired up — see office-followup.
+        /// </para>
+        /// </summary>
         public void OnWorkerStopped()
         {
             lock (_lock)
             {
-                if (_state != DetectorState.Active) return;
-                var snap = ReadSnapshotSafe();
-                if (snap == null) snap = new OfficeC2RSnapshot();
-                Finalize(snap);
+                if (_state == DetectorState.Active) _state = DetectorState.Terminal; // stop; no terminal event
             }
         }
 
@@ -152,9 +164,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
 
         private void EvaluateActive(OfficeC2RSnapshot snap)
         {
+            // Conservative v1: the only terminal we trust is an explicit numeric error code. Completion
+            // is NOT claimed (TasksState-based detection lands with the live-install capture).
             if (!string.IsNullOrEmpty(snap.ErrorCode))
             {
-                Finalize(snap);
+                FinalizeFailed(snap);
                 return;
             }
 
@@ -166,33 +180,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             }
         }
 
-        private void Finalize(OfficeC2RSnapshot snap)
+        private void FinalizeFailed(OfficeC2RSnapshot snap)
         {
             if (_state == DetectorState.Terminal) return;
             _state = DetectorState.Terminal;
-
-            string eventType;
-            EventSeverity severity;
-            string phase;
-            if (!string.IsNullOrEmpty(snap.ErrorCode))
-            {
-                eventType = Constants.EventTypes.OfficeInstallFailed; severity = EventSeverity.Error; phase = "Failed";
-            }
-            else if (snap.StreamingFinished)
-            {
-                eventType = Constants.EventTypes.OfficeInstallCompleted; severity = EventSeverity.Info; phase = "Completed";
-            }
-            else
-            {
-                // Worker gone without StreamingFinished → abandoned install.
-                eventType = Constants.EventTypes.OfficeInstallFailed; severity = EventSeverity.Warning; phase = "Failed";
-            }
-
-            EmitLifecycle(eventType, snap, severity, phase, isTerminal: true);
+            EmitLifecycle(Constants.EventTypes.OfficeInstallFailed, snap, EventSeverity.Error, "Failed", isTerminal: true);
         }
 
-        private static string PhaseOf(OfficeC2RSnapshot snap)
-            => snap.StreamingFinished ? "Finalizing" : "Streaming";
+        // Conservative v1: StreamingFinished does not exist in the C2R registry, so we cannot label
+        // Streaming vs Finalizing — report a single "Installing" phase until TasksState-based phase
+        // detection is added.
+        private static string PhaseOf(OfficeC2RSnapshot snap) => "Installing";
 
         /// <summary>
         /// Stable signature of everything we treat as "progress". A change in any of these (registry
@@ -203,8 +201,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         {
             var parts = new List<string>
             {
-                "phase=" + PhaseOf(snap),
-                "streaming=" + snap.StreamingFinished,
                 "version=" + (snap.VersionToReport ?? string.Empty),
                 "scenario=" + (snap.ActiveScenarioName ?? string.Empty),
             };
