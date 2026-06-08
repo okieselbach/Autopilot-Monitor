@@ -418,9 +418,11 @@ namespace AutopilotMonitor.Shared
             public const string ProvisioningPackageScan   = "provisioning_package_scan";
             // AutoLogon scan — runs at DeviceSetup-phase completion and at final shutdown. Reports
             // raw facts only (Winlogon registry indicators; DefaultPassword presence-only, never the
-            // value) at Info severity. Backend analyze-rules (ANALYZE-SEC-002/003) judge the facts:
-            // an active AutoLogon is a Warning, a plaintext DefaultPassword on disk is escalated.
-            // AutoLogon may be legitimate (kiosk deployment) OR an enrollment/OOBE manipulation vector.
+            // value) at Info severity. AutoLogon-enabled alone is NOT graded — it is the fingerprint
+            // of Windows' own ESP auto-logon on every normal Autopilot enrollment. Backend analyze-
+            // rules grade only the unambiguous cases: a plaintext DefaultPassword on disk (ANALYZE-
+            // SEC-003, escalated) and an optional kiosk allow-list template (ANALYZE-SEC-004, off by
+            // default). AutoLogon may be legitimate (kiosk) OR an enrollment/OOBE manipulation vector.
             public const string AutoLogonAnalysis         = "autologon_analysis";
 
             // Termination / diagnostics / server actions

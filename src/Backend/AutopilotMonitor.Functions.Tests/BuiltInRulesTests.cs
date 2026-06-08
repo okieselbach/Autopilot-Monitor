@@ -91,24 +91,19 @@ public class BuiltInRulesTests
     {
         var rules = BuiltInAnalyzeRules.GetAll();
 
-        // SEC-002: broad AutoLogon warning, default-on, NOT a template.
-        var sec002 = rules.FirstOrDefault(r => r.RuleId == "ANALYZE-SEC-002");
-        Assert.NotNull(sec002);
-        Assert.True(sec002!.Enabled, "ANALYZE-SEC-002 should be enabled by default");
-        Assert.Equal("warning", sec002.Severity);
-        Assert.True(sec002.TemplateVariables == null || sec002.TemplateVariables.Count == 0);
-        Assert.Contains(sec002.Conditions, c => c.DataField == "checks.autologon_enabled");
+        // SEC-002 was removed: AutoLogon-enabled alone is the exact fingerprint of Windows' own ESP
+        // auto-logon during a normal Autopilot enrollment, so a broad "AutoLogon active" warning was
+        // a guaranteed false positive on every device. Only a plaintext password (SEC-003) is graded.
+        Assert.DoesNotContain(rules, r => r.RuleId == "ANALYZE-SEC-002");
 
-        // The sysinternals confidence factor must be backed by a real (non-required) condition
-        // carrying the same signal — otherwise the `exists` factor can never match (dead factor).
-        var sec002SysFactor = sec002.ConfidenceFactors?.FirstOrDefault(f => f.Signal == "sysinternals_suspected");
-        Assert.NotNull(sec002SysFactor);
-        Assert.Contains(sec002.Conditions, c =>
-            c.Signal == "sysinternals_suspected"
-            && c.DataField == "checks.sysinternals_autologon_suspected"
-            && !c.Required);
+        // The non-discriminating sysinternals heuristic was removed everywhere — no surviving rule
+        // may reference it (it fired identically for native ESP auto-logon and a Sysinternals kiosk).
+        Assert.DoesNotContain(rules, r =>
+            r.Conditions != null && r.Conditions.Any(c => c.DataField == "checks.sysinternals_autologon_suspected"));
+        Assert.DoesNotContain(rules, r =>
+            r.ConfidenceFactors != null && r.ConfidenceFactors.Any(f => f.Signal == "sysinternals_suspected"));
 
-        // SEC-003: plaintext password, default-on, escalated.
+        // SEC-003: plaintext password, default-on, escalated. The sole default-on AutoLogon signal.
         var sec003 = rules.FirstOrDefault(r => r.RuleId == "ANALYZE-SEC-003");
         Assert.NotNull(sec003);
         Assert.True(sec003!.Enabled, "ANALYZE-SEC-003 should be enabled by default");

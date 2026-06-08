@@ -14,8 +14,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Analyzers
 {
     /// <summary>
     /// AutoLogonAnalyzer — pure classification (BuildPayload) plus emission contract. The analyzer
-    /// reports raw Winlogon facts at Info severity; the Warning/escalation grading lives in backend
-    /// analyze-rules (ANALYZE-SEC-002/003), so these tests assert facts, not severity judgements.
+    /// reports raw Winlogon facts at Info severity; the escalation grading lives in backend
+    /// analyze-rules (ANALYZE-SEC-003 plaintext password), so these tests assert facts, not severity
+    /// judgements. AutoLogon-enabled alone is deliberately ungraded (it matches Windows' own ESP
+    /// auto-logon on every normal Autopilot enrollment).
     /// </summary>
     public sealed class AutoLogonAnalyzerTests
     {
@@ -90,25 +92,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Analyzers
             // Presence-only: the password value must never appear anywhere in the payload.
             Assert.False(checks.ContainsKey("default_password"));
             Assert.DoesNotContain("DefaultPassword", checks.Keys);
-            // A plaintext password means it is NOT the Sysinternals (LSA-secret) shape.
-            Assert.False((bool)checks["sysinternals_autologon_suspected"]);
         }
 
         [Fact]
-        public void BuildPayload_sysinternals_heuristic_when_enabled_user_set_no_reg_password()
+        public void BuildPayload_enabled_user_no_password_does_not_flag_sysinternals()
         {
+            // Regression guard: "AutoLogon enabled + a default user + no registry password" is the
+            // exact fingerprint of Windows' own ESP auto-logon on a normal Autopilot enrollment.
+            // The old sysinternals heuristic flagged it on every device — it must be gone now: no
+            // sysinternals check, no sysinternals finding, just the factual autologon_active label.
             var snap = new AutoLogonSnapshot
             {
                 WinlogonKeyPresent = true,
                 AutoAdminLogon = "1",
-                DefaultUserName = "kioskuser",
+                DefaultUserName = "luke.skywalker@example.net",
                 DefaultPasswordPresent = false,
             };
-            var data = AutoLogonAnalyzer.BuildPayload(snap, "shutdown");
+            var data = AutoLogonAnalyzer.BuildPayload(snap, "device_setup_complete");
 
             var checks = Checks(data);
-            Assert.True((bool)checks["sysinternals_autologon_suspected"]);
-            Assert.Contains("sysinternals_autologon_suspected", (List<string>)data["findings"]);
+            Assert.DoesNotContain("sysinternals_autologon_suspected", checks.Keys);
+            Assert.DoesNotContain("sysinternals_autologon_suspected", (List<string>)data["findings"]);
+            Assert.Equal("autologon_active", data["finding"]);
         }
 
         [Fact]

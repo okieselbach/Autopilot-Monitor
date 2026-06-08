@@ -1482,84 +1482,6 @@
       ]
     },
     {
-      "ruleId": "ANALYZE-SEC-002",
-      "title": "AutoLogon enabled on device",
-      "description": "Fires when the AutoLogon analyzer reports an active automatic sign-in (AutoAdminLogon or ForceAutoLogon set in Winlogon). AutoLogon can be a legitimate kiosk or shared-device configuration, but it is also a classic way to automate enrollment or OOBE, so an active AutoLogon during Autopilot is worth surfacing.",
-      "severity": "warning",
-      "category": "security",
-      "version": "1.0.0",
-      "enabled": true,
-      "trigger": "single",
-      "baseConfidence": 80,
-      "conditions": [
-        {
-          "signal": "autologon_enabled",
-          "source": "event_type",
-          "eventType": "autologon_analysis",
-          "dataField": "checks.autologon_enabled",
-          "operator": "equals",
-          "value": "true",
-          "required": true
-        },
-        {
-          "signal": "sysinternals_suspected",
-          "source": "event_data",
-          "eventType": "autologon_analysis",
-          "dataField": "checks.sysinternals_autologon_suspected",
-          "operator": "equals",
-          "value": "true",
-          "required": false
-        }
-      ],
-      "confidenceFactors": [
-        {
-          "signal": "sysinternals_suspected",
-          "condition": "exists",
-          "weight": 10
-        }
-      ],
-      "confidenceThreshold": 40,
-      "explanation": "This device has **automatic sign-in (AutoLogon) enabled** in the registry (`HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon`). The `AutoAdminLogon` and/or `ForceAutoLogon` value is set, so Windows will log a user in without prompting for credentials.\n\nThis is legitimate for kiosk and shared-device scenarios, but it is also a common technique to automate enrollment or OOBE. If AutoLogon was not part of your intended deployment, treat it as a possible manipulation: review the configured default user, the source that wrote the keys (provisioning script, Win32 app, or the Sysinternals Autologon tool), and whether the account is more privileged than the kiosk use case requires.\n\n**Sysinternals Autologon:** when the evidence includes `sysinternals_suspected`, the AutoLogon password is stored as an encrypted **LSA secret** instead of a plaintext `DefaultPassword` registry value — the signature of the Sysinternals Autologon tool (AutoLogon enabled, a default user set, and no registry password). That is a deliberate, tool-assisted setup: still legitimate for an approved kiosk, but a stronger indicator of intent than a flag left behind by accident (the rule raises its confidence accordingly).\n\nReview the `autologon_analysis` event in the session timeline for the exact Winlogon values (default user / domain, AutoLogon count, whether a Sysinternals LSA-secret password is suspected).",
-      "remediation": [
-        {
-          "title": "Confirm AutoLogon is intended",
-          "steps": [
-            "Open the autologon_analysis event in the session timeline and review the default user/domain and AutoLogon flags",
-            "Confirm whether AutoLogon is part of an approved kiosk / shared-device deployment",
-            "If unexpected, identify what wrote the Winlogon keys (provisioning script, Win32 app, or Sysinternals Autologon)"
-          ]
-        },
-        {
-          "title": "Disable AutoLogon if not required",
-          "steps": [
-            "Set HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\AutoAdminLogon to 0",
-            "Remove DefaultPassword (and any Sysinternals LSA secret) if present",
-            "For kiosk scenarios, prefer Assigned Access / kiosk profiles over raw AutoLogon where possible"
-          ]
-        },
-        {
-          "title": "Run deliberate kiosks? Use the allow-list instead",
-          "steps": [
-            "If AutoLogon is an approved kiosk configuration, configure the template rule ANALYZE-SEC-004 with your expected kiosk account name(s)",
-            "Then disable this rule (ANALYZE-SEC-002) so approved kiosk AutoLogon stays quiet while AutoLogon for unexpected users still warns"
-          ]
-        }
-      ],
-      "relatedDocs": [
-        {
-          "title": "Microsoft: Configure Windows to automatically sign in (AutoLogon)",
-          "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/turn-on-automatic-logon"
-        }
-      ],
-      "tags": [
-        "security",
-        "autologon",
-        "winlogon",
-        "kiosk",
-        "credentials"
-      ]
-    },
-    {
       "ruleId": "ANALYZE-SEC-003",
       "title": "AutoLogon plaintext password stored in registry",
       "description": "Fires when the AutoLogon analyzer reports a DefaultPassword value present in Winlogon. A plaintext AutoLogon password stored in the registry is readable by any local administrator and is a credential exposure — more severe than AutoLogon alone (the Sysinternals Autologon tool deliberately avoids this by storing the secret in the LSA instead).",
@@ -1616,7 +1538,7 @@
     {
       "ruleId": "ANALYZE-SEC-004",
       "title": "AutoLogon enabled for an unexpected user",
-      "description": "Template variant of the AutoLogon warning with a kiosk allow-list. Fires when AutoLogon is enabled for a default user that is NOT on your configured list of approved kiosk / shared-device accounts. Disabled until configured: set your allowed account name(s), then disable the broad ANALYZE-SEC-002 so deliberate kiosk AutoLogon stops raising a warning while unexpected AutoLogon still does.",
+      "description": "Optional kiosk allow-list for AutoLogon. Fires when AutoLogon is enabled for a default user that is NOT on your configured list of approved kiosk / shared-device accounts. Disabled until configured because a normal Autopilot enrollment leaves Windows' own ESP auto-logon for the enrolling user (AutoLogon enabled, a default user, no plaintext password) — so AutoLogon-enabled alone is not graded by default; only a plaintext DefaultPassword on disk (ANALYZE-SEC-003) is. Enable this rule with your expected kiosk account name(s) if you want to surface AutoLogon configured for any other user.",
       "severity": "warning",
       "category": "security",
       "version": "1.0.0",
@@ -1641,26 +1563,10 @@
           "operator": "not_in",
           "value": "EXPECTED-KIOSK-USER-1,EXPECTED-KIOSK-USER-2",
           "required": true
-        },
-        {
-          "signal": "sysinternals_suspected",
-          "source": "event_data",
-          "eventType": "autologon_analysis",
-          "dataField": "checks.sysinternals_autologon_suspected",
-          "operator": "equals",
-          "value": "true",
-          "required": false
-        }
-      ],
-      "confidenceFactors": [
-        {
-          "signal": "sysinternals_suspected",
-          "condition": "exists",
-          "weight": 10
         }
       ],
       "confidenceThreshold": 40,
-      "explanation": "AutoLogon is enabled on this device for a user that is **not on your approved kiosk allow-list**. AutoLogon is legitimate for kiosk and shared-device scenarios, so this rule only warns when the configured default user differs from the account(s) you expect — letting you keep deliberate kiosk AutoLogon quiet while still surfacing unexpected automatic sign-in.\n\nTo use this rule: configure the allow-list with your approved kiosk account name(s) (comma-separated, case-insensitive exact match against the Winlogon `DefaultUserName`), then disable the broad **ANALYZE-SEC-002 — AutoLogon enabled on device** rule so it does not also fire on your approved kiosk devices.\n\nNote: an AutoLogon with no explicit default user (e.g. ForceAutoLogon only) is treated as unexpected and will warn.",
+      "explanation": "AutoLogon is enabled on this device for a user that is **not on your approved kiosk allow-list**. AutoLogon is legitimate for kiosk and shared-device scenarios, so this rule only warns when the configured default user differs from the account(s) you expect.\n\nThis rule is **off by default**. A normal user-driven Autopilot enrollment leaves Windows' own ESP auto-logon for the enrolling user (`AutoAdminLogon=1`, a `DefaultUserName`, an `AutoLogonSID`, and no plaintext password) — registry-indistinguishable from a kiosk AutoLogon — so AutoLogon-enabled alone is not graded. The only AutoLogon state graded by default is a plaintext `DefaultPassword` on disk (**ANALYZE-SEC-003**).\n\nTo use this rule: configure the allow-list with your approved kiosk account name(s) (comma-separated, case-insensitive exact match against the Winlogon `DefaultUserName`) and enable it. AutoLogon for any other user will then warn.\n\nNote: an AutoLogon with no explicit default user (e.g. ForceAutoLogon only) is treated as unexpected and will warn.",
       "remediation": [
         {
           "title": "Confirm the AutoLogon user",

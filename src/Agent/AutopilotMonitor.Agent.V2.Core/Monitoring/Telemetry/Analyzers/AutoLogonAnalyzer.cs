@@ -17,16 +17,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
     /// <para>
     /// AutoLogon (<c>HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon</c>) is a classic
     /// way to automate sign-in. It can be legitimate (kiosk / shared-device deployment) OR a
-    /// manipulation vector to automate enrollment / OOBE. The Sysinternals <c>Autologon</c> tool
-    /// stores the password as an LSA secret rather than the plaintext <c>DefaultPassword</c> value;
-    /// we detect that heuristically (AutoLogon enabled + a default user but no registry password)
-    /// WITHOUT reading the LSA secret.
+    /// manipulation vector to automate enrollment / OOBE.
+    /// </para>
+    /// <para>
+    /// Note on grading: a normal user-driven Autopilot enrollment leaves <c>AutoAdminLogon=1</c>
+    /// with a <c>DefaultUserName</c>, an <c>AutoLogonSID</c> and NO <c>DefaultPassword</c> — Windows'
+    /// own ESP auto-logon for the enrolling user. That state is registry-indistinguishable from a
+    /// Sysinternals-Autologon / kiosk setup (both leave AutoLogon enabled + a user but no plaintext
+    /// password), so AutoLogon-enabled alone is NOT a reliable signal during Autopilot. The only
+    /// unambiguous risk is a plaintext <c>DefaultPassword</c> on disk — graded by ANALYZE-SEC-003.
     /// </para>
     /// <para>
     /// This analyzer reports facts ONLY, always at <see cref="EventSeverity.Info"/>. It never reads
     /// or emits the <c>DefaultPassword</c> value — only its presence. Whether an AutoLogon is a
-    /// problem is judged by backend analyze-rules (ANALYZE-SEC-002 = AutoLogon active → Warning,
-    /// ANALYZE-SEC-003 = plaintext DefaultPassword on disk → escalated).
+    /// problem is judged by backend analyze-rules (ANALYZE-SEC-003 = plaintext DefaultPassword on
+    /// disk → escalated; ANALYZE-SEC-004 = optional kiosk allow-list template).
     /// </para>
     /// <para>
     /// <b>Trigger</b>: NOT at agent start — the Winlogon keys are written later by a provisioning
@@ -185,17 +190,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
             bool autologonEnabled = autoAdminLogonEnabled || forceAutoLogonEnabled;
             bool defaultIdentityPresent =
                 !string.IsNullOrEmpty(snap.DefaultUserName) || !string.IsNullOrEmpty(snap.DefaultDomainName);
-            // Sysinternals Autologon stores the password as an LSA secret, leaving AutoLogon enabled
-            // with a default user but NO plaintext DefaultPassword in the registry.
-            bool sysinternalsSuspected =
-                autologonEnabled && !string.IsNullOrEmpty(snap.DefaultUserName) && !snap.DefaultPasswordPresent;
 
             // Factual indicator labels (no judgement — severity is the rule's job).
+            // Note: there is deliberately NO "sysinternals suspected" label. The heuristic it used
+            // (AutoLogon enabled + a default user + no registry password) is the exact fingerprint
+            // of Windows' own ESP auto-logon during a normal Autopilot enrollment, so it fired on
+            // every device and graded benign enrollments as suspicious. A plaintext DefaultPassword
+            // (below) is the only unambiguous signal we surface.
             var findings = new List<string>();
             if (autoAdminLogonEnabled) findings.Add("auto_admin_logon_enabled");
             if (forceAutoLogonEnabled) findings.Add("force_auto_logon_enabled");
             if (snap.DefaultPasswordPresent) findings.Add("default_password_present");
-            if (sysinternalsSuspected) findings.Add("sysinternals_autologon_suspected");
             if (defaultIdentityPresent) findings.Add("default_identity_present");
 
             // Primary label, most-notable-first (still factual).
@@ -220,7 +225,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
                 { "auto_logon_sid", snap.AutoLogonSid ?? string.Empty },
                 { "auto_logon_count", snap.AutoLogonCount.HasValue ? (object)snap.AutoLogonCount.Value : string.Empty },
                 { "default_password_present", snap.DefaultPasswordPresent },
-                { "sysinternals_autologon_suspected", sysinternalsSuspected },
                 { "default_identity_present", defaultIdentityPresent },
             };
 
