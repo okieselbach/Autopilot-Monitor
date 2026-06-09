@@ -8,7 +8,6 @@ using AutopilotMonitor.Functions.Functions.Sessions;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Middleware;
 using AutopilotMonitor.Functions.Services;
-using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -53,35 +52,24 @@ builder.Services.Configure<JsonSerializerOptions>(options =>
 });
 
 builder.Services
-    .AddApplicationInsightsTelemetryWorkerService(options =>
-    {
-        // The DEFAULT worker-side adaptive sampler has no excluded types: under load it thinned
-        // the enriched request copies from RequestTelemetryMiddleware (TenantId/CorrelationId —
-        // the per-call audit record) to ~15%, while the unenriched HOST request items stayed
-        // unsampled (host.json excludedTypes only governs the host pipeline). Protection was
-        // inverted. Disabled here and re-added below with Request + Event excluded.
-        options.EnableAdaptiveSampling = false;
-    })
+    .AddApplicationInsightsTelemetryWorkerService()
     .ConfigureFunctionsApplicationInsights();
+
+// L4 ATTEMPT REVERTED 2026-06-09 (deploy-verified ineffective): tried to exclude Request;Event
+// from worker-side adaptive sampling via EnableAdaptiveSampling=false + a manual
+// Configure<TelemetryConfiguration> { DefaultTelemetrySink…UseAdaptiveSampling(excludedTypes) }.
+// In the Functions isolated worker that classic-ASP.NET pattern does NOT take effect — live data
+// showed the enriched worker request copy (Source=WorkerMiddleware) getting sampled to ~63% while
+// the redundant host request item (Source="") stayed fully billed. Net worse (lossy enriched copy,
+// unchanged host duplicate). The host request item is emitted by the HOST process and cannot be
+// dropped from worker code or by host.json "Host.Results" level. Re-attempt only with a mechanism
+// verified against the isolated-worker telemetry pipeline — do not re-add the manual chain.
 
 // Drop successful Azure Storage dependencies (Table/Queue/Blob) from the worker telemetry
 // pipeline to curb AppDependencies ingestion cost — this backend is storage-I/O heavy and those
 // rows are high-volume, low-value. Failed storage calls and all non-storage dependencies
 // (HTTP/Graph/SQL/SignalR) are preserved. See StorageDependencyFilterProcessor for the contract.
 builder.Services.AddApplicationInsightsTelemetryProcessor<AutopilotMonitor.Functions.Telemetry.StorageDependencyFilterProcessor>();
-
-// Re-introduce worker-side adaptive sampling with Request + Event excluded: the enriched
-// request items stay complete (with host.json "Host.Results": "Error" they are the ONLY
-// success-request record), and customEvents are low-volume ops signals worth keeping whole.
-// Traces/dependencies/exceptions remain adaptively sampled. The sampler is appended to the
-// processor chain AFTER the DI-registered processors above, so the dropped storage chatter
-// no longer pressures the sampling rate of everything else.
-builder.Services.Configure<TelemetryConfiguration>(config =>
-{
-    var chain = config.DefaultTelemetrySink.TelemetryProcessorChainBuilder;
-    chain.UseAdaptiveSampling(maxTelemetryItemsPerSecond: 5, excludedTypes: "Request;Event");
-    chain.Build();
-});
 
 // Configure JWT Authentication for Multi-Tenant Azure AD
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
