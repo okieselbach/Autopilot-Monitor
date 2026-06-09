@@ -4,7 +4,6 @@ using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Middleware;
 using AutopilotMonitor.Functions.Helpers;
-using AutopilotMonitor.Functions.Security;
 
 namespace AutopilotMonitor.Functions.Middleware;
 
@@ -90,22 +89,14 @@ public class RequestTelemetryMiddleware : IFunctionsWorkerMiddleware
                 requestTelemetry.Context.Operation.ParentId = activity.Id;
             }
 
-            // Real client IP for the requests table (client_IP). The isolated worker behind
-            // Front Door / App Service does not populate it — it defaults to 0.0.0.0, making the
-            // column useless. Prefer X-Azure-ClientIP (Front Door sets it to the true client
-            // egress IP); fall back to the trusted rightmost X-Forwarded-For hop. Join all header
-            // values (matching ClientIpExtractor) so the rightmost trusted hop wins — taking only
-            // the first value could surface a spoofable left-side entry. Diagnostic only: the rate
-            // limiter independently uses the trusted hop (ClientIpExtractor.GetTrustedClientIp), so
-            // a spoofed value here cannot affect throttling.
-            // StringValues.ToString() joins multiple header values with "," — same semantics as
-            // ClientIpExtractor's string.Join, so the rightmost trusted hop wins.
-            var azureClientIp = httpContext.Request.Headers["X-Azure-ClientIP"].ToString();
-            var clientIp = !string.IsNullOrWhiteSpace(azureClientIp)
-                ? ClientIpExtractor.ExtractTrustedHop(azureClientIp)
-                : ClientIpExtractor.ExtractTrustedHop(httpContext.Request.Headers["X-Forwarded-For"].ToString());
-            if (clientIp != ClientIpExtractor.Unknown)
-                requestTelemetry.Context.Location.Ip = clientIp;
+            // NOTE: client_IP is deliberately NOT populated here. App Insights uses the request IP
+            // only for geo-lookup and then masks the stored client_IP to 0.0.0.0 (verified: every
+            // request in the resource shows 0.0.0.0), so setting Context.Location.Ip has no effect
+            // on the column. On top of that, the only IP reaching the isolated worker is an Azure-
+            // infra hop (West Europe), not the device's real egress IP — the device IP would need a
+            // non-masked custom property AND the correct forwarded header (Front-Door-topology
+            // dependent). Not worth it: TenantId (above) + CorrelationId already isolate a device.
+            // See memory project_ingest_request_multiplication_429 for the full diagnosis.
 
             // Business context from downstream middleware
             requestTelemetry.Properties["Source"] = "WorkerMiddleware";
