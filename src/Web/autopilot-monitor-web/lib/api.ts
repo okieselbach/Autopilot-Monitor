@@ -383,6 +383,7 @@ export const api = {
   // ── Hardware Rejection Insights (tenant-scoped, from distress data) ──────
   distress: {
     hardwareRejected: () => `${API_BASE_URL}/api/audit/hardware-rejected`,
+    deviceNotRegistered: () => `${API_BASE_URL}/api/audit/device-not-registered`,
   },
 
   // ── Ops Events ───────────────────────────────────────────────────────────

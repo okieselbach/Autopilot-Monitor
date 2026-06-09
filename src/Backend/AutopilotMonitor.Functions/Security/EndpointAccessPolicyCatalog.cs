@@ -159,6 +159,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "metrics/ime-versions",      EndpointPolicy.MemberRead),
         new("GET",    "audit/logs",                EndpointPolicy.MemberRead),
         new("GET",    "audit/hardware-rejected", EndpointPolicy.MemberRead),
+        new("GET",    "audit/device-not-registered", EndpointPolicy.MemberRead),
         new("GET",    "diagnostics/download-url",  EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "rules/gather",              EndpointPolicy.MemberRead),
         new("GET",    "rules/analyze",             EndpointPolicy.MemberRead),

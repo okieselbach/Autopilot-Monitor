@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTenantConfig } from "../../TenantConfigContext";
 import { TenantNotifications } from "../../TenantNotifications";
 import AutopilotValidationSection from "../../components/AutopilotValidationSection";
+import NotRegisteredDevicesInsights from "../../components/NotRegisteredDevicesInsights";
 
 export function SectionAutopilotValidation() {
   const {
@@ -15,7 +16,7 @@ export function SectionAutopilotValidation() {
     beginDeviceValidationConsentFlow,
   } = useTenantConfig();
 
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   // DevPrep "Device association" is in Microsoft Private Preview — surface only to Global Admins
   // until it ships GA. Backend always rejects writes from non-GA callers regardless of UI.
   // TODO(devprep-followup): add vitest DOM-render test asserting toggle is hidden for
@@ -39,6 +40,7 @@ export function SectionAutopilotValidation() {
         saving={savingSection === "autopilotValidation"}
         onBeginConsent={beginDeviceValidationConsentFlow}
       />
+      <NotRegisteredDevicesInsights getAccessToken={getAccessToken} />
     </>
   );
 }
