@@ -95,11 +95,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             var body = SerializeBatch(items);
             var compressedBody = CompressWithGzip(body);
 
+            // Per-request correlation id for end-to-end tracing. The backend's
+            // CorrelationIdMiddleware reads X-Correlation-ID; without it the backend mints a
+            // fresh id per inbound request, so a single logical upload that fans out into
+            // multiple backend executions cannot be tied back together. Generated per attempt
+            // so a retry is a distinct, independently-traceable request — querying the backend
+            // requests table grouped by this id reveals exactly how many executions one wire
+            // request produced.
+            var correlationId = Guid.NewGuid().ToString("N");
+
             // Upload-cadence is pipeline mechanics — keep on Debug so a default Info log
             // is dominated by lifecycle events. Failures (TIMEOUT/NETWORK/TRANSIENT/PERMANENT)
             // below stay on Warning/Error so "why didn't my event arrive" surfaces at Info.
             _logger?.Debug(
-                $"BackendTelemetryUploader: flushing {items.Count} item(s) (bytes={compressedBody.Length}, firstId={items[0].TelemetryItemId}, lastId={items[items.Count - 1].TelemetryItemId}).");
+                $"BackendTelemetryUploader: flushing {items.Count} item(s) (corr={correlationId}, bytes={compressedBody.Length}, firstId={items[0].TelemetryItemId}, lastId={items[items.Count - 1].TelemetryItemId}).");
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             using (var request = new HttpRequestMessage(HttpMethod.Post, _endpointUrl))
@@ -108,6 +117,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
                 request.Content.Headers.ContentEncoding.Add("gzip");
                 AddSecurityHeaders(request);
+                request.Headers.Add("X-Correlation-ID", correlationId);
 
                 HttpResponseMessage response;
                 try
@@ -123,7 +133,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 catch (TaskCanceledException ex)
                 {
                     sw.Stop();
-                    _logger?.Warning($"BackendTelemetryUploader: ingest TIMEOUT after {sw.ElapsedMilliseconds}ms (items={items.Count}): {ex.Message}");
+                    _logger?.Warning($"BackendTelemetryUploader: ingest TIMEOUT after {sw.ElapsedMilliseconds}ms (corr={correlationId}, items={items.Count}): {ex.Message}");
                     // HttpClient timeout (not caller cancellation) surfaces as TaskCanceledException
                     // with cancellationToken.IsCancellationRequested == false.
                     return UploadResult.Transient($"timeout: {ex.Message}");
@@ -131,7 +141,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 catch (HttpRequestException ex)
                 {
                     sw.Stop();
-                    _logger?.Warning($"BackendTelemetryUploader: ingest NETWORK fail after {sw.ElapsedMilliseconds}ms (items={items.Count}): {ex.Message}");
+                    _logger?.Warning($"BackendTelemetryUploader: ingest NETWORK fail after {sw.ElapsedMilliseconds}ms (corr={correlationId}, items={items.Count}): {ex.Message}");
                     // DNS failure, socket error, etc. — network-layer is retryable.
                     return UploadResult.Transient($"network: {ex.Message}");
                 }
@@ -143,15 +153,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
                     if (result.Success)
                     {
-                        _logger?.Debug($"BackendTelemetryUploader: ingest OK (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}).");
+                        _logger?.Debug($"BackendTelemetryUploader: ingest OK (corr={correlationId}, items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}).");
                     }
                     else if (result.IsTransient)
                     {
-                        _logger?.Warning($"BackendTelemetryUploader: ingest TRANSIENT (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}): {result.ErrorReason}");
+                        _logger?.Warning($"BackendTelemetryUploader: ingest TRANSIENT (corr={correlationId}, items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}): {result.ErrorReason}");
                     }
                     else
                     {
-                        _logger?.Error($"BackendTelemetryUploader: ingest PERMANENT fail (items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}): {result.ErrorReason}");
+                        _logger?.Error($"BackendTelemetryUploader: ingest PERMANENT fail (corr={correlationId}, items={items.Count}, durationMs={sw.ElapsedMilliseconds}, status={(int)response.StatusCode}): {result.ErrorReason}");
                     }
 
                     return result;

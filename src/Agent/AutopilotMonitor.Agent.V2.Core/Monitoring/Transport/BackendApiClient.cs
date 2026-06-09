@@ -292,6 +292,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Transport
         /// </summary>
         private void AddSecurityHeaders(HttpRequestMessage request)
         {
+            // Per-request correlation id for end-to-end tracing (mirrors BackendTelemetryUploader).
+            // The backend's CorrelationIdMiddleware reads X-Correlation-ID; without it the backend
+            // mints a fresh id per inbound request and agent↔backend calls cannot be tied together.
+            // Generated per request so each attempt (e.g. config-fetch 503 retries) is independently
+            // traceable.
+            var correlationId = Guid.NewGuid().ToString("N");
+            request.Headers.Add("X-Correlation-ID", correlationId);
+            _logger?.Debug($"BackendApiClient: {request.Method} {request.RequestUri?.AbsolutePath} (corr={correlationId})");
+
             if (_useBootstrapTokenAuth && !string.IsNullOrEmpty(_bootstrapToken))
                 request.Headers.Add("X-Bootstrap-Token", _bootstrapToken);
 

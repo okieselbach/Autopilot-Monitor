@@ -75,7 +75,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             // AgentLogger writes each line with File.AppendAllText — content is already on disk.
             var logContent = ReadLogs(tmp.Path);
             Assert.Contains("BackendTelemetryUploader: flushing 2 item(s)", logContent);
-            Assert.Contains("BackendTelemetryUploader: ingest OK (items=2", logContent);
+            // Each upload now carries a per-request correlation id (X-Correlation-ID) for
+            // end-to-end tracing; it precedes the item count in the cadence log lines.
+            Assert.Contains("BackendTelemetryUploader: ingest OK (corr=", logContent);
+            Assert.Contains("items=2", logContent);
         }
 
         [Fact]
