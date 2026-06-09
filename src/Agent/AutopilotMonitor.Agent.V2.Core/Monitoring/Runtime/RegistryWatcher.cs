@@ -67,7 +67,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
             _subKey = subKey ?? throw new ArgumentNullException(nameof(subKey));
             _watchSubtree = watchSubtree;
             _view = view;
-            _filter = filter;
+            // REG_NOTIFY_THREAD_AGNOSTIC (Win8+) is MANDATORY for the ThreadPool model and is
+            // forced on regardless of what the caller passed. Without a dedicated long-lived
+            // thread, RegNotifyChangeKeyValue is issued on the (transient) Start() caller thread
+            // and re-armed on rotating ThreadPool threads; without this flag the kernel ties the
+            // registration to the issuing thread and silently cancels the notification once that
+            // thread ends/recycles. All Autopilot devices are Win10+, so the flag is always
+            // available. Several callers (AadJoinWatcher / ProvisioningStatusTracker /
+            // RealmJoinWatcher) omit it in their explicit filter — OR'ing it here keeps them correct.
+            _filter = filter | RegistryNativeMethods.RegChangeNotifyFilter.ThreadAgnostic;
             _trace = trace;
         }
 
@@ -81,6 +89,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 }
             }
         }
+
+        /// <summary>
+        /// The effective notification filter actually passed to RegNotifyChangeKeyValue — the
+        /// caller's filter with REG_NOTIFY_THREAD_AGNOSTIC forced on. Exposed for tests that guard
+        /// the thread-agnostic invariant deterministically (kernel thread-death timing is unreliable
+        /// to assert against directly).
+        /// </summary>
+        internal RegistryNativeMethods.RegChangeNotifyFilter EffectiveFilter => _filter;
 
         public void Start()
         {
@@ -137,6 +153,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
         /// </summary>
         public void Stop()
         {
+            RegisteredWaitHandle waitToUnregister;
+            AutoResetEvent signalToDispose;
+            SafeRegistryHandle keyToDispose;
             Exception backgroundException;
 
             lock (_sync)
@@ -147,18 +166,41 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
                 _running = false;
                 _stopped = true;
 
-                UnregisterWait();
-
-                try { _signal?.Set(); } catch { /* release any pending wait */ }
-                try { _signal?.Dispose(); } catch { /* dispose must not throw */ }
+                waitToUnregister = _registeredWait;
+                _registeredWait = null;
+                signalToDispose = _signal;
                 _signal = null;
-
-                try { _keyHandle?.Dispose(); } catch { /* dispose must not throw */ }
+                keyToDispose = _keyHandle;
                 _keyHandle = null;
 
                 backgroundException = _backgroundException;
                 _backgroundException = null;
             }
+
+            // Block until any in-flight OnSignalled callback has completed BEFORE disposing the
+            // handles it touches — restores the Thread.Join() guarantee of the old model so a
+            // Changed event can never fire (nor a freed handle be used) after Stop() returns.
+            // Unregister(waitObject) signals the event once all queued callbacks finish; the wait
+            // is done OUTSIDE _sync so the callback's re-arm path can still acquire the lock and
+            // observe _stopped. This blocking form is safe because Stop() is contractually never
+            // called from within a Changed handler — callers use RequestStop() or queue Stop()/
+            // Dispose() to another thread (AadJoinWatcher / RealmJoinWatcher do exactly this).
+            if (waitToUnregister != null)
+            {
+                using (var unregistered = new ManualResetEvent(false))
+                {
+                    try
+                    {
+                        if (waitToUnregister.Unregister(unregistered))
+                            unregistered.WaitOne();
+                    }
+                    catch { /* best-effort — never let teardown throw here */ }
+                }
+            }
+
+            try { signalToDispose?.Set(); } catch { /* release any pending wait */ }
+            try { signalToDispose?.Dispose(); } catch { /* dispose must not throw */ }
+            try { keyToDispose?.Dispose(); } catch { /* dispose must not throw */ }
 
             _trace?.Invoke("Stopped (cancellation requested)");
 
@@ -242,12 +284,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime
 
         private void OnSignalled(object state, bool timedOut)
         {
-            // Drop the (now-consumed, executeOnlyOnce) registration reference.
-            lock (_sync)
-            {
-                _registeredWait = null;
-            }
-
+            // NOTE: _registeredWait is deliberately NOT cleared here. Stop()/Dispose() needs the
+            // live RegisteredWaitHandle to issue a blocking Unregister(waitObject) and wait for
+            // THIS in-flight callback to finish before disposing _signal / _keyHandle. The handle
+            // is cleared+replaced by ArmNotify (re-arm path below) or by Stop().
             bool proceed;
             lock (_sync)
             {

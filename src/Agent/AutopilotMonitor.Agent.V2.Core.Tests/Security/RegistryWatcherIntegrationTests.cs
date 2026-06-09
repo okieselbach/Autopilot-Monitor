@@ -164,5 +164,46 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Security
 
             Assert.True(fireCount >= 2, $"expected ≥2 fire events, saw {fireCount}");
         }
+
+        [Fact]
+        public void Watcher_forces_ThreadAgnostic_even_when_caller_omits_it()
+        {
+            // Regression guard for REG_NOTIFY_THREAD_AGNOSTIC. In the ThreadPool-wait model the
+            // first RegNotifyChangeKeyValue is issued on the (transient) Start() caller thread and
+            // re-armed on rotating ThreadPool threads. Without this flag the kernel ties the
+            // registration to the issuing thread and silently cancels the notification once that
+            // thread ends/recycles — the watcher goes quiet in production. Several callers
+            // (AadJoinWatcher / ProvisioningStatusTracker / RealmJoinWatcher) omit it in their
+            // explicit filter, so the watcher MUST OR it in itself.
+            //
+            // Asserted on the effective filter rather than via a live thread-death test: without
+            // the flag the kernel emits a *spurious* signal when the arming thread dies, which a
+            // behavioural test cannot distinguish from a real change — so only the effective-filter
+            // invariant is a reliable guard. (RegChangeNotifyFilter is internal, so the cases are
+            // iterated in-body rather than via [Theory] parameters.)
+            var callerFilters = new[]
+            {
+                RegistryNativeMethods.RegChangeNotifyFilter.LastSet,
+                RegistryNativeMethods.RegChangeNotifyFilter.Name,
+                RegistryNativeMethods.RegChangeNotifyFilter.LastSet | RegistryNativeMethods.RegChangeNotifyFilter.Name,
+            };
+
+            foreach (var callerFilter in callerFilters)
+            {
+                using var watcher = new RegistryWatcher(
+                    hive: RegistryHive.CurrentUser,
+                    subKey: TestSubKey,
+                    watchSubtree: false,
+                    view: RegistryView.Default,
+                    filter: callerFilter, // deliberately WITHOUT ThreadAgnostic
+                    trace: null);
+
+                Assert.True(
+                    watcher.EffectiveFilter.HasFlag(RegistryNativeMethods.RegChangeNotifyFilter.ThreadAgnostic),
+                    $"RegistryWatcher must force REG_NOTIFY_THREAD_AGNOSTIC into its effective filter (caller passed {callerFilter})");
+                // The caller's requested bits must be preserved alongside the forced flag.
+                Assert.Equal(callerFilter, watcher.EffectiveFilter & callerFilter);
+            }
+        }
     }
 }
