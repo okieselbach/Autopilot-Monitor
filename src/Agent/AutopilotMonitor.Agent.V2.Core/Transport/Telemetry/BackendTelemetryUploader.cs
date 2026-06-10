@@ -194,15 +194,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                     // Feed the central tracker so the agent can shut down after MaxAuthFailures
                     // instead of retrying a permanently-revoked certificate forever.
                     _authFailureTracker?.RecordFailure(statusCode, "agent/telemetry");
-                    return UploadResult.Permanent($"unauthorized: {shortReason}");
+                    return UploadResult.Unauthorized($"unauthorized: {shortReason}");
 
                 case HttpStatusCode.RequestTimeout:     // 408
                 case (HttpStatusCode)429:               // TooManyRequests — enum available net48 SP1+, cast for safety
                     return UploadResult.Transient(shortReason);
+
+                case HttpStatusCode.RequestEntityTooLarge: // 413 — the data is fine, only the batch
+                    return UploadResult.TooLarge(shortReason); // size is wrong → split & retry (P1).
             }
 
             if (statusCode >= 500 && statusCode <= 599) return UploadResult.Transient(shortReason);
-            if (statusCode >= 400 && statusCode <= 499) return UploadResult.Permanent(shortReason);
+
+            if (statusCode >= 400 && statusCode <= 499)
+            {
+                // P1: an explicit item-level poison signal in the 4xx body is the ONLY thing that
+                // authorises a discard ({ "poison": true, "rejectedRowKeys": [...] }). Absent that,
+                // an unknown permanent 4xx (400 contract bug / 404 route mismatch / tenant-validation)
+                // means only THIS request was rejected — we RETAIN the batch (cursor stays) and let
+                // the drain block + report rather than discard good data on a guessed status code.
+                var poison = await TryReadPoisonSignalAsync(response).ConfigureAwait(false);
+                if (poison != null) return poison;
+                return UploadResult.Permanent(shortReason);
+            }
 
             // Unexpected range (1xx, 3xx). Treat as transient — orchestrator retries and logs.
             return UploadResult.Transient(shortReason);
@@ -267,6 +281,52 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                     adminAction: string.IsNullOrEmpty(adminAction) ? null : adminAction,
                     actions: actions)
                 : UploadResult.Ok();
+        }
+
+        /// <summary>
+        /// P1 — parse an EXPLICIT item-level poison signal from a 4xx response body:
+        /// <c>{ "poison": true, "rejectedRowKeys": ["rk1", "rk2"], "reason": "..." }</c>.
+        /// Returns <c>null</c> (→ caller falls back to retain) unless <c>poison == true</c> AND a
+        /// non-empty <c>rejectedRowKeys</c> array is present — we never discard a whole batch on an
+        /// underspecified signal, and we never infer poison from the status code alone.
+        /// </summary>
+        private static async Task<UploadResult?> TryReadPoisonSignalAsync(HttpResponseMessage response)
+        {
+            string body;
+            try { body = await response.Content.ReadAsStringAsync().ConfigureAwait(false); }
+            catch { return null; }
+            if (string.IsNullOrWhiteSpace(body)) return null;
+
+            JObject? root;
+            try { root = JObject.Parse(body); }
+            catch { return null; }
+            if (root == null) return null;
+
+            if ((TryBool(root, "poison", "Poison") ?? false) == false) return null;
+
+            var rowKeys = TryStringArray(root, "rejectedRowKeys", "RejectedRowKeys");
+            if (rowKeys == null || rowKeys.Count == 0) return null; // item-level only — no rowkeys → retain
+
+            var reason = TryString(root, "reason", "Reason");
+            return UploadResult.Poison(rowKeys, string.IsNullOrEmpty(reason) ? "backend_poison" : reason!);
+        }
+
+        private static IReadOnlyList<string>? TryStringArray(JObject root, params string[] names)
+        {
+            foreach (var n in names)
+            {
+                if (root.TryGetValue(n, StringComparison.OrdinalIgnoreCase, out var tok) && tok is JArray arr)
+                {
+                    var list = new List<string>(arr.Count);
+                    foreach (var e in arr)
+                    {
+                        var s = e?.ToString();
+                        if (!string.IsNullOrEmpty(s)) list.Add(s!);
+                    }
+                    return list;
+                }
+            }
+            return null;
         }
 
         private static bool? TryBool(JObject root, params string[] names)

@@ -26,7 +26,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             DateTime? unblockAt,
             bool deviceKillSignal,
             string? adminAction,
-            IReadOnlyList<ServerAction>? actions)
+            IReadOnlyList<ServerAction>? actions,
+            bool isAuthFailure = false,
+            bool requiresSplit = false,
+            bool isPoison = false,
+            IReadOnlyList<string>? poisonRowKeys = null)
         {
             Success = success;
             ErrorReason = errorReason;
@@ -36,6 +40,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             DeviceKillSignal = deviceKillSignal;
             AdminAction = adminAction;
             Actions = actions;
+            IsAuthFailure = isAuthFailure;
+            RequiresSplit = requiresSplit;
+            IsPoison = isPoison;
+            PoisonRowKeys = poisonRowKeys;
         }
 
         public bool Success { get; }
@@ -45,6 +53,33 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
         /// <summary>Bei Success ignoriert. Bei Fehler: true → Retry sinnvoll, false → dauerhafter Fehler (kein Retry).</summary>
         public bool IsTransient { get; }
+
+        /// <summary>
+        /// TRACE-H1: a 401/403 auth-permanent failure. The uploader already drove
+        /// <c>AuthFailureTracker</c> → shutdown; the orchestrator retains the batch (cursor stays)
+        /// and lets the auth path end the session.
+        /// </summary>
+        public bool IsAuthFailure { get; }
+
+        /// <summary>
+        /// TRACE-H1 (P1): a 413 "payload too large". NOT poison — the data is fine, only the batch
+        /// size is wrong. The orchestrator splits/shrinks the batch and retries (never discards a
+        /// multi-item batch); only a lone item that is still too large is quarantined, because that
+        /// is the single case the agent can locally prove is permanently un-sendable.
+        /// </summary>
+        public bool RequiresSplit { get; }
+
+        /// <summary>
+        /// P1: the backend EXPLICITLY declared specific items permanently un-ingestable via a 4xx
+        /// response body (<c>{ "poison": true, "rejectedRowKeys": [...] }</c>). This is the ONLY
+        /// signal that authorises a discard — a bare status code never infers poison. The orchestrator
+        /// drops exactly the named <see cref="PoisonRowKeys"/>, re-uploads the rest of the batch, then
+        /// advances the cursor.
+        /// </summary>
+        public bool IsPoison { get; }
+
+        /// <summary>The RowKeys the backend named as poison (item-level). Non-empty when <see cref="IsPoison"/>.</summary>
+        public IReadOnlyList<string>? PoisonRowKeys { get; }
 
         /// <summary>
         /// Non-terminal quarantine signalled by the backend. The agent should stop draining
@@ -100,5 +135,35 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         public static UploadResult Permanent(string reason) =>
             new UploadResult(false, reason ?? throw new ArgumentNullException(nameof(reason)), isTransient: false,
                 deviceBlocked: false, unblockAt: null, deviceKillSignal: false, adminAction: null, actions: null);
+
+        /// <summary>
+        /// 401/403 auth-permanent failure. Like <see cref="Permanent"/> (no retry, batch retained)
+        /// but flagged <see cref="IsAuthFailure"/> so the drain knows the auth-failure path
+        /// (AuthFailureTracker → shutdown) owns the outcome.
+        /// </summary>
+        public static UploadResult Unauthorized(string reason) =>
+            new UploadResult(false, reason ?? throw new ArgumentNullException(nameof(reason)), isTransient: false,
+                deviceBlocked: false, unblockAt: null, deviceKillSignal: false, adminAction: null, actions: null,
+                isAuthFailure: true);
+
+        /// <summary>
+        /// 413 "payload too large". Non-retryable as-is, but the data is fine — flagged
+        /// <see cref="RequiresSplit"/> so the drain shrinks the batch and retries instead of
+        /// discarding (P1: never lose good telemetry to a size error).
+        /// </summary>
+        public static UploadResult TooLarge(string reason) =>
+            new UploadResult(false, reason ?? throw new ArgumentNullException(nameof(reason)), isTransient: false,
+                deviceBlocked: false, unblockAt: null, deviceKillSignal: false, adminAction: null, actions: null,
+                requiresSplit: true);
+
+        /// <summary>
+        /// Explicit item-level backend poison signal (P1). <paramref name="rejectedRowKeys"/> are the
+        /// items the backend declared permanently un-ingestable; the orchestrator drops exactly those
+        /// and re-uploads the rest of the batch.
+        /// </summary>
+        public static UploadResult Poison(IReadOnlyList<string> rejectedRowKeys, string reason) =>
+            new UploadResult(false, reason ?? throw new ArgumentNullException(nameof(reason)), isTransient: false,
+                deviceBlocked: false, unblockAt: null, deviceKillSignal: false, adminAction: null, actions: null,
+                isPoison: true, poisonRowKeys: rejectedRowKeys ?? throw new ArgumentNullException(nameof(rejectedRowKeys)));
     }
 }

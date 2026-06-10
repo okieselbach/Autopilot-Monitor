@@ -81,6 +81,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         private readonly ImeTrackerStatePersistence _statePersistence;
         private bool _stateDirty;
 
+        // M1: the state file is a read-position bookmark + package-state cache, NOT a source of
+        // truth (the IME logs themselves are written by Windows and always on disk). Saving it on
+        // every 100 ms poll while IME streams progress lines hammers the disk during the most
+        // contended phase of enrollment. Throttle to at most once per this interval; a save that
+        // is throttled away leaves _stateDirty set so the next eligible cycle (or the unconditional
+        // final save on shutdown) persists it. Worst case on restart: ~this-many-seconds of already
+        // processed log lines are re-read and re-emitted (deduped downstream) — no data loss.
+        private static readonly TimeSpan StateSaveMinInterval = TimeSpan.FromSeconds(2);
+        private DateTime _lastStateSaveUtc = DateTime.MinValue;
+
         // Standard GUID capture pattern used as {GUID} placeholder in patterns
         private const string GuidPattern = @"(?<id>[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12})";
 
@@ -382,11 +392,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                         try { await Task.Delay(1000, token); } catch (OperationCanceledException) { break; }
                     }
 
-                    // Persist state after each polling cycle so agent restart continues from here
-                    if (_stateDirty)
+                    // Persist state after each polling cycle so agent restart continues from here.
+                    // M1: throttled to at most once per StateSaveMinInterval — a throttled-away save
+                    // keeps _stateDirty set for the next eligible cycle; the final save on shutdown
+                    // (below) is unconditional so nothing pending is lost on a clean exit.
+                    if (_stateDirty && (DateTime.UtcNow - _lastStateSaveUtc) >= StateSaveMinInterval)
                     {
                         SaveState();
                         _stateDirty = false;
+                        _lastStateSaveUtc = DateTime.UtcNow;
                     }
 
                     try { await Task.Delay(_pollingIntervalMs, token); } catch (OperationCanceledException) { break; }

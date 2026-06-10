@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
@@ -52,6 +53,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
                 return (step, signal);
             }
 
+            /// <summary>Reduces SessionAborted — a stage change (SessionStarted → Failed) that H1a always snapshots.</summary>
+            public (DecisionStep step, DecisionSignal signal) ReduceAbort(long ordinal = 0)
+            {
+                var signal = TestSignals.Raw(ordinal, DecisionSignalKind.SessionAborted, At);
+                var step = Engine.Reduce(InitialState, signal);
+                return (step, signal);
+            }
+
+            /// <summary>
+            /// Reduces an InformationalEvent pass-through (stage unchanged, only a telemetry
+            /// EmitEventTimelineEntry effect) from the processor's CURRENT state — the high-frequency
+            /// step class H1a skips for snapshots.
+            /// </summary>
+            public (DecisionStep step, DecisionSignal signal) ReduceInformational(DecisionStepProcessor sut, long ordinal)
+            {
+                var payload = new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.EventType] = "download_progress",
+                    [SignalPayloadKeys.Source] = "DeliveryOptimizationCollector",
+                };
+                var signal = TestSignals.Raw(ordinal, DecisionSignalKind.InformationalEvent, At, payload: payload);
+                var step = Engine.Reduce(sut.CurrentState, signal);
+                return (step, signal);
+            }
+
             public void Dispose() => Tmp.Dispose();
         }
 
@@ -94,7 +120,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         // ========================================================================= Happy path
 
         [Fact]
-        public void ApplyStep_happy_path_appends_journal_runs_effects_saves_snapshot_forwards_state()
+        public void ApplyStep_happy_path_appends_journal_runs_effects_forwards_state()
         {
             using var rig = new Rig();
             var sut = rig.Build();
@@ -107,11 +133,49 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.Equal(1, rig.Effects.CallCount);
             Assert.Same(step.NewState, rig.Effects.Calls[0].State);
             Assert.Equal(signal.OccurredAtUtc, rig.Effects.Calls[0].OccurredAtUtc);
-            Assert.Single(rig.Snapshot.Saved);
-            Assert.Same(step.NewState, rig.Snapshot.Saved[0]);
+            // H1a: SessionStarted is a pure pass-through (stage unchanged, no effects) → the
+            // snapshot cache is intentionally NOT written; recovery replays this trivially from
+            // the SignalLog. The authoritative writes (journal above) still happen per step.
+            Assert.Empty(rig.Snapshot.Saved);
             Assert.Same(step.NewState, sut.CurrentState);
             Assert.Equal(0, sut.ConsecutiveJournalFailureCount);
             Assert.Empty(rig.Quarantine.Reasons);
+        }
+
+        // ========================================================================= Snapshot policy (H1a)
+
+        [Fact]
+        public void ApplyStep_snapshots_on_stage_change()
+        {
+            using var rig = new Rig();
+            var sut = rig.Build();
+            var (step, signal) = rig.ReduceAbort(); // SessionStarted -> Failed
+
+            sut.ApplyStep(step, signal);
+
+            Assert.Single(rig.Snapshot.Saved);
+            Assert.Same(step.NewState, rig.Snapshot.Saved[0]);
+        }
+
+        [Fact]
+        public void ApplyStep_skips_snapshot_for_informational_pass_throughs_until_floor()
+        {
+            using var rig = new Rig();
+            var sut = rig.Build();
+
+            // SnapshotPassThroughFloor consecutive pass-throughs → none snapshotted.
+            for (long i = 0; i < DecisionStepProcessor.SnapshotPassThroughFloor; i++)
+            {
+                var (step, signal) = rig.ReduceInformational(sut, i);
+                sut.ApplyStep(step, signal);
+            }
+            Assert.Equal(0, rig.Snapshot.SaveCallCount);
+
+            // The next pass-through crosses the floor → exactly one forced snapshot (bounds the
+            // worst-case restart replay tail), then the counter resets.
+            var (s2, sig2) = rig.ReduceInformational(sut, DecisionStepProcessor.SnapshotPassThroughFloor);
+            sut.ApplyStep(s2, sig2);
+            Assert.Equal(1, rig.Snapshot.SaveCallCount);
         }
 
         // ========================================================================= Journal failures
@@ -183,7 +247,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             using var rig = new Rig();
             rig.Snapshot.ScriptThrow(new InvalidOperationException("snapshot-disk-full"));
             var sut = rig.Build();
-            var (step, signal) = rig.ReduceSessionStarted();
+            // Use a stage-changing step so the snapshot actually runs (H1a skips pass-throughs).
+            var (step, signal) = rig.ReduceAbort();
 
             sut.ApplyStep(step, signal);   // does NOT throw
 

@@ -49,40 +49,63 @@ Start-Sleep -Seconds 2
 Wait-Process -Id {currentProcessId} -ErrorAction SilentlyContinue -Timeout 30
 Start-Sleep -Seconds 1
 
-# Remove Scheduled Task
-try {{
-    Stop-ScheduledTask -TaskName '{_configuration.ScheduledTaskName}' -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName '{_configuration.ScheduledTaskName}' -Confirm:$false -ErrorAction SilentlyContinue
-}} catch {{ }}
+# Remove Scheduled Task — verify removal BEFORE deleting files (LIFE-F6). An orphan task firing
+# against a deleted exe spams Task Scheduler errors every boot forever and, once the files (incl.
+# the enrollment-complete marker) are gone, has no cleanup-retry path. So confirm the task is gone
+# first; if it cannot be removed, SKIP the file deletion and leave everything intact for a clean
+# cleanup retry on the next boot (the marker survives, so bootstrap re-runs cleanup).
+$taskName = '{_configuration.ScheduledTaskName}'
+$taskGone = $false
+for ($i = 1; $i -le 5; $i++) {{
+    try {{ Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }} catch {{ }}
+    try {{ Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue }} catch {{ }}
+    $still = $null
+    try {{ $still = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }} catch {{ }}
+    if (-not $still) {{ $taskGone = $true; break }}
+    Start-Sleep -Seconds 1
+}}
+if (-not $taskGone) {{
+    # Fallback: schtasks.exe /Delete does not depend on the ScheduledTasks PowerShell module.
+    try {{ & schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null }} catch {{ }}
+    try {{ $taskGone = -not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) }} catch {{ }}
+}}
 
 {(keepLogs ? $@"
-# Delete everything except Logs directory
-Get-ChildItem -Path '{agentBasePath}' -Exclude 'Logs' | ForEach-Object {{
-    $dest = $_.FullName + '.del'
-    try {{ Rename-Item -Path $_.FullName -NewName $dest -Force -ErrorAction SilentlyContinue }} catch {{ }}
-    Remove-Item -Path $dest -Recurse -Force -ErrorAction SilentlyContinue
-}}
-" : $@"
-# Rename folder then delete. Retry a few times to let the OS release handles.
-$renamedPath = '{agentBasePath}.del'
-$renamed = $false
-for ($i = 1; $i -le 10; $i++) {{
-    try {{
-        Rename-Item -Path '{agentBasePath}' -NewName $renamedPath -Force -ErrorAction Stop
-        $renamed = $true
-        break
-    }} catch {{
-        Start-Sleep -Seconds 2
+if ($taskGone) {{
+    # Delete everything except Logs directory
+    Get-ChildItem -Path '{agentBasePath}' -Exclude 'Logs' | ForEach-Object {{
+        $dest = $_.FullName + '.del'
+        try {{ Rename-Item -Path $_.FullName -NewName $dest -Force -ErrorAction SilentlyContinue }} catch {{ }}
+        Remove-Item -Path $dest -Recurse -Force -ErrorAction SilentlyContinue
     }}
 }}
-if ($renamed) {{
-    Remove-Item -Path $renamedPath -Recurse -Force -ErrorAction SilentlyContinue
-}} else {{
-    Remove-Item -Path '{agentBasePath}' -Recurse -Force -ErrorAction SilentlyContinue
+" : $@"
+if ($taskGone) {{
+    # Rename folder then delete. Retry a few times to let the OS release handles.
+    $renamedPath = '{agentBasePath}.del'
+    $renamed = $false
+    for ($i = 1; $i -le 10; $i++) {{
+        try {{
+            Rename-Item -Path '{agentBasePath}' -NewName $renamedPath -Force -ErrorAction Stop
+            $renamed = $true
+            break
+        }} catch {{
+            Start-Sleep -Seconds 2
+        }}
+    }}
+    if ($renamed) {{
+        Remove-Item -Path $renamedPath -Recurse -Force -ErrorAction SilentlyContinue
+    }} else {{
+        Remove-Item -Path '{agentBasePath}' -Recurse -Force -ErrorAction SilentlyContinue
+    }}
 }}
 ")}
 {(_configuration.RebootOnComplete ? @"
-Restart-Computer -Force -Delay 10 -Comment 'Autopilot enrollment completed - Autopilot Monitor is rebooting'
+# shutdown.exe (NOT Restart-Computer): Restart-Computer has no -Comment parameter and -Delay is
+# only honoured with -Wait, so the previous invocation failed parameter binding and the device
+# silently never rebooted. shutdown.exe /r /t 10 mirrors the standalone reboot path and reboots
+# after a 10 s delay (lets this script finish + the agent exit). Review LIFE-F2.
+shutdown.exe /r /t 10 /c 'Autopilot enrollment completed - Autopilot Monitor is rebooting'
 " : "")}
 Remove-Item -Path $scriptPath -Force -ErrorAction SilentlyContinue
 ";

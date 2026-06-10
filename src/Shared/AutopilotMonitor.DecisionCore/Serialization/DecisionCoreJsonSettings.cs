@@ -24,9 +24,19 @@ namespace AutopilotMonitor.DecisionCore.Serialization
     public static class DecisionCoreJsonSettings
     {
         /// <summary>
-        /// Create a fresh settings instance. Not a static singleton — Newtonsoft mutates
-        /// internal state during serialization (binder caches, etc.), so handing out
-        /// shared instances across threads is a well-known footgun.
+        /// Shared settings instance for the hot (de)serialization paths (M5). Safe to reuse across
+        /// threads: <see cref="JsonConvert"/> builds a fresh <c>JsonSerializer</c> per call from the
+        /// settings (no shared serializer-level mutable state), and every registered converter
+        /// (<see cref="UnknownFallbackEnumConverter{T}"/>) is stateless. Reusing this avoids
+        /// allocating a settings object + 12 converters on every signal / transition / snapshot
+        /// (de)serialize. <b>Do not mutate</b> (e.g. add converters) — call <see cref="Create"/>
+        /// for a private, mutable copy.
+        /// </summary>
+        public static JsonSerializerSettings Shared { get; } = Create();
+
+        /// <summary>
+        /// Create a fresh settings instance. Used by callers that need a private, mutable copy
+        /// (e.g. tests); the production serializers use <see cref="Shared"/>.
         /// </summary>
         public static JsonSerializerSettings Create()
         {

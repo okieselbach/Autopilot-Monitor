@@ -16,21 +16,51 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
     /// </summary>
     public partial class ImeLogTracker
     {
+        // M2: precompiled matchers for LogFilePatterns so CheckLogFilesAsync can filter a single
+        // directory enumeration in-memory. Globs use '?' (single char) in the patterns; '*' is
+        // supported too for forward-compatibility.
+        private static readonly Regex[] LogFilePatternRegexes = BuildLogFilePatternRegexes();
+
+        private static Regex[] BuildLogFilePatternRegexes()
+        {
+            var result = new Regex[LogFilePatterns.Length];
+            for (var i = 0; i < LogFilePatterns.Length; i++)
+            {
+                var escaped = Regex.Escape(LogFilePatterns[i]).Replace("\\?", ".").Replace("\\*", ".*");
+                result[i] = new Regex("^" + escaped + "$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            }
+            return result;
+        }
+
+        private static bool MatchesLogFilePattern(string fileName)
+        {
+            foreach (var rx in LogFilePatternRegexes)
+            {
+                if (rx.IsMatch(fileName)) return true;
+            }
+            return false;
+        }
+
         private async Task CheckLogFilesAsync(CancellationToken token)
         {
             if (!Directory.Exists(_logFolder))
                 return;
 
-            // Get all matching log files, sorted by name (archived files come before current)
+            // Get all matching log files, sorted by name (archived files come before current).
+            // M2: a SINGLE directory enumeration filtered in-memory against the patterns, instead
+            // of one Directory.GetFiles(pattern) per LogFilePattern every 100 ms poll (~90 folder
+            // enumerations/s → 1). The in-memory regex match is anchored, so it is also immune to
+            // the Win32 "*.ext" 8.3 search-pattern quirk.
             var files = new List<string>();
-            foreach (var pattern in LogFilePatterns)
+            try
             {
-                try
+                foreach (var filePath in Directory.EnumerateFiles(_logFolder))
                 {
-                    files.AddRange(Directory.GetFiles(_logFolder, pattern));
+                    if (MatchesLogFilePattern(Path.GetFileName(filePath)))
+                        files.Add(filePath);
                 }
-                catch (DirectoryNotFoundException) { }
             }
+            catch (DirectoryNotFoundException) { }
 
             files.Sort(StringComparer.OrdinalIgnoreCase);
 
@@ -46,10 +76,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                     var startPos = _positionTracker.GetSafePosition(filePath, fileInfo.Length);
                     if (startPos >= fileInfo.Length)
                     {
-                        _logger.Trace($"ImeLogTracker: {Path.GetFileName(filePath)} — no new data (pos={startPos}, size={fileInfo.Length})");
+                        // M2: guard the interpolated string so it isn't built every 100 ms tick
+                        // (per file) when Trace is off — which is the production default (Info).
+                        if (_logger.LogLevel >= AgentLogLevel.Trace)
+                            _logger.Trace($"ImeLogTracker: {Path.GetFileName(filePath)} — no new data (pos={startPos}, size={fileInfo.Length})");
                         continue;
                     }
-                    _logger.Trace($"ImeLogTracker: reading {Path.GetFileName(filePath)} from pos {startPos} (size={fileInfo.Length}, delta={fileInfo.Length - startPos})");
+                    if (_logger.LogLevel >= AgentLogLevel.Trace)
+                        _logger.Trace($"ImeLogTracker: reading {Path.GetFileName(filePath)} from pos {startPos} (size={fileInfo.Length}, delta={fileInfo.Length - startPos})");
 
                     using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     {

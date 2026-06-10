@@ -36,6 +36,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         // M4.6.ε — backend-to-agent control signals.
         private DateTime? _pausedUntilUtc;
 
+        // P1 — current effective batch size. Shrinks (never grows) when the backend returns 413,
+        // so an oversized batch is split down instead of discarded. Only mutated under the drain
+        // guard. Floor 1.
+        private int _effectiveBatchSize;
+
+        // P1 — one-shot guard so a retained (non-transient, non-auth) permanent block reports
+        // telemetry_upload_blocked exactly once per process rather than on every 30 s drain.
+        private bool _uploadBlockedReported;
+
         public TelemetryUploadOrchestrator(
             ITelemetrySpool spool,
             IBackendTelemetryUploader uploader,
@@ -49,6 +58,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
             if (batchSize <= 0) throw new ArgumentOutOfRangeException(nameof(batchSize), "BatchSize must be positive.");
             _batchSize = batchSize;
+            _effectiveBatchSize = batchSize;
 
             _retryBackoffs = retryBackoffs ?? DefaultRetryBackoffs;
         }
@@ -68,6 +78,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         /// </para>
         /// </summary>
         public event EventHandler<UploadResult>? ServerResponseReceived;
+
+        /// <summary>
+        /// TRACE-H1 — raised (after the drain guard releases) when a single oversized item was
+        /// quarantined to keep the pipeline flowing (the only locally-provable poison: a lone item
+        /// the backend rejects with 413 even on its own). The orchestrator turns this into a
+        /// <c>telemetry_upload_poisoned</c> timeline event so the drop is visible on the backend.
+        /// </summary>
+        public event EventHandler<PoisonReport>? BatchPoisoned;
+
+        /// <summary>
+        /// P1 — raised once per process (after the drain guard releases) when the drain is blocked by
+        /// a retained non-transient, non-auth failure (unknown permanent 4xx: 400 contract bug, 404
+        /// route mismatch, tenant-validation …). The batch is NOT discarded. This is a LOCAL diagnostic
+        /// (agent log + diagnostics ZIP): any timeline event the handler posts is queued behind the
+        /// blocking batch on the same spool, so it does not reach the backend until the block clears —
+        /// there is no out-of-band bypass by design. Carries the backend error reason.
+        /// </summary>
+        public event EventHandler<string>? UploadBlocked;
 
         /// <summary>
         /// <c>true</c> when the last successful upload returned <see cref="UploadResult.DeviceBlocked"/>
@@ -94,6 +122,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
             // onTerminateRequested → orchestrator.Stop → DrainAllAsync, which blocks on the
             // guard and deadlocks the final drain (lost agent_shutting_down). Codex Finding 1.
             List<UploadResult>? pendingSignals = null;
+            List<PoisonReport>? pendingPoison = null;
+            string? pendingBlockedReason = null;
             DrainResult result;
 
             try
@@ -101,6 +131,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 int uploaded = 0;
                 int failedBatches = 0;
                 string? lastError = null;
+
+                // P1 — shared success-side control-signal handling. Applied to BOTH the normal
+                // success path and the poison-survivor re-upload, so a DeviceBlocked / DeviceKill /
+                // AdminAction / Actions response on the survivor upload is honoured identically and
+                // never silently dropped. Returns true if the backend just quarantined the device.
+                bool CollectControlSignals(UploadResult o)
+                {
+                    ApplyControlSignals(o); // mutates _pausedUntilUtc synchronously (next IsPaused sees it)
+                    if (CarriesSignal(o)) (pendingSignals ??= new List<UploadResult>()).Add(o);
+                    return o.DeviceBlocked;
+                }
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
@@ -112,7 +153,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                         break;
                     }
 
-                    var batch = _spool.Peek(_batchSize);
+                    var batch = _spool.Peek(_effectiveBatchSize);
                     if (batch.Count == 0) break;
 
                     var outcome = await TryUploadWithRetryAsync(batch, cancellationToken).ConfigureAwait(false);
@@ -122,25 +163,110 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                         _spool.MarkUploaded(batch[batch.Count - 1].TelemetryItemId);
                         uploaded += batch.Count;
 
-                        // ApplyControlSignals mutates _pausedUntilUtc synchronously so the next
-                        // iteration's IsPaused check sees the block. Event dispatch is deferred.
-                        ApplyControlSignals(outcome);
-                        if (CarriesSignal(outcome))
-                        {
-                            (pendingSignals ??= new List<UploadResult>()).Add(outcome);
-                        }
-
                         // Stop draining immediately if the backend just quarantined the device —
                         // the next loop iteration would see IsPaused and break anyway, but there
                         // is no point in even Peeking another batch.
-                        if (outcome.DeviceBlocked) break;
+                        if (CollectControlSignals(outcome)) break;
+                    }
+                    else if (outcome.IsPoison)
+                    {
+                        // P1 — explicit item-level poison. The backend NAMED specific RowKeys as
+                        // permanently un-ingestable. Drop ONLY those; re-upload the rest of the batch;
+                        // then advance the cursor past the whole batch. We never discard an item the
+                        // backend did not explicitly name.
+                        var poisonSet = new HashSet<string>(
+                            outcome.PoisonRowKeys ?? (IReadOnlyList<string>)Array.Empty<string>(), StringComparer.Ordinal);
+                        var survivors = new List<TelemetryItem>(batch.Count);
+                        foreach (var item in batch)
+                        {
+                            if (!poisonSet.Contains(item.RowKey)) survivors.Add(item);
+                        }
+                        var dropped = batch.Count - survivors.Count;
+
+                        if (dropped == 0)
+                        {
+                            // None of the named RowKeys are in this batch — a mismatched signal.
+                            // RETAIN (do not advance) so a stale/misaddressed poison list can't cause
+                            // data loss; retry next drain.
+                            failedBatches++;
+                            lastError = outcome.ErrorReason;
+                            break;
+                        }
+
+                        bool deviceBlockedBySurvivors = false;
+                        if (survivors.Count > 0)
+                        {
+                            var survivorOutcome = await TryUploadWithRetryAsync(survivors, cancellationToken).ConfigureAwait(false);
+                            if (!survivorOutcome.Success)
+                            {
+                                // Could not upload the good items — RETAIN the whole batch (cursor
+                                // stays) and retry next drain rather than risk losing survivors.
+                                // (Nested poison re-filters on the next cycle.)
+                                failedBatches++;
+                                lastError = survivorOutcome.ErrorReason;
+                                break;
+                            }
+                            uploaded += survivors.Count;
+                            // P1 fix: honour any control signals the survivor re-upload carried
+                            // (DeviceBlocked / DeviceKill / AdminAction / Actions) — same as the
+                            // normal success path; previously these were silently dropped.
+                            deviceBlockedBySurvivors = CollectControlSignals(survivorOutcome);
+                        }
+
+                        // Survivors uploaded (or none) — advance past the whole batch; the named items
+                        // are intentionally dropped per the explicit backend signal. Surface the drop.
+                        _spool.MarkUploaded(batch[batch.Count - 1].TelemetryItemId);
+                        (pendingPoison ??= new List<PoisonReport>()).Add(
+                            new PoisonReport(dropped, batch[batch.Count - 1].TelemetryItemId, outcome.ErrorReason,
+                                PoisonKind.BackendRejected));
+
+                        // If the survivor upload just quarantined the device, stop draining (mirror the
+                        // normal success path) instead of continuing past the block.
+                        if (deviceBlockedBySurvivors) break;
+                        continue;
+                    }
+                    else if (outcome.RequiresSplit)
+                    {
+                        // P1: 413 payload-too-large. The data is fine — only the batch size is wrong,
+                        // so we SPLIT instead of discarding. Halve the effective batch size and retry
+                        // (shrink persists for the session so we don't re-hit the limit every cycle).
+                        if (batch.Count > 1)
+                        {
+                            _effectiveBatchSize = Math.Max(1, batch.Count / 2);
+                            continue; // re-Peek smaller, same drain cycle
+                        }
+
+                        // A LONE item that is still too large is the one case the agent can locally
+                        // prove is permanently un-sendable (no size fits) — quarantine just that item,
+                        // advance the cursor by exactly one, and surface it. Everything else flows.
+                        failedBatches++;
+                        lastError = outcome.ErrorReason;
+                        var oversizeId = batch[0].TelemetryItemId;
+                        _spool.MarkUploaded(oversizeId);
+                        (pendingPoison ??= new List<PoisonReport>()).Add(
+                            new PoisonReport(1, oversizeId, "oversize: " + outcome.ErrorReason, PoisonKind.Oversize));
+                        break;
                     }
                     else
                     {
-                        // Stop drain — cursor stays put, re-Peek next drain will return the same
-                        // batch (plus anything newly enqueued), backend will dedup on PK/RK.
+                        // P1 — RETAIN. Transient (retry next drain), auth-permanent (uploader already
+                        // drove AuthFailureTracker → shutdown), OR an unknown permanent 4xx (400
+                        // contract bug / 404 route mismatch / tenant-validation …). We do NOT advance
+                        // the cursor on ANY of these: blocking is recoverable (backend/route fix, diag
+                        // ZIP), discarding good telemetry on a guessed "poison" is not. A genuine
+                        // per-item poison is skipped only on an EXPLICIT backend poison signal (not yet
+                        // wired). Re-Peek next drain returns the same batch; backend dedups on PK/RK.
                         failedBatches++;
                         lastError = outcome.ErrorReason;
+
+                        // One-shot loud marker so a stuck non-transient, non-auth block is visible on
+                        // the backend instead of only in the agent log (transient = normal retry;
+                        // auth = the session is already shutting down via the auth path).
+                        if (!outcome.IsTransient && !outcome.IsAuthFailure && !_uploadBlockedReported)
+                        {
+                            _uploadBlockedReported = true;
+                            pendingBlockedReason = outcome.ErrorReason;
+                        }
                         break;
                     }
                 }
@@ -158,6 +284,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
                 {
                     RaiseServerResponse(outcome);
                 }
+            }
+
+            if (pendingPoison != null)
+            {
+                foreach (var poison in pendingPoison)
+                {
+                    try { BatchPoisoned?.Invoke(this, poison); }
+                    catch { /* handler must not abort the drain result; cursor already advanced */ }
+                }
+            }
+
+            if (pendingBlockedReason != null)
+            {
+                try { UploadBlocked?.Invoke(this, pendingBlockedReason); }
+                catch { /* handler must not abort the drain result */ }
             }
 
             return result;

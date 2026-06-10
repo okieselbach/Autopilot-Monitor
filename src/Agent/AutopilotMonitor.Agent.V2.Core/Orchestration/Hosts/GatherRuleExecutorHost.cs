@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.DecisionCore.Signals;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Orchestration
@@ -17,6 +18,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly AgentLogger _logger;
         private readonly bool _unrestrictedMode;
         private int _disposed;
+
+        // MON-A1: drive phase_change / on_event gather triggers from the central signal stream.
+        // V1 fired these from MonitoringService on every EnrollmentEvent (OnPhaseChanged(evt.Phase)
+        // on phase change + OnEvent(evt.EventType) per event); the V2 host previously only called
+        // UpdateRules, so 5 of 10 shipped rules (incl. the only enabled one, dsregcmd at
+        // FinalizingSetup) silently never fired. In V2 every event is an InformationalEvent signal
+        // carrying eventType + (optional) phase in its payload. Null on test fakes / non-SignalIngress
+        // sinks — then signal-triggers degrade off (startup + interval rules still run).
+        private readonly SignalIngress? _observableIngress;
+        private Action<DecisionSignalKind, IReadOnlyDictionary<string, string>?>? _signalPostedHandler;
+        private readonly object _sync = new object();
+        private string? _lastPhaseName;
 
         public GatherRuleExecutorHost(
             string sessionId,
@@ -45,6 +58,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             var post = new InformationalEventPost(ingress, clock);
             _executor = new Monitoring.Telemetry.Gather.GatherRuleExecutor(
                 sessionId, tenantId, evt => post.Emit(evt), logger, imeLogPathOverride);
+            _observableIngress = ingress as SignalIngress;
         }
 
         public void Start()
@@ -54,18 +68,73 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // rule sees the elevated policy when AllowList checks would otherwise reject it.
             _executor.UnrestrictedMode = _unrestrictedMode;
             _executor.UpdateRules(_rules);
+
+            // MON-A1: observe the central signal stream so phase_change / on_event rules fire.
+            if (_observableIngress != null && _signalPostedHandler == null)
+            {
+                _signalPostedHandler = OnSignalPosted;
+                _observableIngress.SignalPosted += _signalPostedHandler;
+            }
+
             _logger.Info(
-                $"GatherRuleExecutorHost: started with {_rules.Count} rule(s), unrestrictedMode={_unrestrictedMode}.");
+                $"GatherRuleExecutorHost: started with {_rules.Count} rule(s), unrestrictedMode={_unrestrictedMode}, signalTriggers={(_observableIngress != null)}.");
+        }
+
+        /// <summary>
+        /// Translates posted signals into the executor's phase_change / on_event triggers (MON-A1).
+        /// Phase: fire <see cref="Monitoring.Telemetry.Gather.GatherRuleExecutor.OnPhaseChanged"/> when
+        /// the observed phase changes and parses to an <see cref="EnrollmentPhase"/> (raw collector
+        /// phase strings that aren't enum names are ignored — they carry no gather-rule meaning).
+        /// Event: fire <see cref="Monitoring.Telemetry.Gather.GatherRuleExecutor.OnEvent"/> for every
+        /// InformationalEvent's eventType. The executor dispatches rule execution on the ThreadPool,
+        /// so this stays off the signal-posting hot path; it also dedups phase rules per (rule, phase).
+        /// </summary>
+        private void OnSignalPosted(DecisionSignalKind kind, IReadOnlyDictionary<string, string>? payload)
+        {
+            if (payload == null) return;
+
+            try
+            {
+                lock (_sync)
+                {
+                    if (payload.TryGetValue(SignalPayloadKeys.EspPhase, out var phaseName)
+                        && !string.IsNullOrEmpty(phaseName)
+                        && !string.Equals(phaseName, _lastPhaseName, StringComparison.OrdinalIgnoreCase)
+                        && Enum.TryParse<EnrollmentPhase>(phaseName, ignoreCase: true, out var phase))
+                    {
+                        _lastPhaseName = phaseName;
+                        _executor.OnPhaseChanged(phase);
+                    }
+
+                    if (kind == DecisionSignalKind.InformationalEvent
+                        && payload.TryGetValue(SignalPayloadKeys.EventType, out var eventType)
+                        && !string.IsNullOrEmpty(eventType))
+                    {
+                        _executor.OnEvent(eventType);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Verbose($"GatherRuleExecutorHost: signal-trigger dispatch failed: {ex.Message}");
+            }
         }
 
         public void Stop()
         {
-            // GatherRuleExecutor is IDisposable; no explicit Stop. Rely on Dispose.
+            if (_observableIngress != null && _signalPostedHandler != null)
+            {
+                try { _observableIngress.SignalPosted -= _signalPostedHandler; }
+                catch { /* best-effort unsubscribe during shutdown */ }
+                _signalPostedHandler = null;
+            }
+            // GatherRuleExecutor is IDisposable; no explicit Stop beyond unsubscribe. Rely on Dispose.
         }
 
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+            Stop();
             try { _executor.Dispose(); } catch { }
         }
     }

@@ -772,6 +772,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
             try
             {
+                // LIFE-F3: drain the spool BEFORE launching the self-deleting cleanup script. The
+                // script renames+deletes the agent tree (and may force-delete unlocked files) on its
+                // own timer, which can otherwise race the final telemetry drain that
+                // TerminationPipeline.Run/orchestrator.Stop performs later — losing the terminal
+                // enrollment_complete / app_tracking_summary / diagnostics_* events that were emitted
+                // just above. The WG-Part-1 and standalone-reboot paths already drain first; this
+                // closes the gap on the self-destruct path. Bounded + best-effort (never blocks
+                // termination on a wedged backend).
+                DrainSpool();
+
                 var service = _cleanupServiceFactory();
                 service.ExecuteSelfDestruct();
                 _logger.Info("EnrollmentTerminationHandler: CleanupService.ExecuteSelfDestruct() invoked (fire-and-forget).");

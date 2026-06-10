@@ -109,6 +109,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             catch (Exception ex)
             {
                 _logger.Error("Failed to start Shell-Core event log watcher", ex);
+                // MON-D1: a dead Shell-Core watcher means the session never observes ESP exit /
+                // WhiteGlove success — indistinguishable on the backend from a real no-signal
+                // enrollment. Surface it as one-shot telemetry.
+                CollectorDegradationReporter.Report(_post, _sessionId, _tenantId,
+                    collectorName: "ShellCoreTracker", reason: "watcher_arm_failed", ex: ex);
             }
         }
 

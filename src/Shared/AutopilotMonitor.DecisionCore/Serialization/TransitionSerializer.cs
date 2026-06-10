@@ -19,7 +19,7 @@ namespace AutopilotMonitor.DecisionCore.Serialization
         public static string Serialize(DecisionTransition transition)
         {
             if (transition == null) throw new ArgumentNullException(nameof(transition));
-            return JsonConvert.SerializeObject(transition, DecisionCoreJsonSettings.Create());
+            return JsonConvert.SerializeObject(transition, DecisionCoreJsonSettings.Shared);
         }
 
         public static DecisionTransition Deserialize(string line)
@@ -28,7 +28,7 @@ namespace AutopilotMonitor.DecisionCore.Serialization
 
             try
             {
-                var result = JsonConvert.DeserializeObject<DecisionTransition>(line, DecisionCoreJsonSettings.Create());
+                var result = JsonConvert.DeserializeObject<DecisionTransition>(line, DecisionCoreJsonSettings.Shared);
                 if (result == null)
                 {
                     throw new JsonSerializationException($"Transition deserialization produced null for line: {line}");

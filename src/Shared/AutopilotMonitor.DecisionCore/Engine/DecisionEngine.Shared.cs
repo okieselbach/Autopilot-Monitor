@@ -50,23 +50,23 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     Array.Empty<DecisionEffect>());
             }
 
-            // Arm ClassifierTick up-front so the White-Glove classifier re-evaluates
-            // periodically from the very start of the session — Plan §4.x M4.4.4.
-            // Floor the base at AgentBootUtc to keep the tick anchored to "now" even when
-            // SessionStarted itself ever carries a replayed historical timestamp.
-            var classifierTick = BuildClassifierTickDeadline(EffectiveDeadlineBase(state, signal));
-
-            // V2 race-fix (10c8e0bf debrief, 2026-04-26): SessionStarted is now a pure
-            // lifecycle anchor (stage / classifier-tick deadline / step bookkeeping).
-            // The registry-derived profile facts (enrollmentType + isHybridJoin) flow
-            // through the dedicated DecisionSignalKind.EnrollmentFactsObserved signal,
-            // which is stage-agnostic and therefore immune to the V2-Tracker /
-            // Backend-register-session race that previously dropped the JoinMode update.
+            // H2 (Wave 2): the ClassifierTick is NO LONGER armed here. It drives only the
+            // WhiteGloveSealingClassifier, which can reach Confirmed — the sole level that seals
+            // (HighThreshold=70) — only with a PRIMARY WG signal: shellcore_wg_success (+80) or
+            // sealing_pattern (+40). The secondary-only ceiling is device_only(+15) +
+            // system_reboot(+15) = 30 < 70, so before a primary signal the periodic tick can NEVER
+            // change the outcome. Both primary signals arm the tick reactively via
+            // AttachWhiteGloveClassifierEffects and it re-arms itself until terminal, so late
+            // secondary facts are still caught on genuine WG sessions. Arming from SessionStarted
+            // previously produced ~720 no-op ticks/session on the ~95% of enrollments that never
+            // see a WG signal — pure SignalLog + Journal + snapshot write-amplification with zero
+            // decision value. Profile facts (enrollmentType + isHybridJoin) flow through the
+            // dedicated EnrollmentFactsObserved signal; SessionStarted stays a pure lifecycle
+            // anchor (stage / step bookkeeping).
             var builder = state.ToBuilder()
                 .WithStage(SessionStage.SessionStarted)
                 .WithStepIndex(state.StepIndex + 1)
-                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
-                .AddDeadline(classifierTick);
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal);
 
             var newState = builder.Build();
 
@@ -77,12 +77,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 nextStepIndex: newState.StepIndex,
                 trigger: nameof(DecisionSignalKind.SessionStarted));
 
-            var effects = new DecisionEffect[]
-            {
-                new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: classifierTick),
-            };
-
-            return new DecisionStep(newState, transition, effects);
+            return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
         }
 
         /// <summary>
@@ -294,6 +289,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 effects.Add(BuildPhaseTransitionEffect(EnrollmentPhase.FinalizingSetup));
                 effects.Add(BuildPhaseTransitionEffect(EnrollmentPhase.Complete));
             }
+            var adminReason = $"Session {adminOutcome.ToLowerInvariant()} by administrator (detected on register-session).";
             effects.Add(new DecisionEffect(
                 DecisionEffectKind.EmitEventTimelineEntry,
                 parameters: new Dictionary<string, string>
@@ -301,8 +297,17 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     ["eventType"] = eventType,
                     ["adminAction"] = adminOutcome,
                     ["source"] = signal.SourceOrigin ?? "register_session_response",
-                    ["reason"] = $"Session {adminOutcome.ToLowerInvariant()} by administrator (detected on register-session).",
-                }));
+                    ["reason"] = adminReason,
+                },
+                // Parity with the 7 other terminal/state-changing sites (review TRACE-M1): without
+                // the audit trail an admin-preempted session's terminal event carried no
+                // signalsSeen / signalTimestamps / scenario census, so it could not be
+                // post-mortemed from backend telemetry like every other terminal outcome.
+                typedPayload: DecisionAuditTrailBuilder.Build(
+                    postState: newState,
+                    decidedStage: toStage,
+                    trigger: $"AdminPreemption:{adminOutcome}",
+                    failureReason: succeeded ? null : adminReason)));
 
             return new DecisionStep(newState, transition, effects.ToArray());
         }

@@ -20,7 +20,7 @@ namespace AutopilotMonitor.DecisionCore.Serialization
         public static string Serialize(DecisionState state)
         {
             if (state == null) throw new ArgumentNullException(nameof(state));
-            return JsonConvert.SerializeObject(state, DecisionCoreJsonSettings.Create());
+            return JsonConvert.SerializeObject(state, DecisionCoreJsonSettings.Shared);
         }
 
         public static DecisionState Deserialize(string payload)
@@ -29,7 +29,7 @@ namespace AutopilotMonitor.DecisionCore.Serialization
 
             try
             {
-                var result = JsonConvert.DeserializeObject<DecisionState>(payload, DecisionCoreJsonSettings.Create());
+                var result = JsonConvert.DeserializeObject<DecisionState>(payload, DecisionCoreJsonSettings.Shared);
                 if (result == null)
                 {
                     throw new JsonSerializationException("State deserialization produced null.");

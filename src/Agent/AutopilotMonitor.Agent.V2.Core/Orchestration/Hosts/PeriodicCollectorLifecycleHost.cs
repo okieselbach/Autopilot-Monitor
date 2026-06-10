@@ -25,13 +25,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
     /// <see cref="SignalIngress"/>. Activity observation lives centrally on
     /// <see cref="SignalIngress.SignalPosted"/> (Codex Finding 4) so this host can see signals
     /// from <b>every</b> source — Program.cs lifecycle, IME, ESP, DeviceInfo, Analyzer,
-    /// Gather, etc. — not just the subset that flows through its own post. The handler peeks
-    /// every posted signal's <c>eventType</c> payload and bumps <c>_lastRealEventTimeUtc</c>
-    /// unless the event belongs to a well-known periodic type
-    /// (<c>performance_snapshot</c>, <c>agent_metrics_snapshot</c>,
+    /// Gather, etc. — not just the subset that flows through its own post. The handler delegates
+    /// the "is this real activity?" decision to <see cref="SignalActivityClassifier"/> (shared with
+    /// <see cref="StallProbeHost"/>), which excludes internal scheduler ticks
+    /// (<see cref="DecisionSignalKind.DeadlineFired"/>, notably the 30 s <c>classifier_tick</c>) and
+    /// the periodic event-type denylist (<c>performance_snapshot</c>, <c>agent_metrics_snapshot</c>,
     /// <c>performance_collector_stopped</c>, <c>agent_metrics_collector_stopped</c>,
     /// <c>stall_probe_*</c>, <c>session_stalled</c>). Events emitted by the managed collectors
-    /// themselves therefore never reset their own idle window.
+    /// themselves — and the classifier_tick that previously kept them alive forever — therefore
+    /// never reset the idle window.
     /// </para>
     /// </summary>
     internal sealed class PeriodicCollectorLifecycleHost : ICollectorHost
@@ -39,16 +41,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         public string Name => "PeriodicCollectorLifecycleHost";
 
         private static readonly TimeSpan IdleTickInterval = TimeSpan.FromSeconds(60);
-        private static readonly HashSet<string> PeriodicEventTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "performance_snapshot",
-            "agent_metrics_snapshot",
-            SharedConstants.EventTypes.PerformanceCollectorStopped,
-            SharedConstants.EventTypes.AgentMetricsCollectorStopped,
-            SharedConstants.EventTypes.StallProbeCheck,
-            SharedConstants.EventTypes.StallProbeResult,
-            SharedConstants.EventTypes.SessionStalled,
-        };
 
         private readonly string _sessionId;
         private readonly string _tenantId;
@@ -125,22 +117,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// </summary>
         private void OnSignalPosted(DecisionSignalKind kind, IReadOnlyDictionary<string, string>? payload)
         {
-            // InformationalEvents carry eventType in payload — filter those against the
-            // periodic-denylist so snapshots never mark the session as "active".
-            if (kind == DecisionSignalKind.InformationalEvent)
-            {
-                if (payload != null
-                    && payload.TryGetValue(SignalPayloadKeys.EventType, out var eventType)
-                    && !string.IsNullOrEmpty(eventType)
-                    && PeriodicEventTypes.Contains(eventType))
-                {
-                    return;
-                }
-            }
+            // Shared classifier filters out periodic self-emissions and internal scheduler ticks
+            // (DeadlineFired / classifier_tick). Everything else — ESP phase, IME session, hello,
+            // desktop arrival, classifier verdict, session-lifecycle, … — is real activity that
+            // should keep the collectors running.
+            if (!SignalActivityClassifier.IsRealActivity(kind, payload))
+                return;
 
-            // Every other signal kind — ESP phase, IME session, hello, desktop arrival,
-            // deadline fired, classifier verdict, session-lifecycle, … — is real activity
-            // that should keep the collectors running.
             OnRealEvent();
         }
 

@@ -19,7 +19,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
         public static string Serialize(TelemetryItem item)
         {
             if (item == null) throw new ArgumentNullException(nameof(item));
-            return JsonConvert.SerializeObject(item, DecisionCoreJsonSettings.Create());
+            return JsonConvert.SerializeObject(item, DecisionCoreJsonSettings.Shared);
         }
 
         public static TelemetryItem Deserialize(string line)
@@ -28,7 +28,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Transport.Telemetry
 
             try
             {
-                var result = JsonConvert.DeserializeObject<TelemetryItem>(line, DecisionCoreJsonSettings.Create());
+                var result = JsonConvert.DeserializeObject<TelemetryItem>(line, DecisionCoreJsonSettings.Shared);
                 if (result == null)
                 {
                     throw new JsonSerializationException($"TelemetryItem deserialization produced null: {line}");

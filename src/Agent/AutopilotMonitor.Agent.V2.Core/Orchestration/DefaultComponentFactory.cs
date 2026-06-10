@@ -387,9 +387,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // signal before the watcher starts (avoids missing the wake for an install already in flight).
             if (officeHost != null) hosts.Add(officeHost);
 
-            // M4.6.δ — Gather-rules runtime executor. Runs the backend-defined rules whose
-            // Trigger is "startup" once the agent is up; signal / event / periodic triggers
-            // remain supported inside the executor itself.
+            // M4.6.δ — Gather-rules runtime executor. Runs "startup" rules once the agent is up
+            // and "interval" rules on their timers; "phase_change" / "on_event" rules are driven
+            // by the host's SignalIngress.SignalPosted subscription (MON-A1).
             if (_remoteConfig.GatherRules != null && _remoteConfig.GatherRules.Count > 0)
             {
                 hosts.Add(new GatherRuleExecutorHost(

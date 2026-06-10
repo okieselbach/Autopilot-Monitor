@@ -127,20 +127,178 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
         }
 
         [Fact]
-        public async Task Permanent_failure_aborts_without_retrying()
+        public async Task Unknown_permanent_failure_RETAINS_batch_and_reports_blocked_once()
         {
+            // P1: an unknown permanent 4xx (400 contract bug / 404 route / tenant-validation) must
+            // NOT discard data on a guess. The cursor stays put (batch retained), and a one-shot
+            // UploadBlocked event surfaces the stuck pipeline. No poison skip.
             using var tmp = new TempDirectory();
             var spool = new TelemetrySpool(tmp.Path, Clock());
             spool.Enqueue(Draft("only"));
 
-            var uploader = new FakeBackendTelemetryUploader().QueuePermanent("bad-data");
-
+            var uploader = new FakeBackendTelemetryUploader().QueuePermanent("http 400: contract").QueuePermanent("http 400: contract");
             using var sut = new TelemetryUploadOrchestrator(spool, uploader, Clock());
+            PoisonReport? poison = null;
+            int blockedCount = 0;
+            sut.BatchPoisoned += (_, p) => poison = p;
+            sut.UploadBlocked += (_, __) => blockedCount++;
+
+            var first = await sut.DrainAllAsync();
+            Assert.False(first.Success);
+            Assert.Equal(1, uploader.CallCount);       // no retries for permanent
+            Assert.Equal(-1, sut.LastUploadedItemId);  // RETAINED — cursor NOT advanced
+            Assert.Null(poison);                        // never discarded
+            Assert.Equal(1, blockedCount);              // surfaced once
+
+            // Second drain still blocked, but the blocked event is one-shot per process.
+            var second = await sut.DrainAllAsync();
+            Assert.Equal(-1, sut.LastUploadedItemId);
+            Assert.Equal(1, blockedCount);
+        }
+
+        [Fact]
+        public async Task TooLarge_splits_batch_and_uploads_everything()
+        {
+            // P1: 413 is a size problem, not poison. Split & retry — never discard a multi-item batch.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+            for (int i = 0; i < 4; i++) spool.Enqueue(Draft($"r{i}"));
+
+            // First attempt (batch of 4) → 413; orchestrator halves to 2 and the two halves upload.
+            var uploader = new FakeBackendTelemetryUploader().QueueTooLarge().QueueOk().QueueOk();
+            using var sut = new TelemetryUploadOrchestrator(spool, uploader, Clock(), batchSize: 4);
+
+            var result = await sut.DrainAllAsync();
+
+            Assert.True(result.Success);
+            Assert.Equal(4, result.UploadedItems);     // nothing lost
+            Assert.Equal(3, sut.LastUploadedItemId);
+            Assert.Equal(3, uploader.CallCount);       // 1 oversized + 2 half-batches
+        }
+
+        [Fact]
+        public async Task TooLarge_single_item_is_quarantined_as_oversize()
+        {
+            // The ONE locally-provable poison: a lone item the backend rejects with 413 even on its
+            // own can never be sent — quarantine just it (advance by one) and surface it.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+            spool.Enqueue(Draft("huge"));
+
+            var uploader = new FakeBackendTelemetryUploader().QueueTooLarge("http 413");
+            using var sut = new TelemetryUploadOrchestrator(spool, uploader, Clock());
+            PoisonReport? poison = null;
+            sut.BatchPoisoned += (_, p) => poison = p;
+
+            var result = await sut.DrainAllAsync();
+
+            Assert.Equal(0, sut.LastUploadedItemId);   // advanced past the single oversized item
+            Assert.NotNull(poison);
+            Assert.Equal(1, poison!.ItemCount);
+            Assert.Contains("oversize", poison.Reason);
+            Assert.Equal(PoisonKind.Oversize, poison.Kind); // P3
+        }
+
+        [Fact]
+        public async Task Explicit_item_poison_drops_named_items_uploads_survivors_and_advances()
+        {
+            // P1: an EXPLICIT item-level poison signal is the only authorized discard. The named
+            // RowKey is dropped; the rest of the batch is re-uploaded; the cursor advances past all.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+            spool.Enqueue(Draft("r0"));
+            spool.Enqueue(Draft("r1"));
+            spool.Enqueue(Draft("r2"));
+
+            // First call (batch r0,r1,r2) → poison r1; survivors (r0,r2) re-upload → OK.
+            var uploader = new FakeBackendTelemetryUploader()
+                .QueuePoison(new[] { "r1" }, "schema_validation_failed")
+                .QueueOk();
+            using var sut = new TelemetryUploadOrchestrator(spool, uploader, Clock(), batchSize: 100);
+            PoisonReport? poison = null;
+            sut.BatchPoisoned += (_, p) => poison = p;
+
+            var result = await sut.DrainAllAsync();
+
+            Assert.Equal(2, result.UploadedItems);     // r0 + r2 survived
+            Assert.Equal(2, sut.LastUploadedItemId);    // cursor advanced past the whole batch
+            Assert.Equal(2, uploader.CallCount);        // poison call + survivor re-upload
+            Assert.NotNull(poison);
+            Assert.Equal(1, poison!.ItemCount);         // exactly one item dropped (r1)
+            Assert.Equal(PoisonKind.BackendRejected, poison.Kind); // P3 — not mislabeled "oversize"
+        }
+
+        [Fact]
+        public async Task Poison_survivor_reupload_honours_backend_control_signals()
+        {
+            // P1 fix: a DeviceBlocked (or kill/admin/actions) response on the SURVIVOR re-upload must
+            // be honoured exactly like the normal success path — previously it was silently dropped.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+            spool.Enqueue(Draft("r0"));
+            spool.Enqueue(Draft("r1"));
+
+            // Poison r1; the survivor (r0) re-upload comes back with a DeviceBlocked quarantine.
+            var uploader = new FakeBackendTelemetryUploader()
+                .QueuePoison(new[] { "r1" }, "schema")
+                .QueueOkWithSignals(deviceBlocked: true);
+            using var sut = new TelemetryUploadOrchestrator(spool, uploader, Clock(), batchSize: 100);
+            UploadResult? signalled = null;
+            sut.ServerResponseReceived += (_, r) => signalled = r;
+
+            await sut.DrainAllAsync();
+
+            Assert.True(sut.IsPaused);                  // DeviceBlocked from the survivor upload took effect
+            Assert.NotNull(signalled);                  // and was surfaced via ServerResponseReceived
+            Assert.True(signalled!.DeviceBlocked);
+        }
+
+        [Fact]
+        public async Task Poison_rowkeys_not_in_batch_retains_everything()
+        {
+            // A mismatched / stale poison list must not cause data loss — nothing named is in the
+            // batch, so we retain (cursor stays) rather than discard or advance.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+            spool.Enqueue(Draft("r0"));
+            spool.Enqueue(Draft("r1"));
+
+            var uploader = new FakeBackendTelemetryUploader().QueuePoison(new[] { "not-in-batch" }, "stale");
+            using var sut = new TelemetryUploadOrchestrator(spool, uploader, Clock(), batchSize: 100);
+            PoisonReport? poison = null;
+            sut.BatchPoisoned += (_, p) => poison = p;
+
             var result = await sut.DrainAllAsync();
 
             Assert.False(result.Success);
-            Assert.Equal(1, uploader.CallCount);  // no retries for permanent
-            Assert.Equal(-1, sut.LastUploadedItemId);
+            Assert.Equal(-1, sut.LastUploadedItemId);   // RETAINED — nothing advanced or dropped
+            Assert.Null(poison);
+            Assert.Equal(1, uploader.CallCount);        // no survivor re-upload (whole batch retained)
+        }
+
+        [Fact]
+        public async Task Auth_permanent_failure_retains_cursor_and_is_not_blocked_or_poisoned()
+        {
+            // 401/403: cursor stays (retained), no poison, and NOT counted as a "blocked" pipeline —
+            // the uploader already drove AuthFailureTracker → shutdown, which owns the outcome.
+            using var tmp = new TempDirectory();
+            var spool = new TelemetrySpool(tmp.Path, Clock());
+            spool.Enqueue(Draft("only"));
+
+            var uploader = new FakeBackendTelemetryUploader().QueueUnauthorized("unauthorized: http 401");
+            using var sut = new TelemetryUploadOrchestrator(spool, uploader, Clock());
+            PoisonReport? poison = null;
+            int blockedCount = 0;
+            sut.BatchPoisoned += (_, p) => poison = p;
+            sut.UploadBlocked += (_, __) => blockedCount++;
+
+            var result = await sut.DrainAllAsync();
+
+            Assert.False(result.Success);
+            Assert.Equal(1, uploader.CallCount);       // no retries
+            Assert.Equal(-1, sut.LastUploadedItemId);  // cursor NOT advanced
+            Assert.Null(poison);
+            Assert.Equal(0, blockedCount);             // auth path owns shutdown, not a "block"
         }
 
         [Fact]

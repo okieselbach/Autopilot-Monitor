@@ -143,6 +143,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             catch (Exception ex)
             {
                 _logger.Error($"Failed to start ModernDeployment watcher for {channelName}", ex);
+                // MON-D1: surface a dead ModernDeployment channel watcher as one-shot telemetry.
+                CollectorDegradationReporter.Report(_post, _sessionId, _tenantId,
+                    collectorName: "ModernDeploymentTracker", reason: $"watcher_arm_failed:{channelName}", ex: ex);
                 return null;
             }
         }

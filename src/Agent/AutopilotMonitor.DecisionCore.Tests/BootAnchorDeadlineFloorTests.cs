@@ -157,6 +157,8 @@ namespace AutopilotMonitor.DecisionCore.Tests
             // Backward-compat: snapshots from before this field existed deserialize with
             // AgentBootUtc=null. The helper must fall back to signal.OccurredAtUtc so legacy
             // sessions reproduce their pre-fix deadline values exactly (no replay correction).
+            // Vehicle: the reactively-armed ClassifierTick (Wave 2 / H2 — SessionStarted no
+            // longer arms it; a primary WhiteGlove signal does, via the same EffectiveDeadlineBase).
             var engine = new DecisionEngine();
             var legacy = new DecisionState(
                 sessionId: "sess-legacy",
@@ -180,9 +182,10 @@ namespace AutopilotMonitor.DecisionCore.Tests
                 agentBootUtc: null);
 
             var step = engine.Reduce(legacy,
-                MakeSignal(0, DecisionSignalKind.SessionStarted, LogPast));
+                MakeSignal(0, DecisionSignalKind.WhiteGloveSealingPatternDetected, LogPast));
             var tick = Assert.Single(step.NewState.Deadlines);
 
+            Assert.Equal(DeadlineNames.ClassifierTick, tick.Name);
             Assert.Null(step.NewState.AgentBootUtc);
             Assert.Equal(LogPast.AddSeconds(30), tick.DueAtUtc);
         }

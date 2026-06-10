@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using AutopilotMonitor.Agent.V2.Core.Logging;
+using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
 using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
@@ -55,6 +56,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly HashSet<int> _firedProbeIndices = new HashSet<int>();
         private bool _sessionStalledFired;
 
+        // P2 — monotonic generation, bumped by ResetProbes. RunProbe runs OUTSIDE _stateLock; if a
+        // real-activity reset lands while a probe is in flight, the post-probe "mark fired" must be
+        // dropped (its generation is stale) so the next idle period can fire that probe again.
+        private int _probeGeneration;
+
         public event EventHandler<string> EspFailureDetected;
 
         // Per-source hard timeouts (ms)
@@ -66,6 +72,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         // Cross-source caps for the aggregated probe result (enforced during merge).
         private const int MaxRawSamples = 5;
         private const int MaxActiveInstalls = 10;
+
+        // Active-install age window (review MON-B8). An AppWorkload "EnforcementState: Installing"
+        // line older than this is no longer evidence of progress — it lets a wedged install whose
+        // last line lingers in the 200 KB tail keep suppressing session_stalled forever. Lines
+        // with a parsed CMTrace timestamp older than this are excluded; lines whose age we cannot
+        // determine stay counted, so a long-but-active installer is never mis-flagged as stalled.
+        private const int ActiveInstallFreshnessMinutes = 15;
 
         // Terminal ESP failure EventIDs in ModernDeployment-Diagnostics-Provider channels.
         // Conservative list — we prefer to NOT auto-terminate on unknown IDs and let the user decide.
@@ -162,6 +175,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         {
             lock (_stateLock)
             {
+                // Always bump the generation, even when no probes are currently marked fired — a
+                // probe may be running right now (outside the lock) and must not re-mark itself.
+                _probeGeneration++;
                 if (_firedProbeIndices.Count > 0)
                 {
                     _logger.Trace($"StallProbeCollector: resetting {_firedProbeIndices.Count} fired probes");
@@ -186,9 +202,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 int probeIndex = i + 1; // 1-based for user-facing output
 
                 bool alreadyFired;
+                int genAtStart;
                 lock (_stateLock)
                 {
                     alreadyFired = _firedProbeIndices.Contains(probeIndex);
+                    genAtStart = _probeGeneration;
                 }
                 if (alreadyFired)
                     continue;
@@ -197,7 +215,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
                 lock (_stateLock)
                 {
-                    _firedProbeIndices.Add(probeIndex);
+                    // P2: only mark fired if no ResetProbes (real activity) landed while this probe
+                    // ran — otherwise the next genuine idle period would wrongly skip this index.
+                    if (_probeGeneration == genAtStart)
+                        _firedProbeIndices.Add(probeIndex);
                 }
             }
         }
@@ -484,11 +505,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     if (firstNewline > 0 && firstNewline < content.Length - 1)
                         content = content.Substring(firstNewline + 1);
 
-                    // Positive-signal scan: active installations recently logged.
-                    foreach (Match m in ActiveInstallRegex.Matches(content))
+                    // Positive-signal scan: active installations recently logged. Age-filtered so a
+                    // wedged install whose last "Installing" line lingers in the tail stops counting
+                    // as progress once it is stale (review MON-B8).
+                    foreach (var marker in FilterFreshActiveInstalls(content, DateTime.UtcNow, ActiveInstallFreshnessMinutes))
                     {
-                        if (result.ActiveInstalls.Count < MaxActiveInstalls && !result.ActiveInstalls.Contains(m.Value))
-                            result.ActiveInstalls.Add(m.Value);
+                        if (result.ActiveInstalls.Count >= MaxActiveInstalls)
+                            break;
+                        if (!result.ActiveInstalls.Contains(marker))
+                            result.ActiveInstalls.Add(marker);
                     }
 
                     // Negative-signal scan: failures.
@@ -514,6 +539,41 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Extracts the active-install markers (<c>EnforcementState: Installing/Downloading/InProgress</c>)
+        /// from an AppWorkload.log tail, dropping any whose CMTrace timestamp is provably older than
+        /// <paramref name="freshnessMinutes"/>. Conservative by design: a line is excluded ONLY when
+        /// it parses as CMTrace AND its timestamp is older than the cutoff. Lines that do not parse,
+        /// or whose timestamp cannot be determined, are treated as fresh — so a long-but-genuinely-
+        /// active installer is never mis-classified as stalled (review MON-B8). Internal for testing.
+        /// </summary>
+        internal static List<string> FilterFreshActiveInstalls(string content, DateTime nowUtc, int freshnessMinutes)
+        {
+            var fresh = new List<string>();
+            if (string.IsNullOrEmpty(content))
+                return fresh;
+
+            var cutoffUtc = nowUtc - TimeSpan.FromMinutes(freshnessMinutes);
+            foreach (var rawLine in content.Split('\n'))
+            {
+                var scanText = rawLine;
+                if (CmTraceLogParser.TryParseLine(rawLine, out var entry))
+                {
+                    // Provably stale → not progress. (TryParseLine falls back to now on an
+                    // unparseable timestamp, which keeps the line fresh — the safe default.)
+                    if (entry.Timestamp < cutoffUtc)
+                        continue;
+                    scanText = entry.Message;
+                }
+
+                var m = ActiveInstallRegex.Match(scanText);
+                if (m.Success)
+                    fresh.Add(m.Value);
+            }
+
+            return fresh;
         }
 
         private void EmitProbeResultEvent(ProbeResult result, EventSeverity severity)

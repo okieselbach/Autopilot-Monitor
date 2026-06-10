@@ -50,6 +50,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Transport
             return this;
         }
 
+        public FakeBackendTelemetryUploader QueueUnauthorized(string reason = "fake-unauthorized")
+        {
+            _script.Enqueue(_ => UploadResult.Unauthorized(reason));
+            return this;
+        }
+
+        public FakeBackendTelemetryUploader QueueTooLarge(string reason = "fake-413")
+        {
+            _script.Enqueue(_ => UploadResult.TooLarge(reason));
+            return this;
+        }
+
+        public FakeBackendTelemetryUploader QueuePoison(string[] rejectedRowKeys, string reason = "fake-poison")
+        {
+            _script.Enqueue(_ => UploadResult.Poison(rejectedRowKeys, reason));
+            return this;
+        }
+
         public FakeBackendTelemetryUploader QueueThrow(Exception ex)
         {
             _script.Enqueue(_ => throw ex);

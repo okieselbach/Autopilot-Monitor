@@ -193,6 +193,46 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Equal("abc123", v.InputHash);
         }
 
+        // ============================================================ admin preemption
+
+        [Theory]
+        // Review TRACE-M1: AdminPreemption terminal events previously carried parameters only and
+        // no audit trail, so an admin-overridden session could not be post-mortemed from backend
+        // telemetry like every other terminal outcome. Both outcomes must now carry the trail.
+        [InlineData("Succeeded", "enrollment_complete", nameof(SessionStage.Completed))]
+        [InlineData("Failed", "enrollment_failed", nameof(SessionStage.Failed))]
+        public void AdminPreemption_terminal_event_carries_audit_trail(
+            string adminOutcome, string expectedEventType, string expectedStage)
+        {
+            var engine = new DecisionEngine();
+            var state = DecisionState.CreateInitial("sess-admin", "tenant-admin");
+            state = engine.Reduce(state, MakeSignal(0, DecisionSignalKind.SessionStarted, T0)).NewState;
+
+            var step = engine.Reduce(state, MakeSignal(
+                1,
+                DecisionSignalKind.AdminPreemptionDetected,
+                T0.AddMinutes(1),
+                payload: new Dictionary<string, string> { ["adminOutcome"] = adminOutcome },
+                sourceOrigin: "register_session_response"));
+
+            var effect = SingleTimelineEffect(step, expectedEventType);
+            Assert.Equal(adminOutcome, effect.Parameters!["adminAction"]);
+
+            var trail = Assert.IsType<Dictionary<string, object>>(effect.TypedPayload);
+            Assert.Equal("DecisionEngine", trail["decisionSource"]);
+            Assert.Equal($"AdminPreemption:{adminOutcome}", trail["trigger"]);
+            Assert.Equal(expectedStage, trail["sessionStage"]);
+            Assert.IsType<List<string>>(trail["signalsSeen"]);
+            Assert.True(trail.ContainsKey("signalTimestamps"));
+            Assert.True(trail.ContainsKey("scenario"));
+
+            // Failure carries a reason; the success path does not synthesize one.
+            if (adminOutcome == "Failed")
+                Assert.Contains("administrator", (string)trail["reason"]);
+            else
+                Assert.False(trail.ContainsKey("reason"));
+        }
+
         // ============================================================ whiteglove_complete
 
         [Fact]

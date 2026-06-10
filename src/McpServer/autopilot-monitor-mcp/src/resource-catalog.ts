@@ -136,6 +136,10 @@ export const EVENT_TYPES_CATALOG = {
     'stall_probe_result',
     'session_stalled',
     'spool_pressure_detected',
+    'collector_degraded',
+    'state_quarantine_recovered',
+    'telemetry_upload_poisoned',
+    'telemetry_upload_blocked',
   ],
   metrics_events: ['performance_snapshot', 'agent_metrics_snapshot', 'ingress_backpressure'],
   security_events: [

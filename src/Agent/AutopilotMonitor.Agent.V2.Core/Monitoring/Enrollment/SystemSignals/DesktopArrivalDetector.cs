@@ -31,6 +31,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
     {
         private readonly AgentLogger _logger;
         private Timer _pollingTimer;
+        private int _pollInProgress; // Interlocked reentrancy guard for PollForDesktop (ARCH-F8)
         private bool _desktopArrived;
         private bool _excludedUserTraced; // Emit trace event only once for excluded-user skips
         private const int PollingIntervalSeconds = 30;
@@ -160,6 +161,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             if (_desktopArrived)
                 return;
 
+            // Reentrancy guard (review ARCH-F8): WMI GetOwner can run long enough that the 30 s
+            // timer queues a second callback before the first returns. Without this, two
+            // overlapping polls could both pass the _desktopArrived check and double-fire
+            // RealUserOwnerObserved → RealmJoin HKU-watcher arming. Skip if a poll is in flight;
+            // the finally below always clears the flag (covers the mid-method success return).
+            if (Interlocked.CompareExchange(ref _pollInProgress, 1, 0) != 0)
+                return;
+
             _pollCount++;
 
             try
@@ -263,6 +272,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 // Still emit the first-poll snapshot if this was the first poll — the error
                 // count carries the failure mode to the backend.
                 EmitFirstPollIfNeeded(explorerProcessCount: 0);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _pollInProgress, 0);
             }
         }
 

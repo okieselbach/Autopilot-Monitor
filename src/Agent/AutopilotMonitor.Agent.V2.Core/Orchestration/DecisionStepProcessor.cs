@@ -46,6 +46,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// <summary>Default — 3 Failures hintereinander → Quarantine.</summary>
         public const int DefaultQuarantineThreshold = 3;
 
+        /// <summary>
+        /// H1a (Wave 2) — the snapshot is a recovery CACHE, not the source of truth (SignalLog +
+        /// Journal are, both still fsync'd per step). Pure InformationalEvent pass-throughs (Stage
+        /// unchanged + only a telemetry <see cref="DecisionEffectKind.EmitEventTimelineEntry"/>
+        /// effect) skip the snapshot — they are replayed from the SignalLog as deterministic state
+        /// reconstruction on the next start. This floor forces a snapshot at least every N such
+        /// steps so the worst-case restart replay tail stays bounded.
+        /// </summary>
+        public const int SnapshotPassThroughFloor = 100;
+
         private readonly IJournalWriter _journal;
         private readonly IEffectRunner _effectRunner;
         private readonly ISnapshotPersistence _snapshot;
@@ -59,6 +69,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private int _consecutiveJournalFailures;
         private bool _quarantineTriggered;
         private bool _terminalNotified;
+        private int _passThroughStepsSinceSnapshot; // H1a — pass-through steps skipped since last snapshot
 
         public DecisionStepProcessor(
             DecisionState initialState,
@@ -186,16 +197,30 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                         $"for signal ordinal={signal.SessionSignalOrdinal}.");
                 }
 
-                // 3) Snapshot — best-effort. Journal ist die Wahrheit, Snapshot ist Cache.
-                try
+                // 3) Snapshot — best-effort recovery CACHE (Journal ist die Wahrheit). H1a: only
+                //    cache on a meaningful step (Stage transition / non-telemetry effect) or once
+                //    every SnapshotPassThroughFloor pass-through steps. Pure InformationalEvent
+                //    pass-throughs are skipped — replayed from the SignalLog (pure state
+                //    reconstruction, no effects) on the next start, so nothing is lost.
+                if (ShouldSnapshot(step, previousStage))
                 {
-                    _snapshot.Save(step.NewState);
+                    try
+                    {
+                        _snapshot.Save(step.NewState);
+                        _passThroughStepsSinceSnapshot = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warning(
+                            $"DecisionStepProcessor: snapshot save failed (transient, not escalated) " +
+                            $"for signal ordinal={signal.SessionSignalOrdinal}: {ex.Message}");
+                        // Floor counter intentionally NOT reset — a failed save leaves the cache
+                        // stale, so the next step should attempt the snapshot again.
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.Warning(
-                        $"DecisionStepProcessor: snapshot save failed (transient, not escalated) " +
-                        $"for signal ordinal={signal.SessionSignalOrdinal}: {ex.Message}");
+                    _passThroughStepsSinceSnapshot++;
                 }
             }
 
@@ -239,6 +264,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
 
             return effectResult;
+        }
+
+        /// <summary>
+        /// H1a snapshot policy. The snapshot is a recovery cache; skipping a step is always
+        /// correctness-safe (the SignalLog tail is replayed deterministically on the next start,
+        /// running no effects). We cache when the step is "meaningful" so the restart replay tail
+        /// stays short: a Stage transition (covers every terminal stage + the SessionMustAbort
+        /// replacement), or any effect other than the pure telemetry projection
+        /// (<see cref="DecisionEffectKind.EmitEventTimelineEntry"/>). Pure InformationalEvent
+        /// pass-throughs (download_progress, IME/perf snapshots, …) are the high-frequency case we
+        /// skip; <see cref="SnapshotPassThroughFloor"/> bounds the worst-case replay length.
+        /// </summary>
+        private bool ShouldSnapshot(DecisionStep step, SessionStage previousStage)
+        {
+            if (step.NewState.Stage != previousStage) return true;
+
+            foreach (var effect in step.Effects)
+            {
+                if (effect.Kind != DecisionEffectKind.EmitEventTimelineEntry)
+                    return true;
+            }
+
+            return _passThroughStepsSinceSnapshot >= SnapshotPassThroughFloor;
         }
 
         private void TryTriggerQuarantine(string reason)

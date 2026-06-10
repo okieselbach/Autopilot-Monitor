@@ -287,6 +287,10 @@ namespace AutopilotMonitor.Shared
             public const string PerformanceCollectorStopped     = "performance_collector_stopped";    // Idle-stop anchor — fired after 15 min idle by PerformanceCollector. PR1.
             public const string AgentMetricsCollectorStopped    = "agent_metrics_collector_stopped";  // Idle-stop anchor — fired after 15 min idle by AgentMetricsCollector. PR1.
             public const string PriorRunDiedWithState           = "prior_run_died_with_state";        // Death-Rattle (Plan §B) — emitted on next run if previous exit was unclean. PR1.
+            public const string CollectorDegraded               = "collector_degraded";               // One-shot Warning when a collector/watcher fails to arm (e.g. EventLogWatcher start error). Review MON-D1: without it a dead kernel watcher is indistinguishable from a genuine no-signal session.
+            public const string StateQuarantineRecovered        = "state_quarantine_recovered";        // Warning emitted on the start that honours a prior run's quarantine marker (3 consecutive journal-append failures). Review TRACE-H2: without it a corruption-recovery looks like a normal restart on the backend.
+            public const string TelemetryUploadPoisoned         = "telemetry_upload_poisoned";         // Warning when the drain quarantined a single oversized item (413 even on its own — the only locally-provable poison) to keep the pipeline flowing. Review TRACE-H1/P1.
+            public const string TelemetryUploadBlocked          = "telemetry_upload_blocked";          // Warning (one-shot) when the drain is blocked by a retained unknown permanent 4xx (400 contract bug / 404 route mismatch / tenant-validation). Data is NOT discarded. LOCAL diagnostic (agent log + diag ZIP): this marker is queued behind the blocking batch and only reaches the backend after the block clears — no out-of-band bypass by design.
 
             // IME log tracker — app / device / script telemetry (V2 single-rail plan §5.9)
             public const string EspPhaseChanged           = "esp_phase_changed";

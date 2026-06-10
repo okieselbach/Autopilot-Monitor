@@ -21,14 +21,14 @@ namespace AutopilotMonitor.DecisionCore.Serialization
         public static string Serialize(DecisionSignal signal)
         {
             if (signal == null) throw new ArgumentNullException(nameof(signal));
-            return JsonConvert.SerializeObject(signal, DecisionCoreJsonSettings.Create());
+            return JsonConvert.SerializeObject(signal, DecisionCoreJsonSettings.Shared);
         }
 
         public static DecisionSignal Deserialize(string line)
         {
             if (line == null) throw new ArgumentNullException(nameof(line));
 
-            var settings = DecisionCoreJsonSettings.Create();
+            var settings = DecisionCoreJsonSettings.Shared;
             var obj = JsonConvert.DeserializeObject<JObject>(line, settings)
                 ?? throw new JsonReaderException($"Failed to parse line as JSON object: {line}");
 

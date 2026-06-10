@@ -467,6 +467,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             catch (Exception ex)
             {
                 _logger.Error("Failed to start Hello event log watcher", ex);
+                // MON-D1: a dead UDR watcher silently drops Hello provisioning evidence.
+                CollectorDegradationReporter.Report(_post, _sessionId, _tenantId,
+                    collectorName: "HelloTracker", reason: "udr_watcher_arm_failed", ex: ex);
             }
         }
 
@@ -746,6 +749,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             catch (Exception ex)
             {
                 _logger.Error("Failed to start HelloForBusiness event log watcher", ex);
+                // MON-D1: a dead HelloForBusiness watcher silently drops Hello completion evidence.
+                CollectorDegradationReporter.Report(_post, _sessionId, _tenantId,
+                    collectorName: "HelloTracker", reason: "hellobusiness_watcher_arm_failed", ex: ex);
             }
         }
 

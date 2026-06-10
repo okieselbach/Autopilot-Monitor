@@ -63,9 +63,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             {
                 Directory.CreateDirectory(_stateDirectory);
                 var tempPath = _stateFilePath + ".tmp";
-                File.WriteAllText(tempPath, JsonConvert.SerializeObject(state, Formatting.Indented));
-                File.Copy(tempPath, _stateFilePath, overwrite: true);
-                try { File.Delete(tempPath); } catch { }
+                // M1: Formatting.None (was Indented — this state is machine-only, ~halves the
+                // bytes for 30+ packages) and an atomic File.Replace/Move instead of File.Copy
+                // (which read+wrote the whole file again AND was non-atomic).
+                File.WriteAllText(tempPath, JsonConvert.SerializeObject(state));
+                if (File.Exists(_stateFilePath))
+                {
+                    File.Replace(tempPath, _stateFilePath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(tempPath, _stateFilePath);
+                }
             }
             catch (Exception ex)
             {

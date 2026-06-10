@@ -134,6 +134,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private bool _quarantineRequested;
         private string? _quarantineReason;
 
+        // TRACE-H2: marker file written by TriggerQuarantine (mid-run, when the journal can no
+        // longer be appended) and honoured on the NEXT Start — a running process must not pull the
+        // state files out from under itself. When the marker is found at startup, all reducer-state
+        // segments + snapshot are quarantined and the session starts from a clean Initial state.
+        private const string QuarantineRequestedMarkerFile = "quarantine-requested.marker";
+        private bool _priorRunQuarantined;
+        private string? _priorRunQuarantineReason;
+
+        // P2: set when a prior-run quarantine was REQUESTED (marker present) but did NOT fully
+        // succeed this start. The marker demands a clean reset, so we must NOT fall back to normal
+        // snapshot/log recovery (which could reload the very state we were told to discard) — this
+        // forces the run to seed from a fresh Initial state instead.
+        private bool _forceCleanStart;
+
         // Recovery flags (populated during Start()).
         // V1-symmetric Part-2 hint (analog to V1 MonitoringService._isWhiteGlovePart2):
         // set when Start() detects a persisted WhiteGloveSealed snapshot and archives the
@@ -317,6 +331,50 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             var journalPath = Path.Combine(_stateDirectory, "journal.jsonl");
             var eventSequencePath = Path.Combine(_stateDirectory, "event-sequence.json");
 
+            // -1) TRACE-H2 — honour a prior run's quarantine request BEFORE the writers scan the
+            //     (suspect) segment files. A prior run hit the consecutive-journal-failure threshold
+            //     and could no longer persist consistently; it left the marker so THIS run resets
+            //     cleanly. Quarantining here (not mid-run) preserves the "a running process never
+            //     pulls its own state files out from under itself" invariant. event-sequence is
+            //     quarantined too — a clean restart re-seeds it from 0 (backend dedups on RowKey).
+            var quarantineMarkerPath = Path.Combine(_stateDirectory, QuarantineRequestedMarkerFile);
+            if (File.Exists(quarantineMarkerPath))
+            {
+                var quarantineReason = TryReadMarkerReason(quarantineMarkerPath);
+                _logger.Error(
+                    "EnrollmentOrchestrator: prior-run quarantine marker found — quarantining all state " +
+                    $"segments + snapshot before recovery. Reason: {quarantineReason}");
+                try
+                {
+                    SegmentQuarantine.QuarantineAll(
+                        _stateDirectory, "quarantine-requested:" + quarantineReason, () => _clock.UtcNow);
+                    new SnapshotPersistence(snapshotPath, () => _clock.UtcNow)
+                        .Quarantine("quarantine-requested:" + quarantineReason);
+
+                    // P2: delete the marker ONLY after the quarantine fully succeeded. If QuarantineAll
+                    // or the snapshot quarantine threw (ACL / lock / disk), the marker is LEFT so the
+                    // next start retries fail-closed instead of proceeding on possibly-still-corrupt
+                    // segments with the retry hint lost.
+                    try { File.Delete(quarantineMarkerPath); }
+                    catch (Exception ex) { _logger.Warning($"EnrollmentOrchestrator: quarantine marker delete failed: {ex.Message}"); }
+
+                    _priorRunQuarantined = true;
+                    _priorRunQuarantineReason = quarantineReason;
+                }
+                catch (Exception ex)
+                {
+                    // Marker intentionally retained — do NOT delete on failure (P2). AND force a
+                    // clean Initial seed for THIS run: a partial failure (e.g. segments moved but the
+                    // snapshot quarantine threw) must not let normal recovery reload the discarded
+                    // snapshot. Fail-closed to fresh state; the retained marker drives a proper retry
+                    // next start.
+                    _forceCleanStart = true;
+                    _logger.Error(
+                        "EnrollmentOrchestrator: prior-run quarantine cleanup FAILED — marker retained for "
+                        + "next-start retry; forcing a clean Initial seed for this run.", ex);
+                }
+            }
+
             // 0) WhiteGlove Part-2 resume detection. V1-symmetric Archive-and-Reset
             //    pattern: peek the persisted snapshot via the lock-free static reader; if
             //    the prior run sealed Part-1, move the reducer-state segment files
@@ -405,7 +463,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             IReadOnlyList<DecisionSignal> signalsToReplay = Array.Empty<DecisionSignal>();
             string branchTag;
 
-            if (loadedState == null && snapshotFileExistsPreLoad)
+            if (_forceCleanStart)
+            {
+                // P2 — a requested prior-run quarantine did not fully succeed. Fail-closed: ignore
+                // any (possibly-still-present) snapshot and SignalLog and seed from a fresh Initial
+                // state. seed/signalsToReplay are already CreateInitial/empty above. The retained
+                // marker drives a proper full quarantine + retry on the next start.
+                _logger.Warning(
+                    "EnrollmentOrchestrator: forcing clean Initial seed (prior-run quarantine incomplete) — "
+                    + "skipping snapshot/log recovery for this run.");
+                branchTag = "forced-clean-after-failed-quarantine";
+            }
+            else if (loadedState == null && snapshotFileExistsPreLoad)
             {
                 // Branch (a) — Snapshot corrupt. Quarantine the snapshot and attempt log replay.
                 _logger.Error(
@@ -508,6 +577,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             //    never applied, so tenants saw drainInterval/MaxBatchSize have no effect).
             _spool = new TelemetrySpool(_transportDirectory, _clock, _logger);
             _transport = new TelemetryUploadOrchestrator(_spool, _uploader, _clock, batchSize: _uploadBatchSize);
+
+            // TRACE-H1 — surface skipped oversized items + blocked-pipeline conditions as timeline
+            // events. Raised after the drain guard releases, so posting back through the ingress
+            // here cannot deadlock the drain.
+            _transport.BatchPoisoned += OnBatchPoisoned;
+            _transport.UploadBlocked += OnUploadBlocked;
 
             // Late-bind the spool reference into the component factory so peripheral
             // collectors (AgentSelfMetricsCollector via PeriodicCollectorLifecycleHost) can
@@ -722,6 +797,34 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             //         downstream UI splitters can render a "User Enrollment Part 2"
             //         block. Posted AFTER the onIngressReady hook so agent_started lands
             //         first (matches V1 ordering).
+            // 13b-Q) TRACE-H2 — announce that this start honoured a prior run's quarantine request,
+            //        so the backend can distinguish a corruption-recovery from a normal restart.
+            //        Posted after onIngressReady (agent_started lands first), Warning severity.
+            if (_priorRunQuarantined)
+            {
+                try
+                {
+                    var quarantinePost = new InformationalEventPost(_ingress, _clock);
+                    quarantinePost.Emit(
+                        eventType: Constants.EventTypes.StateQuarantineRecovered,
+                        source: "Agent",
+                        message: "Prior run could not persist consistently (consecutive journal-append failures); "
+                                 + "state segments + snapshot quarantined and session restarted from a clean state.",
+                        severity: Shared.Models.EventSeverity.Warning,
+                        immediateUpload: true,
+                        data: new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["reason"] = _priorRunQuarantineReason ?? string.Empty,
+                        },
+                        sourceOrigin: "EnrollmentOrchestrator",
+                        evidenceSummary: "Prior-run quarantine marker honoured on startup.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("EnrollmentOrchestrator: failed to post state_quarantine_recovered.", ex);
+                }
+            }
+
             if (_isWhiteGlovePart2)
             {
                 try
@@ -1140,7 +1243,112 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _quarantineRequested = true;
             _quarantineReason = reason ?? string.Empty;
             _logger.Error($"EnrollmentOrchestrator: quarantine requested — {reason}");
-            // Actual segment-quarantine happens on next Start (M4.4.5.f), not mid-run.
+
+            // TRACE-H2: persist a marker so the NEXT Start performs the actual segment-quarantine —
+            // a running process must not pull its own state files out from under itself. Best-effort:
+            // the journal failure that triggered this is often disk-full / ACL on the very same state
+            // dir, so the marker write may also fail; if it does we're no worse off than the previous
+            // log-only behaviour (the BootTrigger / max-lifetime restart still re-runs recovery).
+            try
+            {
+                var markerPath = Path.Combine(_stateDirectory, QuarantineRequestedMarkerFile);
+                var body = _clock.UtcNow.ToString("o", System.Globalization.CultureInfo.InvariantCulture)
+                           + " " + (reason ?? string.Empty);
+                File.WriteAllText(markerPath, body, System.Text.Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"EnrollmentOrchestrator: failed to persist quarantine marker: {ex.Message}");
+            }
+        }
+
+        /// <summary>Reads the reason text from a quarantine marker; returns a fallback on any error.</summary>
+        private static string TryReadMarkerReason(string markerPath)
+        {
+            try { return File.ReadAllText(markerPath, System.Text.Encoding.UTF8); }
+            catch { return "unknown (marker unreadable)"; }
+        }
+
+        /// <summary>
+        /// TRACE-H1/P1 — turns a quarantined oversized item into a <c>telemetry_upload_poisoned</c>
+        /// Warning so the drop is visible on the backend timeline (the item stays in spool.jsonl for
+        /// the diag ZIP). Only fires for the one locally-provable poison case: a lone item the backend
+        /// rejects with 413 even on its own. Posted through the ingress like other lifecycle events.
+        /// </summary>
+        private void OnBatchPoisoned(object? sender, PoisonReport poison)
+        {
+            var ingress = _ingress;
+            if (ingress == null || poison == null) return;
+            try
+            {
+                // P3 — message reflects WHY the item was dropped so forensics don't read an explicit
+                // backend schema/RowKey rejection as an "oversized" item.
+                var message = poison.Kind == PoisonKind.Oversize
+                    ? $"Quarantined {poison.ItemCount} oversized telemetry item(s) the backend cannot "
+                      + "accept at any batch size; item remains on disk for diagnostics."
+                    : $"Dropped {poison.ItemCount} telemetry item(s) the backend explicitly rejected as "
+                      + "poison (per response signal); items remain on disk for diagnostics.";
+
+                new InformationalEventPost(ingress, _clock).Emit(
+                    eventType: Constants.EventTypes.TelemetryUploadPoisoned,
+                    source: "TelemetryUploadOrchestrator",
+                    message: message,
+                    severity: Shared.Models.EventSeverity.Warning,
+                    immediateUpload: true,
+                    data: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["kind"] = poison.Kind.ToString(),
+                        ["itemCount"] = poison.ItemCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["throughItemId"] = poison.ThroughItemId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["reason"] = poison.Reason ?? string.Empty,
+                    },
+                    sourceOrigin: "EnrollmentOrchestrator",
+                    evidenceSummary: poison.Kind == PoisonKind.Oversize
+                        ? "Oversized telemetry item quarantined to keep the upload pipeline flowing."
+                        : "Backend-rejected (poison) telemetry items dropped to keep the upload pipeline flowing.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("EnrollmentOrchestrator: failed to post telemetry_upload_poisoned.", ex);
+            }
+        }
+
+        /// <summary>
+        /// P1 — records a blocked drain (retained unknown permanent 4xx) as a one-shot
+        /// <c>telemetry_upload_blocked</c> Warning. NO data is discarded. This is primarily a LOCAL
+        /// diagnostic (agent log + diagnostics ZIP): the event is queued on the same spool behind the
+        /// very batch that is blocking, so it does NOT reach the backend while the block persists — it
+        /// uploads (with the retained batch) only once the cause is resolved. There is no out-of-band
+        /// bypass by design.
+        /// </summary>
+        private void OnUploadBlocked(object? sender, string reason)
+        {
+            // Local-first: the agent log + diagnostics ZIP are the reliable channel while blocked.
+            _logger.Warning($"EnrollmentTerminationHandler/Upload: drain blocked by permanent backend rejection — {reason}");
+
+            var ingress = _ingress;
+            if (ingress == null) return;
+            try
+            {
+                new InformationalEventPost(ingress, _clock).Emit(
+                    eventType: Constants.EventTypes.TelemetryUploadBlocked,
+                    source: "TelemetryUploadOrchestrator",
+                    message: "Telemetry upload blocked by a permanent backend rejection; data is retained "
+                             + "on disk (agent log / diagnostics ZIP). This marker is queued behind the "
+                             + "blocking batch and reaches the backend only once the block clears.",
+                    severity: Shared.Models.EventSeverity.Warning,
+                    immediateUpload: true,
+                    data: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["reason"] = reason ?? string.Empty,
+                    },
+                    sourceOrigin: "EnrollmentOrchestrator",
+                    evidenceSummary: "Upload pipeline blocked on a retained permanent rejection (local diagnostic; no data discarded).");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("EnrollmentOrchestrator: failed to post telemetry_upload_blocked.", ex);
+            }
         }
 
         // ---------------------------------------------------------------- Test helpers

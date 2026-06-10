@@ -64,14 +64,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             watcher.Start();
             watcher.ScheduleRecheck();
 
-            // Give it well beyond max*interval, then assert it has stopped and never exceeded the bound.
-            Thread.Sleep(400);
-            int settled = Volatile.Read(ref raises);
-            Thread.Sleep(200);
+            // Deterministic instead of fixed-sleep (the old version raced a delayed re-probe under
+            // load): the probe raises exactly maxRechecks times then stops, so first SYNCHRONISE on
+            // reaching the bound (generous timeout tolerates scheduler delay), then prove it stopped.
+            bool reachedBound = SpinUntil(() => Volatile.Read(ref raises) >= 3, 10000);
+            Assert.True(reachedBound, $"re-probe did not reach its bound in time; got {Volatile.Read(ref raises)}");
 
-            Assert.Equal(settled, Volatile.Read(ref raises)); // no further raises — bounded
-            Assert.True(settled <= 3, $"re-probe exceeded its bound: {settled}");
-            Assert.True(settled >= 1, "re-probe never fired");
+            int settled = Volatile.Read(ref raises);
+            Thread.Sleep(200); // room for a (buggy) 4th raise past the bound
+            Assert.Equal(settled, Volatile.Read(ref raises)); // stopped — no further raises
+            Assert.Equal(3, settled);                          // fired exactly maxRechecks, no more
         }
 
         [Fact]
@@ -145,14 +147,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal(afterDispose, Volatile.Read(ref raises)); // no raises after dispose
         }
 
-        private static void SpinUntil(Func<bool> condition, int timeoutMs)
+        private static bool SpinUntil(Func<bool> condition, int timeoutMs)
         {
             var deadline = Environment.TickCount + timeoutMs;
             while (Environment.TickCount < deadline)
             {
-                if (condition()) return;
+                if (condition()) return true;
                 Thread.Sleep(10);
             }
+            return condition();
         }
     }
 }
