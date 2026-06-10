@@ -330,16 +330,11 @@ namespace AutopilotMonitor.Functions.Services
                 updatedSession = null;
             updatedSession ??= await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
 
-            if (updatedSession != null && updatedSession.Status == SessionStatus.InProgress)
-            {
-                var sessionAge = DateTime.UtcNow - updatedSession.StartedAt;
-                if (sessionAge.TotalHours > 4)
-                {
-                    _logger.LogWarning(
-                        "Session {SessionId} (tenant {TenantId}) still InProgress after {Hours:F1}h — may be stuck",
-                        request.SessionId, request.TenantId, sessionAge.TotalHours);
-                }
-            }
+            // NOTE: long-running InProgress sessions are handled authoritatively by
+            // MaintenanceService.MarkStalledSessionsAsTimedOutAsync (Stalled at 2h agent-silence,
+            // Failed at SessionTimeoutHours, with a SessionTimeouts OpsEvent). A per-batch warning
+            // here was pure observability noise (fired on every ingest of a >4h session, strictly
+            // later than maintenance's first action) and was removed.
 
             if (classification.WhiteGloveEvent != null && updatedSession?.IsPreProvisioned != true)
             {

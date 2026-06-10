@@ -471,16 +471,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 // Retrieve updated session data to include in SignalR messages
                 var updatedSession = await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
 
-                // Session age warning: log if session >4h old and still InProgress (observability only)
-                if (updatedSession != null && updatedSession.Status == SessionStatus.InProgress)
-                {
-                    var sessionAge = DateTime.UtcNow - updatedSession.StartedAt;
-                    if (sessionAge.TotalHours > 4)
-                    {
-                        _logger.LogWarning("Session {SessionId} (tenant {TenantId}) still InProgress after {Hours:F1}h — may be stuck",
-                            request.SessionId, request.TenantId, sessionAge.TotalHours);
-                    }
-                }
+                // NOTE: stuck/long-running InProgress sessions are handled authoritatively by
+                // MaintenanceService.MarkStalledSessionsAsTimedOutAsync (Stalled at 2h, Failed at
+                // SessionTimeoutHours + SessionTimeouts OpsEvent). The former per-batch >4h warning
+                // here was redundant observability noise and was removed.
 
                 // Log warning if WhiteGlove status update was not persisted despite retries and fallback.
                 if (classification.WhiteGloveEvent != null && updatedSession?.IsPreProvisioned != true)

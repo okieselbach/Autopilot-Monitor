@@ -228,6 +228,14 @@ namespace AutopilotMonitor.Functions.Services
 
                 await indexTableClient.UpdateEntityAsync(indexUpdate, ETag.All, TableUpdateMode.Merge);
             }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                // Benign race: the SessionsIndex row doesn't exist yet (merge runs before the full
+                // upsert that creates it, e.g. a session predating the index dual-write / awaiting
+                // backfill). The next full-upsert path rebuilds the row. Downgrade to Debug so it
+                // doesn't pollute the exceptions table as a tracked error.
+                _logger.LogDebug("Session index merge skipped (row not found yet) for {TenantId}/{IndexRowKey}", tenantId, indexRowKey);
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to merge session index for {TenantId}/{IndexRowKey}", tenantId, indexRowKey);
@@ -676,8 +684,19 @@ namespace AutopilotMonitor.Functions.Services
                     .GroupBy(x => x.index / 100)
                     .Select(g => g.Select(x => x.evt).ToList());
 
-                foreach (var chunk in chunks)
+                foreach (var rawChunk in chunks)
                 {
+                    // Dedup by RowKey within the chunk. The RowKey is {Timestamp:ms}_{Sequence:D10};
+                    // two events sharing the same millisecond AND Sequence map to one row and would
+                    // collapse under UpsertReplace anyway — but Azure rejects the WHOLE transaction
+                    // with InvalidDuplicateRow if both appear in one batch (then we degrade to slow
+                    // per-event writes and track a noisy TableTransactionFailedException). Keeping the
+                    // last occurrence (matches UpsertReplace last-wins) lets the batch succeed cleanly.
+                    var chunk = rawChunk
+                        .GroupBy(evt => $"{evt.Timestamp:yyyyMMddHHmmssfff}_{evt.Sequence:D10}")
+                        .Select(g => g.Last())
+                        .ToList();
+
                     try
                     {
                         var actions = chunk.Select(evt =>
