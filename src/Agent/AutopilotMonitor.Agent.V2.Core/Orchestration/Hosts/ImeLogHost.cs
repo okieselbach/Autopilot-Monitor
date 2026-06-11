@@ -52,6 +52,15 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         internal ImeLogTracker Tracker => _tracker;
 
         /// <summary>
+        /// Session caa6cf50 gate-starvation fix (2026-06-11) — bridge for the
+        /// <c>EspAndHelloTracker</c> user-ESP-apps-settled probe. True when the tracker's
+        /// current ESP phase is AccountSetup and every tracked user-phase app is terminal
+        /// (installed/skipped/postponed, zero errors). See
+        /// <see cref="ImeLogTracker.AreUserEspAppsSettled"/>.
+        /// </summary>
+        public bool AreUserEspAppsSettled() => _tracker.AreUserEspAppsSettled();
+
+        /// <summary>
         /// c117946b debrief (2026-05-12) — bridge for the <c>EnrollmentTerminationHandler</c>
         /// pre-hook to promote apps still in <see cref="AppInstallationState.Installing"/>
         /// to Error on terminal ESP-Apps failure. Delegates to

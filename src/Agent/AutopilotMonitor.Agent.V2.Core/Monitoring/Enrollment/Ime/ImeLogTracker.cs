@@ -202,6 +202,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         }
 
         /// <summary>
+        /// Test-only seam: sets the tracker's current detected ESP phase without driving the
+        /// IME-ESP-PHASE regex pattern through a real log file. Production code never calls
+        /// this — the phase is set by <c>HandleEspPhaseDetected</c> from live pattern matches
+        /// (or restored from persisted state). Used by <c>AreUserEspAppsSettled</c> tests.
+        /// </summary>
+        internal void SeedCurrentPhaseForTesting(string phaseName)
+        {
+            _lastEspPhaseDetected = phaseName;
+        }
+
+        /// <summary>
         /// Returns a deduped union of phase-snapshotted apps plus the live
         /// <see cref="PackageStates"/> (current phase). Live entries win on Id collision.
         /// Used by the termination summary path so that DeviceSetup apps cleared from
@@ -227,6 +238,56 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 }
             }
             return result;
+        }
+
+        /// <summary>
+        /// Session caa6cf50 gate-starvation fix (2026-06-11): returns <c>true</c> when the
+        /// tracker's current ESP phase is AccountSetup AND every tracked user-phase app has
+        /// reached a terminal state (Installed / Skipped / Postponed) with zero errors.
+        /// <para>
+        /// Used by <c>EspAndHelloTracker</c> as alternative evidence for the strong
+        /// post-AccountSetup completion gate: when a user-ESP app is policy-skipped, Windows
+        /// never flips the registry's Apps subcategory to <c>succeeded</c> and never writes
+        /// <c>AccountSetupCategory.Status.categorySucceeded</c> before tearing down the ESP
+        /// page — the registry-driven <c>AccountSetupProvisioningComplete</c> (and its
+        /// all-subcategories fallback) can then never fire. IME's own app tracking is the
+        /// independent evidence that AccountSetup app enforcement actually finished.
+        /// </para>
+        /// <para>
+        /// Conservative by construction: requires at least one required (Install/Uninstall
+        /// intent) app in the live current-phase list — an empty list (phase just cleared, or
+        /// apps not yet surfaced) or intent-unknown-only tracking returns <c>false</c>. Any
+        /// app in <see cref="AppInstallationState.Error"/> returns <c>false</c>. May be called
+        /// from the Shell-Core event-log watcher thread while the polling thread mutates the
+        /// list — any race-induced exception is swallowed and reported as "not settled".
+        /// </para>
+        /// </summary>
+        public bool AreUserEspAppsSettled()
+        {
+            try
+            {
+                if (!string.Equals(_lastEspPhaseDetected, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                var apps = new List<AppPackageState>(_packageStates);
+                if (apps.Count == 0) return false;
+
+                var sawRequired = false;
+                foreach (var pkg in apps)
+                {
+                    if (pkg == null) continue;
+                    if (pkg.IsError) return false;
+                    if (!pkg.IsRequired) continue;
+                    sawRequired = true;
+                    if (!pkg.IsCompleted) return false;
+                }
+                return sawRequired;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"ImeLogTracker: AreUserEspAppsSettled probe threw: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>

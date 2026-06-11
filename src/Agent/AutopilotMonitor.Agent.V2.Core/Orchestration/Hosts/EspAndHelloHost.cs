@@ -60,7 +60,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             bool modernDeploymentBackfillEnabled,
             int modernDeploymentBackfillLookbackMinutes,
             int[]? modernDeploymentHarmlessEventIds,
-            string stateDirectory)
+            string stateDirectory,
+            Func<bool>? userEspAppsSettledProbe = null)
         {
             if (ingress == null) throw new ArgumentNullException(nameof(ingress));
             if (clock == null) throw new ArgumentNullException(nameof(clock));
@@ -76,7 +77,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 modernDeploymentBackfillEnabled: modernDeploymentBackfillEnabled,
                 modernDeploymentBackfillLookbackMinutes: modernDeploymentBackfillLookbackMinutes,
                 stateDirectory: stateDirectory,
-                modernDeploymentHarmlessEventIds: modernDeploymentHarmlessEventIds);
+                modernDeploymentHarmlessEventIds: modernDeploymentHarmlessEventIds,
+                userEspAppsSettledProbe: userEspAppsSettledProbe);
 
             _tracker.WhiteGloveCompleted += OnTrackerWhiteGloveCompleted;
             _tracker.DeviceSetupProvisioningComplete += OnTrackerDeviceSetupProvisioningComplete;

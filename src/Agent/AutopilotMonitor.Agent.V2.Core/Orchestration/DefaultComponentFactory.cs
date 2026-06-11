@@ -102,6 +102,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // ----- Kernel hosts (always-on; they produce decision signals) --------------------
 
+            // Session caa6cf50 gate-starvation fix: the EspAndHelloTracker's user-ESP-apps-settled
+            // probe reads the IME log host, which is constructed further down. Same closure-over-
+            // local pattern as realmJoinHost below — null until assigned, and the probe only fires
+            // on esp_exiting events long after Start.
+            ImeLogHost? imeLogHostRef = null;
+
             var espAndHelloHost = new EspAndHelloHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
@@ -114,7 +120,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 modernDeploymentBackfillEnabled: collectors.ModernDeploymentBackfillEnabled,
                 modernDeploymentBackfillLookbackMinutes: collectors.ModernDeploymentBackfillLookbackMinutes,
                 modernDeploymentHarmlessEventIds: collectors.ModernDeploymentHarmlessEventIds,
-                stateDirectory: _stateDirectory);
+                stateDirectory: _stateDirectory,
+                userEspAppsSettledProbe: () => imeLogHostRef?.AreUserEspAppsSettled() == true);
             hosts.Add(espAndHelloHost);
 
             // Hybrid User-Driven completion-gap fix (2026-05-01): the AadJoinHost notifies
@@ -202,6 +209,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 simulationMode: simulationMode,
                 simulationSpeedFactor: _agentConfig.ReplaySpeedFactor);
             hosts.Add(imeLogHost);
+            imeLogHostRef = imeLogHost;
 
             if (collectors.StallProbeEnabled)
             {

@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
@@ -37,6 +39,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly int[] _modernDeploymentHarmlessEventIds;
         private readonly Func<(bool? skipUser, bool? skipDevice)> _skipConfigProbe;
         private readonly Func<bool> _accountSetupActivityProbe;
+        private readonly Func<bool> _userEspAppsSettledProbe;
+
+        // Session caa6cf50 gate-starvation fix (2026-06-11) — fire-once guard for the
+        // user-ESP-apps-settled AccountSetup synthesis (see MaybeSynthesizeAccountSetupComplete).
+        private bool _userAppsSettledSynthesisFired;
 
         private HelloTracker _helloTracker;
         private ShellCoreTracker _shellCoreTracker;
@@ -187,7 +194,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             string stateDirectory = null,
             int[] modernDeploymentHarmlessEventIds = null,
             Func<(bool? skipUser, bool? skipDevice)> skipConfigProbe = null,
-            Func<bool> accountSetupActivityProbe = null)
+            Func<bool> accountSetupActivityProbe = null,
+            Func<bool> userEspAppsSettledProbe = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -206,6 +214,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             // Test seam: allow injection of a fake AccountSetup-activity probe. Production uses
             // the provisioning tracker's live registry-derived flag.
             _accountSetupActivityProbe = accountSetupActivityProbe ?? (() => _provisioningTracker?.HasAccountSetupActivity == true);
+            // Session caa6cf50 gate-starvation fix: IME-side "all tracked user-ESP apps terminal"
+            // probe (wired to ImeLogHost.AreUserEspAppsSettled by DefaultComponentFactory).
+            // Defaults to "not settled" so single-tracker wiring scenarios keep prior behaviour.
+            _userEspAppsSettledProbe = userEspAppsSettledProbe ?? (() => false);
         }
 
         // =====================================================================
@@ -561,9 +573,85 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             // this path is NOT filtered by IsIntermediateDeviceEspExit — the reducer-side
             // ShouldTransitionToAwaitingHello guard decides whether HelloSafety arms.
             LastEventOccurredAtUtc = args?.OccurredAtUtc;
-            try { EspExited?.Invoke(this, args); }
-            catch (Exception ex) { _logger.Error("Error forwarding EspExited", ex); }
+            try
+            {
+                try { EspExited?.Invoke(this, args); }
+                catch (Exception ex) { _logger.Error("Error forwarding EspExited", ex); }
+
+                // Session caa6cf50 gate-starvation fix: a Shell-Core normal exit while IME's
+                // user-ESP app tracking is fully settled is alternative evidence that
+                // AccountSetup completed. Raised AFTER the EspExited forward so the reducer
+                // records EspFinalExitUtc first and the deferred-promote path in
+                // HandleAccountSetupProvisioningCompleteV1 takes over.
+                MaybeSynthesizeAccountSetupCompleteFromSettledUserApps();
+            }
             finally { LastEventOccurredAtUtc = null; }
         }
+
+        /// <summary>
+        /// Session caa6cf50 gate-starvation fix (2026-06-11). When a user-ESP app is
+        /// policy-skipped by IME, Windows leaves the ESP registry's Apps subcategory stuck at
+        /// <c>inProgress</c> ("Apps (N of M installed)") and never writes
+        /// <c>AccountSetupCategory.Status.categorySucceeded</c> before tearing down the ESP page
+        /// — after the page exits those values are never updated again. Both registry-driven
+        /// <see cref="ProvisioningStatusTracker.AccountSetupProvisioningComplete"/> paths
+        /// (normal + all-subcategories fallback) are then permanently starved, the reducer's
+        /// strong post-AccountSetup gate never opens, and the session stalls despite a fully
+        /// successful enrollment.
+        /// <para>
+        /// This synthesis accepts the equivalent evidence pair instead: Shell-Core 62407 normal
+        /// exit (the caller) + all tracked user-ESP apps terminal with zero failures (the
+        /// injected IME probe). Fire-once; the registry path's tracker-level dedup and the
+        /// adapter's fire-once flag make a duplicate raise benign either way. Never fires while
+        /// any user-phase app is failed or still in flight — those sessions keep today's
+        /// conservative stall behaviour.
+        /// </para>
+        /// </summary>
+        private void MaybeSynthesizeAccountSetupCompleteFromSettledUserApps()
+        {
+            if (_userAppsSettledSynthesisFired) return;
+
+            bool settled;
+            try { settled = _userEspAppsSettledProbe(); }
+            catch (Exception ex)
+            {
+                _logger.Debug($"EspAndHelloTracker: user-ESP-apps-settled probe threw: {ex.Message}");
+                return;
+            }
+            if (!settled) return;
+
+            _userAppsSettledSynthesisFired = true;
+            _logger.Warning(
+                "EspAndHelloTracker: ESP exited normally with all tracked user-ESP apps terminal (0 failed) " +
+                "but AccountSetupCategory.Status never confirmed categorySucceeded — treating AccountSetup as complete " +
+                "(user-apps-settled synthesis)");
+
+            _post.Emit(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = Constants.EventTypes.EspProvisioningStatus,
+                Severity = EventSeverity.Warning,
+                Source = "EspAndHelloTracker",
+                Phase = EnrollmentPhase.Unknown,
+                Message = "ESP provisioning status: AccountSetup — ESP page exited normally and all tracked " +
+                          "user-ESP apps reached a terminal state (0 failed) but categorySucceeded was never " +
+                          "confirmed by Windows — treating as complete (user-apps-settled synthesis)",
+                Data = new Dictionary<string, object>
+                {
+                    { "category", "AccountSetup" },
+                    { "categorySucceeded", "in_progress" },
+                    { "fallbackApplied", true },
+                    { "fallbackReason", "esp_exited_user_apps_settled_category_unresolved" },
+                }
+            });
+
+            try { AccountSetupProvisioningComplete?.Invoke(this, EventArgs.Empty); }
+            catch (Exception ex) { _logger.Error("AccountSetupProvisioningComplete handler failed (user-apps-settled synthesis)", ex); }
+        }
+
+        // Test seam for the user-apps-settled synthesis — drives OnEspExited with the live
+        // handler signature, mirroring TriggerEspExitedForTest's contract.
+        internal bool UserAppsSettledSynthesisFiredForTest => _userAppsSettledSynthesisFired;
     }
 }

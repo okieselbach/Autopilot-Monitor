@@ -796,6 +796,45 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 return new DecisionStep(newState, transition, Array.Empty<DecisionEffect>());
             }
 
+            // Deferred-completion parity (session caa6cf50 fix, 2026-06-11): when the strong gate
+            // arrives LAST — after both EspExiting and DesktopArrived already landed (the Win11
+            // Classic ordering where explorer.exe runs underneath the User-ESP page, so Desktop
+            // "arrives" before the final exit) — promoting to AwaitingHello would park the session
+            // until HelloSafety stamps a misleading HelloOutcome="Timeout" 300 s later. Mirror the
+            // completion checks the live-ordering handlers perform instead:
+            //   * Hello already resolved → both prerequisites in → Finalizing (HandleDesktopArrivedV1
+            //     helloAlreadyResolved branch).
+            //   * Hello policy explicitly disabled → synthesise HelloOutcome="Skipped" → Finalizing
+            //     (HandleDesktopArrivedV1 Hello-disabled fast-path; its strong-gate arm is satisfied
+            //     by the very fact this signal records).
+            // HelloPolicyEnabled == null keeps the pessimistic AwaitingHello promotion below.
+            var desktopAlreadyArrived = state.DesktopArrivedUtc != null;
+            if (desktopAlreadyArrived
+                && (state.HelloResolvedUtc != null || state.HelloPolicyEnabled?.Value == false))
+            {
+                if (state.HelloResolvedUtc == null)
+                {
+                    builder.HelloResolvedUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+                    builder.HelloOutcome = new SignalFact<string>("Skipped", signal.SessionSignalOrdinal);
+                }
+
+                var helloSafetyCancelEffect = BuildHelloSafetyCancelEffectIfArmed(state);
+                if (helloSafetyCancelEffect != null)
+                {
+                    builder.CancelDeadline(DeadlineNames.HelloSafety);
+                }
+
+                return CompleteThroughFinalizingOrDefer(
+                    state: state,
+                    signal: signal,
+                    preparedBuilder: builder,
+                    nextStepIndex: nextStep,
+                    trigger: nameof(DecisionSignalKind.AccountSetupProvisioningComplete) + ":DeferredCompletion",
+                    leadingEffects: helloSafetyCancelEffect != null
+                        ? new[] { helloSafetyCancelEffect }
+                        : null);
+            }
+
             // Mirror of HandleEspExitingV1's promote branch, using this signal's instant as
             // the deadline base. EffectiveDeadlineBase still floors at AgentBootUtc to keep
             // the replay-safety guarantee.
