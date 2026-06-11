@@ -27,13 +27,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// Baut alle Collector-Hosts. Jeder Host ist selbst dafür zuständig, seine
         /// <c>InformationalEventPost</c> aus (ingress, clock) zu konstruieren und Collector-Events
         /// als <c>InformationalEvent</c>-Signals über <paramref name="ingress"/> zu posten.
+        /// <para>
+        /// Returns a <see cref="CollectorSurfaces"/> bundle (hosts + typed read-model surfaces)
+        /// instead of a bare host list (ARCH-F4): the factory holds no post-creation state and
+        /// the orchestrator never needs to downcast this seam. Test fakes return
+        /// <c>new CollectorSurfaces(hosts)</c>.
+        /// </para>
+        /// <para>
+        /// <paramref name="telemetrySpool"/> flows into the <c>PeriodicCollectorLifecycleHost</c>
+        /// → <c>AgentSelfMetricsCollector</c> so <c>agent_metrics_snapshot</c> can surface
+        /// <c>spool.pendingItemCount</c> / <c>spool.fileSizeBytes</c>. Nullable — fakes and
+        /// spool-less configurations pass null and the metrics fields are simply absent.
+        /// </para>
         /// </summary>
-        IReadOnlyList<ICollectorHost> CreateCollectorHosts(
+        CollectorSurfaces CreateCollectorHosts(
             string sessionId,
             string tenantId,
             AgentLogger logger,
             IReadOnlyCollection<string> whiteGloveSealingPatternIds,
             ISignalIngressSink ingress,
-            IClock clock);
+            IClock clock,
+            Transport.Telemetry.ITelemetrySpool? telemetrySpool);
     }
 }

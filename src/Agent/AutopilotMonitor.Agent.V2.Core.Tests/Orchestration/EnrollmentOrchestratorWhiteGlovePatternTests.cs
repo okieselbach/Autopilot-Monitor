@@ -20,16 +20,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
         {
             public IReadOnlyCollection<string>? CapturedPatternIds { get; private set; }
 
-            public IReadOnlyList<ICollectorHost> CreateCollectorHosts(
+            public CollectorSurfaces CreateCollectorHosts(
                 string sessionId,
                 string tenantId,
                 AgentLogger logger,
                 IReadOnlyCollection<string> whiteGloveSealingPatternIds,
                 ISignalIngressSink ingress,
-                IClock clock)
+                IClock clock,
+                AutopilotMonitor.Agent.V2.Core.Transport.Telemetry.ITelemetrySpool? telemetrySpool)
             {
                 CapturedPatternIds = whiteGloveSealingPatternIds;
-                return Array.Empty<ICollectorHost>();
+                return new CollectorSurfaces(Array.Empty<ICollectorHost>());
             }
         }
 

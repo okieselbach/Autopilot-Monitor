@@ -333,87 +333,37 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             // emits through the same InformationalEventPost. The terminated-
                             // dispatch wrapper registered above picks this instance up via
                             // closure capture.
+                            //
+                            // ARCH-F2: the former ~80-line lambda wiring is grouped into four
+                            // adapter objects. The per-parameter rationale comments live on
+                            // the interface members (IAppTrackingReadModel / IDrainStatus /
+                            // IShutdownGate / TerminationSessionContext).
                             terminationHandler = new EnrollmentTerminationHandler(
-                                configuration: agentConfig,
+                                session: new TerminationSessionContext(
+                                    configuration: agentConfig,
+                                    stateDirectory: stateSubdir,
+                                    agentStartTimeUtc: agentStartTimeUtc,
+                                    agentVersion: agentVersion,
+                                    sessionPersistence: sessionPersistence,
+                                    // Read lazily — the orchestrator resolves the Part-2 hint
+                                    // during Start, after this handler is constructed.
+                                    isWhiteGlovePart2: () => orchestrator.IsWhiteGlovePart2),
+                                appTracking: new OrchestratorAppTrackingReadModel(orchestrator),
+                                drainStatus: new OrchestratorDrainStatus(orchestrator),
+                                shutdownGate: new RuntimeShutdownGate(
+                                    signalShutdown: () => shutdown.Set(),
+                                    writeCleanExitMarker: () => Program.WriteCleanExitMarker(dataDirectory),
+                                    tryClaimShutdownEvent: TryClaimAgentShuttingDownEmit),
                                 logger: logger,
-                                stateDirectory: stateSubdir,
-                                agentStartTimeUtc: agentStartTimeUtc,
-                                currentStateAccessor: () => orchestrator.CurrentState,
-                                // F5 (debrief 7dd4e593) — pass the deduped phase-snapshot+live
-                                // union so DeviceSetup apps cleared from _packageStates on the
-                                // AccountSetup transition still appear in the SummaryDialog and
-                                // app_tracking_summary event.
-                                packageStatesAccessor: () => componentFactory.AllKnownPackageStates,
                                 cleanupServiceFactory: bootstrap.CleanupServiceFactory,
                                 uploadDiagnosticsAsync: uploadDiagnosticsAsync,
-                                signalShutdown: () => shutdown.Set(),
                                 analyzerManager: analyzerManager,
                                 post: lifecyclePost,
-                                sessionPersistence: sessionPersistence,
-                                // Plan §5 Fix 4 — per-app timing snapshot for FinalStatusBuilder +
-                                // app_tracking_summary emission. Null-safe via the handler's default.
-                                appTimingsAccessor: () => componentFactory.ImeAppTimings,
-                                agentVersion: agentVersion,
                                 // Stop periodic collectors before the diagnostics ZIP is
                                 // built, so no late `performance_snapshot` slips in after
                                 // `diagnostics_collecting`. Idempotent on the orchestrator
                                 // side — the full Stop() call later is a no-op for hosts.
-                                stopPeripheralCollectors: () => orchestrator.StopCollectorHosts(),
-                                // V1-parity ignoredCount for app_tracking_summary — lives on the
-                                // live AppPackageStateList only (phase snapshots don't carry it).
-                                ignoredCountAccessor: () => componentFactory.ImeIgnoredCount,
-                                // Option 1 (WG Part 1 graceful-exit hardening, 2026-04-30) —
-                                // active spool-empty polling so DrainSpool exits as soon as the
-                                // backend ack'd the last lifecycle event instead of waiting the
-                                // full 10s timeout. Critical when an admin reseal-reboot races
-                                // termination.
-                                pendingItemCountAccessor: () => orchestrator.PendingItemCount,
-                                // Option 2 (same hardening) — write clean-exit.marker before
-                                // _signalShutdown returns, instead of relying solely on
-                                // AppDomain.ProcessExit which Windows can pre-empt during a
-                                // shutdown.exe / reseal-triggered reboot.
-                                writeCleanExitMarker: () => Program.WriteCleanExitMarker(dataDirectory),
-                                // Codex Finding 2 (2026-04-30) — DrainSpool needs to wait
-                                // for the ingress to finish processing the lifecycle events
-                                // the handler just posted (agent_shutting_down,
-                                // whiteglove_part1_complete, analyzer events) BEFORE polling
-                                // spool-empty. Pair with off-worker dispatch in
-                                // EnrollmentOrchestrator.OnDecisionTerminalStage so the
-                                // wait can actually make progress.
-                                ingressPendingSignalCountAccessor: () => orchestrator.IngressPendingSignalCount,
-                                // V1-symmetric Part-2 hint accessor (plan §11). The orchestrator
-                                // does not reach a dedicated terminal stage for Part 2; instead
-                                // Part 2 runs as a fresh Classic enrollment after Archive-and-Reset
-                                // and ends on Completed/Failed. The shutdown analyzer pipeline
-                                // still needs the hint to tag findings with phase=2 so the backend
-                                // vulnerability correlation pipeline can filter Part-2 inventory
-                                // out of the Part-1 set.
-                                isWhiteGlovePart2Accessor: () => orchestrator.IsWhiteGlovePart2,
-                                // c117646b debrief (2026-05-12) — on terminal ESP-Apps failure,
-                                // promote any apps in `Installing` to Error with the canonical
-                                // `esp_apps_timeout` failureType so the user sees a name + a
-                                // hedged "likely stuck" label, not just an opaque `installing: 1`
-                                // counter. Discriminator inside the handler gates this to the
-                                // EspTerminalFailure pathway only — other Failed paths leave the
-                                // app list untouched.
-                                promoteActiveInstallsToStuck: (failureType, message, errorCode)
-                                    => componentFactory.PromoteActiveInstallsToStuck(failureType, message, errorCode),
-                                // Shutdown-gap closure (2026-05-15) — share the cross-path
-                                // idempotency gate so a Terminated event that races a Ctrl+C /
-                                // ProcessExit gap-path does not emit two agent_shutting_down
-                                // events on the wire. The handler skips its emit when the
-                                // gate already claimed the slot.
-                                tryClaimShutdownEvent: TryClaimAgentShuttingDownEmit,
-                                // Session 080edee9 follow-up + Codex review (P2/P3, 2026-05-28)
-                                // — feeds the latest ESP failure context (HRESULT +
-                                // failedSubcategory + category) captured by
-                                // ProvisioningStatusTracker (via
-                                // EspAndHelloTracker.LastEspTerminalFailure) into the
-                                // termination handler's classifier. The handler only treats
-                                // the HRESULT as an app-level cause when the failure came
-                                // from the Apps subcategory; non-Apps ESP failures fall
-                                // back to the generic esp_apps_timeout classification.
-                                lastEspTerminalFailureAccessor: () => componentFactory.LastEspTerminalFailure);
+                                stopPeripheralCollectors: () => orchestrator.StopCollectorHosts());
 
                             // ServerActionDispatcher (plan §5.3) — constructed inside this
                             // hook so lifecyclePost + terminationHandler are guaranteed
@@ -442,15 +392,16 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             shutdownComplete,
                             logger);
 
-                        // Wire the WhiteGlove Part-1 inventory trigger. componentFactory.EspAndHelloHost
-                        // is set inside CreateCollectorHosts (orchestrator.Start step 14, runs after
-                        // the onIngressReady hook above), so by here both it and analyzerManager are
-                        // live. The Action closes over the local `analyzerManager` variable; null-safe
-                        // in case a race ever inverts the order.
-                        if (componentFactory.EspAndHelloHost != null)
+                        // Wire the WhiteGlove Part-1 inventory trigger. The CollectorSurfaces are
+                        // set inside CreateCollectorHosts (orchestrator.Start step 14, runs after
+                        // the onIngressReady hook above), so by here both the EspAndHelloHost and
+                        // analyzerManager are live. The Action closes over the local
+                        // `analyzerManager` variable; null-safe in case a race ever inverts the order.
+                        var espAndHelloHost = orchestrator.CollectorSurfaces?.EspAndHelloHost;
+                        if (espAndHelloHost != null)
                         {
                             whiteGloveInventoryTrigger = new WhiteGloveInventoryTrigger(
-                                host: componentFactory.EspAndHelloHost,
+                                host: espAndHelloHost,
                                 onTrigger: () => analyzerManager?.RunWhiteGlovePart1InventorySnapshot(),
                                 logger: logger);
 
@@ -459,13 +410,13 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             // AutoLogon keys. Final shutdown re-scans via RunShutdown for user-phase
                             // changes. Same host + lifecycle as the WG inventory trigger above.
                             autoLogonDeviceSetupTrigger = new AutoLogonDeviceSetupTrigger(
-                                host: componentFactory.EspAndHelloHost,
+                                host: espAndHelloHost,
                                 onTrigger: () => analyzerManager?.RunDeviceSetupCompleteAutoLogonCheck(),
                                 logger: logger);
                         }
                         else
                         {
-                            logger.Warning("WhiteGloveInventoryTrigger / AutoLogonDeviceSetupTrigger not wired — componentFactory.EspAndHelloHost is null after orchestrator.Start.");
+                            logger.Warning("WhiteGloveInventoryTrigger / AutoLogonDeviceSetupTrigger not wired — CollectorSurfaces.EspAndHelloHost is null after orchestrator.Start.");
                         }
 
                         // WhiteGlove Part-2 resume: EnrollmentOrchestrator.Start (PR-A) detected
@@ -502,7 +453,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                             // reboots don't have the placeholder→real-user flow that motivates this.
                             if (!isWhiteGloveResume && EnrollmentRegistryDetector.DetectHybridJoin())
                             {
-                                try { componentFactory.AadJoinHost?.ArmHybridLoginPendingDetector(); }
+                                try { orchestrator.CollectorSurfaces?.AadJoinHost?.ArmHybridLoginPendingDetector(); }
                                 catch (Exception ex)
                                 {
                                     logger.Warning($"ArmHybridLoginPendingDetector threw: {ex.Message}");
