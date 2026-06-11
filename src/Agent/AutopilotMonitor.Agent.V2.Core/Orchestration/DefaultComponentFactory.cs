@@ -68,87 +68,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly string _agentVersion;
         private readonly string _stateDirectory;
 
-        private ImeLogHost? _imeLogHost;
-        private EspAndHelloHost? _espAndHelloHost;
-        private AadJoinHost? _aadJoinHost;
-        private RealmJoinHost? _realmJoinHost;
-        private Transport.Telemetry.ITelemetrySpool? _telemetrySpool;
-
-        /// <summary>
-        /// Exposes the WhiteGlove-success event surface from the ESP/Hello coordinator host so
-        /// downstream subscribers (e.g. <c>WhiteGloveInventoryTrigger</c>) can react to the
-        /// pre-provisioning success window without reaching into the host's internals. Returns
-        /// <c>null</c> before <see cref="CreateCollectorHosts"/> has been called.
-        /// <para>
-        /// <c>internal</c> because <see cref="EspAndHelloHost"/> itself is <c>internal sealed</c>.
-        /// AutopilotMonitor.Agent.V2 (the runtime entry-point project) sees it via the
-        /// <c>InternalsVisibleTo</c> declared on this project's csproj.
-        /// </para>
-        /// </summary>
-        internal EspAndHelloHost? EspAndHelloHost => _espAndHelloHost;
-
-        /// <summary>
-        /// Exposes the <see cref="AadJoinHost"/> so the runtime host can arm the Hybrid
-        /// User-Driven login-pending detector after observing a reboot-kill on a Hybrid-AAD
-        /// device (2026-05-01 completion-gap fix). Returns <c>null</c> before
-        /// <see cref="CreateCollectorHosts"/> has been called.
-        /// </summary>
-        internal AadJoinHost? AadJoinHost => _aadJoinHost;
-
-        /// <summary>
-        /// Exposes the IME tracker's package-state list to peripheral consumers such as the
-        /// <c>FinalStatusBuilder</c> in M4.6.β. Returns <c>null</c> before
-        /// <see cref="CreateCollectorHosts"/> has been called (Orchestrator start order).
-        /// </summary>
-        public AppPackageStateList? ImePackageStates => _imeLogHost?.PackageStates;
-
-        /// <summary>
-        /// F5 (debrief 7dd4e593) — deduped union of phase-snapshotted apps + the live
-        /// <see cref="ImePackageStates"/>. Use this from the termination summary path so
-        /// DeviceSetup apps cleared from <c>_packageStates</c> on the AccountSetup transition
-        /// still reach the SummaryDialog and <c>app_tracking_summary</c> event. Returns
-        /// <c>null</c> before <see cref="CreateCollectorHosts"/> has been called.
-        /// </summary>
-        public IReadOnlyList<AppPackageState>? AllKnownPackageStates =>
-            _imeLogHost?.AllKnownPackageStates;
-
-        /// <summary>
-        /// Plan §5 Fix 4c — per-app install-lifecycle timings (StartedAt / CompletedAt /
-        /// DurationSeconds) captured by <c>ImeLogTrackerAdapter</c>. Returns <c>null</c> before
-        /// <see cref="CreateCollectorHosts"/> has been called (Orchestrator start order).
-        /// </summary>
-        public IReadOnlyDictionary<string, AppInstallTiming>? ImeAppTimings => _imeLogHost?.AppTimings;
-
-        /// <summary>
-        /// V1-parity field: count of IME apps in the tracker's ignore list (e.g. uninstall
-        /// intents that don't surface in the install pipeline). Lives on the live
-        /// <see cref="AppPackageStateList"/> only — phase snapshots don't carry it. Returns 0
-        /// before <see cref="CreateCollectorHosts"/> has been called.
-        /// </summary>
-        public int ImeIgnoredCount => _imeLogHost?.PackageStates?.IgnoreList?.Count ?? 0;
-
-        /// <summary>
-        /// c117946b debrief (2026-05-12) — bridge for the V2 EnrollmentTerminationHandler
-        /// pre-hook. Delegates to <c>ImeLogHost.PromoteActiveInstallsToStuck</c> which calls
-        /// the tracker directly so the standard <c>OnAppStateChanged</c> path fires and the
-        /// adapter emits regular <c>app_install_failed</c> events for every promoted app.
-        /// Returns an empty list when the host has not been created yet (start order).
-        /// </summary>
-        public IReadOnlyList<string> PromoteActiveInstallsToStuck(string failureType, string message, string? errorCode = null) =>
-            _imeLogHost?.PromoteActiveInstallsToStuck(failureType, message, errorCode) ?? Array.Empty<string>();
-
-        /// <summary>
-        /// Session 080edee9 follow-up + Codex review (P2/P3, 2026-05-28) — last
-        /// observed ESP failure context (HRESULT + failedSubcategory + category).
-        /// Surfaced by <see cref="EspAndHelloHost.LastEspTerminalFailure"/> and
-        /// read by <c>EnrollmentTerminationHandler.MaybePromoteActiveInstallsAsStuck</c>
-        /// so the promotion can: (a) classify via HRESULT (detection-failure /
-        /// install-failure), AND (b) refuse to attach app-level classifications
-        /// when the failure originated outside the Apps subcategory. Returns null
-        /// when no registry-derived ESP failure was observed.
-        /// </summary>
-        public Termination.EspTerminalFailureSnapshot? LastEspTerminalFailure => EspAndHelloHost?.LastEspTerminalFailure;
-
         public DefaultComponentFactory(
             AgentConfiguration agentConfig,
             AgentConfigResponse remoteConfig,
@@ -163,27 +82,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _stateDirectory = stateDirectory ?? throw new ArgumentNullException(nameof(stateDirectory));
         }
 
-        /// <summary>
-        /// Late-binding setter called by <see cref="EnrollmentOrchestrator"/> right after
-        /// the <see cref="Transport.Telemetry.TelemetrySpool"/> is constructed (Start step 3).
-        /// The spool reference flows from here into the
-        /// <c>PeriodicCollectorLifecycleHost</c> in <see cref="CreateCollectorHosts"/> and
-        /// from there into <see cref="Monitoring.Telemetry.Periodic.AgentSelfMetricsCollector"/>,
-        /// which surfaces <c>spool.pendingItemCount</c> / <c>spool.fileSizeBytes</c> on
-        /// every <c>agent_metrics_snapshot</c>.
-        /// </summary>
-        public void SetTelemetrySpool(Transport.Telemetry.ITelemetrySpool spool)
-        {
-            _telemetrySpool = spool;
-        }
-
-        public IReadOnlyList<ICollectorHost> CreateCollectorHosts(
+        public CollectorSurfaces CreateCollectorHosts(
             string sessionId,
             string tenantId,
             AgentLogger logger,
             IReadOnlyCollection<string> whiteGloveSealingPatternIds,
             ISignalIngressSink ingress,
-            IClock clock)
+            IClock clock,
+            Transport.Telemetry.ITelemetrySpool? telemetrySpool)
         {
             if (string.IsNullOrEmpty(sessionId)) throw new ArgumentException("SessionId required.", nameof(sessionId));
             if (string.IsNullOrEmpty(tenantId)) throw new ArgumentException("TenantId required.", nameof(tenantId));
@@ -196,7 +102,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // ----- Kernel hosts (always-on; they produce decision signals) --------------------
 
-            _espAndHelloHost = new EspAndHelloHost(
+            var espAndHelloHost = new EspAndHelloHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
                 logger: logger,
@@ -209,7 +115,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 modernDeploymentBackfillLookbackMinutes: collectors.ModernDeploymentBackfillLookbackMinutes,
                 modernDeploymentHarmlessEventIds: collectors.ModernDeploymentHarmlessEventIds,
                 stateDirectory: _stateDirectory);
-            hosts.Add(_espAndHelloHost);
+            hosts.Add(espAndHelloHost);
 
             // Hybrid User-Driven completion-gap fix (2026-05-01): the AadJoinHost notifies
             // the DesktopArrivalHost when a real AAD user replaces the foouser/autopilot
@@ -219,8 +125,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             //
             // RealmJoin hookup: the DesktopArrival observer feeds the resolved real-user owner
             // to the RealmJoinHost so it can arm its HKU-scope package watcher. The lambda
-            // captures `_realmJoinHost` by reference — null at this point, set a few lines
-            // later before the detector can ever fire.
+            // captures `realmJoinHost` by reference (closure over the local) — null at this
+            // point, set a few lines later before the detector can ever fire.
+            RealmJoinHost? realmJoinHost = null;
             var desktopArrivalHost = new DesktopArrivalHost(
                 logger,
                 ingress,
@@ -230,10 +137,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 tenantId: tenantId,
                 onRealUserOwnerObserved: owner =>
                 {
-                    if (_realmJoinHost == null) return;
+                    if (realmJoinHost == null) return;
                     if (UserSidResolver.TryResolveSid(owner, out var sid) && !string.IsNullOrEmpty(sid))
                     {
-                        _realmJoinHost.ArmHkuWatcher(sid!);
+                        realmJoinHost.ArmHkuWatcher(sid!);
                     }
                     else
                     {
@@ -242,13 +149,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 });
             hosts.Add(desktopArrivalHost);
 
-            _aadJoinHost = new AadJoinHost(
+            var aadJoinHost = new AadJoinHost(
                 logger, ingress, clock,
                 onRealUserJoined: desktopArrivalHost.RequestResetForRealUserSwitch);
-            hosts.Add(_aadJoinHost);
+            hosts.Add(aadJoinHost);
 
-            _realmJoinHost = new RealmJoinHost(logger, ingress, clock);
-            hosts.Add(_realmJoinHost);
+            realmJoinHost = new RealmJoinHost(logger, ingress, clock);
+            hosts.Add(realmJoinHost);
 
             // Single-rail refactor (plan §5.8) — DeviceInfoCollector existed in V2.Core but had
             // no host so the Device-Details UI block was empty in V2 sessions (V1-Parity Issue #2).
@@ -281,7 +188,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 ? _agentConfig.ReplayLogDir
                 : _agentConfig.ImeLogPathOverride;
 
-            _imeLogHost = new ImeLogHost(
+            var imeLogHost = new ImeLogHost(
                 sessionId: sessionId,
                 tenantId: tenantId,
                 logger: logger,
@@ -294,7 +201,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 whiteGloveSealingPatternIds: whiteGloveSealingPatternIds,
                 simulationMode: simulationMode,
                 simulationSpeedFactor: _agentConfig.ReplaySpeedFactor);
-            hosts.Add(_imeLogHost);
+            hosts.Add(imeLogHost);
 
             if (collectors.StallProbeEnabled)
             {
@@ -333,7 +240,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     idleTimeoutMinutes: collectors.CollectorIdleTimeoutMinutes,
                     networkMetrics: _networkMetrics,
                     agentVersion: _agentVersion,
-                    telemetrySpool: _telemetrySpool));
+                    telemetrySpool: telemetrySpool));
             }
 
             // V1 parity (CollectorCoordinator.StartOptionalCollectors:375-382) — wire the
@@ -369,7 +276,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // tracker reports an app entering Downloading/Installing (AppStateChanged chain below) OR
             // an Office C2R install is active (officeHost signal) — the latter lets it capture Office's
             // DO CDN jobs and fold them into the office_install_* events.
-            if (collectors.EnableDeliveryOptimizationCollector && _imeLogHost != null)
+            if (collectors.EnableDeliveryOptimizationCollector)
             {
                 var doHost = new DeliveryOptimizationHost(
                     sessionId: sessionId,
@@ -378,7 +285,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     clock: clock,
                     logger: logger,
                     intervalSeconds: collectors.DeliveryOptimizationIntervalSeconds,
-                    imeHost: _imeLogHost,
+                    imeHost: imeLogHost,
                     officeHost: officeHost);
                 hosts.Add(doHost);
             }
@@ -403,7 +310,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     unrestrictedMode: _agentConfig.UnrestrictedMode));
             }
 
-            return hosts;
+            return new CollectorSurfaces(hosts, imeLogHost, espAndHelloHost, aadJoinHost);
         }
     }
 }

@@ -53,23 +53,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             public IReadOnlyCollection<string>? CapturedWhiteGloveSealingPatternIds { get; private set; }
             public ISignalIngressSink? CapturedIngress { get; private set; }
             public IClock? CapturedClock { get; private set; }
+            public AutopilotMonitor.Agent.V2.Core.Transport.Telemetry.ITelemetrySpool? CapturedTelemetrySpool { get; private set; }
 
-            public IReadOnlyList<ICollectorHost> CreateCollectorHosts(
+            public CollectorSurfaces CreateCollectorHosts(
                 string sessionId,
                 string tenantId,
                 AgentLogger logger,
                 IReadOnlyCollection<string> whiteGloveSealingPatternIds,
                 ISignalIngressSink ingress,
-                IClock clock)
+                IClock clock,
+                AutopilotMonitor.Agent.V2.Core.Transport.Telemetry.ITelemetrySpool? telemetrySpool)
             {
                 CapturedWhiteGloveSealingPatternIds = whiteGloveSealingPatternIds;
                 CapturedIngress = ingress;
                 CapturedClock = clock;
+                CapturedTelemetrySpool = telemetrySpool;
                 foreach (var name in HostNames)
                 {
                     Hosts.Add(new FakeCollectorHost(name));
                 }
-                return Hosts;
+                return new CollectorSurfaces(Hosts);
             }
         }
 
@@ -124,6 +127,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Orchestration
             Assert.NotNull(factory.CapturedIngress);
             Assert.NotNull(factory.CapturedClock);
             Assert.Same(rig.Clock, factory.CapturedClock);
+            // ARCH-F4: the spool flows in as a CreateCollectorHosts parameter (replaces the
+            // old SetTelemetrySpool late-binding setter + concrete-factory downcast).
+            Assert.NotNull(factory.CapturedTelemetrySpool);
 
             sut.Stop();
         }

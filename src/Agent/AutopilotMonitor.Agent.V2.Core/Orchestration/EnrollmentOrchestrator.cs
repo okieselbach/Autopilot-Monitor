@@ -299,6 +299,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// </summary>
         public long IngressPendingSignalCount => _ingress?.PendingSignalCount ?? 0L;
 
+        /// <summary>
+        /// Typed read-model surfaces returned by <see cref="IComponentFactory.CreateCollectorHosts"/>
+        /// (ARCH-F4). Set during <see cref="Start"/> step 14; <c>null</c> before Start and when
+        /// no factory was supplied. The runtime host reads peripheral surfaces (IME app tracking,
+        /// ESP/Hello coordinator, AAD-join host) from here instead of downcasting the factory seam.
+        /// </summary>
+        public CollectorSurfaces? CollectorSurfaces { get; private set; }
+
         // ---------------------------------------------------------------- Lifecycle
 
         /// <summary>
@@ -584,17 +592,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             _transport.BatchPoisoned += OnBatchPoisoned;
             _transport.UploadBlocked += OnUploadBlocked;
 
-            // Late-bind the spool reference into the component factory so peripheral
-            // collectors (AgentSelfMetricsCollector via PeriodicCollectorLifecycleHost) can
-            // read PendingItemCount / SpoolFileSizeBytes for the agent_metrics_snapshot
-            // payload. Done as a setter call rather than a CreateCollectorHosts parameter
-            // because IComponentFactory is a public seam with test fakes — adding a
-            // parameter would force every fake to be touched, and the spool stats are an
-            // optional capability that test fakes don't need to surface.
-            if (_componentFactory is DefaultComponentFactory defaultFactory)
-            {
-                defaultFactory.SetTelemetrySpool(_spool);
-            }
+            // The spool reference reaches peripheral collectors (AgentSelfMetricsCollector via
+            // PeriodicCollectorLifecycleHost) as a CreateCollectorHosts parameter at step 14,
+            // so agent_metrics_snapshot can surface PendingItemCount / SpoolFileSizeBytes.
 
             // 3a) Immediate-flush wakeup — lifecycle-critical items (agent_started, hello wizard,
             //     auth-failure shutdown, version-check, enrollment_failed on max-lifetime, …)
@@ -876,9 +876,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             //     über den Ingress als InformationalEvent.
             if (_componentFactory != null)
             {
-                _collectorHosts = _componentFactory.CreateCollectorHosts(
+                var surfaces = _componentFactory.CreateCollectorHosts(
                     _sessionId, _tenantId, _logger, _whiteGloveSealingPatternIds,
-                    ingress: _ingress, clock: _clock);
+                    ingress: _ingress, clock: _clock, telemetrySpool: _spool);
+                CollectorSurfaces = surfaces;
+                _collectorHosts = surfaces.Hosts;
                 foreach (var host in _collectorHosts)
                 {
                     try
