@@ -45,6 +45,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly AgentLogger _logger;
         private readonly object _lock = new object();
 
+        private readonly OfficeInstallStateData? _resumeState;
         private RegistryChangeWatcher? _registryWatcher;
         private OfficeBinaryWatcher? _binaryWatcher;
         private bool _pathObserved;       // InstallationPath known → stop poking the DO collector
@@ -64,15 +65,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             ISignalIngressSink ingress,
             IClock clock,
             AgentLogger logger,
-            int settleSeconds)
+            int settleSeconds,
+            OfficeInstallStatePersistence? statePersistence = null,
+            OfficeInstallStateData? resumeState = null)
         {
             if (ingress == null) throw new ArgumentNullException(nameof(ingress));
             if (clock == null) throw new ArgumentNullException(nameof(clock));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _resumeState = resumeState;
 
             var post = new InformationalEventPost(ingress, clock);
             _detector = new OfficeInstallDetector(sessionId, tenantId, post, logger, clock,
-                onInstallationPathObserved: OnInstallationPathObserved);
+                onInstallationPathObserved: OnInstallationPathObserved,
+                statePersistence: statePersistence);
             _processWatcher = new OfficeProcessWatcher(logger, settleSeconds);
             _processWatcher.Started += OnWorkerStarted;
         }
@@ -96,6 +101,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 _registryWatcher.Start();
             }
             _processWatcher.Start();
+
+            // Resume a lifecycle left open by a previous agent run (enrollments span reboots) AFTER
+            // the watchers are armed: the resume surfaces the InstallationPath, which arms the binary
+            // watcher — when Office finished installing while the agent was down, its initial scan
+            // completes the lifecycle synchronously and the teardown disposes the watchers again.
+            if (_resumeState != null) _detector.ResumeActive(_resumeState);
         }
 
         private void OnWorkerStarted(object? sender, EventArgs e) => _detector.OnWorkerStarted();

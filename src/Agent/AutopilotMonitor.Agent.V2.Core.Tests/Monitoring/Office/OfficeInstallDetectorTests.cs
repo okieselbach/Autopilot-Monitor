@@ -31,16 +31,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             public VirtualClock Clock { get; }
             public OfficeInstallDetector Sut { get; }
             public OfficeC2RSnapshot Current { get; set; }
+            public OfficeInstallStatePersistence? Persistence { get; }
             private readonly TempDirectory _tmp;
 
-            public Rig(OfficeC2RSnapshot initial)
+            public Rig(OfficeC2RSnapshot initial, bool withPersistence = false)
             {
                 _tmp = new TempDirectory();
                 Sink = new FakeSignalIngressSink();
                 Clock = new VirtualClock(At);
                 Current = initial;
+                var logger = NewLogger(_tmp.Path);
+                Persistence = withPersistence ? new OfficeInstallStatePersistence(_tmp.Path, logger) : null;
                 var post = new InformationalEventPost(Sink, Clock);
-                Sut = new OfficeInstallDetector("S1", "T1", post, NewLogger(_tmp.Path), Clock)
+                Sut = new OfficeInstallDetector("S1", "T1", post, logger, Clock,
+                    statePersistence: Persistence)
                 {
                     SnapshotProvider = () => Current,
                 };
@@ -418,6 +422,182 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.False(OfficeInstallDetector.CoreBinariesPresentOnDisk(tmp.Path, logger));
             Assert.False(OfficeInstallDetector.CoreBinariesPresentOnDisk(null, logger));
             Assert.False(OfficeInstallDetector.CoreBinariesPresentOnDisk(System.IO.Path.Combine(tmp.Path, "does-not-exist"), logger));
+        }
+
+        // ---------------------------------------------------------------- persistence across restarts
+
+        [Fact]
+        public void Started_persists_active_state_with_trigger_and_start_time()
+        {
+            using var rig = new Rig(ActiveStreaming(), withPersistence: true);
+
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 2, FileSize = 1000, TotalBytesDownloaded = 100 });
+
+            var state = rig.Persistence!.Load();
+            Assert.NotNull(state);
+            Assert.Equal(OfficeInstallStateData.StateActive, state!.State);
+            Assert.Equal(At, state.StartedAtUtc);
+            Assert.Equal("do", state.StartedTrigger);
+            Assert.Equal(100, state.PeakDo!.TotalBytesDownloaded);
+        }
+
+        [Fact]
+        public void Completed_persists_terminal_state()
+        {
+            using var rig = new Rig(ActiveStreaming(), withPersistence: true);
+            rig.Sut.OnWorkerStarted();
+
+            rig.Current = CompletedIdle();
+            rig.Sut.CoreBinariesProbe = _ => true;
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.Completed, rig.Sut.TryFinalizeCompletion());
+
+            var state = rig.Persistence!.Load();
+            Assert.Equal(OfficeInstallStateData.StateCompleted, state!.State);
+            Assert.True(state.IsTerminal);
+        }
+
+        [Fact]
+        public void Failed_persists_terminal_state()
+        {
+            using var rig = new Rig(ActiveStreaming(), withPersistence: true);
+            rig.Sut.OnWorkerStarted();
+
+            var withError = ActiveStreaming();
+            withError.ErrorCode = "0x80070005";
+            rig.Current = withError;
+            rig.Sut.OnRegistryChanged();
+
+            var state = rig.Persistence!.Load();
+            Assert.Equal(OfficeInstallStateData.StateFailed, state!.State);
+            Assert.True(state.IsTerminal);
+        }
+
+        [Fact]
+        public void AbandonSilently_does_not_persist_a_terminal_state()
+        {
+            // AbandonSilently fires on every host dispose/shutdown. Persisting it as terminal would
+            // block the next agent run from resuming the open lifecycle — and the resume is exactly
+            // what delivers a completion missed across a mid-install reboot.
+            using var rig = new Rig(ActiveStreaming(), withPersistence: true);
+            rig.Sut.OnWorkerStarted();
+
+            rig.Sut.AbandonSilently();
+
+            var state = rig.Persistence!.Load();
+            Assert.Equal(OfficeInstallStateData.StateActive, state!.State);
+            Assert.False(state.IsTerminal);
+        }
+
+        [Fact]
+        public void Active_peak_growth_is_persisted_with_throttle()
+        {
+            using var rig = new Rig(ActiveStreaming(), withPersistence: true);
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 2, FileSize = 1000, TotalBytesDownloaded = 100 }); // started + persisted
+
+            // Within the 30s throttle window: peak grows in memory but the file is not rewritten.
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 2, FileSize = 1000, TotalBytesDownloaded = 300 });
+            Assert.Equal(100, rig.Persistence!.Load()!.PeakDo!.TotalBytesDownloaded);
+
+            // After the throttle window the next grown peak is persisted.
+            rig.Clock.Advance(TimeSpan.FromSeconds(31));
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 2, FileSize = 1000, TotalBytesDownloaded = 600 });
+            Assert.Equal(600, rig.Persistence.Load()!.PeakDo!.TotalBytesDownloaded);
+        }
+
+        [Fact]
+        public void ResumeActive_completes_without_second_started_using_original_start_time_and_peak()
+        {
+            // Agent restart after a mid-install reboot: started went out in the previous run. The
+            // resumed lifecycle must not emit a second started, and the completion proven in this
+            // run reports the true total duration + the persisted DO summary.
+            using var rig = new Rig(CompletedIdle(), withPersistence: true);
+
+            rig.Sut.ResumeActive(new OfficeInstallStateData
+            {
+                State = OfficeInstallStateData.StateActive,
+                StartedAtUtc = At.AddMinutes(-10),
+                StartedTrigger = "do",
+                PeakDo = new OfficeDoPeakData
+                {
+                    JobCount = 3,
+                    FileSize = 1200,
+                    TotalBytesDownloaded = 1000,
+                    BytesFromHttp = 1000,
+                    BytesFromCacheServer = 800,
+                    DownloadMode = 1,
+                },
+            });
+            Assert.Empty(rig.OfficeEvents()); // no second started
+
+            // New start triggers must not re-open a window either — the lifecycle is already open.
+            rig.Sut.OnWorkerStarted();
+            Assert.Empty(rig.OfficeEvents());
+
+            rig.Sut.CoreBinariesProbe = _ => true;
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.Completed, rig.Sut.TryFinalizeCompletion());
+
+            var completed = Assert.Single(rig.OfficeEvents());
+            Assert.Equal(Constants.EventTypes.OfficeInstallCompleted, EventType(completed));
+            Assert.Equal(600, Data(completed)["durationSeconds"]); // 10 min across the restart
+            Assert.Equal("do", Data(completed)["startedTrigger"]);
+            var summary = Assert.IsType<Dictionary<string, object>>(Data(completed)["doSummary"]);
+            Assert.Equal(1000L, summary["totalBytesDownloaded"]);
+            Assert.Equal(800L, summary["bytesFromCacheServer"]);
+            Assert.Equal(200L, summary["bytesFromCdn"]);
+            Assert.Equal(OfficeInstallStateData.StateCompleted, rig.Persistence!.Load()!.State);
+        }
+
+        [Fact]
+        public void ResumeActive_surfaces_installation_path_for_synchronous_completion()
+        {
+            // Office finished installing while the agent was down: the resume reads a fresh snapshot
+            // and surfaces the InstallationPath; the host's binary watcher (wired here via the
+            // callback) finds the binaries immediately and completes the lifecycle synchronously —
+            // the previously missed completed is delivered, with no started this run.
+            using var tmp = new TempDirectory();
+            var sink = new FakeSignalIngressSink();
+            var clock = new VirtualClock(At);
+            var post = new InformationalEventPost(sink, clock);
+
+            OfficeInstallDetector sut = null!;
+            sut = new OfficeInstallDetector("S1", "T1", post, NewLogger(tmp.Path), clock,
+                onInstallationPathObserved: _ =>
+                {
+                    sut.CoreBinariesProbe = __ => true;
+                    sut.TryFinalizeCompletion();
+                });
+            var snap = CompletedIdle();
+            snap.InstallationPath = @"C:\Program Files\Microsoft Office";
+            sut.SnapshotProvider = () => snap;
+
+            sut.ResumeActive(new OfficeInstallStateData
+            {
+                State = OfficeInstallStateData.StateActive,
+                StartedAtUtc = At.AddMinutes(-5),
+                StartedTrigger = "registry",
+            });
+
+            var office = sink.Posted
+                .Where(p => p.Payload != null
+                    && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                    && et != null && et.StartsWith("office_install_", StringComparison.Ordinal))
+                .ToList();
+            var completed = Assert.Single(office);
+            Assert.Equal(Constants.EventTypes.OfficeInstallCompleted, completed.Payload![SignalPayloadKeys.EventType]);
+        }
+
+        [Fact]
+        public void ResumeActive_ignores_terminal_or_invalid_state()
+        {
+            using var rig = new Rig(ActiveStreaming(), withPersistence: true);
+
+            rig.Sut.ResumeActive(new OfficeInstallStateData { State = OfficeInstallStateData.StateCompleted });
+            rig.Sut.ResumeActive(new OfficeInstallStateData { State = null });
+
+            // Still Idle — a real start trigger opens a fresh lifecycle normally.
+            rig.Sut.OnWorkerStarted();
+            var started = Assert.Single(rig.OfficeEvents());
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(started));
         }
 
         // ---------------------------------------------------------------- ctor

@@ -8,6 +8,7 @@ using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Runtime;
+using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
 using AutopilotMonitor.Agent.V2.Core.SignalAdapters;
@@ -275,13 +276,31 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             OfficeInstallDetectorHost? officeHost = null;
             if (collectors.EnableOfficeInstallDetector)
             {
-                officeHost = new OfficeInstallDetectorHost(
-                    sessionId: sessionId,
-                    tenantId: tenantId,
-                    ingress: ingress,
-                    clock: clock,
-                    logger: logger,
-                    settleSeconds: collectors.OfficeInstallSettleSeconds);
+                // The lifecycle state is persisted across agent restarts (an enrollment spans
+                // several reboots, and Scenario\INSTALL persists post-install / OfficeC2RClient.exe
+                // runs again for update checks / Office updates stream from the same CDN — all three
+                // start triggers would falsely re-open the window and emit a duplicate
+                // started+completed pair every restart). A persisted terminal means the install was
+                // already reported → don't arm the detector at all this run; a persisted Active is
+                // resumed inside the host (no second started, missed completion delivered late).
+                var officeStatePersistence = new OfficeInstallStatePersistence(_stateDirectory, logger);
+                var officeState = officeStatePersistence.Load();
+                if (officeState != null && officeState.IsTerminal)
+                {
+                    logger.Info($"[{OfficeInstallDetector.SourceName}] persisted lifecycle is already terminal ({officeState.State}) — detector not armed this run");
+                }
+                else
+                {
+                    officeHost = new OfficeInstallDetectorHost(
+                        sessionId: sessionId,
+                        tenantId: tenantId,
+                        ingress: ingress,
+                        clock: clock,
+                        logger: logger,
+                        settleSeconds: collectors.OfficeInstallSettleSeconds,
+                        statePersistence: officeStatePersistence,
+                        resumeState: officeState);
+                }
             }
 
             // M4.6.γ — Delivery-Optimization telemetry. Dormant-by-default: polls only when the IME log

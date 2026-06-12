@@ -64,14 +64,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // exclude products (e.g. no Outlook), so requiring all would miss legitimate completions.
         internal static readonly string[] CoreBinaries = { "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "OUTLOOK.EXE" };
 
+        // While Active, a grown DO peak is re-persisted at most this often — keeps the doSummary
+        // data of a mid-install restart fresh without writing the state file on every 3s DO poll.
+        private const int PeakPersistThrottleSeconds = 30;
+
         private readonly string _sessionId;
         private readonly string _tenantId;
         private readonly InformationalEventPost _post;
         private readonly AgentLogger _logger;
         private readonly IClock _clock;
         private readonly Action<string?>? _onInstallationPathObserved;
+        private readonly OfficeInstallStatePersistence? _statePersistence;
         private readonly object _lock = new object();
         private bool _pathObservedRaised;
+        private DateTime? _lastStatePersistUtc;
 
         // Test seam: when set, used instead of reading the live registry/process state. Production
         // never assigns it. Surfaced to the test assembly via InternalsVisibleTo.
@@ -98,7 +104,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             InformationalEventPost post,
             AgentLogger logger,
             IClock clock,
-            Action<string?>? onInstallationPathObserved = null)
+            Action<string?>? onInstallationPathObserved = null,
+            OfficeInstallStatePersistence? statePersistence = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -106,6 +113,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _onInstallationPathObserved = onInstallationPathObserved;
+            _statePersistence = statePersistence;
+        }
+
+        /// <summary>
+        /// Restores a persisted open lifecycle after an agent restart (an enrollment commonly spans
+        /// several reboots): started was already emitted in a previous run, so none is re-emitted
+        /// here. The original start time and DO peak are restored, so a completion proven in THIS
+        /// run reports the true total duration and doSummary. A fresh snapshot is read to surface
+        /// the InstallationPath, which lets the host arm the binary watcher — when Office finished
+        /// installing while the agent was down, that completes the lifecycle synchronously.
+        /// </summary>
+        internal void ResumeActive(OfficeInstallStateData state)
+        {
+            if (state == null || state.State != OfficeInstallStateData.StateActive) return;
+            lock (_lock)
+            {
+                if (_state != DetectorState.Idle) return;
+                _state = DetectorState.Active;
+                _startedAtUtc = state.StartedAtUtc ?? _clock.UtcNow;
+                _startedTrigger = state.StartedTrigger;
+                if (state.PeakDo != null) _peakDo = state.PeakDo.ToSample();
+                _logger.Info($"[{SourceName}] resumed open install lifecycle from persisted state (started {_startedAtUtc:O}, trigger={_startedTrigger ?? "?"})");
+
+                var snap = ReadSnapshotSafe();
+                if (snap != null) ObserveInstallationPath(snap);
+            }
         }
 
         /// <summary>
@@ -177,8 +210,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             lock (_lock)
             {
                 _lastDo = sample;
-                if (_peakDo == null || sample.TotalBytesDownloaded > _peakDo.TotalBytesDownloaded)
-                    _peakDo = sample;
+                var peakGrew = _peakDo == null || sample.TotalBytesDownloaded > _peakDo.TotalBytesDownloaded;
+                if (peakGrew) _peakDo = sample;
                 if (_state == DetectorState.Terminal) return;
 
                 if (_state == DetectorState.Idle)
@@ -187,8 +220,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                     var snapStart = ReadSnapshotSafe();
                     if (snapStart == null) return;
                     BeginIfIdle("do", snapStart);
+                    return;
                 }
-                // Active: no progress event — the sample only updates the DO summary data.
+
+                // Active: no progress event — the sample only updates the DO summary data. A grown
+                // peak is re-persisted (throttled) so a mid-install agent restart keeps the doSummary.
+                if (peakGrew && _statePersistence != null
+                    && (!_lastStatePersistUtc.HasValue
+                        || (_clock.UtcNow - _lastStatePersistUtc.Value).TotalSeconds >= PeakPersistThrottleSeconds))
+                {
+                    PersistState(OfficeInstallStateData.StateActive);
+                }
             }
         }
 
@@ -219,6 +261,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                 {
                     _state = DetectorState.Terminal;
                     EmitLifecycle(Constants.EventTypes.OfficeInstallCompleted, snap, EventSeverity.Info, "Completed", isTerminal: true, coreBinariesPresent: true);
+                    PersistState(OfficeInstallStateData.StateCompleted);
                     return CompletionOutcome.Completed;
                 }
 
@@ -260,6 +303,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             // Emitting started first guarantees the correct order (started → completed); otherwise a
             // pre-installed Office produced completed-before-started (field session a7525e97).
             EmitLifecycle(Constants.EventTypes.OfficeInstallStarted, snap, EventSeverity.Info, PhaseOf(snap), isTerminal: false);
+            // Persist Active BEFORE ObserveInstallationPath: when Office is already on disk the
+            // host's binary watcher completes the lifecycle synchronously from inside that callback
+            // (and persists Completed) — persisting Active afterwards would overwrite the terminal.
+            PersistState(OfficeInstallStateData.StateActive);
             ObserveInstallationPath(snap);
         }
 
@@ -280,6 +327,27 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             if (_state == DetectorState.Terminal) return;
             _state = DetectorState.Terminal;
             EmitLifecycle(Constants.EventTypes.OfficeInstallFailed, snap, EventSeverity.Error, "Failed", isTerminal: true);
+            PersistState(OfficeInstallStateData.StateFailed);
+        }
+
+        /// <summary>
+        /// Persists the lifecycle state (fail-soft). Active and the two terminals are persisted;
+        /// <see cref="AbandonSilently"/> deliberately is NOT — it fires on every dispose/shutdown
+        /// and persisting it as terminal would block the next run from resuming the open lifecycle
+        /// (the resume is what delivers a completion missed across a mid-install reboot).
+        /// Caller holds the lock.
+        /// </summary>
+        private void PersistState(string state)
+        {
+            if (_statePersistence == null) return;
+            _lastStatePersistUtc = _clock.UtcNow;
+            _statePersistence.Save(new OfficeInstallStateData
+            {
+                State = state,
+                StartedAtUtc = _startedAtUtc,
+                StartedTrigger = _startedTrigger,
+                PeakDo = OfficeDoPeakData.FromSample(_peakDo),
+            });
         }
 
         /// <summary>
