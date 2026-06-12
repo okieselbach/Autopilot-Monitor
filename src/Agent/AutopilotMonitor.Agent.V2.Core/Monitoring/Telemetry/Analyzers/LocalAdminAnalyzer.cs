@@ -56,17 +56,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
 
         public string Name => "LocalAdminAnalyzer";
 
+        private readonly Core.Persistence.StartupEventGate _startupGate;
+
         public LocalAdminAnalyzer(
             string sessionId,
             string tenantId,
             InformationalEventPost post,
             AgentLogger logger,
-            List<string> allowedAccounts = null)
+            List<string> allowedAccounts = null,
+            Core.Persistence.StartupEventGate startupGate = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId  = tenantId  ?? throw new ArgumentNullException(nameof(tenantId));
             _post      = post      ?? throw new ArgumentNullException(nameof(post));
             _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
+            _startupGate = startupGate;
 
             // Tenant-supplied accounts are additive (union with built-ins, not replacement)
             _allowedAccounts = new List<string>(BuiltInAllowedAccounts);
@@ -204,6 +208,19 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
                 var message = confidenceScore == 0
                     ? $"{Name}: No unexpected local admins detected"
                     : $"{Name}: Unexpected admin activity detected (confidence={confidenceScore})";
+
+                // Restart dedup — startup trigger only (the shutdown emission must always go out):
+                // identical findings were already reported by a previous agent run of this
+                // enrollment; a changed payload (new account, flipped BypassNRO) re-emits.
+                if (trigger == "startup"
+                    && _startupGate != null
+                    && !_startupGate.ShouldEmit(
+                        Constants.EventTypes.LocalAdminAnalysis,
+                        Core.Persistence.StartupEventGate.ComputeFingerprint(data)))
+                {
+                    _logger.Debug($"{Name}: startup findings unchanged since last emission — event suppressed (restart dedup)");
+                    return;
+                }
 
                 _post.Emit(new EnrollmentEvent
                 {

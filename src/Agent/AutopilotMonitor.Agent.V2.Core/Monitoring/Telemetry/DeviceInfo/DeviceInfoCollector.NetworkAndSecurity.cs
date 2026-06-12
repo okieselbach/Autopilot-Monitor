@@ -286,19 +286,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
 
                 EmitDeviceInfoEvent(Constants.EventTypes.AutopilotProfile, "Autopilot profile configuration", data);
 
-                // Emit dedicated enrollment_type_detected event for easy filtering
-                _post.Emit(new EnrollmentEvent
-                {
-                    SessionId = _sessionId,
-                    TenantId = _tenantId,
-                    EventType = Constants.EventTypes.EnrollmentTypeDetected,
-                    Severity = EventSeverity.Info,
-                    Source = "EnrollmentTracker",
-                    Phase = EnrollmentPhase.Unknown,
-                    Message = detectedType == "v2"
+                // Emit dedicated enrollment_type_detected event for easy filtering. Routed through
+                // EmitDeviceInfoEvent (same Severity/Source/Phase) so the restart dedup applies.
+                EmitDeviceInfoEvent(Constants.EventTypes.EnrollmentTypeDetected,
+                    detectedType == "v2"
                         ? "Enrollment type: Autopilot v2 (Windows Device Preparation)"
                         : "Enrollment type: Autopilot v1 (Classic ESP)",
-                    Data = new Dictionary<string, object>
+                    new Dictionary<string, object>
                     {
                         { "enrollmentType", detectedType },
                         { "CloudAssignedDeviceRegistration", data.ContainsKey("CloudAssignedDeviceRegistration") ? data["CloudAssignedDeviceRegistration"] : "n/a" },
@@ -308,8 +302,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
                                 ? "CloudAssignedDeviceRegistration=2"
                                 : "CloudAssignedEspEnabled=0")
                             : "default (no v2 indicators)" }
-                    }
-                });
+                    });
 
                 _logger.Info($"EnrollmentTracker: enrollment type detected: {detectedType}");
             }
@@ -751,6 +744,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
 
         private void EmitDeviceInfoEvent(string eventType, string message, Dictionary<string, object> data)
         {
+            if (!ShouldEmitDeviceInfoEvent(eventType, data)) return;
+
             _post.Emit(new EnrollmentEvent
             {
                 SessionId = _sessionId,
@@ -762,6 +757,27 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
                 Message = message,
                 Data = data
             });
+        }
+
+        /// <summary>
+        /// Restart dedup: device-info events are re-collected on every agent process start (one
+        /// enrollment spans several reboots), but most payloads are static or change rarely — the
+        /// <see cref="Persistence.StartupEventGate"/> suppresses an emission only when the payload
+        /// is IDENTICAL to the last emitted one. A real change (e.g. aad_join_status flipping to
+        /// Joined after a Hybrid-Join reboot, BitLocker conversion progressing) always re-emits.
+        /// Collection itself — return values, HasAadJoinedUser, decision signals — never runs
+        /// through this gate.
+        /// </summary>
+        internal bool ShouldEmitDeviceInfoEvent(string eventType, Dictionary<string, object> data)
+        {
+            if (_startupGate == null || GateExemptEventTypes.Contains(eventType)) return true;
+
+            GateFingerprintExcludedFields.TryGetValue(eventType, out var excludedFields);
+            var fingerprint = Persistence.StartupEventGate.ComputeFingerprint(data, excludedFields);
+            if (_startupGate.ShouldEmit(eventType, fingerprint)) return true;
+
+            _logger.Debug($"EnrollmentTracker: '{eventType}' suppressed — payload unchanged since last emission (restart dedup)");
+            return false;
         }
 
         /// <summary>

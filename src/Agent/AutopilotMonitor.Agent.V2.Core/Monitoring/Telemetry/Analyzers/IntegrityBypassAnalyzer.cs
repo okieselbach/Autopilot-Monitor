@@ -62,16 +62,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
             "S-1-5-20"  // NetworkService
         };
 
+        private readonly Core.Persistence.StartupEventGate _startupGate;
+
         public IntegrityBypassAnalyzer(
             string sessionId,
             string tenantId,
             InformationalEventPost post,
-            AgentLogger logger)
+            AgentLogger logger,
+            Core.Persistence.StartupEventGate startupGate = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
             _post = post ?? throw new ArgumentNullException(nameof(post));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _startupGate = startupGate;
         }
 
         public void AnalyzeAtStartup()
@@ -221,6 +225,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
                         }
                     }
                 };
+
+                // Restart dedup: bypass indicators are pre-enrollment state (the analyzer's own
+                // shutdown run is a no-op for the same reason) — identical findings were already
+                // reported by a previous agent run; a changed payload re-emits.
+                if (_startupGate != null
+                    && !_startupGate.ShouldEmit(
+                        Constants.EventTypes.IntegrityBypassAnalysis,
+                        Core.Persistence.StartupEventGate.ComputeFingerprint(data)))
+                {
+                    _logger.Debug($"{Name}: findings unchanged since last emission — event suppressed (restart dedup)");
+                    return;
+                }
 
                 _post.Emit(new EnrollmentEvent
                 {

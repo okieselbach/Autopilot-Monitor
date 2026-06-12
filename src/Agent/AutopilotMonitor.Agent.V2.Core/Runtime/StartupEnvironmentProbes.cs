@@ -37,30 +37,67 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
         /// Runs all three probes sequentially and emits the resulting events via
         /// <paramref name="post"/>. Returns a <see cref="Task"/> that completes when all
         /// probes have finished (typical runtime &lt;10s; longer on slow/blocked networks).
+        /// <para>
+        /// Restart dedup (<paramref name="gate"/>, optional): geo / timezone / NTP follow
+        /// retry-until-success semantics across agent restarts — a probe that already succeeded in
+        /// a previous run of this enrollment is skipped entirely (no network call, no duplicate
+        /// event), while a failed one retries on the next start (a later boot may have working
+        /// network/DNS). The power-state check is deliberately NOT gated: battery drain across the
+        /// enrollment is real per-boot information.
+        /// </para>
         /// </summary>
         public static async Task RunAsync(
             AgentConfiguration configuration,
             AgentLogger logger,
-            Orchestration.InformationalEventPost post)
+            Orchestration.InformationalEventPost post,
+            Persistence.StartupEventGate? gate = null)
         {
             if (configuration == null) throw new ArgumentNullException(nameof(configuration));
             if (logger == null) throw new ArgumentNullException(nameof(logger));
             if (post == null) throw new ArgumentNullException(nameof(post));
 
-            if (configuration.EnableGeoLocation)
-                await RunGeoAndTimezone(configuration, logger, post).ConfigureAwait(false);
-            else
+            if (!configuration.EnableGeoLocation)
+            {
                 logger.Debug("StartupEnvironmentProbes: EnableGeoLocation=false — skipping geo + timezone probes.");
+            }
+            else if (GeoAndTimezoneAlreadySatisfied(configuration, gate))
+            {
+                logger.Debug("StartupEnvironmentProbes: geo + timezone already succeeded in a previous run — skipping (restart dedup).");
+            }
+            else
+            {
+                await RunGeoAndTimezone(configuration, logger, post, gate).ConfigureAwait(false);
+            }
 
-            await RunNtpCheck(configuration, logger, post).ConfigureAwait(false);
+            if (gate != null && gate.AlreadySucceeded(Constants.EventTypes.NtpTimeCheck))
+            {
+                logger.Debug("StartupEnvironmentProbes: NTP check already succeeded in a previous run — skipping (restart dedup).");
+            }
+            else
+            {
+                await RunNtpCheck(configuration, logger, post, gate).ConfigureAwait(false);
+            }
 
             RunPowerStateCheck(configuration, logger, post);
+        }
+
+        /// <summary>
+        /// The geo block is satisfied only when the location succeeded AND the timezone auto-set is
+        /// either disabled or has also succeeded — a pending timezone retry still needs a fresh geo
+        /// lookup (the IANA timezone comes from the location result and is not persisted).
+        /// </summary>
+        private static bool GeoAndTimezoneAlreadySatisfied(AgentConfiguration configuration, Persistence.StartupEventGate? gate)
+        {
+            if (gate == null) return false;
+            return gate.AlreadySucceeded(Constants.EventTypes.DeviceLocation)
+                && (!configuration.EnableTimezoneAutoSet || gate.AlreadySucceeded(Constants.EventTypes.TimezoneAutoSet));
         }
 
         private static async Task RunGeoAndTimezone(
             AgentConfiguration configuration,
             AgentLogger logger,
-            Orchestration.InformationalEventPost post)
+            Orchestration.InformationalEventPost post,
+            Persistence.StartupEventGate? gate)
         {
             GeoLocationAttemptResult? attempt = null;
             try
@@ -74,23 +111,44 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
 
             if (attempt?.Location != null)
             {
-                SafeEmit(post, logger, BuildGeoEvent(configuration, attempt.Location));
+                // When the location event already went out in a previous run, this lookup only ran
+                // to feed a pending timezone retry — don't emit a duplicate device_location.
+                if (gate == null || !gate.AlreadySucceeded(Constants.EventTypes.DeviceLocation))
+                {
+                    SafeEmit(post, logger, BuildGeoEvent(configuration, attempt.Location));
+                    gate?.MarkSucceeded(Constants.EventTypes.DeviceLocation);
+                }
+                else
+                {
+                    logger.Debug("StartupEnvironmentProbes: location re-resolved for the pending timezone retry — device_location already emitted in a previous run.");
+                }
             }
             else
             {
+                // Failure event each failing start is intentional — it documents the retry trail,
+                // and the unset gate key makes the next agent run try again.
                 SafeEmit(post, logger, BuildGeoFailureEvent(configuration, attempt));
             }
 
             if (configuration.EnableTimezoneAutoSet && !string.IsNullOrEmpty(attempt?.Location?.Timezone))
             {
-                try
+                if (gate != null && gate.AlreadySucceeded(Constants.EventTypes.TimezoneAutoSet))
                 {
-                    var tzResult = TimezoneService.TrySetTimezone(attempt!.Location!.Timezone, logger);
-                    SafeEmit(post, logger, BuildTimezoneEvent(configuration, tzResult));
+                    logger.Debug("StartupEnvironmentProbes: timezone already set successfully in a previous run — skipping tzutil (restart dedup).");
                 }
-                catch (Exception tzEx)
+                else
                 {
-                    logger.Warning($"StartupEnvironmentProbes: timezone auto-set threw: {tzEx.Message}");
+                    try
+                    {
+                        var tzResult = TimezoneService.TrySetTimezone(attempt!.Location!.Timezone, logger);
+                        SafeEmit(post, logger, BuildTimezoneEvent(configuration, tzResult));
+                        if (tzResult.Success)
+                            gate?.MarkSucceeded(Constants.EventTypes.TimezoneAutoSet);
+                    }
+                    catch (Exception tzEx)
+                    {
+                        logger.Warning($"StartupEnvironmentProbes: timezone auto-set threw: {tzEx.Message}");
+                    }
                 }
             }
         }
@@ -98,7 +156,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
         private static async Task RunNtpCheck(
             AgentConfiguration configuration,
             AgentLogger logger,
-            Orchestration.InformationalEventPost post)
+            Orchestration.InformationalEventPost post,
+            Persistence.StartupEventGate? gate)
         {
             try
             {
@@ -111,12 +170,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                     .ConfigureAwait(false);
 
                 SafeEmit(post, logger, BuildNtpEvent(configuration, ntpServer, result));
+
+                // A clean check (small offset) latches: clock skew matters at the start of the
+                // enrollment; once Windows has synced there is nothing new to learn per reboot.
+                // A Warning result (offset > tolerance, or failure) keeps the key unset so the
+                // next run re-checks — and eventually emits the closing "offset OK" Info event.
+                if (IsNtpWithinTolerance(result))
+                    gate?.MarkSucceeded(Constants.EventTypes.NtpTimeCheck);
             }
             catch (Exception ex)
             {
                 logger.Warning($"StartupEnvironmentProbes: NTP check threw: {ex.Message}");
             }
         }
+
+        internal const int NtpOffsetToleranceSeconds = 60;
+
+        internal static bool IsNtpWithinTolerance(NtpCheckResult result) =>
+            result != null && result.Success && Math.Abs(result.OffsetSeconds) <= NtpOffsetToleranceSeconds;
 
         // --------------------------------------------------------------- Event builders (internal for tests)
 
@@ -185,7 +256,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
         {
             if (result.Success)
             {
-                var severity = Math.Abs(result.OffsetSeconds) > 60 ? EventSeverity.Warning : EventSeverity.Info;
+                var severity = IsNtpWithinTolerance(result) ? EventSeverity.Info : EventSeverity.Warning;
                 return new EnrollmentEvent
                 {
                     SessionId = configuration.SessionId,

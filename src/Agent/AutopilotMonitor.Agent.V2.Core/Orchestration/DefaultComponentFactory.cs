@@ -68,19 +68,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         private readonly NetworkMetrics? _networkMetrics;
         private readonly string _agentVersion;
         private readonly string _stateDirectory;
+        private readonly Persistence.StartupEventGate? _startupEventGate;
 
         public DefaultComponentFactory(
             AgentConfiguration agentConfig,
             AgentConfigResponse remoteConfig,
             NetworkMetrics? networkMetrics,
             string agentVersion,
-            string stateDirectory)
+            string stateDirectory,
+            Persistence.StartupEventGate? startupEventGate = null)
         {
             _agentConfig = agentConfig ?? throw new ArgumentNullException(nameof(agentConfig));
             _remoteConfig = remoteConfig ?? throw new ArgumentNullException(nameof(remoteConfig));
             _networkMetrics = networkMetrics;
             _agentVersion = string.IsNullOrEmpty(agentVersion) ? "unknown" : agentVersion;
             _stateDirectory = stateDirectory ?? throw new ArgumentNullException(nameof(stateDirectory));
+            _startupEventGate = startupEventGate;
         }
 
         public CollectorSurfaces CreateCollectorHosts(
@@ -178,7 +181,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 tenantId: tenantId,
                 ingress: ingress,
                 clock: clock,
-                logger: logger));
+                logger: logger,
+                startupGate: _startupEventGate));
 
             // Provisioning-package (PPKG) scan — kernel host, NOT scan-at-Start. Arms a one-shot
             // scan that fires when the ESP DeviceSetup phase begins (or desktop arrival as the

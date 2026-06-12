@@ -27,6 +27,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
         private readonly AgentLogger _logger;
         private readonly InformationalEventPost _post;
         private readonly AnalyzerConfiguration _analyzerConfig;
+        private readonly Persistence.StartupEventGate? _startupEventGate;
 
         private readonly List<IAgentAnalyzer> _analyzers = new List<IAgentAnalyzer>();
         private bool _initialised;
@@ -35,12 +36,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
             AgentConfiguration configuration,
             AgentLogger logger,
             InformationalEventPost post,
-            AnalyzerConfiguration? analyzerConfig)
+            AnalyzerConfiguration? analyzerConfig,
+            Persistence.StartupEventGate? startupEventGate = null)
         {
             _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _post = post ?? throw new ArgumentNullException(nameof(post));
             _analyzerConfig = analyzerConfig ?? new AnalyzerConfiguration();
+            _startupEventGate = startupEventGate;
         }
 
         /// <summary>Exposed for tests / observability.</summary>
@@ -59,7 +62,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                     _configuration.TenantId,
                     _post,
                     _logger,
-                    _analyzerConfig.LocalAdminAllowedAccounts));
+                    _analyzerConfig.LocalAdminAllowedAccounts,
+                    _startupEventGate));
                 _logger.Info("LocalAdminAnalyzer registered");
             }
             else
@@ -73,7 +77,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                     _configuration.SessionId,
                     _configuration.TenantId,
                     _post,
-                    _logger));
+                    _logger,
+                    _startupEventGate));
                 _logger.Info("SoftwareInventoryAnalyzer registered");
             }
             else
@@ -87,7 +92,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Runtime
                     _configuration.SessionId,
                     _configuration.TenantId,
                     _post,
-                    _logger));
+                    _logger,
+                    _startupEventGate));
                 _logger.Info("IntegrityBypassAnalyzer registered");
             }
             else

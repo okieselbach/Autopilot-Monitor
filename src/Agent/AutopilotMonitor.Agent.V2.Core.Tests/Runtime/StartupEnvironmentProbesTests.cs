@@ -1,8 +1,16 @@
 #nullable enable
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using AutopilotMonitor.Agent.V2.Core.Configuration;
+using AutopilotMonitor.Agent.V2.Core.Logging;
 using AutopilotMonitor.Agent.V2.Core.Monitoring.Transport;
+using AutopilotMonitor.Agent.V2.Core.Orchestration;
+using AutopilotMonitor.Agent.V2.Core.Persistence;
 using AutopilotMonitor.Agent.V2.Core.Runtime;
+using AutopilotMonitor.Agent.V2.Core.Tests.Harness;
+using AutopilotMonitor.Agent.V2.Core.Tests.Orchestration;
+using AutopilotMonitor.DecisionCore.Engine;
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.Models;
 using Xunit;
 
@@ -283,6 +291,70 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Runtime
             Assert.Contains("probe failed", evt.Message);
             Assert.Contains("Win32Error=87", evt.Message);
             Assert.Equal("GetSystemPowerStatus returned false (Win32Error=87)", evt.Data["error"]);
+        }
+
+        // ================================================================= Restart dedup (StartupEventGate)
+
+        [Theory]
+        [InlineData(30.0, true)]
+        [InlineData(-30.0, true)]
+        [InlineData(60.0, true)]    // exactly at tolerance still OK (matches Info severity)
+        [InlineData(61.0, false)]
+        [InlineData(-120.0, false)]
+        public void IsNtpWithinTolerance_matches_the_severity_threshold(double offset, bool expected)
+        {
+            var r = new NtpCheckResult { Success = true, OffsetSeconds = offset };
+            Assert.Equal(expected, StartupEnvironmentProbes.IsNtpWithinTolerance(r));
+        }
+
+        [Fact]
+        public void IsNtpWithinTolerance_false_on_failure_or_null()
+        {
+            Assert.False(StartupEnvironmentProbes.IsNtpWithinTolerance(new NtpCheckResult { Success = false }));
+            Assert.False(StartupEnvironmentProbes.IsNtpWithinTolerance(null!));
+        }
+
+        [Fact]
+        public async Task RunAsync_skips_geo_timezone_and_ntp_once_all_succeeded_only_power_state_emits()
+        {
+            // All retry-until-success probes already latched by a previous agent run of this
+            // enrollment → no network/tzutil calls, no duplicate events. Only the deliberately
+            // ungated power-state snapshot goes out (battery drain is real per-boot information).
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            var gate = new StartupEventGate(tmp.Path, logger);
+            gate.MarkSucceeded(Constants.EventTypes.DeviceLocation);
+            gate.MarkSucceeded(Constants.EventTypes.TimezoneAutoSet);
+            gate.MarkSucceeded(Constants.EventTypes.NtpTimeCheck);
+
+            var sink = new FakeSignalIngressSink();
+            var clock = new VirtualClock(new System.DateTime(2026, 6, 12, 12, 0, 0, System.DateTimeKind.Utc));
+            var post = new InformationalEventPost(sink, clock);
+
+            await StartupEnvironmentProbes.RunAsync(Config(geoEnabled: true, tzAutoSet: true), logger, post, gate);
+
+            var single = Assert.Single(sink.Posted);
+            Assert.Equal(Constants.EventTypes.PowerStateCheck, single.Payload![SignalPayloadKeys.EventType]);
+        }
+
+        [Fact]
+        public async Task RunAsync_skips_geo_block_when_timezone_autoset_is_disabled_and_location_succeeded()
+        {
+            using var tmp = new TempDirectory();
+            var logger = new AgentLogger(tmp.Path, AgentLogLevel.Info);
+            var gate = new StartupEventGate(tmp.Path, logger);
+            gate.MarkSucceeded(Constants.EventTypes.DeviceLocation);
+            gate.MarkSucceeded(Constants.EventTypes.NtpTimeCheck);
+
+            var sink = new FakeSignalIngressSink();
+            var clock = new VirtualClock(new System.DateTime(2026, 6, 12, 12, 0, 0, System.DateTimeKind.Utc));
+            var post = new InformationalEventPost(sink, clock);
+
+            // TimezoneAutoSet disabled → the satisfied location alone closes the geo block.
+            await StartupEnvironmentProbes.RunAsync(Config(geoEnabled: true, tzAutoSet: false), logger, post, gate);
+
+            var single = Assert.Single(sink.Posted);
+            Assert.Equal(Constants.EventTypes.PowerStateCheck, single.Payload![SignalPayloadKeys.EventType]);
         }
     }
 }

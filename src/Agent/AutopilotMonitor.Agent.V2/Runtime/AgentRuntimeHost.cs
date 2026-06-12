@@ -74,12 +74,18 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                 new WhiteGloveSealingClassifier(),
             };
 
+            // Cross-cutting restart dedup for the one-shot startup checks (device-info sweep,
+            // geo/timezone/NTP probes, startup analyzers). One shared instance — the consumers
+            // write to the same state file; per-enrollment lifecycle like the other state files.
+            var startupEventGate = new AutopilotMonitor.Agent.V2.Core.Persistence.StartupEventGate(stateSubdir, logger);
+
             var componentFactory = new DefaultComponentFactory(
                 agentConfig: agentConfig,
                 remoteConfig: remoteConfig,
                 networkMetrics: auth.NetworkMetrics,
                 agentVersion: agentVersion,
-                stateDirectory: stateSubdir);
+                stateDirectory: stateSubdir,
+                startupEventGate: startupEventGate);
 
             var whiteGloveSealingPatternIds = (System.Collections.Generic.IReadOnlyCollection<string>)remoteConfig.WhiteGloveSealingPatternIds
                 ?? Array.Empty<string>();
@@ -327,7 +333,8 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                                 configuration: agentConfig,
                                 logger: logger,
                                 post: lifecyclePost,
-                                analyzerConfig: remoteConfig.Analyzers);
+                                analyzerConfig: remoteConfig.Analyzers,
+                                startupEventGate: startupEventGate);
 
                             // Single-rail refactor (plan §5.3) — EnrollmentTerminationHandler
                             // emits through the same InformationalEventPost. The terminated-
@@ -523,7 +530,7 @@ namespace AutopilotMonitor.Agent.V2.Runtime
                                 // agent_trace through the single-rail pipe, preserving their
                                 // Source labels via the InformationalEventPost contract.
                                 await StartupEnvironmentProbes
-                                    .RunAsync(agentConfig, logger, lifecyclePost)
+                                    .RunAsync(agentConfig, logger, lifecyclePost, startupEventGate)
                                     .ConfigureAwait(false);
                             }
                             catch (Exception ex)

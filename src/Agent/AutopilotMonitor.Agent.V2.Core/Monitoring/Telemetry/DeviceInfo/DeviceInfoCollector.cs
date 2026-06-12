@@ -33,8 +33,26 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
         private readonly AgentLogger _logger;
         private readonly ISignalIngressSink _signalIngress;
         private readonly IClock _clock;
+        private readonly Persistence.StartupEventGate _startupGate;
 
         private const string RegKeyWindowsCurrentVersion = @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+
+        // Restart dedup (StartupEventGate) — exemptions. boot_time is genuinely new per boot
+        // (boot timestamp + uptime); wifi_signal_info is a live diagnostic snapshot whose
+        // signal-% churns by nature (kept ungated, analogous to power_state_check).
+        private static readonly HashSet<string> GateExemptEventTypes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            Constants.EventTypes.BootTime,
+            Constants.EventTypes.WifiSignalInfo,
+        };
+
+        // Volatile top-level payload fields excluded from the change fingerprint: the negotiated
+        // (WiFi) link speed varies per association without the adapter actually changing — keeping
+        // it in the fingerprint would defeat the dedup on every WiFi device.
+        private static readonly Dictionary<string, string[]> GateFingerprintExcludedFields = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            { Constants.EventTypes.NetworkInterfaceInfo, new[] { "linkSpeedMbps" } },
+        };
 
         public DeviceInfoCollector(
             string sessionId,
@@ -42,7 +60,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
             InformationalEventPost post,
             AgentLogger logger,
             ISignalIngressSink signalIngress = null,
-            IClock clock = null)
+            IClock clock = null,
+            Persistence.StartupEventGate startupGate = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId  = tenantId  ?? throw new ArgumentNullException(nameof(tenantId));
@@ -50,6 +69,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.DeviceInfo
             _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
             _signalIngress = signalIngress;
             _clock = clock;
+            _startupGate = startupGate;
         }
 
         /// <summary>

@@ -78,26 +78,56 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
             string sessionId,
             string tenantId,
             InformationalEventPost post,
-            AgentLogger logger)
+            AgentLogger logger,
+            Core.Persistence.StartupEventGate startupGate = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId  = tenantId  ?? throw new ArgumentNullException(nameof(tenantId));
             _post      = post      ?? throw new ArgumentNullException(nameof(post));
             _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
+            _startupGate = startupGate;
         }
+
+        private readonly Core.Persistence.StartupEventGate _startupGate;
 
         public void AnalyzeAtStartup()
         {
             _logger.Info($"{Name}: Running startup analysis (baseline inventory)");
             try
             {
+                // The collection ALWAYS runs — _startupInventory is the in-memory base for the
+                // shutdown delta. Only the (chunked, large) baseline event emission is deduped
+                // across agent restarts: an unchanged inventory was already reported by a previous
+                // run of this enrollment.
                 _startupInventory = CollectAndNormalize();
+
+                if (_startupGate != null
+                    && !_startupGate.ShouldEmit(
+                        Constants.EventTypes.SoftwareInventoryAnalysis + ":startup",
+                        BuildInventoryFingerprint(_startupInventory)))
+                {
+                    _logger.Info($"{Name}: baseline inventory unchanged since last emission — startup events suppressed (restart dedup), delta base kept in memory");
+                    return;
+                }
+
                 EmitInventoryEvents("startup", EnrollmentPhase.Unknown, _startupInventory, null);
             }
             catch (Exception ex)
             {
                 _logger.Error($"{Name}: Startup analysis failed", ex);
             }
+        }
+
+        /// <summary>
+        /// Stable content fingerprint of an inventory: name|version|publisher per entry, sorted
+        /// ordinally (registry enumeration order is not guaranteed to be stable across runs).
+        /// </summary>
+        internal static string BuildInventoryFingerprint(List<SoftwareEntry> inventory)
+        {
+            var lines = (inventory ?? new List<SoftwareEntry>())
+                .Select(e => $"{e.DisplayName}|{e.DisplayVersion}|{e.Publisher}")
+                .OrderBy(l => l, StringComparer.Ordinal);
+            return Core.Persistence.StartupEventGate.HashString(string.Join("\n", lines));
         }
 
         public void AnalyzeAtShutdown()
@@ -672,7 +702,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Analyzers
         // Private model
         // -----------------------------------------------------------------------
 
-        private class SoftwareEntry
+        // internal (was private): surfaced to the test assembly for the restart-dedup
+        // fingerprint tests (BuildInventoryFingerprint) via InternalsVisibleTo.
+        internal class SoftwareEntry
         {
             public string DisplayName { get; set; }
             public string DisplayVersion { get; set; }
