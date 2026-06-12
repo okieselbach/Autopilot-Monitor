@@ -120,8 +120,19 @@ namespace AutopilotMonitor.DecisionCore.Tests
                 Assert.Contains(step.Effects,
                     e => e.Kind == DecisionEffectKind.ScheduleDeadline && e.Deadline?.Name == DeadlineNames.HelloSafety);
             }
+            else if (accountSetupEntered)
+            {
+                // Session 1ec8f4c6 (2026-06-12): a guard-blocked exit AFTER AccountSetup entry
+                // no longer parks the session silently — it arms the shared completion-
+                // resolution window (AdvisoryCompletion) instead. HelloSafety stays off.
+                Assert.DoesNotContain(step.NewState.Deadlines, d => d.Name == DeadlineNames.HelloSafety);
+                Assert.Contains(step.NewState.Deadlines, d => d.Name == DeadlineNames.AdvisoryCompletion);
+                Assert.Contains(step.Effects,
+                    e => e.Kind == DecisionEffectKind.ScheduleDeadline && e.Deadline?.Name == DeadlineNames.AdvisoryCompletion);
+            }
             else
             {
+                // Pre-AccountSetup blocked exit (Device-ESP handoff): nothing is armed.
                 Assert.Empty(step.NewState.Deadlines);
                 Assert.Empty(step.Effects);
             }

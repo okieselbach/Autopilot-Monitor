@@ -46,7 +46,12 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.Null(state.HelloResolvedUtc);
             Assert.Null(state.AccountSetupProvisioningSucceededUtc);
             Assert.Equal(SessionStage.EspAccountSetup, state.Stage);
-            Assert.Empty(state.Deadlines);
+            // Session 1ec8f4c6 (2026-06-12): the post-AccountSetup blocked exit now arms the
+            // AdvisoryCompletion resolution window — the parked shape is no longer deadline-free.
+            // The synthesized AccountSetupProvisioningComplete below still wins the race (it
+            // arrives long before the 30-min window) — this test covers that fast path.
+            var parked = Assert.Single(state.Deadlines);
+            Assert.Equal(DeadlineNames.AdvisoryCompletion, parked.Name);
 
             var step = engine.Reduce(state, MakeSignal(20, DecisionSignalKind.AccountSetupProvisioningComplete,
                 T0.AddMinutes(24).AddSeconds(10), null));

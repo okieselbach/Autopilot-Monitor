@@ -216,14 +216,45 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         /// <summary>
-        /// Resolution window for an advisory-defanged ESP terminal failure. 30 minutes is long
-        /// enough for the user to dismiss the failure screen ("Continue anyway"), reach the
-        /// desktop, and for IME's user-session processing to settle — and short enough to kill
-        /// the multi-hour "InProgress until max-lifetime" tail observed in session 8bc1180f
-        /// (Apps subcategory failed → AccountSetupProvisioningComplete impossible → no
-        /// completion path left, agent idled for the remaining ~5 h).
+        /// Resolution window for a completion dead-end. 30 minutes is long enough for the user
+        /// to dismiss/leave the ESP page, reach the desktop, and for IME's user-session
+        /// processing to settle — and short enough to kill the multi-hour "InProgress until
+        /// max-lifetime" tail. Two arming sites share it:
+        /// <list type="bullet">
+        ///   <item>the advisory-defang path (session 8bc1180f: Apps subcategory failed →
+        ///         AccountSetupProvisioningComplete impossible, IME settle probe starved), and</item>
+        ///   <item>the guard-blocked post-AccountSetup <c>esp_exiting</c> path (session
+        ///         1ec8f4c6: ESP page closes normally — Shell-Core 62407, errorCode=0 — while
+        ///         AccountSetup/Apps is still in_progress; no failure ever fires, same dead-end,
+        ///         see <c>HandleEspExitingV1</c>).</item>
+        /// </list>
         /// </summary>
         private static readonly TimeSpan s_advisoryCompletionWindow = TimeSpan.FromMinutes(30);
+
+        /// <summary>
+        /// Build the <see cref="DeadlineNames.AdvisoryCompletion"/> resolution deadline for
+        /// either arming site. Floored at AgentBootUtc so a replayed signal can't fire it
+        /// immediately at boot.
+        /// </summary>
+        internal static ActiveDeadline BuildAdvisoryCompletionDeadline(DecisionState state, DecisionSignal signal) =>
+            new ActiveDeadline(
+                name: DeadlineNames.AdvisoryCompletion,
+                dueAtUtc: EffectiveDeadlineBase(state, signal).Add(s_advisoryCompletionWindow),
+                firesSignalKind: DecisionSignalKind.DeadlineFired,
+                firesPayload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.Deadline] = DeadlineNames.AdvisoryCompletion,
+                });
+
+        /// <summary>True when <see cref="DeadlineNames.AdvisoryCompletion"/> is armed in <paramref name="state"/>.</summary>
+        internal static bool HasAdvisoryCompletionDeadline(DecisionState state)
+        {
+            foreach (var d in state.Deadlines)
+            {
+                if (d.Name == DeadlineNames.AdvisoryCompletion) return true;
+            }
+            return false;
+        }
 
         private DecisionStep BuildAdvisoryStep(
             DecisionState state,
@@ -246,17 +277,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
             // (registry never flips, IME settle probe starved by a never-started app, Hello
             // disabled) and the session would otherwise stay InProgress until the max-lifetime
             // watchdog — which by design issues no session verdict. The deadline resolves the
-            // session either way (see HandleAdvisoryCompletionDeadlineFired). Floored at
-            // AgentBootUtc so a replayed EspTerminalFailure can't fire it immediately at boot.
-            var dueAtUtc = EffectiveDeadlineBase(state, signal).Add(s_advisoryCompletionWindow);
-            var advisoryCompletion = new ActiveDeadline(
-                name: DeadlineNames.AdvisoryCompletion,
-                dueAtUtc: dueAtUtc,
-                firesSignalKind: DecisionSignalKind.DeadlineFired,
-                firesPayload: new Dictionary<string, string>
-                {
-                    [SignalPayloadKeys.Deadline] = DeadlineNames.AdvisoryCompletion,
-                });
+            // session either way (see HandleAdvisoryCompletionDeadlineFired). AddDeadline
+            // replaces by name, so an earlier esp_exiting arm is intentionally re-based on the
+            // (later) failure instant — the freshest dead-end signal owns the window.
+            var advisoryCompletion = BuildAdvisoryCompletionDeadline(state, signal);
             builder.AddDeadline(advisoryCompletion);
 
             var newState = builder.Build();
@@ -286,9 +310,12 @@ namespace AutopilotMonitor.DecisionCore.Engine
         }
 
         /// <summary>
-        /// <see cref="DeadlineNames.AdvisoryCompletion"/> fired — the resolution window after an
-        /// advisory-defanged ESP terminal failure expired without one of the normal completion
-        /// paths terminating the session. Resolve it now, either way (session 8bc1180f):
+        /// <see cref="DeadlineNames.AdvisoryCompletion"/> fired — the resolution window after a
+        /// completion dead-end expired without one of the normal completion paths terminating
+        /// the session. Two arming sites lead here: the advisory-defanged ESP terminal failure
+        /// (session 8bc1180f) and the guard-blocked post-AccountSetup <c>esp_exiting</c>
+        /// (session 1ec8f4c6 — ESP page closed normally while AccountSetup/Apps was still
+        /// in_progress; no failure ever fired). Resolve the session now, either way:
         /// <list type="bullet">
         ///   <item>
         ///   <b>Complete</b> — when the real-user completion conjunction holds:
@@ -300,34 +327,44 @@ namespace AutopilotMonitor.DecisionCore.Engine
         ///   in the pre-AccountSetup frame, so its timestamp can never satisfy the conjunction,
         ///   and in flows that never enter AccountSetup the anchor is missing entirely. The
         ///   conjunction deliberately REPLACES <c>ShouldTransitionToAwaitingHello</c>'s strong
-        ///   registry gate — after an Apps-subcategory failure that gate is unsatisfiable by
+        ///   registry gate — in both dead-end variants that gate is unsatisfiable by
         ///   construction, and IME's own user-session completion plus the real-user desktop is
         ///   the independent evidence that user-phase enforcement actually finished.
         ///   </item>
         ///   <item>
-        ///   <b>Fail</b> — otherwise. The ESP reported a terminal failure, the device had
-        ///   30 minutes to produce completion evidence and did not; un-defang the advisory.
-        ///   <see cref="DecisionState.LastFailureTrigger"/> is stamped with
-        ///   <c>EspTerminalFailure</c> (not the deadline) so the
-        ///   <c>EnrollmentTerminationHandler</c> likely-stuck app promotion discriminator
-        ///   treats this exactly like a direct ESP terminal failure — the failure cause IS the
-        ///   ESP failure, the deadline merely lifted the defang.
+        ///   <b>Fail</b> — otherwise; the device had 30 minutes to produce completion evidence
+        ///   and did not. The two arming variants fail with distinct context:
+        ///   <i>advisory variant</i> — un-defang: reason stays <c>esp_terminal_failure</c> and
+        ///   <see cref="DecisionState.LastFailureTrigger"/> is stamped <c>EspTerminalFailure</c>
+        ///   so the <c>EnrollmentTerminationHandler</c> likely-stuck app promotion treats it
+        ///   exactly like a direct ESP terminal failure (the failure cause IS the ESP failure,
+        ///   the deadline merely lifted the defang).
+        ///   <i>esp-exit variant</i> — no ESP failure ever existed, so claiming
+        ///   <c>esp_terminal_failure</c> would be wrong: reason is
+        ///   <c>esp_exit_without_completion_evidence</c> and LastFailureTrigger stays the
+        ///   deadline (<c>DeadlineFired</c>), which keeps the likely-stuck promotion OFF — the
+        ///   ESP never gave up on those apps, the page just closed.
         ///   </item>
         /// </list>
         /// Stale-fire guards mirror <c>HandleRealmJoinTimeoutDeadlineFired</c>: a fire without
-        /// the advisory anchor, without the deadline still armed, or while a Finalizing
-        /// transition is already in flight dead-ends as bookkeeping.
+        /// any arming anchor (advisory recorded OR a post-AccountSetup final exit), without the
+        /// deadline still armed, or while a Finalizing transition is already in flight
+        /// dead-ends as bookkeeping.
         /// </summary>
         private DecisionStep HandleAdvisoryCompletionDeadlineFired(DecisionState state, DecisionSignal signal)
         {
-            var deadlineStillArmed = false;
-            foreach (var d in state.Deadlines)
-            {
-                if (d.Name == DeadlineNames.AdvisoryCompletion) { deadlineStillArmed = true; break; }
-            }
+            var deadlineStillArmed = HasAdvisoryCompletionDeadline(state);
+
+            var hasAdvisoryAnchor = state.EspAdvisoryFailureRecordedUtc != null;
+            // The esp-exit arming site only runs for a final exit observed at-or-after
+            // AccountSetup entry; an intermediate Device→Account exit (recorded earlier than
+            // AccountSetupEnteredUtc) does not count as an anchor.
+            var hasEspExitAnchor = state.EspFinalExitUtc != null
+                && state.AccountSetupEnteredUtc != null
+                && state.EspFinalExitUtc.Value >= state.AccountSetupEnteredUtc.Value;
 
             string? staleReason = null;
-            if (state.EspAdvisoryFailureRecordedUtc == null) staleReason = "advisory_completion_without_advisory_anchor";
+            if (!hasAdvisoryAnchor && !hasEspExitAnchor) staleReason = "advisory_completion_without_anchor";
             else if (!deadlineStillArmed) staleReason = "advisory_completion_stale_deadline_not_armed";
             else if (state.Stage == SessionStage.Finalizing) staleReason = "advisory_completion_finalizing_already_in_flight";
 
@@ -383,23 +420,45 @@ namespace AutopilotMonitor.DecisionCore.Engine
                         : null);
             }
 
-            // Conjunction not met — un-defang: the session is failed. Parameter bag mirrors the
-            // direct Failed path (ContinueAnyway hints from observations); the registry-derived
-            // failure context (failureType/errorCode/...) lived on the original signal and is
-            // already on the wire via the esp_failure_advisory event, so the terminal event
-            // carries the resolution reason instead.
-            var reason = "esp_terminal_failure";
-            var parameters = BuildEspFailureParameters(
-                signal: signal,
-                reason: reason,
-                advisoryPath: false,
-                observations: state.ScenarioObservations);
-            parameters["advisoryReason"] = "advisory_completion_window_expired_without_completion_evidence";
+            // Conjunction not met — the session is failed. The two arming variants carry
+            // distinct context (see method doc): the advisory variant un-defangs the original
+            // ESP failure; the esp-exit variant never had an ESP failure, so it gets its own
+            // reason literal and keeps the likely-stuck app promotion off (LastFailureTrigger
+            // stays the deadline, not EspTerminalFailure).
+            string reason;
+            Dictionary<string, string> parameters;
+            if (hasAdvisoryAnchor)
+            {
+                // Registry-derived failure context (failureType/errorCode/...) lived on the
+                // original signal and is already on the wire via the esp_failure_advisory
+                // event; the terminal event carries the resolution reason instead.
+                reason = "esp_terminal_failure";
+                parameters = BuildEspFailureParameters(
+                    signal: signal,
+                    reason: reason,
+                    advisoryPath: false,
+                    observations: state.ScenarioObservations);
+                parameters["advisoryReason"] = "advisory_completion_window_expired_without_completion_evidence";
+                builder.WithLastFailureTrigger(nameof(DecisionSignalKind.EspTerminalFailure), signal.SessionSignalOrdinal);
+            }
+            else
+            {
+                // esp-exit variant: minimal bag — no ContinueAnyway "failure screen" hints,
+                // there was no failure screen. The ESP page closed normally and the device
+                // then produced no completion evidence for the whole window.
+                reason = "esp_exit_without_completion_evidence";
+                parameters = new Dictionary<string, string>
+                {
+                    ["eventType"] = SharedConstants.EventTypes.EnrollmentFailed,
+                    ["reason"] = reason,
+                    ["advisoryReason"] = "esp_exit_resolution_window_expired_without_completion_evidence",
+                };
+                builder.WithLastFailureTrigger(nameof(DecisionSignalKind.DeadlineFired), signal.SessionSignalOrdinal);
+            }
 
             builder
                 .WithStage(SessionStage.Failed)
                 .WithOutcome(SessionOutcome.EnrollmentFailed)
-                .WithLastFailureTrigger(nameof(DecisionSignalKind.EspTerminalFailure), signal.SessionSignalOrdinal)
                 .ClearDeadlines();
 
             var failedState = builder.Build();

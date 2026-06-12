@@ -132,7 +132,10 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// <see cref="SessionStage.AwaitingHello"/> and arms the Hello-safety deadline only
         /// when <see cref="ShouldTransitionToAwaitingHello"/> holds (plan §6 Fix 8). On an
         /// early / intermediate exit (e.g. the Device-ESP handoff on a Classic V1 enrollment)
-        /// the fact is still recorded but the stage is unchanged and no deadline is armed.
+        /// the fact is still recorded and the stage is unchanged — but when the blocked exit
+        /// happened AFTER AccountSetup entry, the shared
+        /// <see cref="DeadlineNames.AdvisoryCompletion"/> resolution window is armed (session
+        /// 1ec8f4c6 dead-end variant; see the inline comment in the no-transition branch).
         /// </summary>
         private DecisionStep HandleEspExitingV1(DecisionState state, DecisionSignal signal)
         {
@@ -148,13 +151,37 @@ namespace AutopilotMonitor.DecisionCore.Engine
             {
                 // Early / intermediate esp_exiting: keep stage, no HelloSafety arm. Observability
                 // still records EspFinalExitUtc so downstream classifiers see the full picture.
+                //
+                // Session 1ec8f4c6 (2026-06-12) — third completion-dead-end variant: Windows can
+                // close the ESP page NORMALLY (Shell-Core 62407, errorCode=0) while the
+                // AccountSetup Apps subcategory is still in_progress (a user-targeted app never
+                // started). No EspTerminalFailure ever fires, so the advisory-defang arming site
+                // never runs; the registry gate can never open (Apps never succeeds, the
+                // all-subcategories fallback needs every subcategory succeeded) and the session
+                // would idle to the max-lifetime watchdog with no verdict. A guard-blocked exit
+                // AFTER AccountSetup entry is exactly that shape — arm the shared
+                // AdvisoryCompletion resolution window so HandleAdvisoryCompletionDeadlineFired
+                // resolves the session either way. Fire-once: repeated post-AccountSetup exits
+                // do not re-base an already-armed window (unlike the advisory site, which
+                // deliberately replaces it — the failure is the fresher dead-end signal).
+                var exitEffects = Array.Empty<DecisionEffect>();
+                if (state.AccountSetupEnteredUtc != null && !HasAdvisoryCompletionDeadline(state))
+                {
+                    var resolutionDeadline = BuildAdvisoryCompletionDeadline(state, signal);
+                    builder.AddDeadline(resolutionDeadline);
+                    exitEffects = new[]
+                    {
+                        new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: resolutionDeadline),
+                    };
+                }
+
                 var noopTransition = BuildTakenTransition(
                     before: state,
                     signal: signal,
                     toStage: state.Stage,
                     nextStepIndex: nextStep,
                     trigger: nameof(DecisionSignalKind.EspExiting));
-                return new DecisionStep(builder.Build(), noopTransition, Array.Empty<DecisionEffect>());
+                return new DecisionStep(builder.Build(), noopTransition, exitEffects);
             }
 
             // Replay-safety: floor the 300-s Hello-safety window at AgentBootUtc so a replayed

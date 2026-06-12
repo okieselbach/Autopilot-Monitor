@@ -47,14 +47,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
         public const string RealmJoinTimeout = "realmjoin_timeout";
 
         /// <summary>
-        /// Resolution window armed when an <c>EspTerminalFailure</c> is defanged to an
-        /// <c>esp_failure_advisory</c> (session 8bc1180f, 2026-06-12). The advisory keeps
-        /// monitoring alive, but when the failed subcategory is AccountSetup/Apps the
-        /// registry-driven <c>AccountSetupProvisioningComplete</c> can never arrive and the
-        /// session would otherwise idle until the max-lifetime watchdog with no terminal
-        /// verdict. When this deadline fires the engine resolves the session either way:
-        /// Completed when the real-user completion conjunction holds (Desktop + Hello +
-        /// genuine IME user-session evidence), Failed otherwise.
+        /// Completion-dead-end resolution window. Armed by two sites: (a) an
+        /// <c>EspTerminalFailure</c> defanged to an <c>esp_failure_advisory</c> (session
+        /// 8bc1180f — Apps subcategory failed, so the registry-driven
+        /// <c>AccountSetupProvisioningComplete</c> can never arrive), and (b) a guard-blocked
+        /// <c>esp_exiting</c> observed after AccountSetup entry (session 1ec8f4c6 — the ESP
+        /// page closed normally while AccountSetup/Apps was still in_progress; no failure ever
+        /// fires, same dead-end). Without it the session would idle until the max-lifetime
+        /// watchdog with no terminal verdict. When this deadline fires the engine resolves the
+        /// session either way: Completed when the real-user completion conjunction holds
+        /// (Desktop + Hello + genuine IME user-session evidence), Failed otherwise.
         /// </summary>
         public const string AdvisoryCompletion = "advisory_completion";
     }

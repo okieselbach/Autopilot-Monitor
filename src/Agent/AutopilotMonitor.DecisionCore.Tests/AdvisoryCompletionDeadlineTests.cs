@@ -343,15 +343,17 @@ namespace AutopilotMonitor.DecisionCore.Tests
         // ======================================================= stale-fire guards ====
 
         [Fact]
-        public void DeadlineFired_WithoutAdvisoryAnchor_DeadEnds()
+        public void DeadlineFired_WithoutAnyAnchor_DeadEnds()
         {
+            // No advisory recorded AND the only esp_exiting was the intermediate Device→Account
+            // handoff (before AccountSetup entry) — neither arming anchor exists.
             var engine = new DecisionEngine();
             var state = SetupAdvisoryEligibleSession(engine);
 
             var step = engine.Reduce(state, DeadlineFired(70, T0.AddMinutes(57.5), DeadlineNames.AdvisoryCompletion));
 
             Assert.False(step.Transition.Taken);
-            Assert.Equal("advisory_completion_without_advisory_anchor", step.Transition.DeadEndReason);
+            Assert.Equal("advisory_completion_without_anchor", step.Transition.DeadEndReason);
             Assert.Empty(step.Effects);
             Assert.Equal(state.Stage, step.NewState.Stage);
         }
@@ -397,6 +399,168 @@ namespace AutopilotMonitor.DecisionCore.Tests
             Assert.False(step.Transition.Taken);
             Assert.Equal("advisory_completion_finalizing_already_in_flight", step.Transition.DeadEndReason);
             Assert.Empty(step.Effects);
+        }
+
+        // ==================================== esp-exit arming variant (1ec8f4c6) ====
+
+        /// <summary>
+        /// Drives the session-1ec8f4c6 shape up to the guard-blocked FINAL esp_exiting:
+        /// no ESP failure anywhere — the page closes normally (errorCode=0) while the
+        /// AccountSetup Apps subcategory is still in_progress (one user app never started).
+        /// </summary>
+        private static DecisionState SetupEspExitDeadEndSession(
+            DecisionEngine engine,
+            bool desktopArrives = true,
+            bool imeUserSessionCompletes = true)
+        {
+            var state = SetupAdvisoryEligibleSession(
+                engine,
+                desktopArrives: desktopArrives,
+                imeUserSessionCompletes: false);
+            // Final esp_exiting AFTER AccountSetup entry (1ec8f4c6: 10:34:07, AccountSetup
+            // 10:31:52) — guard-blocked because the strong gate never opened (Apps in_progress).
+            state = engine.Reduce(state, MakeSignal(
+                50, DecisionSignalKind.EspExiting, T0.AddMinutes(19.5))).NewState;
+            if (imeUserSessionCompletes)
+            {
+                // IME user-session completion right after the page closed (1ec8f4c6: 10:34:20).
+                state = engine.Reduce(state, MakeSignal(
+                    55, DecisionSignalKind.ImeUserSessionCompleted, T0.AddMinutes(19.7),
+                    new Dictionary<string, string> { [SignalPayloadKeys.ImePatternId] = "IME-USER-SESSION-COMPLETED" })).NewState;
+            }
+            return state;
+        }
+
+        [Fact]
+        public void EspExiting_PostAccountSetup_GuardBlocked_ArmsResolutionDeadline()
+        {
+            var engine = new DecisionEngine();
+            var state = SetupAdvisoryEligibleSession(engine, imeUserSessionCompletes: false);
+            // Sanity: the intermediate pre-AccountSetup exit in the setup helper did NOT arm.
+            Assert.Null(FindDeadline(state, DeadlineNames.AdvisoryCompletion));
+
+            var exitAt = T0.AddMinutes(19.5);
+            var step = engine.Reduce(state, MakeSignal(50, DecisionSignalKind.EspExiting, exitAt));
+
+            // Stage unchanged (guard still blocks), but the resolution window is armed.
+            Assert.Equal(state.Stage, step.NewState.Stage);
+            Assert.Null(step.NewState.Outcome);
+            var deadline = FindDeadline(step.NewState, DeadlineNames.AdvisoryCompletion);
+            Assert.NotNull(deadline);
+            Assert.Equal(exitAt.AddMinutes(30), deadline!.DueAtUtc);
+            var scheduleEffect = step.Effects.Single(e => e.Kind == DecisionEffectKind.ScheduleDeadline);
+            Assert.Equal(DeadlineNames.AdvisoryCompletion, scheduleEffect.Deadline!.Name);
+        }
+
+        [Fact]
+        public void EspExiting_RepeatedPostAccountSetupExit_DoesNotReArm()
+        {
+            // Shell-Core 62407 can fire more than once. The esp-exit site is fire-once: a
+            // second blocked exit must not push the already-armed window out.
+            var engine = new DecisionEngine();
+            var state = SetupAdvisoryEligibleSession(engine, imeUserSessionCompletes: false);
+            state = engine.Reduce(state, MakeSignal(50, DecisionSignalKind.EspExiting, T0.AddMinutes(19.5))).NewState;
+            var armed = FindDeadline(state, DeadlineNames.AdvisoryCompletion);
+            Assert.NotNull(armed);
+
+            var step = engine.Reduce(state, MakeSignal(60, DecisionSignalKind.EspExiting, T0.AddMinutes(25)));
+
+            var after = FindDeadline(step.NewState, DeadlineNames.AdvisoryCompletion);
+            Assert.NotNull(after);
+            Assert.Equal(armed!.DueAtUtc, after!.DueAtUtc);
+            Assert.DoesNotContain(step.Effects, e => e.Kind == DecisionEffectKind.ScheduleDeadline);
+        }
+
+        [Fact]
+        public void EspExiting_LaterAdvisory_ReBasesTheWindow()
+        {
+            // Ordering: blocked post-AccountSetup exit arms first, then the ESP flips a
+            // subcategory to failed → advisory. The advisory site deliberately replaces the
+            // window (freshest dead-end signal owns it).
+            var engine = new DecisionEngine();
+            var state = SetupEspExitDeadEndSession(engine);
+            var armed = FindDeadline(state, DeadlineNames.AdvisoryCompletion);
+            Assert.NotNull(armed);
+
+            var step = engine.Reduce(state, MakeSignal(
+                60, DecisionSignalKind.EspTerminalFailure, T0.AddMinutes(25),
+                new Dictionary<string, string>
+                {
+                    ["failureType"] = "Provisioning_AccountSetup_Apps_Failed",
+                    ["failedSubcategory"] = "Apps",
+                    ["category"] = "AccountSetup",
+                }));
+
+            Assert.NotNull(step.NewState.EspAdvisoryFailureRecordedUtc);
+            var after = FindDeadline(step.NewState, DeadlineNames.AdvisoryCompletion);
+            Assert.NotNull(after);
+            Assert.Equal(T0.AddMinutes(25).AddMinutes(30), after!.DueAtUtc);
+        }
+
+        [Fact]
+        public void DeadlineFired_EspExitVariant_FullConjunction_CompletesThroughFinalizing()
+        {
+            // The 1ec8f4c6 replay: DeviceSetup → intermediate exit → AccountSetup → real-user
+            // desktop → final exit (normal, guard-blocked) → IME user session completed →
+            // 30 min later the resolution deadline completes the session.
+            var engine = new DecisionEngine();
+            var state = SetupEspExitDeadEndSession(engine);
+
+            var fireAt = T0.AddMinutes(49.5);
+            var step = engine.Reduce(state, DeadlineFired(70, fireAt, DeadlineNames.AdvisoryCompletion));
+
+            Assert.Equal(SessionStage.Finalizing, step.NewState.Stage);
+            Assert.Equal("Skipped", step.NewState.HelloOutcome!.Value);
+
+            var final = engine.Reduce(step.NewState, DeadlineFired(80, fireAt.AddSeconds(5), DeadlineNames.FinalizingGrace));
+            Assert.Equal(SessionStage.Completed, final.NewState.Stage);
+            Assert.Equal(SessionOutcome.EnrollmentComplete, final.NewState.Outcome);
+            SingleTimelineEffect(final, "enrollment_complete");
+        }
+
+        [Fact]
+        public void DeadlineFired_EspExitVariant_NoEvidence_FailsWithDistinctReason()
+        {
+            // ESP page closed normally but neither desktop nor IME evidence arrived within the
+            // window. The failure must NOT claim esp_terminal_failure (no ESP failure existed)
+            // and must NOT activate the likely-stuck app promotion (LastFailureTrigger stays
+            // the deadline, not EspTerminalFailure).
+            var engine = new DecisionEngine();
+            var state = SetupEspExitDeadEndSession(engine, desktopArrives: false, imeUserSessionCompletes: false);
+
+            var step = engine.Reduce(state, DeadlineFired(70, T0.AddMinutes(49.5), DeadlineNames.AdvisoryCompletion));
+
+            Assert.Equal(SessionStage.Failed, step.NewState.Stage);
+            Assert.Equal(SessionOutcome.EnrollmentFailed, step.NewState.Outcome);
+            Assert.Equal(nameof(DecisionSignalKind.DeadlineFired), step.NewState.LastFailureTrigger!.Value);
+
+            var failed = SingleTimelineEffect(step, "enrollment_failed");
+            Assert.Equal("esp_exit_without_completion_evidence", failed.Parameters!["reason"]);
+            Assert.Equal("esp_exit_resolution_window_expired_without_completion_evidence",
+                failed.Parameters!["advisoryReason"]);
+            // No ContinueAnyway failure-screen hints — there was no failure screen.
+            Assert.False(failed.Parameters!.ContainsKey("mayHaveContinuedAnyway"));
+            Assert.False(failed.Parameters!.ContainsKey("continueAnywayHint"));
+        }
+
+        [Fact]
+        public void DeadlineFired_AdvisoryVariant_NoEvidence_KeepsEspTerminalFailureSemantics()
+        {
+            // Regression guard for the variant split: the advisory-armed path must keep the
+            // un-defang semantics (reason=esp_terminal_failure + LastFailureTrigger=
+            // EspTerminalFailure for the likely-stuck promotion parity).
+            var engine = new DecisionEngine();
+            var state = SetupAdvisoryEligibleSession(engine, desktopArrives: false, imeUserSessionCompletes: false);
+            state = ApplyEspTerminalFailure(engine, state);
+
+            var step = engine.Reduce(state, DeadlineFired(70, T0.AddMinutes(57.5), DeadlineNames.AdvisoryCompletion));
+
+            Assert.Equal(SessionStage.Failed, step.NewState.Stage);
+            Assert.Equal(nameof(DecisionSignalKind.EspTerminalFailure), step.NewState.LastFailureTrigger!.Value);
+            var failed = SingleTimelineEffect(step, "enrollment_failed");
+            Assert.Equal("esp_terminal_failure", failed.Parameters!["reason"]);
+            Assert.Equal("advisory_completion_window_expired_without_completion_evidence",
+                failed.Parameters!["advisoryReason"]);
         }
 
         // ===================================================== fact recording ====
