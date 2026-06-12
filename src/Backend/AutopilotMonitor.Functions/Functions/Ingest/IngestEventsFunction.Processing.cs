@@ -613,6 +613,10 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                     case "session_stalled":
                         classification.SessionStalledEvent = evt;
                         break;
+                    case "agent_shutting_down":
+                        if (IsMaxLifetimeAgentShutdown(evt))
+                            classification.AgentMaxLifetimeShutdownEvent = evt;
+                        break;
                     case "system_reboot_detected":
                         // Per-batch incremental reboot count (live value during enrollment).
                         // Overwritten with an authoritative distinct count at the terminal
@@ -640,6 +644,26 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
             }
 
             return classification;
+        }
+
+        /// <summary>
+        /// True for an <c>agent_shutting_down</c> event whose <c>Data.reason</c> is
+        /// <c>max_lifetime</c> — the V2 watchdog shutdown (session 8bc1180f). By design that
+        /// path is a "notbremse, not a session verdict": the agent stops permanently WITHOUT
+        /// emitting <c>enrollment_failed</c>, so this is the last event the session ever
+        /// sends and the backend must map it to a terminal status itself. Other shutdown
+        /// reasons (decision_terminal, ctrl_c, process_exit, unhandled_exception, ...) either
+        /// follow a real terminal event or imply nothing terminal. Shared by both
+        /// classification copies (legacy ingest + <see cref="Services.EventIngestProcessor"/>).
+        /// </summary>
+        internal static bool IsMaxLifetimeAgentShutdown(EnrollmentEvent? evt)
+        {
+            if (evt == null || !string.Equals(evt.EventType, "agent_shutting_down", StringComparison.Ordinal))
+                return false;
+            var reason = evt.Data != null && evt.Data.ContainsKey("reason")
+                ? evt.Data["reason"]?.ToString()
+                : null;
+            return string.Equals(reason, "max_lifetime", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -752,6 +776,39 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
                 else
                 {
                     _logger.LogInformation("{SessionPrefix} WhiteGlove resumed skipped, session already {Status}", sessionPrefix, currentSession?.Status);
+                }
+            }
+            else if (c.AgentMaxLifetimeShutdownEvent != null)
+            {
+                // Lowest-priority status writer (session 8bc1180f): the V2 max-lifetime
+                // watchdog stops the agent permanently without a session verdict — this
+                // shutdown event is the last one the session ever sends, so without this
+                // mapping the session stays InProgress forever. Any genuine terminal event
+                // in the same batch wins via the else-if chain above; an already-terminal
+                // session is protected by the repository's idempotency guard. Pending
+                // (WhiteGlove) sessions are skipped — they are deliberately long-lived and
+                // resume via re-registration.
+                var currentSession = await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId);
+                if (currentSession?.Status == SessionStatus.Pending)
+                {
+                    _logger.LogInformation(
+                        "{SessionPrefix} max_lifetime shutdown ignored — session is Pending (WhiteGlove)", sessionPrefix);
+                }
+                else
+                {
+                    var uptimeMinutes = c.AgentMaxLifetimeShutdownEvent.Data?.ContainsKey("uptimeMinutes") == true
+                        ? c.AgentMaxLifetimeShutdownEvent.Data["uptimeMinutes"]?.ToString() : null;
+                    failureReason = string.IsNullOrEmpty(uptimeMinutes)
+                        ? "Agent reached its maximum lifetime without a terminal enrollment verdict (max_lifetime watchdog shutdown)."
+                        : $"Agent reached its maximum lifetime ({uptimeMinutes} min) without a terminal enrollment verdict (max_lifetime watchdog shutdown).";
+
+                    statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
+                        request.TenantId, request.SessionId, SessionStatus.Failed, c.AgentMaxLifetimeShutdownEvent.Phase, failureReason,
+                        completedAt: c.AgentMaxLifetimeShutdownEvent.Timestamp,
+                        earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
+                        failureSource: "max_lifetime_watchdog");
+                    _logger.LogWarning("{SessionPrefix} Status: Failed via max_lifetime shutdown mapping (transitioned={Transitioned})",
+                        sessionPrefix, statusTransitioned);
                 }
             }
 
@@ -1114,6 +1171,14 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
         public EnrollmentEvent? WhiteGloveResumedEvent { get; set; }
         public EnrollmentEvent? EspFailureEvent { get; set; }
         public EnrollmentEvent? SessionStalledEvent { get; set; }
+
+        /// <summary>
+        /// <c>agent_shutting_down</c> with <c>Data.reason == "max_lifetime"</c> — the V2
+        /// watchdog shutdown that deliberately carries no enrollment verdict. Mapped to a
+        /// terminal Failed status as the lowest-priority status writer so the session does
+        /// not stay InProgress forever (session 8bc1180f).
+        /// </summary>
+        public EnrollmentEvent? AgentMaxLifetimeShutdownEvent { get; set; }
         public bool HasNonPeriodicRealEvent { get; set; }
         public EnrollmentEvent? DeviceLocationEvent { get; set; }
         public DateTime? EarliestEventTimestamp { get; set; }

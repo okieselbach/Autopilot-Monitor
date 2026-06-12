@@ -65,6 +65,10 @@ namespace AutopilotMonitor.Functions.Services
                     case "session_stalled":
                         classification.SessionStalledEvent = evt;
                         break;
+                    case "agent_shutting_down":
+                        if (IngestEventsFunction.IsMaxLifetimeAgentShutdown(evt))
+                            classification.AgentMaxLifetimeShutdownEvent = evt;
+                        break;
                     case "system_reboot_detected":
                         // Per-batch incremental reboot count (live value during enrollment).
                         // Overwritten with an authoritative distinct count at the terminal
@@ -190,6 +194,40 @@ namespace AutopilotMonitor.Functions.Services
                     _logger.LogInformation("{SessionPrefix} WhiteGlove resumed skipped, session already {Status}", sessionPrefix, currentSession?.Status);
                 }
             }
+            else if (c.AgentMaxLifetimeShutdownEvent != null)
+            {
+                // Lowest-priority status writer (session 8bc1180f): the V2 max-lifetime
+                // watchdog stops the agent permanently without a session verdict — this
+                // shutdown event is the last one the session ever sends, so without this
+                // mapping the session stays InProgress forever. Any genuine terminal event
+                // in the same batch wins via the else-if chain above; an already-terminal
+                // session is protected by the repository's idempotency guard. Pending
+                // (WhiteGlove) sessions are skipped — they are deliberately long-lived and
+                // resume via re-registration.
+                var currentStatus = preFetchedStatus
+                    ?? (await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId))?.Status;
+                if (currentStatus == SessionStatus.Pending)
+                {
+                    _logger.LogInformation(
+                        "{SessionPrefix} max_lifetime shutdown ignored — session is Pending (WhiteGlove)", sessionPrefix);
+                }
+                else
+                {
+                    var uptimeMinutes = c.AgentMaxLifetimeShutdownEvent.Data?.ContainsKey("uptimeMinutes") == true
+                        ? c.AgentMaxLifetimeShutdownEvent.Data["uptimeMinutes"]?.ToString() : null;
+                    failureReason = string.IsNullOrEmpty(uptimeMinutes)
+                        ? "Agent reached its maximum lifetime without a terminal enrollment verdict (max_lifetime watchdog shutdown)."
+                        : $"Agent reached its maximum lifetime ({uptimeMinutes} min) without a terminal enrollment verdict (max_lifetime watchdog shutdown).";
+
+                    statusTransitioned = await _sessionRepo.UpdateSessionStatusAsync(
+                        request.TenantId, request.SessionId, SessionStatus.Failed, c.AgentMaxLifetimeShutdownEvent.Phase, failureReason,
+                        completedAt: c.AgentMaxLifetimeShutdownEvent.Timestamp,
+                        earliestEventTimestamp: c.EarliestEventTimestamp, latestEventTimestamp: c.LatestEventTimestamp,
+                        failureSource: "max_lifetime_watchdog");
+                    _logger.LogWarning("{SessionPrefix} Status: Failed via max_lifetime shutdown mapping (transitioned={Transitioned})",
+                        sessionPrefix, statusTransitioned);
+                }
+            }
 
             if (c.WhiteGloveStartedEvent != null)
             {
@@ -215,7 +253,8 @@ namespace AutopilotMonitor.Functions.Services
                 // falsely heal the session back to InProgress over the just-written status.
                 var batchWroteStatus = c.CompletionEvent != null || c.FailureEvent != null
                     || c.EspFailureEvent != null || c.GatherCompletionEvent != null
-                    || c.WhiteGloveEvent != null || c.WhiteGloveResumedEvent != null;
+                    || c.WhiteGloveEvent != null || c.WhiteGloveResumedEvent != null
+                    || c.AgentMaxLifetimeShutdownEvent != null;
                 var currentStatus = !batchWroteStatus && preFetchedStatus.HasValue
                     ? preFetchedStatus
                     : (await _sessionRepo.GetSessionAsync(request.TenantId, request.SessionId))?.Status;
