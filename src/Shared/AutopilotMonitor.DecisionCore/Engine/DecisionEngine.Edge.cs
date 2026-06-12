@@ -215,6 +215,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
             return new DecisionStep(newState, transition, effects);
         }
 
+        /// <summary>
+        /// Resolution window for an advisory-defanged ESP terminal failure. 30 minutes is long
+        /// enough for the user to dismiss the failure screen ("Continue anyway"), reach the
+        /// desktop, and for IME's user-session processing to settle — and short enough to kill
+        /// the multi-hour "InProgress until max-lifetime" tail observed in session 8bc1180f
+        /// (Apps subcategory failed → AccountSetupProvisioningComplete impossible → no
+        /// completion path left, agent idled for the remaining ~5 h).
+        /// </summary>
+        private static readonly TimeSpan s_advisoryCompletionWindow = TimeSpan.FromMinutes(30);
+
         private DecisionStep BuildAdvisoryStep(
             DecisionState state,
             DecisionSignal signal,
@@ -227,9 +237,28 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
                 .WithEspAdvisoryFailureRecorded(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
 
-            // Stage / Outcome / Deadlines deliberately untouched — monitoring continues. The
-            // session's normal completion paths (Hello/Desktop, IME pattern, AccountSetup
-            // provisioning complete) still drive it.
+            // Stage / Outcome deliberately untouched — monitoring continues. The session's
+            // normal completion paths (Hello/Desktop, IME pattern, AccountSetup provisioning
+            // complete) still drive it and win whenever they fire first.
+            //
+            // Session 8bc1180f (2026-06-12): additionally arm the AdvisoryCompletion deadline.
+            // When the failure is AccountSetup/Apps, every normal completion path can be dead
+            // (registry never flips, IME settle probe starved by a never-started app, Hello
+            // disabled) and the session would otherwise stay InProgress until the max-lifetime
+            // watchdog — which by design issues no session verdict. The deadline resolves the
+            // session either way (see HandleAdvisoryCompletionDeadlineFired). Floored at
+            // AgentBootUtc so a replayed EspTerminalFailure can't fire it immediately at boot.
+            var dueAtUtc = EffectiveDeadlineBase(state, signal).Add(s_advisoryCompletionWindow);
+            var advisoryCompletion = new ActiveDeadline(
+                name: DeadlineNames.AdvisoryCompletion,
+                dueAtUtc: dueAtUtc,
+                firesSignalKind: DecisionSignalKind.DeadlineFired,
+                firesPayload: new Dictionary<string, string>
+                {
+                    [SignalPayloadKeys.Deadline] = DeadlineNames.AdvisoryCompletion,
+                });
+            builder.AddDeadline(advisoryCompletion);
+
             var newState = builder.Build();
 
             var transition = BuildTakenTransition(
@@ -241,6 +270,7 @@ namespace AutopilotMonitor.DecisionCore.Engine
 
             var effects = new[]
             {
+                new DecisionEffect(DecisionEffectKind.ScheduleDeadline, deadline: advisoryCompletion),
                 new DecisionEffect(
                     DecisionEffectKind.EmitEventTimelineEntry,
                     parameters: parameters,
@@ -253,6 +283,147 @@ namespace AutopilotMonitor.DecisionCore.Engine
             };
 
             return new DecisionStep(newState, transition, effects);
+        }
+
+        /// <summary>
+        /// <see cref="DeadlineNames.AdvisoryCompletion"/> fired — the resolution window after an
+        /// advisory-defanged ESP terminal failure expired without one of the normal completion
+        /// paths terminating the session. Resolve it now, either way (session 8bc1180f):
+        /// <list type="bullet">
+        ///   <item>
+        ///   <b>Complete</b> — when the real-user completion conjunction holds:
+        ///   <see cref="DecisionState.DesktopArrivedUtc"/> is set (DAD-validated real user;
+        ///   defaultuser0/SYSTEM are excluded at the detector), Hello is resolved or the policy
+        ///   is explicitly disabled, AND <see cref="DecisionState.ImeUserSessionCompletedUtc"/>
+        ///   is at-or-after <see cref="DecisionState.AccountSetupEnteredUtc"/>. The IME
+        ///   timestamp gate kills defaultuser0 ghosts: an OOBE/technician IME session completes
+        ///   in the pre-AccountSetup frame, so its timestamp can never satisfy the conjunction,
+        ///   and in flows that never enter AccountSetup the anchor is missing entirely. The
+        ///   conjunction deliberately REPLACES <c>ShouldTransitionToAwaitingHello</c>'s strong
+        ///   registry gate — after an Apps-subcategory failure that gate is unsatisfiable by
+        ///   construction, and IME's own user-session completion plus the real-user desktop is
+        ///   the independent evidence that user-phase enforcement actually finished.
+        ///   </item>
+        ///   <item>
+        ///   <b>Fail</b> — otherwise. The ESP reported a terminal failure, the device had
+        ///   30 minutes to produce completion evidence and did not; un-defang the advisory.
+        ///   <see cref="DecisionState.LastFailureTrigger"/> is stamped with
+        ///   <c>EspTerminalFailure</c> (not the deadline) so the
+        ///   <c>EnrollmentTerminationHandler</c> likely-stuck app promotion discriminator
+        ///   treats this exactly like a direct ESP terminal failure — the failure cause IS the
+        ///   ESP failure, the deadline merely lifted the defang.
+        ///   </item>
+        /// </list>
+        /// Stale-fire guards mirror <c>HandleRealmJoinTimeoutDeadlineFired</c>: a fire without
+        /// the advisory anchor, without the deadline still armed, or while a Finalizing
+        /// transition is already in flight dead-ends as bookkeeping.
+        /// </summary>
+        private DecisionStep HandleAdvisoryCompletionDeadlineFired(DecisionState state, DecisionSignal signal)
+        {
+            var deadlineStillArmed = false;
+            foreach (var d in state.Deadlines)
+            {
+                if (d.Name == DeadlineNames.AdvisoryCompletion) { deadlineStillArmed = true; break; }
+            }
+
+            string? staleReason = null;
+            if (state.EspAdvisoryFailureRecordedUtc == null) staleReason = "advisory_completion_without_advisory_anchor";
+            else if (!deadlineStillArmed) staleReason = "advisory_completion_stale_deadline_not_armed";
+            else if (state.Stage == SessionStage.Finalizing) staleReason = "advisory_completion_finalizing_already_in_flight";
+
+            if (staleReason != null)
+            {
+                var bookkept = BumpStepBookkeeping(state, signal);
+                var staleTransition = BuildDeadEndTransition(
+                    state: state,
+                    signal: signal,
+                    nextStepIndex: bookkept.StepIndex,
+                    trigger: $"DeadlineFired:{DeadlineNames.AdvisoryCompletion}",
+                    deadEndReason: staleReason);
+                return new DecisionStep(bookkept, staleTransition, Array.Empty<DecisionEffect>());
+            }
+
+            var nextStep = state.StepIndex + 1;
+            var builder = state.ToBuilder()
+                .WithStepIndex(nextStep)
+                .WithLastAppliedSignalOrdinal(signal.SessionSignalOrdinal)
+                .CancelDeadline(DeadlineNames.AdvisoryCompletion);
+
+            var desktopArrived = state.DesktopArrivedUtc != null;
+            var helloSatisfied = state.HelloResolvedUtc != null || state.HelloPolicyEnabled?.Value == false;
+            var imeUserSessionGenuine =
+                state.ImeUserSessionCompletedUtc != null
+                && state.AccountSetupEnteredUtc != null
+                && state.ImeUserSessionCompletedUtc.Value >= state.AccountSetupEnteredUtc.Value;
+
+            if (desktopArrived && helloSatisfied && imeUserSessionGenuine)
+            {
+                if (state.HelloResolvedUtc == null)
+                {
+                    builder.HelloResolvedUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
+                    builder.HelloOutcome = new SignalFact<string>("Skipped", signal.SessionSignalOrdinal);
+                }
+
+                // Dispose a still-armed HelloSafety scheduler timer (8b8d611d pattern) so it
+                // cannot fire post-Completion and re-enter the completion path.
+                var helloSafetyCancelEffect = BuildHelloSafetyCancelEffectIfArmed(state);
+                if (helloSafetyCancelEffect != null)
+                {
+                    builder.CancelDeadline(DeadlineNames.HelloSafety);
+                }
+
+                return CompleteThroughFinalizingOrDefer(
+                    state: state,
+                    signal: signal,
+                    preparedBuilder: builder,
+                    nextStepIndex: nextStep,
+                    trigger: $"DeadlineFired:{DeadlineNames.AdvisoryCompletion}",
+                    leadingEffects: helloSafetyCancelEffect != null
+                        ? new[] { helloSafetyCancelEffect }
+                        : null);
+            }
+
+            // Conjunction not met — un-defang: the session is failed. Parameter bag mirrors the
+            // direct Failed path (ContinueAnyway hints from observations); the registry-derived
+            // failure context (failureType/errorCode/...) lived on the original signal and is
+            // already on the wire via the esp_failure_advisory event, so the terminal event
+            // carries the resolution reason instead.
+            var reason = "esp_terminal_failure";
+            var parameters = BuildEspFailureParameters(
+                signal: signal,
+                reason: reason,
+                advisoryPath: false,
+                observations: state.ScenarioObservations);
+            parameters["advisoryReason"] = "advisory_completion_window_expired_without_completion_evidence";
+
+            builder
+                .WithStage(SessionStage.Failed)
+                .WithOutcome(SessionOutcome.EnrollmentFailed)
+                .WithLastFailureTrigger(nameof(DecisionSignalKind.EspTerminalFailure), signal.SessionSignalOrdinal)
+                .ClearDeadlines();
+
+            var failedState = builder.Build();
+            var failedTransition = BuildTakenTransition(
+                before: state,
+                signal: signal,
+                toStage: SessionStage.Failed,
+                nextStepIndex: nextStep,
+                trigger: $"DeadlineFired:{DeadlineNames.AdvisoryCompletion}");
+
+            var failedEffects = new[]
+            {
+                new DecisionEffect(
+                    DecisionEffectKind.EmitEventTimelineEntry,
+                    parameters: parameters,
+                    typedPayload: BuildEspFailureAuditTrail(
+                        postState: failedState,
+                        decidedStage: SessionStage.Failed,
+                        trigger: $"DeadlineFired:{DeadlineNames.AdvisoryCompletion}",
+                        failureReason: reason,
+                        parameters: parameters)),
+            };
+
+            return new DecisionStep(failedState, failedTransition, failedEffects);
         }
 
         private DecisionStep BuildFailedStep(

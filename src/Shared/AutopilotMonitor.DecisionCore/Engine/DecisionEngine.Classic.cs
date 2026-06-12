@@ -420,6 +420,14 @@ namespace AutopilotMonitor.DecisionCore.Engine
         /// Handle <see cref="DecisionSignalKind.ImeUserSessionCompleted"/>. Primarily a
         /// <c>EnrollmentType</c>-hypothesis strengthener (IME's user-session-complete pattern
         /// is a strong UserDriven-v1 indicator), and records the matched pattern id.
+        /// <para>
+        /// Additionally records <see cref="DecisionState.ImeUserSessionCompletedUtc"/>
+        /// (set-once — the first observation wins, replays keep the original anchor). The fact
+        /// is NOT a completion trigger here: the IME "user session" can run under
+        /// <c>defaultuser0</c>, so the raw signal proves nothing about the real user. The
+        /// <c>AdvisoryCompletion</c> deadline handler consumes it lazily inside a correlation
+        /// conjunction (see <c>HandleAdvisoryCompletionDeadlineFired</c>).
+        /// </para>
         /// </summary>
         private DecisionStep HandleImeUserSessionCompletedV1(DecisionState state, DecisionSignal signal)
         {
@@ -435,6 +443,11 @@ namespace AutopilotMonitor.DecisionCore.Engine
             if (!string.IsNullOrEmpty(patternId))
             {
                 builder.ImeMatchedPatternId = new SignalFact<string>(patternId!, signal.SessionSignalOrdinal);
+            }
+
+            if (state.ImeUserSessionCompletedUtc == null)
+            {
+                builder.ImeUserSessionCompletedUtc = new SignalFact<DateTime>(signal.OccurredAtUtc, signal.SessionSignalOrdinal);
             }
 
             // Classic High-confidence promotion on user-session-complete. Codex follow-up #5:

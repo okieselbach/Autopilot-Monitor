@@ -61,7 +61,8 @@ namespace AutopilotMonitor.DecisionCore.State
             RealmJoinFacts? realmJoinFacts = null,
             SignalFact<DateTime>? deviceSetupResolvedUtc = null,
             string? schemaVersion = null,
-            SignalFact<DateTime>? espAdvisoryFailureRecordedUtc = null)
+            SignalFact<DateTime>? espAdvisoryFailureRecordedUtc = null,
+            SignalFact<DateTime>? imeUserSessionCompletedUtc = null)
         {
             if (string.IsNullOrEmpty(sessionId))
             {
@@ -102,6 +103,7 @@ namespace AutopilotMonitor.DecisionCore.State
             DeviceSetupResolvedUtc = deviceSetupResolvedUtc;
             SchemaVersion = schemaVersion ?? CurrentSchemaVersion;
             EspAdvisoryFailureRecordedUtc = espAdvisoryFailureRecordedUtc;
+            ImeUserSessionCompletedUtc = imeUserSessionCompletedUtc;
         }
 
         public string SessionId { get; }
@@ -267,6 +269,22 @@ namespace AutopilotMonitor.DecisionCore.State
         /// </para>
         /// </summary>
         public SignalFact<DateTime>? EspAdvisoryFailureRecordedUtc { get; }
+
+        /// <summary>
+        /// Set when <c>HandleImeUserSessionCompletedV1</c> observes the IME
+        /// <c>IME-USER-SESSION-COMPLETED</c> pattern (set-once; the first observation wins).
+        /// <para>
+        /// On its own this fact is deliberately weak evidence: the IME "user session" can run
+        /// under <c>defaultuser0</c> (OOBE auto-logon, WhiteGlove technician flow), where its
+        /// completion says nothing about the real user's enrollment. It becomes meaningful only
+        /// in conjunction with independent facts — a DAD-validated real-user desktop
+        /// (<see cref="DesktopArrivedUtc"/>, which excludes defaultuser0/SYSTEM by construction)
+        /// AND a timestamp at-or-after <see cref="AccountSetupEnteredUtc"/> (defaultuser0 IME
+        /// sessions live in the pre-AccountSetup OOBE frame). The
+        /// <c>AdvisoryCompletion</c> deadline handler evaluates exactly that conjunction.
+        /// </para>
+        /// </summary>
+        public SignalFact<DateTime>? ImeUserSessionCompletedUtc { get; }
 
         public string SchemaVersion { get; }
 

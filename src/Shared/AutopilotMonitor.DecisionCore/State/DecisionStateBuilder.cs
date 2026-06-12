@@ -48,6 +48,7 @@ namespace AutopilotMonitor.DecisionCore.State
             DeviceSetupResolvedUtc = source.DeviceSetupResolvedUtc;
             SchemaVersion = source.SchemaVersion;
             EspAdvisoryFailureRecordedUtc = source.EspAdvisoryFailureRecordedUtc;
+            ImeUserSessionCompletedUtc = source.ImeUserSessionCompletedUtc;
         }
 
         public string SessionId { get; set; }
@@ -78,6 +79,7 @@ namespace AutopilotMonitor.DecisionCore.State
         public RealmJoinFacts RealmJoinFacts { get; set; } = RealmJoinFacts.Empty;
         public SignalFact<DateTime>? DeviceSetupResolvedUtc { get; set; }
         public SignalFact<DateTime>? EspAdvisoryFailureRecordedUtc { get; set; }
+        public SignalFact<DateTime>? ImeUserSessionCompletedUtc { get; set; }
         public string SchemaVersion { get; set; }
 
         // ---------- fluent helpers for the most common reducer operations ----------
@@ -227,6 +229,7 @@ namespace AutopilotMonitor.DecisionCore.State
                 realmJoinFacts: RealmJoinFacts,
                 deviceSetupResolvedUtc: DeviceSetupResolvedUtc,
                 schemaVersion: SchemaVersion,
-                espAdvisoryFailureRecordedUtc: EspAdvisoryFailureRecordedUtc);
+                espAdvisoryFailureRecordedUtc: EspAdvisoryFailureRecordedUtc,
+                imeUserSessionCompletedUtc: ImeUserSessionCompletedUtc);
     }
 }

@@ -108,7 +108,9 @@ namespace AutopilotMonitor.DecisionCore.Tests
             // PR1 ContinueAnyway-Defang (Session 4fa5a2d4, 2026-05-22) added
             // `espAdvisoryFailureRecordedUtc` as the fire-once gate for downgraded ESP
             // terminal failures → 15.
-            Assert.Equal(15, facts.Count);
+            // Session 8bc1180f (2026-06-12) added `imeUserSessionCompletedUtc` as the
+            // IME-evidence anchor for the AdvisoryCompletion conjunction → 16.
+            Assert.Equal(16, facts.Count);
             Assert.All(facts.Values, v => Assert.Null(v));
         }
 
@@ -224,10 +226,12 @@ namespace AutopilotMonitor.DecisionCore.Tests
             // `deviceSetupResolvedUtc` as the DeviceSetup-END anchor for the new
             // deadline arm-point → 14. PR1 ContinueAnyway-Defang (Session 4fa5a2d4,
             // 2026-05-22) added `espAdvisoryFailureRecordedUtc` as the fire-once gate
-            // for downgraded ESP terminal failures → 15. If this number ever changes,
-            // both the count expectation AND the actual snapshot output need to evolve
-            // in lockstep.
-            Assert.Equal(15, expectedFactKeys.Count);
+            // for downgraded ESP terminal failures → 15. Session 8bc1180f (2026-06-12)
+            // added `imeUserSessionCompletedUtc` as the IME-evidence anchor for the
+            // AdvisoryCompletion conjunction → 16. If this number ever changes, both
+            // the count expectation AND the actual snapshot output need to evolve in
+            // lockstep.
+            Assert.Equal(16, expectedFactKeys.Count);
 
             var snapshot = DecisionStateSnapshotBuilder.Build(DecisionState.CreateInitial("s", "t"));
             var facts = (Dictionary<string, object?>)snapshot["facts"]!;

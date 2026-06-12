@@ -100,6 +100,16 @@ namespace AutopilotMonitor.DecisionCore.Engine
                 timestamps["deviceSetupResolved"] = FormatUtc(state.DeviceSetupResolvedUtc.Value);
                 evidence["deviceSetupResolved"] = TimestampedEvidence(state.DeviceSetupResolvedUtc);
             }
+            // Session 8bc1180f — IME user-session completion anchor. Consumed by the
+            // AdvisoryCompletion deadline conjunction; surfaced in the census so terminal
+            // audit trails show whether the IME evidence was present (and its timestamp,
+            // for the >= AccountSetupEntered correlation check) when the session resolved.
+            if (state.ImeUserSessionCompletedUtc != null)
+            {
+                seen.Add("ime_user_session_completed");
+                timestamps["imeUserSessionCompleted"] = FormatUtc(state.ImeUserSessionCompletedUtc.Value);
+                evidence["imeUserSessionCompleted"] = TimestampedEvidence(state.ImeUserSessionCompletedUtc);
+            }
 
             // WhiteGlove Part-1 sealing observations — engine-internal, no UTC fact.
             var obs = state.ScenarioObservations;

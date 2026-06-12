@@ -360,6 +360,8 @@ namespace AutopilotMonitor.DecisionCore.Engine
                     return HandleFinalizingGraceDeadlineFired(state, signal);
                 case DeadlineNames.RealmJoinTimeout:
                     return HandleRealmJoinTimeoutDeadlineFired(state, signal);
+                case DeadlineNames.AdvisoryCompletion:
+                    return HandleAdvisoryCompletionDeadlineFired(state, signal);
                 default:
                     // Deadline name not recognized in this sub-milestone. Cancel it from state
                     // and record a neutral taken transition — M3.3+ adds handlers for
