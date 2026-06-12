@@ -55,10 +55,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -266,20 +266,20 @@ jobs:
           }
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: AutopilotMonitor-Agent-v${{ steps.version.outputs.version }}
           path: ${{ steps.artifact.outputs.versioned_zip_release }}
 
       - name: Upload version metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: version-metadata
           path: ${{ env.MANIFEST_NAME }}
 
       - name: Create GitHub Release
         if: inputs.create_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Autopilot Monitor Agent ${{ steps.version.outputs.version }}
