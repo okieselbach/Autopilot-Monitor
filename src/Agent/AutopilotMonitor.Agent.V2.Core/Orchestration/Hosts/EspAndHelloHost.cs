@@ -48,6 +48,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// </summary>
         public Termination.EspTerminalFailureSnapshot? LastEspTerminalFailure => _tracker.LastEspTerminalFailure;
 
+        /// <summary>
+        /// Liveness plan PR3 — appIds already reported via <c>app_install_starved</c> on the
+        /// live path. Read by <c>CollectorSurfaces</c> for the termination handler's dedupe.
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyCollection<string> StarvedAppsReported => _tracker.StarvedAppsReported;
+
         public EspAndHelloHost(
             string sessionId,
             string tenantId,
@@ -61,7 +67,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             int modernDeploymentBackfillLookbackMinutes,
             int[]? modernDeploymentHarmlessEventIds,
             string stateDirectory,
-            Func<bool>? userEspAppsSettledProbe = null)
+            Func<bool>? userEspAppsSettledProbe = null,
+            Func<System.Collections.Generic.IReadOnlyList<Monitoring.Enrollment.Ime.AppPackageState>>? starvedUserEspAppsProbe = null)
         {
             if (ingress == null) throw new ArgumentNullException(nameof(ingress));
             if (clock == null) throw new ArgumentNullException(nameof(clock));
@@ -78,7 +85,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 modernDeploymentBackfillLookbackMinutes: modernDeploymentBackfillLookbackMinutes,
                 stateDirectory: stateDirectory,
                 modernDeploymentHarmlessEventIds: modernDeploymentHarmlessEventIds,
-                userEspAppsSettledProbe: userEspAppsSettledProbe);
+                userEspAppsSettledProbe: userEspAppsSettledProbe,
+                starvedUserEspAppsProbe: starvedUserEspAppsProbe);
 
             _tracker.WhiteGloveCompleted += OnTrackerWhiteGloveCompleted;
             _tracker.DeviceSetupProvisioningComplete += OnTrackerDeviceSetupProvisioningComplete;

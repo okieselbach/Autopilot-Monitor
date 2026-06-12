@@ -247,6 +247,12 @@ namespace AutopilotMonitor.Shared
             public const string AppInstallFailed    = "app_install_failed";
             public const string AppDownloadStarted  = "app_download_started";
             public const string AppInstallSkipped   = "app_install_skipped";
+            // Liveness plan PR3 — one-shot Warning per app naming a required user-ESP app that
+            // NEVER started installing (no download/install activity seen) while the ESP
+            // AccountSetup apps gate waited on it. Emitted when the user-apps-settled probe
+            // returns false after the ESP page exited, and again at termination for leftovers.
+            // This is the actionable customer hint behind "session hangs in AccountSetup".
+            public const string AppInstallStarved   = "app_install_starved";
             public const string NetworkStateChange  = "network_state_change";
             public const string NetworkConnectivityCheck = "network_connectivity_check";
             public const string ErrorDetected       = "error_detected";

@@ -39,5 +39,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
 
         public EspTerminalFailureSnapshot? LastEspTerminalFailure =>
             _orchestrator.CollectorSurfaces?.LastEspTerminalFailure;
+
+        public IReadOnlyList<AppPackageState>? GetStarvedUserEspApps() =>
+            _orchestrator.CollectorSurfaces?.GetStarvedUserEspApps();
+
+        public IReadOnlyCollection<string> StarvedUserEspAppsAlreadyReported =>
+            _orchestrator.CollectorSurfaces?.StarvedUserEspAppsAlreadyReported ?? Array.Empty<string>();
     }
 }

@@ -113,5 +113,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         /// was observed.
         /// </summary>
         public Termination.EspTerminalFailureSnapshot? LastEspTerminalFailure => EspAndHelloHost?.LastEspTerminalFailure;
+
+        /// <summary>
+        /// Liveness plan PR3 — required user-ESP apps that never started installing (current
+        /// AccountSetup phase). Empty when no IME host exists.
+        /// </summary>
+        public IReadOnlyList<AppPackageState> GetStarvedUserEspApps() =>
+            _imeLogHost?.GetStarvedUserEspApps() ?? Array.Empty<AppPackageState>();
+
+        /// <summary>
+        /// Liveness plan PR3 — appIds already reported via <c>app_install_starved</c> on the
+        /// live (esp_exited) path. Consulted by the termination handler so the terminal sweep
+        /// never double-reports an app. Empty when no ESP/Hello host exists.
+        /// </summary>
+        public IReadOnlyCollection<string> StarvedUserEspAppsAlreadyReported =>
+            EspAndHelloHost?.StarvedAppsReported ?? Array.Empty<string>();
     }
 }

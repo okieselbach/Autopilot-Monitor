@@ -61,6 +61,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
         public bool AreUserEspAppsSettled() => _tracker.AreUserEspAppsSettled();
 
         /// <summary>
+        /// Liveness plan PR3 — bridge for the <c>EspAndHelloTracker</c> starved-apps probe and
+        /// the <c>EnrollmentTerminationHandler</c> terminal sweep. See
+        /// <see cref="ImeLogTracker.GetStarvedUserEspApps"/>.
+        /// </summary>
+        public IReadOnlyList<AppPackageState> GetStarvedUserEspApps() => _tracker.GetStarvedUserEspApps();
+
+        /// <summary>
         /// c117946b debrief (2026-05-12) — bridge for the <c>EnrollmentTerminationHandler</c>
         /// pre-hook to promote apps still in <see cref="AppInstallationState.Installing"/>
         /// to Error on terminal ESP-Apps failure. Delegates to

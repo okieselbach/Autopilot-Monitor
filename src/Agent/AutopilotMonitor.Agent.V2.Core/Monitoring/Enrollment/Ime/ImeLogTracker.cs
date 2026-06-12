@@ -291,6 +291,47 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
         }
 
         /// <summary>
+        /// Liveness plan PR3 — returns the required user-ESP apps that are STARVING the
+        /// AccountSetup apps gate: tracked in the current AccountSetup phase, Install/Uninstall
+        /// intent, no download/install activity ever observed, not terminal and not failed.
+        /// These are the apps whose enforcement IME never started (e.g. a user-targeted app
+        /// stuck on "pending") — the actual blocker behind the gate-starvation dead-ends.
+        /// <para>
+        /// Deliberately excludes apps that are alive (<see cref="AppPackageState.DownloadingOrInstallingSeen"/>
+        /// covers Downloading/Installing and anything that ever progressed) and error-state apps
+        /// (the failure path already names those). Same thread-safety contract as
+        /// <see cref="AreUserEspAppsSettled"/>: snapshot copy, any race-induced exception
+        /// returns an empty list.
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<AppPackageState> GetStarvedUserEspApps()
+        {
+            try
+            {
+                if (!string.Equals(_lastEspPhaseDetected, "AccountSetup", StringComparison.OrdinalIgnoreCase))
+                    return Array.Empty<AppPackageState>();
+
+                var apps = new List<AppPackageState>(_packageStates);
+                if (apps.Count == 0) return Array.Empty<AppPackageState>();
+
+                var starved = new List<AppPackageState>();
+                foreach (var pkg in apps)
+                {
+                    if (pkg == null || !pkg.IsRequired) continue;
+                    if (pkg.IsCompleted || pkg.IsError) continue;
+                    if (pkg.DownloadingOrInstallingSeen) continue;
+                    starved.Add(pkg);
+                }
+                return starved;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"ImeLogTracker: GetStarvedUserEspApps probe threw: {ex.Message}");
+                return Array.Empty<AppPackageState>();
+            }
+        }
+
+        /// <summary>
         /// Promotes every app currently in <see cref="AppInstallationState.Installing"/> to
         /// <see cref="AppInstallationState.Error"/>, stamping <paramref name="failureType"/>
         /// onto <see cref="AppPackageState.ErrorPatternId"/> and <paramref name="message"/>

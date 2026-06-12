@@ -159,6 +159,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             // non-Apps gating test assigns a snapshot whose FailedSubcategory is NOT
             // "Apps".
             public EspTerminalFailureSnapshot? LastEspTerminalFailureOverride { get; set; } = null;
+
+            // Liveness plan PR3 — starved-apps surfaces for the terminal sweep tests.
+            public IReadOnlyList<AppPackageState>? StarvedAppsOverride { get; set; } = null;
+            public IReadOnlyCollection<string> StarvedAlreadyReportedOverride { get; set; } = Array.Empty<string>();
             public List<string> TerminationActionLog { get; } = new List<string>();
             public TimeSpan SpoolDrainPeriodOverride { get; set; } = TimeSpan.Zero;
             // Shutdown-gap closure (2026-05-15) — when set, the constructed handler shares
@@ -223,6 +227,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
             }
 
             public EspTerminalFailureSnapshot? LastEspTerminalFailure => _rig.LastEspTerminalFailureOverride;
+
+            public IReadOnlyList<AppPackageState>? GetStarvedUserEspApps() => _rig.StarvedAppsOverride;
+
+            public IReadOnlyCollection<string> StarvedUserEspAppsAlreadyReported => _rig.StarvedAlreadyReportedOverride;
         }
 
         /// <summary>
@@ -1077,6 +1085,77 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
                 Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
 
             Assert.Empty(rig.PromotionCalls);
+        }
+
+        // ----------------------------------------------------------------
+        // Liveness plan PR3: app_install_starved terminal sweep
+        // ----------------------------------------------------------------
+
+        private static AppPackageState BuildStarvedApp(string id, string name)
+        {
+            var pkg = new AppPackageState(id, listPos: 0);
+            pkg.UpdateIntent(AppIntent.Install);
+            pkg.UpdateName(name);
+            return pkg;
+        }
+
+        [Fact]
+        public void StarvedApps_at_termination_emit_one_warning_per_app()
+        {
+            using var rig = new Rig();
+            rig.StarvedAppsOverride = new[] { BuildStarvedApp("app-starving", "Contoso Backgrounds") };
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.MaxLifetimeExceeded, EnrollmentTerminationOutcome.TimedOut, SessionStage.EspAccountSetup));
+
+            Assert.Contains("app_install_starved", rig.EmittedEventTypes);
+            var post = rig.Ingress.Posted.Single(p =>
+                p.Payload != null
+                && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
+                && et == "app_install_starved");
+            Assert.Equal("Warning", post.Payload![SignalPayloadKeys.Severity]);
+            var data = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(post.TypedPayload);
+            Assert.Equal("app-starving", data["appId"]);
+            Assert.Equal("termination", data["trigger"]);
+            Assert.Equal("TimedOut", data["terminationOutcome"]);
+        }
+
+        [Fact]
+        public void StarvedApps_already_reported_by_live_path_are_skipped()
+        {
+            using var rig = new Rig();
+            rig.StarvedAppsOverride = new[] { BuildStarvedApp("app-starving", "Contoso Backgrounds") };
+            rig.StarvedAlreadyReportedOverride = new[] { "app-starving" };
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.DoesNotContain("app_install_starved", rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void No_starved_apps_emits_nothing()
+        {
+            using var rig = new Rig();
+            rig.StarvedAppsOverride = null; // no IME surface
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.Completed));
+
+            Assert.DoesNotContain("app_install_starved", rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void StarvedApps_skipped_on_whiteglove_part1()
+        {
+            // Part 1 has no user session — user apps haven't run yet; Part 2 is where they land.
+            using var rig = new Rig();
+            rig.StarvedAppsOverride = new[] { BuildStarvedApp("app-starving", "Contoso Backgrounds") };
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Succeeded, SessionStage.WhiteGloveSealed));
+
+            Assert.DoesNotContain("app_install_starved", rig.EmittedEventTypes);
         }
 
         [Fact]

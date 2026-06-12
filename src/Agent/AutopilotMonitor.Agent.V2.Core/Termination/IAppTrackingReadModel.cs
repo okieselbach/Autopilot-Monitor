@@ -73,5 +73,21 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
         /// mis-classify in-flight installs. Null = no HRESULT context → fallback.
         /// </summary>
         EspTerminalFailureSnapshot? LastEspTerminalFailure { get; }
+
+        /// <summary>
+        /// Liveness plan PR3 — required user-ESP apps that never started installing while the
+        /// AccountSetup apps gate waited on them (no download/install activity, not failed,
+        /// not terminal). The termination handler emits a one-shot <c>app_install_starved</c>
+        /// Warning per leftover app on every terminal outcome. May return null / empty when no
+        /// IME surface exists.
+        /// </summary>
+        IReadOnlyList<AppPackageState>? GetStarvedUserEspApps();
+
+        /// <summary>
+        /// Liveness plan PR3 — appIds the live (esp_exited) path already reported via
+        /// <c>app_install_starved</c>. The terminal sweep skips these so the two emission
+        /// paths never double-report an app.
+        /// </summary>
+        IReadOnlyCollection<string> StarvedUserEspAppsAlreadyReported { get; }
     }
 }

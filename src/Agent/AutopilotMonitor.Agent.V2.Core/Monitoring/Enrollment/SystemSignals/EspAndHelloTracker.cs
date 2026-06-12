@@ -40,10 +40,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly Func<(bool? skipUser, bool? skipDevice)> _skipConfigProbe;
         private readonly Func<bool> _accountSetupActivityProbe;
         private readonly Func<bool> _userEspAppsSettledProbe;
+        private readonly Func<System.Collections.Generic.IReadOnlyList<Ime.AppPackageState>> _starvedUserEspAppsProbe;
 
         // Session caa6cf50 gate-starvation fix (2026-06-11) — fire-once guard for the
         // user-ESP-apps-settled AccountSetup synthesis (see MaybeSynthesizeAccountSetupComplete).
         private bool _userAppsSettledSynthesisFired;
+
+        // Liveness plan PR3 — one-shot-per-appId dedupe for app_install_starved emissions.
+        // Written from the Shell-Core watcher thread (esp_exited path), read at termination by
+        // the EnrollmentTerminationHandler via StarvedAppsReported — guarded by _starvedLock.
+        private readonly System.Collections.Generic.HashSet<string> _starvedAppsReported =
+            new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly object _starvedLock = new object();
 
         private HelloTracker _helloTracker;
         private ShellCoreTracker _shellCoreTracker;
@@ -195,7 +203,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             int[] modernDeploymentHarmlessEventIds = null,
             Func<(bool? skipUser, bool? skipDevice)> skipConfigProbe = null,
             Func<bool> accountSetupActivityProbe = null,
-            Func<bool> userEspAppsSettledProbe = null)
+            Func<bool> userEspAppsSettledProbe = null,
+            Func<System.Collections.Generic.IReadOnlyList<Ime.AppPackageState>> starvedUserEspAppsProbe = null)
         {
             _sessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
             _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -218,6 +227,27 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             // probe (wired to ImeLogHost.AreUserEspAppsSettled by DefaultComponentFactory).
             // Defaults to "not settled" so single-tracker wiring scenarios keep prior behaviour.
             _userEspAppsSettledProbe = userEspAppsSettledProbe ?? (() => false);
+            // Liveness plan PR3: IME-side starved-apps probe (wired to
+            // ImeLogHost.GetStarvedUserEspApps by DefaultComponentFactory). Defaults to empty
+            // so single-tracker wiring scenarios never emit app_install_starved.
+            _starvedUserEspAppsProbe = starvedUserEspAppsProbe
+                ?? (() => Array.Empty<Ime.AppPackageState>());
+        }
+
+        /// <summary>
+        /// Liveness plan PR3 — appIds already reported via <c>app_install_starved</c> on the
+        /// live (esp_exited) path. Read by the <c>EnrollmentTerminationHandler</c> terminal
+        /// sweep so the two emission paths never double-report an app. Snapshot copy.
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyCollection<string> StarvedAppsReported
+        {
+            get
+            {
+                lock (_starvedLock)
+                {
+                    return new System.Collections.Generic.List<string>(_starvedAppsReported);
+                }
+            }
         }
 
         // =====================================================================
@@ -618,7 +648,16 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 _logger.Debug($"EspAndHelloTracker: user-ESP-apps-settled probe threw: {ex.Message}");
                 return;
             }
-            if (!settled) return;
+            if (!settled)
+            {
+                // Liveness plan PR3: the ESP page is gone but the user-apps gate is NOT settled
+                // — name the app(s) that never started installing instead of leaving the
+                // operator with an anonymous "session hangs in AccountSetup". One-shot per
+                // appId; apps that are alive (Downloading/Installing) or failed are excluded
+                // by the probe itself.
+                EmitStarvedUserEspApps(trigger: "esp_exited_user_apps_not_settled");
+                return;
+            }
 
             _userAppsSettledSynthesisFired = true;
             _logger.Warning(
@@ -648,6 +687,68 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
             try { AccountSetupProvisioningComplete?.Invoke(this, EventArgs.Empty); }
             catch (Exception ex) { _logger.Error("AccountSetupProvisioningComplete handler failed (user-apps-settled synthesis)", ex); }
+        }
+
+        /// <summary>
+        /// Liveness plan PR3 — emit a one-shot <c>app_install_starved</c> Warning per starved
+        /// user-ESP app (required, never started installing, not failed). Best-effort: probe or
+        /// emit failures are logged and swallowed; a failed emit keeps the appId out of the
+        /// dedupe set so the termination sweep can retry.
+        /// </summary>
+        private void EmitStarvedUserEspApps(string trigger)
+        {
+            System.Collections.Generic.IReadOnlyList<Ime.AppPackageState> starved;
+            try { starved = _starvedUserEspAppsProbe(); }
+            catch (Exception ex)
+            {
+                _logger.Debug($"EspAndHelloTracker: starved-apps probe threw: {ex.Message}");
+                return;
+            }
+            if (starved == null || starved.Count == 0) return;
+
+            foreach (var app in starved)
+            {
+                if (app?.Id == null) continue;
+                lock (_starvedLock)
+                {
+                    if (!_starvedAppsReported.Add(app.Id)) continue;
+                }
+
+                try
+                {
+                    var name = string.IsNullOrEmpty(app.Name) ? app.Id : app.Name;
+                    _logger.Warning(
+                        $"EspAndHelloTracker: required user-ESP app '{name}' ({app.Id}) never started installing " +
+                        $"(state={app.InstallationState}) — starving the AccountSetup apps gate (trigger={trigger}).");
+
+                    _post.Emit(new EnrollmentEvent
+                    {
+                        SessionId = _sessionId,
+                        TenantId = _tenantId,
+                        EventType = Constants.EventTypes.AppInstallStarved,
+                        Severity = EventSeverity.Warning,
+                        Source = "EspAndHelloTracker",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"Required app '{name}' never started installing while the ESP AccountSetup " +
+                                  "apps gate waited on it — the app is starving the enrollment completion.",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "appId", app.Id },
+                            { "appName", name },
+                            { "state", app.InstallationState.ToString() },
+                            { "intent", app.Intent.ToString() },
+                            { "targeted", app.Targeted.ToString() },
+                            { "trigger", trigger },
+                        },
+                        ImmediateUpload = true,
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"EspAndHelloTracker: app_install_starved emit failed for '{app.Id}'", ex);
+                    lock (_starvedLock) { _starvedAppsReported.Remove(app.Id); }
+                }
+            }
         }
 
         // Test seam for the user-apps-settled synthesis — drives OnEspExited with the live

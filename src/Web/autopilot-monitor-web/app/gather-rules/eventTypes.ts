@@ -80,6 +80,8 @@ export const KNOWN_EVENT_TYPES: EventTypeEntry[] = [
     description: "An application installation failed." },
   { value: "app_install_skipped", label: "app_install_skipped", category: "app",
     description: "An application installation was skipped." },
+  { value: "app_install_starved", label: "app_install_starved", category: "app",
+    description: "A required user-ESP app never started installing while the AccountSetup apps gate waited on it (one-shot per app)." },
   { value: "app_download_started", label: "app_download_started", category: "app",
     description: "An application download has started." },
   { value: "download_progress", label: "download_progress", category: "app",

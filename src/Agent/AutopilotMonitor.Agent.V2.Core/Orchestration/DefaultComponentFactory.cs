@@ -121,7 +121,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 modernDeploymentBackfillLookbackMinutes: collectors.ModernDeploymentBackfillLookbackMinutes,
                 modernDeploymentHarmlessEventIds: collectors.ModernDeploymentHarmlessEventIds,
                 stateDirectory: _stateDirectory,
-                userEspAppsSettledProbe: () => imeLogHostRef?.AreUserEspAppsSettled() == true);
+                userEspAppsSettledProbe: () => imeLogHostRef?.AreUserEspAppsSettled() == true,
+                // Liveness plan PR3: starved-apps probe over the same lazily-assigned IME host.
+                starvedUserEspAppsProbe: () =>
+                    imeLogHostRef?.GetStarvedUserEspApps()
+                    ?? Array.Empty<Monitoring.Enrollment.Ime.AppPackageState>());
             hosts.Add(espAndHelloHost);
 
             // Hybrid User-Driven completion-gap fix (2026-05-01): the AadJoinHost notifies

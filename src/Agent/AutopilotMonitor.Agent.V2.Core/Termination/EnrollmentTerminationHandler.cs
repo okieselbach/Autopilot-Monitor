@@ -181,6 +181,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     // the new Error counts via the `likelyStuckNames` bucket.
                     MaybePromoteActiveInstallsAsStuck(state, args);
 
+                    // Liveness plan PR3 — leftover starved apps (required, never started
+                    // installing) at termination get their one-shot app_install_starved
+                    // BEFORE the summary so both reach the backend in the terminal flush.
+                    // Runs on every outcome; the live (esp_exited) path's dedupe set is
+                    // consulted so no app is reported twice. Promoted likely-stuck apps are
+                    // Error by now and excluded by the probe itself.
+                    EmitStarvedUserEspApps(args);
+
                     EmitAppTrackingSummary();
                 }
 
@@ -399,6 +407,65 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             {
                 _logger.Warning($"EnrollmentTerminationHandler: ignoredCount accessor threw: {ex.Message}");
                 return 0;
+            }
+        }
+
+        /// <summary>
+        /// Liveness plan PR3 — terminal sweep for <c>app_install_starved</c>. Emits a one-shot
+        /// Warning per required user-ESP app that never started installing and was not already
+        /// reported by the live (esp_exited) path in <c>EspAndHelloTracker</c>. Best-effort:
+        /// any accessor / emit failure is logged and swallowed.
+        /// </summary>
+        private void EmitStarvedUserEspApps(EnrollmentTerminatedEventArgs args)
+        {
+            if (_post == null) return;
+
+            try
+            {
+                var starved = _appTracking.GetStarvedUserEspApps();
+                if (starved == null || starved.Count == 0) return;
+
+                var alreadyReported = _appTracking.StarvedUserEspAppsAlreadyReported
+                    ?? (IReadOnlyCollection<string>)Array.Empty<string>();
+                var reported = new HashSet<string>(alreadyReported, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var app in starved)
+                {
+                    if (app?.Id == null || !reported.Add(app.Id)) continue;
+
+                    var name = string.IsNullOrEmpty(app.Name) ? app.Id : app.Name;
+                    _logger.Warning(
+                        $"EnrollmentTerminationHandler: required user-ESP app '{name}' ({app.Id}) never started " +
+                        $"installing (state={app.InstallationState}) — reporting app_install_starved at termination " +
+                        $"(outcome={args.Outcome}).");
+
+                    _post.Emit(new EnrollmentEvent
+                    {
+                        SessionId = _configuration.SessionId,
+                        TenantId = _configuration.TenantId,
+                        EventType = Constants.EventTypes.AppInstallStarved,
+                        Severity = EventSeverity.Warning,
+                        Source = "EnrollmentTerminationHandler",
+                        Phase = EnrollmentPhase.Unknown,
+                        Message = $"Required app '{name}' never started installing while the ESP AccountSetup " +
+                                  "apps gate waited on it — the app starved the enrollment completion.",
+                        Data = new Dictionary<string, object>
+                        {
+                            { "appId", app.Id },
+                            { "appName", name },
+                            { "state", app.InstallationState.ToString() },
+                            { "intent", app.Intent.ToString() },
+                            { "targeted", app.Targeted.ToString() },
+                            { "trigger", "termination" },
+                            { "terminationOutcome", args.Outcome.ToString() },
+                        },
+                        ImmediateUpload = true,
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: app_install_starved terminal sweep failed: {ex.Message}");
             }
         }
 
