@@ -69,6 +69,7 @@ export const EVENT_TYPES_CATALOG = {
     'office_install_progress',
     'office_install_completed',
     'office_install_failed',
+    'office_preinstalled_detected',
   ],
   script_events: ['script_started', 'script_completed', 'script_failed'],
   network_events: [

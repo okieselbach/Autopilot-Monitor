@@ -96,6 +96,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
         [InlineData(OfficeInstallStateData.StateActive, false)]
         [InlineData(OfficeInstallStateData.StateCompleted, true)]
         [InlineData(OfficeInstallStateData.StateFailed, true)]
+        [InlineData(OfficeInstallStateData.StatePreinstalled, false)] // persisted for dedup, but re-arms
         public void IsTerminal_only_for_completed_and_failed(string state, bool expected)
         {
             Assert.Equal(expected, new OfficeInstallStateData { State = state }.IsTerminal);

@@ -92,8 +92,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         public const string StateActive = "Active";
         public const string StateCompleted = "Completed";
         public const string StateFailed = "Failed";
+        // The C2R activity was on an already-resident Office (OEM/consumer inbox) — a
+        // office_preinstalled_detected went out, no install lifecycle was opened. Persisted ONLY to
+        // suppress a duplicate emit across reboots; deliberately NOT terminal (see IsTerminal), because
+        // an enrollment commonly uninstalls the inbox Office and lays down a fresh one afterwards — the
+        // next run must re-arm the detector to catch that real install.
+        public const string StatePreinstalled = "Preinstalled";
 
-        /// <summary><see cref="StateActive"/>, <see cref="StateCompleted"/> or <see cref="StateFailed"/>.</summary>
+        /// <summary><see cref="StateActive"/>, <see cref="StateCompleted"/>, <see cref="StateFailed"/> or <see cref="StatePreinstalled"/>.</summary>
         public string? State { get; set; }
 
         public DateTime? StartedAtUtc { get; set; }
@@ -102,6 +108,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         /// <summary>Highest-bytes DO sample seen — basis for the doSummary on a resumed completion.</summary>
         public OfficeDoPeakData? PeakDo { get; set; }
 
+        // Preinstalled is intentionally excluded — it is persisted for emit-once dedup but must NOT
+        // block the next run from arming the detector (a later fresh install must still be detected).
         [JsonIgnore]
         public bool IsTerminal => State == StateCompleted || State == StateFailed;
     }

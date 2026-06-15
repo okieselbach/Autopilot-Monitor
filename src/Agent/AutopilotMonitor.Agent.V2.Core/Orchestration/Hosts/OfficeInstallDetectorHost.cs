@@ -33,6 +33,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
     /// An explicit error code → failed. No binary ever appears → the lifecycle simply stays open and is
     /// abandoned silently on dispose (never a false completed/failed).
     /// </para>
+    /// <para>
+    /// <b>Already-resident short-circuit:</b> when the core Office binaries are already on disk at the
+    /// first signal, the detector does not open an install lifecycle — a consumer/OEM-inbox product set
+    /// emits an informational <c>office_preinstalled_detected</c> (no binary watcher armed), enterprise
+    /// Office falls through to the synchronous started→completed path. See <see cref="OfficeInstallDetector"/>.
+    /// </para>
     /// </summary>
     internal sealed class OfficeInstallDetectorHost : ICollectorHost
     {
@@ -91,6 +97,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
         public void Start()
         {
+            // Restore the preinstalled emit-once guard BEFORE arming any watcher. The process watcher's
+            // startup probe can synchronously fire Started (→ OnWorkerStarted → BeginIfIdle) when
+            // OfficeC2RClient.exe is already running, which would otherwise re-emit
+            // office_preinstalled_detected for the resident inbox Office. ResumePreinstalled only sets
+            // the guard (no watcher/InstallationPath interaction), so it is safe to run this early.
+            if (_resumeState != null && _resumeState.State == OfficeInstallStateData.StatePreinstalled)
+                _detector.ResumePreinstalled(_resumeState);
+
             // Arm the registry watcher up front (not at worker-start) so the early Scenario\INSTALL key
             // is caught before the (late) worker process. The watcher's bootstrap fallback handles the
             // case where the ClickToRun key does not exist yet on a clean first install.
@@ -102,11 +116,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             }
             _processWatcher.Start();
 
-            // Resume a lifecycle left open by a previous agent run (enrollments span reboots) AFTER
-            // the watchers are armed: the resume surfaces the InstallationPath, which arms the binary
-            // watcher — when Office finished installing while the agent was down, its initial scan
-            // completes the lifecycle synchronously and the teardown disposes the watchers again.
-            if (_resumeState != null) _detector.ResumeActive(_resumeState);
+            // Resume a persisted *Active* lifecycle (enrollments span reboots) AFTER the watchers are
+            // armed: the resume surfaces the InstallationPath, which arms the binary watcher — when
+            // Office finished installing while the agent was down, its initial scan completes the
+            // lifecycle synchronously and the teardown disposes the just-armed watchers again.
+            if (_resumeState != null && _resumeState.State != OfficeInstallStateData.StatePreinstalled)
+                _detector.ResumeActive(_resumeState);
         }
 
         private void OnWorkerStarted(object? sender, EventArgs e) => _detector.OnWorkerStarted();

@@ -53,7 +53,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             public List<FakeSignalIngressSink.PostedSignal> OfficeEvents() => Sink.Posted
                 .Where(p => p.Payload != null
                     && p.Payload.TryGetValue(SignalPayloadKeys.EventType, out var et)
-                    && et != null && et.StartsWith("office_install_", StringComparison.Ordinal))
+                    && et != null && et.StartsWith("office_", StringComparison.Ordinal))
                 .ToList();
 
             public void Dispose() => _tmp.Dispose();
@@ -69,6 +69,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
                 StreamingFinished = false,
                 ActiveScenarioPresent = true,
                 ActiveScenarioName = "INSTALL",
+                InstallScenarioPresent = true,
+                InstallScenarioName = "INSTALL",
                 OfficeC2RClientRunning = true,
             };
             s.Products.Add("O365ProPlusRetail");
@@ -89,6 +91,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
                 VersionToReport = version,
             };
             s.Products.Add("O365ProPlusRetail");
+            return s;
+        }
+
+        // An Office that is already fully resident on disk at the first signal: OEM/consumer inbox
+        // Office (O365HomePremRetail + OneNoteFreeRetail) running a background CLIENTUPDATE — the
+        // false-positive shape from field session fa526757.
+        private static OfficeC2RSnapshot PreinstalledConsumer(string scenario = "CLIENTUPDATE")
+        {
+            var s = new OfficeC2RSnapshot
+            {
+                ConfigurationKeyPresent = true,
+                Channel = "Current",
+                Platform = "x64",
+                StreamingFinished = true,
+                ActiveScenarioPresent = true,
+                ActiveScenarioName = scenario,
+                OfficeC2RClientRunning = true,
+                InstallationPath = @"C:\Program Files\Microsoft Office",
+                VersionToReport = "16.0.16327.20264",
+            };
+            s.Products.Add("O365HomePremRetail");
+            s.Products.Add("OneNoteFreeRetail");
             return s;
         }
 
@@ -382,12 +406,188 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal("0x80070005", Data(failed)["errorCode"]);
         }
 
+        // ---------------------------------------------------------------- preinstalled (already-resident)
+
+        [Fact]
+        public void Resident_consumer_office_emits_preinstalled_not_started_or_failed()
+        {
+            // OEM/consumer inbox Office already on disk at the first signal, running a background
+            // CLIENTUPDATE — surface an informational office_preinstalled_detected, never a
+            // started/failed pair (field session fa526757 / the CLIENTUPDATE errorCode "2" false alarm).
+            using var rig = new Rig(PreinstalledConsumer());
+            rig.Sut.CoreBinariesProbe = _ => true; // core Office binaries already present on disk
+
+            rig.Sut.OnWorkerStarted();
+
+            var ev = Assert.Single(rig.OfficeEvents());
+            Assert.Equal(Constants.EventTypes.OfficePreinstalledDetected, EventType(ev));
+            Assert.Equal("Info", Severity(ev));
+            var data = Data(ev);
+            Assert.Equal("office_already_resident", data["reason"]);
+            Assert.Equal("CLIENTUPDATE", data["scenario"]);
+            Assert.Contains("O365HomePremRetail", (List<string>)data["products"]);
+        }
+
+        [Fact]
+        public void Resident_consumer_office_with_install_scenario_still_preinstalled()
+        {
+            // The real field false positive had scenario=INSTALL yet Office was already resident — the
+            // filesystem proof (not the scenario name) is what classifies it as preinstalled.
+            using var rig = new Rig(PreinstalledConsumer(scenario: "INSTALL"));
+            rig.Sut.CoreBinariesProbe = _ => true;
+
+            rig.Sut.OnWorkerStarted();
+
+            Assert.Equal(Constants.EventTypes.OfficePreinstalledDetected, EventType(Assert.Single(rig.OfficeEvents())));
+        }
+
+        [Fact]
+        public void Resident_enterprise_office_still_starts_not_preinstalled()
+        {
+            // Enterprise Office already on disk (Office CSP / Win32-wrapper re-run, field session
+            // a7525e97) is NOT preinstalled inbox Office — keep the started→completed path.
+            var snap = ActiveStreaming(); // O365ProPlusRetail
+            snap.InstallationPath = @"C:\Program Files\Microsoft Office";
+            using var rig = new Rig(snap);
+            rig.Sut.CoreBinariesProbe = _ => true;
+
+            rig.Sut.OnWorkerStarted();
+
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(Assert.Single(rig.OfficeEvents())));
+        }
+
+        [Fact]
+        public void Fresh_install_without_binaries_on_disk_starts_normally()
+        {
+            // The common case (200/202 field starts): early DO trigger, nothing on disk yet → started.
+            using var rig = new Rig(PreinstalledConsumer());
+            rig.Sut.CoreBinariesProbe = _ => false; // no binaries on disk yet → a genuine fresh install
+
+            rig.Sut.OnWorkerStarted();
+
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(Assert.Single(rig.OfficeEvents())));
+        }
+
+        [Fact]
+        public void Preinstalled_persists_nonterminal_state_so_next_run_rearms()
+        {
+            // Persisted for emit-once dedup, but NOT terminal — the factory must still arm the detector
+            // next run (an enrollment often uninstalls the inbox Office and installs a fresh one).
+            using var rig = new Rig(PreinstalledConsumer(), withPersistence: true);
+            rig.Sut.CoreBinariesProbe = _ => true;
+
+            rig.Sut.OnWorkerStarted();
+
+            var state = rig.Persistence!.Load();
+            Assert.Equal(OfficeInstallStateData.StatePreinstalled, state!.State);
+            Assert.False(state.IsTerminal);
+        }
+
+        [Fact]
+        public void Preinstalled_emits_once_then_a_later_fresh_install_still_starts()
+        {
+            // Resident inbox Office reports preinstalled (no lifecycle). Then the enrollment lays down a
+            // fresh enterprise Microsoft 365 Apps (real download, no binaries on disk yet) — that MUST
+            // still open a normal started lifecycle (the re-arm requirement).
+            using var rig = new Rig(PreinstalledConsumer());
+            rig.Sut.CoreBinariesProbe = _ => true;
+            rig.Sut.OnWorkerStarted(); // → office_preinstalled_detected, stays Idle/armed
+
+            // A second resident-consumer signal must NOT emit a duplicate preinstalled.
+            rig.Sut.OnWorkerStarted();
+
+            var afterFirst = rig.OfficeEvents();
+            Assert.Single(afterFirst);
+            Assert.Equal(Constants.EventTypes.OfficePreinstalledDetected, EventType(afterFirst[0]));
+
+            // Now a fresh enterprise install begins (binaries not yet on disk → real download).
+            rig.Current = ActiveStreaming(); // O365ProPlusRetail, streaming
+            rig.Sut.CoreBinariesProbe = _ => false;
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 2, FileSize = 1000, TotalBytesDownloaded = 100 });
+
+            var events = rig.OfficeEvents();
+            Assert.Equal(2, events.Count);
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(events[1]));
+        }
+
+        [Fact]
+        public void Preinstalled_do_bytes_do_not_leak_into_a_later_real_install_summary()
+        {
+            // A CLIENTUPDATE DO download (large bytes) drives the preinstalled short-circuit — those
+            // bytes must NOT seed _peakDo, or a later real install's doSummary would report them.
+            using var rig = new Rig(PreinstalledConsumer());
+            rig.Sut.CoreBinariesProbe = _ => true;
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 3, FileSize = 5000, TotalBytesDownloaded = 4000 });
+            Assert.Equal(Constants.EventTypes.OfficePreinstalledDetected, EventType(Assert.Single(rig.OfficeEvents())));
+
+            // Now a real enterprise install begins (smaller download) and completes.
+            rig.Current = ActiveStreaming();
+            rig.Sut.CoreBinariesProbe = _ => false;
+            rig.Sut.OnOfficeDoSample(new OfficeDoSample { JobCount = 1, FileSize = 1000, TotalBytesDownloaded = 600, BytesFromHttp = 600 });
+            rig.Current = CompletedIdle();
+            rig.Sut.CoreBinariesProbe = _ => true;
+            Assert.Equal(OfficeInstallDetector.CompletionOutcome.Completed, rig.Sut.TryFinalizeCompletion());
+
+            var completed = rig.OfficeEvents().Last();
+            Assert.Equal(Constants.EventTypes.OfficeInstallCompleted, EventType(completed));
+            var summary = Assert.IsType<Dictionary<string, object>>(Data(completed)["doSummary"]);
+            Assert.Equal(600L, summary["totalBytesDownloaded"]); // the real install's bytes, NOT the 4000 CLIENTUPDATE bytes
+        }
+
+        [Fact]
+        public void ResumePreinstalled_suppresses_duplicate_emit_but_stays_armed()
+        {
+            using var rig = new Rig(PreinstalledConsumer());
+            rig.Sut.CoreBinariesProbe = _ => true;
+
+            // Simulate a restart where preinstalled was already reported in a previous run.
+            rig.Sut.ResumePreinstalled(new OfficeInstallStateData { State = OfficeInstallStateData.StatePreinstalled });
+
+            // Resident-consumer signal this run must NOT re-emit preinstalled.
+            rig.Sut.OnWorkerStarted();
+            Assert.Empty(rig.OfficeEvents());
+
+            // But a fresh enterprise install still starts (armed).
+            rig.Current = ActiveStreaming();
+            rig.Sut.CoreBinariesProbe = _ => false;
+            rig.Sut.OnWorkerStarted();
+            Assert.Equal(Constants.EventTypes.OfficeInstallStarted, EventType(Assert.Single(rig.OfficeEvents())));
+        }
+
+        // ---------------------------------------------------------------- product classifier
+
+        [Theory]
+        [InlineData(true, "O365HomePremRetail", "OneNoteFreeRetail")] // OEM consumer inbox
+        [InlineData(true, "OneNoteFreeRetail")]
+        [InlineData(true, "HomeBusinessRetail")]                      // consumer perpetual — NOT the managed O365Business
+        [InlineData(true, "HomeStudent2019Retail")]
+        [InlineData(false, "O365ProPlusRetail")]                      // M365 Apps for enterprise
+        [InlineData(false, "O365BusinessRetail")]                     // M365 Apps for business (managed)
+        [InlineData(false, "O365HomePremRetail", "O365ProPlusRetail")] // mixed → managed wins
+        [InlineData(false, "SomeUnknownSku")]                          // unknown → not consumer
+        public void IsConsumerInboxProductSet_classifies_consumer_vs_managed(bool expected, params string[] products)
+        {
+            Assert.Equal(expected, OfficeProductClassifier.IsConsumerInboxProductSet(products));
+        }
+
+        [Fact]
+        public void IsConsumerInboxProductSet_empty_is_not_consumer()
+        {
+            Assert.False(OfficeProductClassifier.IsConsumerInboxProductSet(new List<string>()));
+            Assert.False(OfficeProductClassifier.IsConsumerInboxProductSet(null));
+        }
+
         // ---------------------------------------------------------------- error-code heuristic
 
         [Theory]
         [InlineData("0x80070005", true)]   // hex HRESULT
         [InlineData("17002", true)]        // decimal C2R exit code
+        [InlineData("30015", true)]        // decimal C2R exit code
         [InlineData("-2147024891", true)]  // negative decimal HRESULT
+        [InlineData("2", false)]           // implausibly small positive — a state/enum, not an error
+        [InlineData("9", false)]
+        [InlineData("999", false)]         // just below the plausibility floor
+        [InlineData("1000", true)]         // at the floor
         [InlineData("0x0", false)]         // zero hex
         [InlineData("0", false)]           // zero decimal
         [InlineData("Success", false)]     // benign textual value (e.g. Result=Success)
@@ -395,7 +595,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
         [InlineData("InProgress", false)]
         [InlineData("", false)]
         [InlineData(null, false)]
-        public void IsNonZeroNumericCode_only_treats_nonzero_numbers_as_errors(string? value, bool expected)
+        public void IsNonZeroNumericCode_only_treats_plausible_nonzero_numbers_as_errors(string? value, bool expected)
         {
             Assert.Equal(expected, OfficeInstallDetector.IsNonZeroNumericCode(value!));
         }

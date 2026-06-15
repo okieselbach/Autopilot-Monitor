@@ -600,7 +600,7 @@ export default function SessionDetailPage() {
             <InstallProgress
               events={events.filter(
                 e => e.eventType === "app_install_started" || e.eventType === "app_install_completed" || e.eventType === "app_install_failed" || e.eventType === "app_install_postponed" || e.eventType === "app_install_skipped"
-                  || e.eventType === "office_install_started" || e.eventType === "office_install_completed" || e.eventType === "office_install_failed"
+                  || e.eventType === "office_install_started" || e.eventType === "office_install_completed" || e.eventType === "office_install_failed" || e.eventType === "office_preinstalled_detected"
                   || e.eventType === "realmjoin_package_started" || e.eventType === "realmjoin_package_completed"
               )}
               summaryStats={appSummaryStats}

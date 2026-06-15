@@ -32,7 +32,7 @@ const ESP_APPS_INSTALL_FAILURE = "esp_apps_install_failure";
 interface InstallItem {
   appName: string;
   appId: string;
-  state: "Installing" | "Installed" | "Failed" | "Postponed" | "Skipped";
+  state: "Installing" | "Installed" | "Failed" | "Postponed" | "Skipped" | "Preinstalled";
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -203,6 +203,24 @@ export default function InstallProgress({ events, summaryStats }: InstallProgres
           // Session 080edee9 follow-up — ESP-level HRESULT carried on promoted
           // app_install_failed events from the V2 termination handler.
           errorCode: d.errorCode ?? d.error_code,
+          firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
+          eventData: d,
+        });
+      } else if (type === "office_preinstalled_detected") {
+        // Office was already fully resident on disk at the first signal (OEM/consumer inbox Office
+        // running a background CLIENTUPDATE) — informational, not an enrollment install or failure.
+        // Don't overwrite a real terminal state if one somehow co-exists.
+        if (existing?.state === "Installed" || existing?.state === "Failed") continue;
+        installMap.set(appName, {
+          appName,
+          appId,
+          state: "Preinstalled",
+          completedAt: eventTs,
+          isCompleted: true,
+          isError: false,
+          isLikelyStuck: false,
+          isDetectionFailure: false,
+          isInstallFailure: false,
           firstSeenIndex: existing?.firstSeenIndex ?? insertionIndex++,
           eventData: d,
         });
@@ -384,13 +402,15 @@ function InstallItemRow({ item }: { item: InstallItem }) {
   // have a concrete HRESULT and are confirmed errors → red, same as any other.
   const containerClass = item.state === "Skipped"
     ? "bg-gray-50 border border-gray-300"
-    : item.isLikelyStuck
-      ? "bg-orange-50 border border-orange-200"
-      : item.isError
-        ? "bg-red-50 border border-red-200"
-        : item.isCompleted
-          ? "bg-green-50 border border-green-200"
-          : "bg-gray-50 border border-gray-200";
+    : item.state === "Preinstalled"
+      ? "bg-sky-50 border border-sky-200"
+      : item.isLikelyStuck
+        ? "bg-orange-50 border border-orange-200"
+        : item.isError
+          ? "bg-red-50 border border-red-200"
+          : item.isCompleted
+            ? "bg-green-50 border border-green-200"
+            : "bg-gray-50 border border-gray-200";
 
   return (
     <div className={`rounded-lg p-3 ${containerClass}`}>
@@ -399,6 +419,11 @@ function InstallItemRow({ item }: { item: InstallItem }) {
           {item.state === "Skipped" ? (
             <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
+          ) : item.state === "Preinstalled" ? (
+            // Info circle — already-resident Office, neither install nor failure.
+            <svg className="w-4 h-4 text-sky-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           ) : item.isLikelyStuck ? (
             // Question-mark inside circle — explicit "we don't actually know" iconography,
@@ -454,6 +479,14 @@ function InstallItemRow({ item }: { item: InstallItem }) {
           )}
           {item.state === "Postponed" && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-amber-200 text-amber-700 font-medium">Postponed</span>
+          )}
+          {item.state === "Preinstalled" && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full bg-sky-200 text-sky-800 font-medium"
+              title="Office was already present on disk at enrollment start (OEM/consumer inbox Office) — not installed by this enrollment"
+            >
+              Pre-installed
+            </span>
           )}
         </div>
         <div className="flex items-center space-x-3 text-xs text-gray-500 flex-shrink-0 ml-2">

@@ -298,9 +298,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 // several reboots, and Scenario\INSTALL persists post-install / OfficeC2RClient.exe
                 // runs again for update checks / Office updates stream from the same CDN — all three
                 // start triggers would falsely re-open the window and emit a duplicate
-                // started+completed pair every restart). A persisted terminal means the install was
-                // already reported → don't arm the detector at all this run; a persisted Active is
-                // resumed inside the host (no second started, missed completion delivered late).
+                // started+completed pair every restart). A persisted terminal (Completed/Failed) means
+                // the install was already reported → don't arm the detector at all this run; a persisted
+                // Active is resumed inside the host (no second started, missed completion delivered late).
+                // A persisted Preinstalled is NOT terminal — the host is still armed (an enrollment often
+                // uninstalls the inbox Office and installs a fresh one), it only suppresses a duplicate
+                // office_preinstalled_detected via ResumePreinstalled.
                 var officeStatePersistence = new OfficeInstallStatePersistence(_stateDirectory, logger);
                 var officeState = officeStatePersistence.Load();
                 if (officeState != null && officeState.IsTerminal)

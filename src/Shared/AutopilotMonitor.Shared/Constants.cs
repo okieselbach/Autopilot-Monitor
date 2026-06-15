@@ -324,6 +324,10 @@ namespace AutopilotMonitor.Shared
             public const string OfficeInstallProgress     = "office_install_progress";
             public const string OfficeInstallCompleted    = "office_install_completed";
             public const string OfficeInstallFailed       = "office_install_failed";
+            // Emitted instead of a started/failed pair when the C2R activity is on an Office that is
+            // ALREADY fully resident on disk at the first signal (OEM/consumer inbox Office running a
+            // background CLIENTUPDATE/maintenance scenario). Informational — NOT an enrollment failure.
+            public const string OfficePreinstalledDetected = "office_preinstalled_detected";
 
             // Stall detection (Ebene 2 — StallProbeCollector)
             public const string StallProbeCheck           = "stall_probe_check";   // Trace heartbeat from Probe 2 (15 min) when no anomaly found

@@ -59,6 +59,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         // names against a field enrollment and widen only if needed.
         private static readonly string[] ErrorValueHints = { "errorcode", "hresult", "exitcode", "lasterror", "failurecode" };
 
+        // Install-class C2R scenario subkey names. Only these anchor an error code (a failure in a
+        // CLIENTUPDATE / UPDATE / maintenance scenario must not fail an install). Deliberately narrow
+        // — the Autopilot enrollment cares about the fresh product lay-down, not client self-updates.
+        private static readonly string[] InstallScenarioNames = { "INSTALL" };
+
+        private static bool IsInstallScenario(string? name)
+            => name != null && InstallScenarioNames.Any(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase));
+
         // Core Office app binaries used as the on-disk completion proof. ANY of these present under
         // {InstallationPath}\root\* means the C2R lay-down finished — "any of", because a deployment can
         // exclude products (e.g. no Outlook), so requiring all would miss legitimate completions.
@@ -93,6 +101,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         internal enum CompletionOutcome { Completed, Failed, NotYet }
 
         private DetectorState _state = DetectorState.Idle;
+        private bool _preinstalledReported; // office_preinstalled_detected already emitted (emit-once guard)
         private DateTime? _startedAtUtc;
         private string? _startedTrigger;
         private OfficeDoSample? _lastDo;
@@ -138,6 +147,22 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
 
                 var snap = ReadSnapshotSafe();
                 if (snap != null) ObserveInstallationPath(snap);
+            }
+        }
+
+        /// <summary>
+        /// Restores the "preinstalled already reported" guard after an agent restart so resident inbox
+        /// Office does not re-emit <c>office_preinstalled_detected</c> every reboot — while leaving the
+        /// detector Idle/armed so a later fresh (enterprise) install in this enrollment is still caught.
+        /// </summary>
+        internal void ResumePreinstalled(OfficeInstallStateData state)
+        {
+            if (state == null || state.State != OfficeInstallStateData.StatePreinstalled) return;
+            lock (_lock)
+            {
+                if (_state != DetectorState.Idle) return;
+                _preinstalledReported = true;
+                _logger.Info($"[{SourceName}] resumed preinstalled-reported guard (armed for a later fresh install)");
             }
         }
 
@@ -189,7 +214,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
 
                 if (_state == DetectorState.Idle)
                 {
-                    if (snap.ActiveScenarioPresent) BeginIfIdle("registry", snap);
+                    // Start from the registry ONLY for an install-class scenario. A CLIENTUPDATE / UPDATE
+                    // scenario key (the C2R client self-update / maintenance) must not open an install
+                    // lifecycle. The early DO-job trigger (OnOfficeDoSample) still catches a real install
+                    // before its INSTALL key is written — the common case (47% of field starts).
+                    if (snap.InstallScenarioPresent) BeginIfIdle("registry", snap);
                     return;
                 }
                 EvaluateActive(snap);
@@ -209,9 +238,6 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             if (sample == null) return;
             lock (_lock)
             {
-                _lastDo = sample;
-                var peakGrew = _peakDo == null || sample.TotalBytesDownloaded > _peakDo.TotalBytesDownloaded;
-                if (peakGrew) _peakDo = sample;
                 if (_state == DetectorState.Terminal) return;
 
                 if (_state == DetectorState.Idle)
@@ -220,11 +246,24 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                     var snapStart = ReadSnapshotSafe();
                     if (snapStart == null) return;
                     BeginIfIdle("do", snapStart);
+                    // Seed the DO summary from the triggering sample ONLY if a real lifecycle actually
+                    // opened. A preinstalled short-circuit stays Idle — capturing its CLIENTUPDATE bytes
+                    // here would leak them into a LATER real install's doSummary (which is built from
+                    // _peakDo). The seed is persisted directly (it is the lifecycle's first DO sample).
+                    if (_state == DetectorState.Active)
+                    {
+                        _lastDo = sample;
+                        _peakDo = sample;
+                        PersistState(OfficeInstallStateData.StateActive);
+                    }
                     return;
                 }
 
                 // Active: no progress event — the sample only updates the DO summary data. A grown
                 // peak is re-persisted (throttled) so a mid-install agent restart keeps the doSummary.
+                _lastDo = sample;
+                var peakGrew = _peakDo == null || sample.TotalBytesDownloaded > _peakDo.TotalBytesDownloaded;
+                if (peakGrew) _peakDo = sample;
                 if (peakGrew && _statePersistence != null
                     && (!_lastStatePersistUtc.HasValue
                         || (_clock.UtcNow - _lastStatePersistUtc.Value).TotalSeconds >= PeakPersistThrottleSeconds))
@@ -294,6 +333,37 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         private void BeginIfIdle(string trigger, OfficeC2RSnapshot snap)
         {
             if (_state != DetectorState.Idle) return;
+
+            // Already-resident detection — the precision gate. When the core Office binaries are
+            // ALREADY on disk at the very first signal, this C2R activity is NOT a fresh install:
+            // Office was laid down before the detector opened. Two flavours:
+            //   * consumer / OEM-inbox product set → surface an informational office_preinstalled_detected
+            //     (the C2R client running a background CLIENTUPDATE on pre-provisioned Office — field
+            //     session fa526757), NOT a started/failed pair.
+            //   * enterprise product set → fall through to the existing started→completed path (Office
+            //     CSP / Win32-wrapper re-run on already-present Office — field session a7525e97).
+            // Anchored on the filesystem, NOT the StreamingFinished registry value (absent on some
+            // machines → reads false), so it holds even when that value is missing.
+            //
+            // Crucially this does NOT latch a terminal: an enrollment commonly UNINSTALLS the inbox
+            // Office and lays down a fresh (enterprise) Microsoft 365 Apps afterwards, which we must
+            // still report. So we emit the informational fact ONCE (idempotent guard) and stay Idle —
+            // a later fresh install (enterprise product set, or a real download with no binaries on
+            // disk yet) opens a normal started→completed lifecycle from here.
+            if (ProbeCoreBinaries(snap.InstallationPath)
+                && OfficeProductClassifier.IsConsumerInboxProductSet(snap.Products))
+            {
+                if (!_preinstalledReported)
+                {
+                    _preinstalledReported = true;
+                    _startedAtUtc = _clock.UtcNow;
+                    _startedTrigger = trigger;
+                    EmitPreinstalled(snap);
+                    PersistState(OfficeInstallStateData.StatePreinstalled);
+                }
+                return; // stay Idle (armed) — never open an install lifecycle for resident inbox Office
+            }
+
             _state = DetectorState.Active;
             _startedAtUtc = _clock.UtcNow;
             _startedTrigger = trigger;
@@ -328,6 +398,35 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             _state = DetectorState.Terminal;
             EmitLifecycle(Constants.EventTypes.OfficeInstallFailed, snap, EventSeverity.Error, "Failed", isTerminal: true);
             PersistState(OfficeInstallStateData.StateFailed);
+        }
+
+        /// <summary>
+        /// Emits the informational <c>office_preinstalled_detected</c> for an Office that was already
+        /// resident on disk at the first signal (OEM/consumer inbox Office running a background
+        /// CLIENTUPDATE/maintenance scenario). This is NOT an enrollment install — Info severity, no
+        /// started/failed pair. The caller has set the emit-once guard + start metadata and deliberately
+        /// leaves the detector Idle/armed (no terminal latch) so a later fresh install is still detected.
+        /// </summary>
+        private void EmitPreinstalled(OfficeC2RSnapshot snap)
+        {
+            var data = BuildPayload(snap, "Preinstalled", isTerminal: true);
+            if (!string.IsNullOrEmpty(_startedTrigger)) data["startedTrigger"] = _startedTrigger!;
+            // Why we classified it as preinstalled — core binaries already on disk at first signal.
+            data["reason"] = "office_already_resident";
+
+            var product = snap.Products != null && snap.Products.Count > 0 ? string.Join(",", snap.Products) : AppName;
+            _post.Emit(new EnrollmentEvent
+            {
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                EventType = Constants.EventTypes.OfficePreinstalledDetected,
+                Severity = EventSeverity.Info,
+                Source = SourceName,
+                Phase = EnrollmentPhase.Unknown,
+                Message = $"{SourceName}: {product} already present (pre-installed OEM/consumer Office — no enrollment install)",
+                Data = data,
+                ImmediateUpload = true,
+            });
         }
 
         /// <summary>
@@ -447,6 +546,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                 { "streamingFinished", snap.StreamingFinished },
                 { "officeC2RClientRunning", snap.OfficeC2RClientRunning },
                 { "errorCode", (object?)snap.ErrorCode ?? string.Empty },
+                { "errorSource", (object?)snap.ErrorSource ?? string.Empty },
                 { "installationPath", snap.InstallationPath ?? string.Empty },
                 { "scanErrors", (snap.Errors ?? new List<string>()).ToList() },
             };
@@ -587,6 +687,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
 
                     foreach (var scenarioName in scenarioNames)
                     {
+                        // Attribute an error code ONLY from an install-class scenario. A failure value
+                        // in a CLIENTUPDATE / UPDATE / maintenance scenario (the C2R client self-update
+                        // and similar) must never fail an Office *install* — field session fa526757 /
+                        // the CLIENTUPDATE errorCode "2" false positive.
+                        var isInstallScenario = IsInstallScenario(scenarioName);
+                        if (isInstallScenario && snap.InstallScenarioName == null)
+                        {
+                            snap.InstallScenarioPresent = true;
+                            snap.InstallScenarioName = scenarioName;
+                        }
+
                         try
                         {
                             using (var scenarioKey = scenarioRoot.OpenSubKey(scenarioName, writable: false))
@@ -598,11 +709,12 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                                     if (value == null) continue;
                                     snap.ScenarioValues[$"{scenarioName}\\{valueName}"] = value;
 
-                                    if (snap.ErrorCode == null
+                                    if (isInstallScenario && snap.ErrorCode == null
                                         && ErrorValueHints.Any(h => valueName.IndexOf(h, StringComparison.OrdinalIgnoreCase) >= 0)
                                         && IsNonZeroNumericCode(value))
                                     {
                                         snap.ErrorCode = value;
+                                        snap.ErrorSource = $"{scenarioName}\\{valueName}";
                                     }
                                 }
                             }
@@ -660,10 +772,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             return v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
+        // Below this, a bare positive decimal is treated as an implausible failure code (a state /
+        // phase / mode / retry-count enum, not an error). Real C2R failures are HRESULTs (hex or
+        // negative decimal) or 5-digit C2R codes (17002, 30015, 30088…) — all >= this floor. Field
+        // session fa526757 / the CLIENTUPDATE "2" false positive motivated this.
+        private const long MinPlausibleDecimalErrorCode = 1000;
+
         /// <summary>
-        /// True only when <paramref name="value"/> is a non-zero numeric or hex (0x…) code. Textual
-        /// values such as "Success" / "Completed" / "InProgress" are NOT error codes and return false,
-        /// so a benign "Result=Success" never masquerades as a failure.
+        /// True only when <paramref name="value"/> is a PLAUSIBLE non-zero error code: a non-zero hex
+        /// (0x…) value, a negative decimal HRESULT, or a positive decimal at/above
+        /// <see cref="MinPlausibleDecimalErrorCode"/>. Textual values ("Success" / "Completed" /
+        /// "InProgress") and implausibly small positive decimals (e.g. "2") return false, so a benign
+        /// status/enum value never masquerades as a failure.
         /// </summary>
         internal static bool IsNonZeroNumericCode(string value)
         {
@@ -673,8 +793,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             {
                 return long.TryParse(v.Substring(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex) && hex != 0;
             }
-            // Decimal (HRESULTs can be large or negative); reject anything non-numeric.
-            return long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var dec) && dec != 0;
+            // Decimal: reject non-numeric, zero, and implausibly small positive values; keep negative
+            // HRESULTs and large positive C2R codes.
+            if (!long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var dec) || dec == 0) return false;
+            return dec < 0 || dec >= MinPlausibleDecimalErrorCode;
         }
     }
 
@@ -694,8 +816,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         public bool StreamingFinished { get; set; }
         public bool ActiveScenarioPresent { get; set; }
         public string? ActiveScenarioName { get; set; }
+        /// <summary>True when an install-class scenario (INSTALL) subkey is present.</summary>
+        public bool InstallScenarioPresent { get; set; }
+        /// <summary>The install-class scenario subkey name, when present (else null).</summary>
+        public string? InstallScenarioName { get; set; }
         public Dictionary<string, string> ScenarioValues { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public string? ErrorCode { get; set; }
+        /// <summary>Which <c>scenario\value</c> produced <see cref="ErrorCode"/> — for diagnosis.</summary>
+        public string? ErrorSource { get; set; }
         public bool OfficeC2RClientRunning { get; set; }
         public List<string> Errors { get; } = new List<string>();
     }

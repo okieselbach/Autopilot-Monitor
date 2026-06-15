@@ -96,6 +96,8 @@ export const KNOWN_EVENT_TYPES: EventTypeEntry[] = [
     description: "Office C2R install completed (streaming finished, scenario cleared); carries version reached and duration." },
   { value: "office_install_failed", label: "office_install_failed", category: "app",
     description: "Office C2R install ended without reaching completion, or a failure code was observed." },
+  { value: "office_preinstalled_detected", label: "office_preinstalled_detected", category: "app",
+    description: "Office was already fully resident on disk at the first signal (OEM/consumer inbox Office running a background CLIENTUPDATE) — informational, not an enrollment install or failure." },
 
   // -------- Scripts --------
   { value: "script_started", label: "script_started", category: "script",
