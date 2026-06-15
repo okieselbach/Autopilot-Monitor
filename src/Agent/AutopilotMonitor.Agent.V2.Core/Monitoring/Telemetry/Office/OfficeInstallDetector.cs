@@ -411,7 +411,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
                 data["coreBinariesPresent"] = coreBinariesPresent;
                 // One-time Delivery-Optimization summary (how Office was delivered) — far more useful than
                 // a streaming download-% (which is noise under Connected-Cache + multi-job churn).
-                if (_peakDo != null) data["doSummary"] = BuildDoSummary(_peakDo);
+                if (_peakDo != null) data["doSummary"] = BuildDoSummary(_peakDo, snap.StreamingFinished);
             }
             var message = BuildMessage(eventType, snap);
 
@@ -467,8 +467,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
         /// highest-bytes sample seen. Splits the bytes into Connected-Cache-Server / peer / pure-CDN: on
         /// MCC-enabled networks <c>BytesFromHttp</c> includes the cache-server bytes, so pure CDN is
         /// <c>BytesFromHttp - BytesFromCacheServer</c> (see project DO-telemetry notes).
+        ///
+        /// <para><c>aggregateFileSize</c> is the sum of the DO jobs' declared target sizes at the peak
+        /// instant — NOT a stable "total Office payload". It commonly exceeds <c>totalBytesDownloaded</c>
+        /// because the completed event fires at core-binary completion while background streaming of the
+        /// remaining declared content is still in flight (<c>streamingFinished == false</c>). The mirrored
+        /// <c>downloadPercent</c> + <c>streamingFinished</c> make that gap self-explanatory.</para>
         /// </summary>
-        private static Dictionary<string, object> BuildDoSummary(OfficeDoSample d)
+        private static Dictionary<string, object> BuildDoSummary(OfficeDoSample d, bool streamingFinished)
         {
             long total = d.TotalBytesDownloaded;
             long cacheServer = d.BytesFromCacheServer;
@@ -480,6 +486,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Office
             {
                 { "totalBytesDownloaded", total },
                 { "aggregateFileSize", d.FileSize },
+                { "downloadPercent", (object?)d.DownloadPercent ?? 0 },
+                { "streamingFinished", streamingFinished },
                 { "jobCount", d.JobCount },
                 { "bytesFromCacheServer", cacheServer },
                 { "bytesFromPeers", peers },

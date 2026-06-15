@@ -292,6 +292,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal(0L, summary["bytesFromPeers"]);
             Assert.Equal(80, summary["percentFromCacheServer"]);
             Assert.Equal(20, summary["percentFromCdn"]);
+            Assert.Equal(83, summary["downloadPercent"]);   // 1000 of 1200 declared
+            Assert.Equal(true, summary["streamingFinished"]);
         }
 
         [Fact]
@@ -544,6 +546,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Office
             Assert.Equal(1000L, summary["totalBytesDownloaded"]);
             Assert.Equal(800L, summary["bytesFromCacheServer"]);
             Assert.Equal(200L, summary["bytesFromCdn"]);
+            Assert.Equal(83, summary["downloadPercent"]);
+            Assert.Equal(true, summary["streamingFinished"]);
             Assert.Equal(OfficeInstallStateData.StateCompleted, rig.Persistence!.Load()!.State);
         }
 
