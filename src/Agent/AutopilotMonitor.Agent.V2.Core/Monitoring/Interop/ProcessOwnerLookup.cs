@@ -69,8 +69,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Interop
         /// count the failure rate. A process that simply vanished between enumeration and query
         /// (zero rows) is NOT counted as an error.
         /// <para>
-        /// Projects only <c>ProcessId</c>: <c>GetOwner</c> binds through the object's <c>__PATH</c>,
-        /// which WMI always returns regardless of the SELECT list, so this avoids materializing the
+        /// Projects only <c>Handle</c> + <c>ProcessId</c>: <c>Handle</c> is the key property WMI
+        /// needs for <c>GetOwner</c> method invocation, while still avoiding materializing the
         /// ~45 unused properties that <c>SELECT *</c> would.
         /// </para>
         /// </summary>
@@ -80,7 +80,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Interop
             try
             {
                 using (var searcher = new ManagementObjectSearcher(
-                    $"SELECT ProcessId FROM Win32_Process WHERE ProcessId = {processId}"))
+                    $"SELECT Handle, ProcessId FROM Win32_Process WHERE ProcessId = {processId}"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
                     {
