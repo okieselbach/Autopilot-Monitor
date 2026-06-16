@@ -13,6 +13,18 @@ export function SectionAgentChangelog() {
 
       {/* ── June 2026 ────────────────────────────────── */}
       <ChangelogBlock title="June 2026">
+        <Li>Fewer stuck enrollments — Classic sessions where a skipped user-ESP app or an advisory &quot;continue anyway&quot; ESP failure left completion waiting now resolve through a short completion deadline instead of running into the 6-hour timeout</Li>
+        <Li>Desktop-arrival detection no longer stalls on devices where the owner lookup failed — the agent resolves the signed-in user via a Windows session (WTS) query, with the previous method as fallback</Li>
+        <Li>When an app still installing blocks enrollment completion, the agent now names the specific app holding up the AccountSetup gate instead of just reporting a stall</Li>
+        <Li>Office (M365 Apps) install tracking is more accurate — pre-installed OEM / consumer Office no longer triggers a false &quot;install failed&quot;, and Office install progress now survives agent restarts and reboots</Li>
+        <Li>Low-disk-space warning — agent emits a one-shot warning when free space drops below 2&nbsp;GB during enrollment (re-arms once space recovers above 3&nbsp;GB)</Li>
+        <Li>Repetitive ModernDeployment event bursts are rolled up into a single entry and excluded from the idle timer — less timeline noise, and they no longer keep the collector awake</Li>
+        <Li>Hello for Business policy is no longer reported as <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">not_configured</code> when it simply couldn&apos;t be detected, avoiding misleading Hello status</Li>
+        <Li>New liveness signals show what enrollment completion is waiting on, and flag a session that is parked without a deadline — making stuck sessions easier to spot</Li>
+        <Li>Startup events (e.g. timezone, NTP, geo-location) are de-duplicated across agent restarts, so a reboot mid-enrollment no longer repeats them in the timeline</Li>
+        <Li>RealmJoin client detection is now an opt-in per-tenant setting (off by default) and additionally reports the RealmJoin release channel alongside its version</Li>
+        <Li>Agent records the device&apos;s outbound (egress) IP for network correlation during enrollment</Li>
+        <Li>Each agent request now carries a correlation ID for end-to-end tracing across agent and backend, making request-level troubleshooting easier</Li>
         <Li>Microsoft 365 Apps (Office) install tracking — agent surfaces the real Office Click-to-Run install that the Intune &quot;integrated&quot; app hides (IME reports done within a minute or two while Office keeps streaming in the background); shown as its own install row with live Delivery Optimization download progress</Li>
         <Li>Provisioning-package detection — agent scans for Windows provisioning packages (<code className="text-xs bg-gray-100 px-1 py-0.5 rounded">.ppkg</code>) applied to the device and reports them in a single scan event; security rules flag packages outside a built-in allow-list of Windows-inbox packages</Li>
         <Li>AutoLogon detection — agent reports the device&apos;s automatic sign-in (AutoLogon) configuration; security rules now flag it only when a plaintext password is actually stored, so normal Autopilot enrollments no longer produce false positives</Li>
