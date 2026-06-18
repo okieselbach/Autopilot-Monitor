@@ -93,6 +93,26 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                             _logger.LogInformation($"Global Admin {userEmail} leaving cross-tenant group: {request.GroupName}");
                         }
                     }
+
+                    // Symmetric with AddToGroup: the privileged notification groups are membership-gated.
+                    // A roleless authenticated end user is never in these groups, so reject the leave too
+                    // (defense-in-depth — keeps join/leave authorization identical).
+                    if (SignalRGroupHelper.IsTenantNotifyAdminGroup(request.GroupName)
+                        && !requestCtx.IsTenantAdmin
+                        && !requestCtx.IsGlobalAdmin)
+                    {
+                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Tenant Admins can leave the admin notification group" });
+                        return new RemoveFromGroupOutput { HttpResponse = forbiddenResponse };
+                    }
+
+                    if (SignalRGroupHelper.IsTenantNotifyMemberGroup(request.GroupName)
+                        && !requestCtx.IsTenantMemberOrGlobalAdmin())
+                    {
+                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only tenant members can leave the notification group" });
+                        return new RemoveFromGroupOutput { HttpResponse = forbiddenResponse };
+                    }
                 }
 
                 // Extract session ID from group name if it's a session-specific group

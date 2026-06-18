@@ -138,3 +138,5 @@ plans/REFACTOR_AGENT_V2.md
 # (storage account name, resource group are operator-specific) so it stays
 # out of the repo. Each operator keeps their own copy.
 scripts/Backup/setup-backup-container.ps1
+docs/Introduction-AutopilotMonitor.pptx
+docs/~$Introduction-AutopilotMonitor.pptx

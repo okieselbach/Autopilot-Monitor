@@ -95,7 +95,6 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                     }
 
                     // Admin-tier notification group: only Tenant Admins or Global Admins may join.
-                    // The Member-tier group has no extra check beyond the tenant-membership above.
                     if (SignalRGroupHelper.IsTenantNotifyAdminGroup(request.GroupName)
                         && !requestCtx.IsTenantAdmin
                         && !requestCtx.IsGlobalAdmin)
@@ -103,6 +102,19 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         _logger.LogWarning($"User {userEmail} (role={requestCtx.UserRole}) attempted to join Admin-tier notification group: {request.GroupName}");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
                         await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Tenant Admins can join the admin notification group" });
+                        return new AddToGroupOutput { HttpResponse = forbiddenResponse };
+                    }
+
+                    // Member-tier notification group: requires tenant membership (any role) or GA.
+                    // The endpoint policy (AuthenticatedUserWithRole) admits roleless end users so the
+                    // Progress Portal works, but the notification push carries the full payload (the
+                    // REST list is MemberRead-gated), so a roleless caller must not join this group.
+                    if (SignalRGroupHelper.IsTenantNotifyMemberGroup(request.GroupName)
+                        && !requestCtx.IsTenantMemberOrGlobalAdmin())
+                    {
+                        _logger.LogWarning($"User {userEmail} (role={requestCtx.UserRole}) attempted to join Member-tier notification group without a tenant role: {request.GroupName}");
+                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only tenant members can join the notification group" });
                         return new AddToGroupOutput { HttpResponse = forbiddenResponse };
                     }
                 }

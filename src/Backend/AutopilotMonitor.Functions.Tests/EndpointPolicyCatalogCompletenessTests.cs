@@ -265,6 +265,28 @@ public class EndpointPolicyCatalogCompletenessTests
     }
 
     /// <summary>
+    /// SignalR group join/leave MUST be AuthenticatedUserWithRole — NOT MemberRead and NOT plain
+    /// AuthenticatedUser. The Progress Portal admits non-member end users, so MemberRead 403s them
+    /// (no live updates). Plain AuthenticatedUser would admit them but leaves IsGlobalAdmin/
+    /// IsTenantAdmin/UserRole unresolved, breaking the function's per-group gates (GA global-admins,
+    /// cross-tenant, admin/member notification groups). Only AuthenticatedUserWithRole satisfies both.
+    /// Guards against either accidental downgrade. TenantScoping stays None — the function enforces
+    /// the group's tenant against the caller's JWT tenant itself.
+    /// </summary>
+    [Theory]
+    [InlineData("POST", "/api/realtime/groups/join",  "realtime/groups/join")]
+    [InlineData("POST", "/api/realtime/groups/leave", "realtime/groups/leave")]
+    public void SignalRGroupJoinLeave_AreAuthenticatedUserWithRole(string method, string path, string expectedTemplate)
+    {
+        var entry = EndpointAccessPolicyCatalog.FindPolicy(method, path);
+
+        Assert.NotNull(entry);
+        Assert.Equal(expectedTemplate, entry!.RouteTemplate);
+        Assert.Equal(EndpointPolicy.AuthenticatedUserWithRole, entry.Policy);
+        Assert.Equal(TenantScoping.None, entry.TenantScoping);
+    }
+
+    /// <summary>
     /// Named capture group for {tenantId} correctly extracts the value from request paths.
     /// </summary>
     [Theory]

@@ -36,6 +36,19 @@ public enum EndpointPolicy
     /// <summary>Valid JWT token required. Any authenticated user.</summary>
     AuthenticatedUser,
 
+    /// <summary>
+    /// Valid JWT required (admits ANY authenticated user, including non-members), but the
+    /// middleware still resolves the caller's Global-Admin status and effective tenant role and
+    /// publishes them on <see cref="Helpers.RequestContext"/>. Use for endpoints that must admit
+    /// non-member end users yet whose function performs fine-grained, per-resource authorization
+    /// needing the role/GA flags — e.g. SignalR group join/leave: an end user may join their own
+    /// tenant's progress/session groups, but global-admins / cross-tenant / notify-admin /
+    /// notify-member groups are gated inside the function on the resolved role. Differs from
+    /// <see cref="AuthenticatedUser"/>, which short-circuits and leaves
+    /// IsGlobalAdmin/IsTenantAdmin/UserRole unpopulated (always-false / empty).
+    /// </summary>
+    AuthenticatedUserWithRole,
+
     /// <summary>Tenant member with Admin, Operator, or Viewer role. Tenant-scoped read access.</summary>
     MemberRead,
 
@@ -118,8 +131,22 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "auth/me",                   EndpointPolicy.AuthenticatedUser),
         new("GET",    "auth/is-global-admin",      EndpointPolicy.AuthenticatedUser),
         new("POST",   "realtime/negotiate",        EndpointPolicy.AuthenticatedUser),
-        new("POST",   "realtime/groups/join",      EndpointPolicy.MemberRead),
-        new("POST",   "realtime/groups/leave",     EndpointPolicy.MemberRead),
+        // Group join/leave is AuthenticatedUserWithRole — NOT MemberRead — on purpose. The real,
+        // per-group authorization lives inside SignalRAddToGroup/RemoveFromGroupFunction: it
+        // requires the requested group's tenant to match the caller's JWT tenant (Global Admins
+        // excepted), gates the global-admins group on IsGlobalAdmin, the admin-tier notification
+        // group on IsTenantAdmin, and the member-tier notification group on tenant membership.
+        // The Progress Portal is an END-USER feature: employees tracking their own device are
+        // authenticated (JWT tid = their tenant) but are typically NOT tenant members (no
+        // TenantAdmins row, no Entra app-role). Gating join at MemberRead let them load the
+        // initial status (progress/* is AuthenticatedUser) but silently 403'd their session-group
+        // join, so they never received live eventStream pushes — the page looked frozen.
+        // AuthenticatedUserWithRole (not plain AuthenticatedUser) is required so the middleware
+        // still resolves IsGlobalAdmin/IsTenantAdmin/UserRole — the function's per-group gates
+        // depend on those flags; plain AuthenticatedUser leaves them always-false and would break
+        // GA/admin group joins. (Regression history: c4dabeee elevated these to MemberRead.)
+        new("POST",   "realtime/groups/join",      EndpointPolicy.AuthenticatedUserWithRole),
+        new("POST",   "realtime/groups/leave",     EndpointPolicy.AuthenticatedUserWithRole),
         new("GET",    "progress/sessions",         EndpointPolicy.AuthenticatedUser),
         new("GET",    "progress/sessions/{sessionId}/events", EndpointPolicy.AuthenticatedUser, TenantScoping.QueryParam),
         new("PUT",    "preview/notification-email", EndpointPolicy.AuthenticatedUser),

@@ -395,8 +395,8 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
       {/* Global nav — only when authenticated */}
       {isAuthenticated && (
         <>
-          {/* Dashboard */}
-          {renderGlobalItem(DASHBOARD_ITEM)}
+          {/* Dashboard — hidden for regular users (no admin/operator access) */}
+          {!isRegularUser && renderGlobalItem(DASHBOARD_ITEM)}
 
           {/* Regular user: only show Progress Portal */}
           {isRegularUser && (

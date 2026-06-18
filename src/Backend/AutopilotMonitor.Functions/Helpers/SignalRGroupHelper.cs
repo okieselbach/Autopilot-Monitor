@@ -52,6 +52,15 @@ public static class SignalRGroupHelper
     public static bool IsTenantNotifyAdminGroup(string groupName)
         => groupName.StartsWith("tenant-") && groupName.EndsWith(TenantNotifyAdminSuffix);
 
+    /// <summary>
+    /// True for the Member-tier tenant notification group. Joining requires tenant membership
+    /// (any Admin/Operator/Viewer role) or Global-Admin — the live push carries the full
+    /// notification payload, which is otherwise MemberRead-gated at the REST layer, so a roleless
+    /// authenticated end user must not be allowed to join it.
+    /// </summary>
+    public static bool IsTenantNotifyMemberGroup(string groupName)
+        => groupName.StartsWith("tenant-") && groupName.EndsWith(TenantNotifyMemberSuffix);
+
     public static string TenantNotifyMemberGroup(string tenantId) => $"tenant-{tenantId}{TenantNotifyMemberSuffix}";
     public static string TenantNotifyAdminGroup(string tenantId) => $"tenant-{tenantId}{TenantNotifyAdminSuffix}";
     public const string GlobalAdminsGroup = "global-admins";

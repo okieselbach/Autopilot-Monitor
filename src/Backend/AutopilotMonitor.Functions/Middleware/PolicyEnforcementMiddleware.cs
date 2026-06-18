@@ -228,6 +228,9 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
                     return CatalogDecisionResult.Allow(userIdentifier, "Authenticated", "ValidJWT");
                 return CatalogDecisionResult.Deny(userIdentifier, "N/A", "NoJWT");
 
+            case EndpointPolicy.AuthenticatedUserWithRole:
+                return await EvaluateAuthenticatedUserWithRoleAsync(tenantId, upn, principal, userIdentifier);
+
             case EndpointPolicy.MemberRead:
                 return await EvaluateMemberReadAsync(tenantId, upn, principal, userIdentifier);
 
@@ -243,6 +246,38 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
             default:
                 return CatalogDecisionResult.Deny(userIdentifier, "N/A", $"UnknownPolicy:{entry.Policy}");
         }
+    }
+
+    /// <summary>
+    /// Allows ANY authenticated caller (valid JWT) but still resolves their Global-Admin status and
+    /// effective tenant role so the downstream function can make fine-grained, per-resource decisions
+    /// (the resolved values flow onto RequestContext.IsGlobalAdmin/IsTenantAdmin/UserRole). A caller
+    /// with no special role is admitted as "Authenticated" (role flags stay false) — non-member end
+    /// users are intentionally allowed here; the function gates the privileged resources.
+    /// </summary>
+    private async Task<CatalogDecisionResult> EvaluateAuthenticatedUserWithRoleAsync(
+        string? tenantId, string? upn, ClaimsPrincipal? principal, string userIdentifier)
+    {
+        if (principal == null)
+            return CatalogDecisionResult.Deny(userIdentifier, "N/A", "NoJWT");
+
+        // Global Admin outranks any tenant role.
+        if (!string.IsNullOrEmpty(upn) && await _globalAdminService.IsGlobalAdminAsync(upn))
+            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "ValidJWT+GA");
+
+        // Resolve the effective tenant role (may be null for non-members). A resolved role is
+        // surfaced so the function can distinguish members from roleless end users; either way
+        // the request is allowed at the middleware tier.
+        if (!string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(upn))
+        {
+            var role = await ResolveEffectiveRoleAsync(tenantId, upn, principal);
+            if (role?.Role != null)
+                return CatalogDecisionResult.Allow(userIdentifier, role.Role, "ValidJWT+Member");
+        }
+
+        // Authenticated but not a member and not a GA — still allowed (the function decides which
+        // groups, if any, this caller may join).
+        return CatalogDecisionResult.Allow(userIdentifier, "Authenticated", "ValidJWT");
     }
 
     private async Task<CatalogDecisionResult> EvaluateMemberReadAsync(

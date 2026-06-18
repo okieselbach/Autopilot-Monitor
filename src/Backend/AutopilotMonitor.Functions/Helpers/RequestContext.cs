@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
@@ -58,6 +59,18 @@ public static class RequestContextExtensions
     /// </summary>
     public static RequestContext GetRequestContext(this HttpRequestData req)
         => req.FunctionContext.GetRequestContext();
+
+    /// <summary>
+    /// True if the caller is a tenant member (any Admin/Operator/Viewer role) or a Global Admin.
+    /// Only meaningful when the request was evaluated under a role-resolving policy tier
+    /// (MemberRead / TenantAdminOrGA / AuthenticatedUserWithRole / …); under plain AuthenticatedUser
+    /// the role is not resolved and this returns false.
+    /// </summary>
+    public static bool IsTenantMemberOrGlobalAdmin(this RequestContext ctx)
+        => ctx.IsGlobalAdmin
+            || ctx.UserRole == Constants.TenantRoles.Admin
+            || ctx.UserRole == Constants.TenantRoles.Operator
+            || ctx.UserRole == Constants.TenantRoles.Viewer;
 
     /// <summary>Gets the correlation ID for this request (set by CorrelationIdMiddleware).</summary>
     public static string GetCorrelationId(this FunctionContext context)
