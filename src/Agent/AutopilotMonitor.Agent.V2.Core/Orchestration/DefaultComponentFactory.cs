@@ -143,6 +143,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
             // captures `realmJoinHost` by reference (closure over the local) — null at this
             // point, set a few lines later before the detector can ever fire.
             RealmJoinHost? realmJoinHost = null;
+            // Captured by the desktop-arrival observer below (null at this point, assigned a few lines
+            // later before the detector can fire). When the real-user desktop arrives, Shift+F10 is no
+            // longer possible, so the console watcher is stopped to avoid post-enrollment false positives.
+            ConsoleBypassHost? consoleBypassHost = null;
             var desktopArrivalHost = new DesktopArrivalHost(
                 logger,
                 ingress,
@@ -152,6 +156,11 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                 tenantId: tenantId,
                 onRealUserOwnerObserved: owner =>
                 {
+                    // The DesktopArrivalDetector validates a REAL user owner (excludes SYSTEM and
+                    // defaultuser0), so this firing means we are past the OOBE / autologon phase where
+                    // Shift+F10 works — stop the console watcher (no-op if not created / already stopped).
+                    consoleBypassHost?.StopForDesktopArrival();
+
                     if (realmJoinHost == null) return;
                     if (UserSidResolver.TryResolveSid(owner, out var sid) && !string.IsNullOrEmpty(sid))
                     {
@@ -203,18 +212,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
             // OOBE-console / Shift+F10 detection — opt-OUT per tenant (portal toggle →
             // AnalyzerConfiguration.EnableConsoleBypassDetection, default ON). The LIVE half: a WMI
-            // Win32_ProcessStartTrace watcher that flags a cmd.exe spawned with parent winlogon.exe
-            // (the SYSTEM-console fingerprint) as a Warning oobe_console_spawned. The STARTUP-FORENSIC
-            // half (ConsolePrefetchScanner, covering the pre-agent OOBE window) is registered by the
-            // AgentAnalyzerManager under the same flag. Detection is best-effort, not gapless.
+            // Win32_ProcessStartTrace watcher that flags an interactive-session cmd.exe with a bare
+            // (non-scripted) command line as a Warning oobe_console_spawned. Stopped on real-user desktop
+            // arrival (see the desktop-arrival observer above) since Shift+F10 is gone by then. The
+            // STARTUP-FORENSIC half (ConsolePrefetchScanner, covering the pre-agent OOBE window) is
+            // registered by the AgentAnalyzerManager under the same flag. Detection is best-effort.
             if (analyzers.EnableConsoleBypassDetection)
             {
-                hosts.Add(new ConsoleBypassHost(
+                consoleBypassHost = new ConsoleBypassHost(
                     sessionId: sessionId,
                     tenantId: tenantId,
                     ingress: ingress,
                     clock: clock,
-                    logger: logger));
+                    logger: logger);
+                hosts.Add(consoleBypassHost);
             }
 
             // Single-rail refactor (plan §5.8) — DeviceInfoCollector existed in V2.Core but had

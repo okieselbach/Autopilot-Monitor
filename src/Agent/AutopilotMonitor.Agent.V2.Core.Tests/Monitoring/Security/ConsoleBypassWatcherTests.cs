@@ -9,13 +9,16 @@ using Xunit;
 namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Security
 {
     /// <summary>
-    /// ConsoleBypassWatcher classification core — driven via the internal <c>HandleStart</c> with an
-    /// injected parent-name resolver (no real WMI / processes). Asserts the winlogon-parent
-    /// discriminator: a cmd.exe parented to winlogon.exe raises exactly one detection; any other
-    /// parent (or an unresolvable one) is ignored, keeping the false-positive rate near zero.
+    /// ConsoleBypassWatcher classification — driven via the internal <c>HandleStart</c>/<c>Classify</c>
+    /// with an injected process probe (no real WMI / processes). Asserts the parent-free discriminator:
+    /// an interactive-session cmd with a bare command line is flagged (high confidence); a scripted
+    /// <c>cmd /c</c> and a session-0 (service) cmd are ignored; an interactive-session cmd whose command
+    /// line cannot be read (instant-close race) is still surfaced at low confidence.
     /// </summary>
     public sealed class ConsoleBypassWatcherTests
     {
+        private const string BareCmd = @"C:\WINDOWS\system32\cmd.exe";
+
         private static AgentLogger NewLogger(string dir) => new AgentLogger(dir, AgentLogLevel.Info);
 
         private sealed class Rig : IDisposable
@@ -24,96 +27,130 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Monitoring.Security
             public List<ConsoleSpawnInfo> Detected { get; } = new List<ConsoleSpawnInfo>();
             public ConsoleBypassWatcher Sut { get; }
 
-            public Rig(Func<int, string?> parentResolver)
+            public Rig(Func<int, ProcessProbe?> probe)
             {
-                Sut = new ConsoleBypassWatcher(NewLogger(_tmp.Path), parentResolver);
+                Sut = new ConsoleBypassWatcher(NewLogger(_tmp.Path), probe);
                 Sut.BypassConsoleDetected += (_, info) => Detected.Add(info);
             }
 
             public void Dispose() { Sut.Dispose(); _tmp.Dispose(); }
         }
 
-        [Fact]
-        public void Parent_winlogon_raises_one_detection_with_full_signature()
-        {
-            using var rig = new Rig(parentPid => parentPid == 612 ? "winlogon" : "explorer");
+        private static Func<int, ProcessProbe?> Probe(string? commandLine, string? owner = @"PC\defaultuser0")
+            => _ => new ProcessProbe(commandLine, owner);
 
-            rig.Sut.HandleStart(pid: 7244, parentPid: 612, sessionId: 1, detectedVia: "process_start_trace");
+        private static readonly Func<int, ProcessProbe?> GoneProbe = _ => null;
+
+        // ---------------------------------------------------------------- HandleStart end-to-end
+
+        [Fact]
+        public void Interactive_session_bare_cmd_raises_high_confidence_with_signature()
+        {
+            using var rig = new Rig(Probe(BareCmd, owner: @"PC\defaultuser0"));
+
+            rig.Sut.HandleStart(pid: 9636, parentPid: 9016, sessionId: 1, ownerSidHint: null, detectedVia: "process_start_trace");
 
             var info = Assert.Single(rig.Detected);
             Assert.Equal("cmd.exe", info.ProcessName);
-            Assert.Equal(7244, info.ProcessId);
-            Assert.Equal("winlogon.exe", info.ParentProcessName);
-            Assert.Equal(612, info.ParentProcessId);
+            Assert.Equal(9636, info.ProcessId);
+            Assert.Equal(9016, info.ParentProcessId);
             Assert.Equal(1, info.SessionId);
-            Assert.Equal("process_start_trace", info.DetectedVia);
+            Assert.Equal("high", info.Confidence);
+            Assert.Equal("interactive_console", info.Classification);
+            Assert.Equal(@"PC\defaultuser0", info.Owner);
+            Assert.Equal(BareCmd, info.CommandLine);
         }
 
         [Fact]
-        public void Parent_winlogon_match_is_case_insensitive()
+        public void Session_zero_cmd_is_ignored_even_when_bare()
         {
-            using var rig = new Rig(_ => "WinLogon");
-            rig.Sut.HandleStart(7244, 612, 1, "startup_probe");
-            Assert.Single(rig.Detected);
+            // IME / Intune install cmd run as SYSTEM in session 0 — never an interactive console.
+            using var rig = new Rig(Probe(BareCmd));
+            rig.Sut.HandleStart(1234, 1, sessionId: 0, ownerSidHint: null, detectedVia: "process_start_trace");
+            Assert.Empty(rig.Detected);
         }
 
-        [Fact]
-        public void Non_winlogon_parent_is_ignored()
+        [Theory]
+        [InlineData(@"C:\WINDOWS\system32\cmd.exe /c ""install.bat""")]
+        [InlineData(@"cmd.exe /C ping")]
+        [InlineData(@"cmd.exe /k doskey")]
+        public void Scripted_cmd_is_ignored(string commandLine)
         {
-            using var rig = new Rig(_ => "explorer"); // ordinary install-launched cmd
-            rig.Sut.HandleStart(7244, 999, 1, "process_start_trace");
+            using var rig = new Rig(Probe(commandLine));
+            rig.Sut.HandleStart(2222, 1, sessionId: 1, ownerSidHint: null, detectedVia: "process_start_trace");
             Assert.Empty(rig.Detected);
         }
 
         [Fact]
-        public void Unresolvable_parent_is_ignored()
+        public void Instant_close_unreadable_commandline_raises_low_confidence()
         {
-            using var rig = new Rig(_ => null);
-            rig.Sut.HandleStart(7244, 612, 1, "process_start_trace");
-            Assert.Empty(rig.Detected);
+            // Win32_Process query loses the race (process already exited). SessionID from the trace is
+            // still known, so the console is surfaced — low confidence, owner from the trace SID hint.
+            using var rig = new Rig(GoneProbe);
+
+            rig.Sut.HandleStart(9636, 9016, sessionId: 1, ownerSidHint: "S-1-5-18", detectedVia: "process_start_trace");
+
+            var info = Assert.Single(rig.Detected);
+            Assert.Equal("low", info.Confidence);
+            Assert.Equal("interactive_session_unclassified", info.Classification);
+            Assert.Equal("S-1-5-18", info.Owner);
+            Assert.Null(info.CommandLine);
         }
 
         [Fact]
-        public void Parent_resolver_throwing_is_swallowed_and_not_flagged()
+        public void Owner_prefers_probe_over_trace_hint()
         {
-            using var rig = new Rig(_ => throw new InvalidOperationException("parent gone"));
-            rig.Sut.HandleStart(7244, 612, 1, "process_start_trace");
-            Assert.Empty(rig.Detected); // conservative: cannot confirm winlogon → no false positive
+            using var rig = new Rig(Probe(BareCmd, owner: @"PC\defaultuser0"));
+            rig.Sut.HandleStart(9636, 9016, sessionId: 1, ownerSidHint: "S-1-5-18", detectedVia: "process_start_trace");
+            Assert.Equal(@"PC\defaultuser0", Assert.Single(rig.Detected).Owner);
         }
 
         [Fact]
         public void Same_pid_seen_twice_raises_only_once()
         {
-            // The startup probe and the live trace can both observe the same still-running console.
-            using var rig = new Rig(_ => "winlogon");
-            rig.Sut.HandleStart(7244, 612, 1, "startup_probe");
-            rig.Sut.HandleStart(7244, 612, 1, "process_start_trace");
+            // The startup probe and the live trace can both observe the same still-open console.
+            using var rig = new Rig(Probe(BareCmd));
+            rig.Sut.HandleStart(9636, 9016, 1, null, "startup_probe");
+            rig.Sut.HandleStart(9636, 9016, 1, null, "process_start_trace");
             Assert.Single(rig.Detected);
         }
 
         [Fact]
-        public void Non_winlogon_start_does_not_suppress_a_later_winlogon_start_with_same_pid()
+        public void Invalid_pid_is_ignored()
         {
-            // A non-winlogon cmd (pid 7244) exits; the OS reuses pid 7244 for a real Shift+F10
-            // console. The first non-match must NOT have marked the pid seen.
-            var parentNames = new Dictionary<int, string?> { [999] = "explorer", [612] = "winlogon" };
-            using var rig = new Rig(parentPid => parentNames[parentPid]);
-
-            rig.Sut.HandleStart(7244, 999, 1, "process_start_trace"); // ordinary cmd → ignored
-            rig.Sut.HandleStart(7244, 612, 1, "process_start_trace"); // reused pid, real bypass
-
-            Assert.Single(rig.Detected);
-            Assert.Equal(612, rig.Detected[0].ParentProcessId);
+            using var rig = new Rig(Probe(BareCmd));
+            rig.Sut.HandleStart(0, 9016, 1, null, "process_start_trace");
+            Assert.Empty(rig.Detected);
         }
 
+        // ---------------------------------------------------------------- Classify (pure)
+
         [Theory]
-        [InlineData(0, 612)]
-        [InlineData(7244, 0)]
-        public void Invalid_pids_are_ignored(int pid, int parentPid)
+        [InlineData(0, BareCmd, "Ignore")]                          // service session
+        [InlineData(1, null, "UnclassifiedInteractive")]            // instant-close
+        [InlineData(1, BareCmd, "InteractiveConsole")]              // bare shell
+        [InlineData(1, @"cmd.exe /c foo", "Ignore")]                // scripted
+        [InlineData(2, @"C:\x\cmd.exe /K bar", "Ignore")]           // scripted, other session
+        public void Classify_maps_session_and_commandline(int sessionId, string? commandLine, string expected)
         {
-            using var rig = new Rig(_ => "winlogon");
-            rig.Sut.HandleStart(pid, parentPid, 1, "process_start_trace");
-            Assert.Empty(rig.Detected);
+            Assert.Equal(expected, ConsoleBypassWatcher.Classify(sessionId, commandLine).ToString());
+        }
+
+        // ---------------------------------------------------------------- HasScriptArgument (pure)
+
+        [Theory]
+        [InlineData(@"C:\WINDOWS\system32\cmd.exe", false)]
+        [InlineData(@"""C:\WINDOWS\system32\cmd.exe""", false)]
+        [InlineData(@"cmd.exe /d", false)]                       // /d skips AutoRun — still interactive
+        [InlineData(@"C:\cmd\cmd.exe", false)]                   // folder named 'cmd', not a switch
+        [InlineData("", false)]
+        [InlineData(@"cmd.exe /c whoami", true)]
+        [InlineData(@"cmd.exe /C whoami", true)]
+        [InlineData(@"cmd.exe /k", true)]
+        [InlineData(@"""C:\WINDOWS\system32\cmd.exe"" /c ""x.bat""", true)]
+        public void HasScriptArgument_detects_run_command_switch(string commandLine, bool expected)
+        {
+            Assert.Equal(expected, ConsoleBypassWatcher.HasScriptArgument(commandLine));
         }
     }
 }

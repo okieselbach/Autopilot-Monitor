@@ -1,46 +1,58 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Management;
+using System.Security.Principal;
+using System.Text.RegularExpressions;
 using AutopilotMonitor.Agent.V2.Core.Logging;
 
 namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
 {
     /// <summary>
-    /// Live watcher for a SYSTEM console opened during enrollment — the classic <b>Shift+F10</b>
-    /// OOBE bypass, where <c>winlogon.exe</c> spawns a <c>cmd.exe</c> running as SYSTEM. The
-    /// discriminator is not the keystroke (un-hookable across sessions from session 0) but the
-    /// <b>process signature</b>: a watched console process whose <i>parent</i> is <c>winlogon.exe</c>.
-    /// That parent cleanly separates the bypass console from ordinary install-launched cmd (parented
-    /// to IME / a script host), keeping the false-positive rate near zero.
+    /// Live watcher for an interactive console opened during enrollment — the classic <b>Shift+F10</b>
+    /// OOBE bypass (a <c>cmd.exe</c> a human can type into, opened before the real desktop exists).
     /// <para>
-    /// Mirrors <see cref="Office.OfficeProcessWatcher"/>: a true ETW-backed push via WMI
-    /// <c>Win32_ProcessStartTrace</c> (no idle polling) plus a one-shot startup probe over
-    /// <c>Win32_Process</c> so a console still open when the agent boots (realistic during OOBE) is
-    /// still caught. Fail-soft — if the WMI watcher cannot start it is logged and the startup probe
-    /// still covers the already-open case; no polling fallback by design.
+    /// <b>Discriminator (no parent dependency).</b> Field experience (session f240a555, Win11 24H2)
+    /// showed the Shift+F10 cmd is NOT a child of a long-lived <c>winlogon.exe</c> — its parent is a
+    /// short-lived launcher that exits within milliseconds, so resolving the parent name races and the
+    /// parent is not winlogon anyway. Two signals that do NOT depend on the parent:
+    /// <list type="bullet">
+    ///   <item><b><see cref="ManagementEventWatcher"/> trace gives <c>SessionID</c> race-free</b> — an
+    ///     interactive console runs in an interactive session (≠ 0); Intune/IME install <c>cmd /c</c>
+    ///     run as SYSTEM in session 0. So <c>SessionID == 0</c> is dropped without even probing.</item>
+    ///   <item><b>The console's own command line</b> (queried for the just-started PID): a bare
+    ///     <c>cmd.exe</c> with no <c>/c</c>/<c>/k</c> script argument is an interactive shell; a
+    ///     <c>cmd /c "..."</c> is a scripted invocation (install/script) and is ignored.</item>
+    /// </list>
     /// </para>
     /// <para>
-    /// <b>Coverage</b> is best-effort: the agent installs during ESP, so a Shift+F10 pressed earlier
-    /// in OOBE (before the agent exists) is invisible here — that pre-agent window is covered, coarsely,
-    /// by the <see cref="Analyzers.ConsolePrefetchScanner"/>. The emitted event documents this gap.
+    /// <b>Instant-close fallback.</b> Reading the command line still races if the process exits before
+    /// the probe. In that case (<c>SessionID ≠ 0</c> but command line unreadable) the console is still
+    /// surfaced, tagged <c>confidence:"low"</c> — better than missing it. A truly race-free capture of
+    /// the command line would require the ETW Kernel-Process provider (deferred).
+    /// </para>
+    /// <para>
+    /// <b>Lifecycle.</b> The host stops this watcher once the real-user desktop has arrived (wired in
+    /// the composition root): from that point Shift+F10 is no longer possible, so any later cmd is an
+    /// ordinary user action — stopping avoids false positives over the agent's remaining lifetime.
+    /// The pre-agent OOBE window is covered separately by <see cref="Analyzers.ConsolePrefetchScanner"/>.
     /// </para>
     /// </summary>
     public sealed class ConsoleBypassWatcher : IDisposable
     {
         /// <summary>
-        /// Console executables treated as a bypass console when parented to winlogon. v1 watches only
-        /// <c>cmd.exe</c> (the exact Shift+F10 spawn); the list is the single seam to broaden later
-        /// (e.g. <c>powershell.exe</c>) without touching the watcher logic.
+        /// Console executables watched. v1 watches only <c>cmd.exe</c> (the exact Shift+F10 spawn); the
+        /// list is the single seam to broaden later (e.g. <c>powershell.exe</c>).
         /// </summary>
         internal static readonly string[] WatchedProcessNames = { "cmd.exe" };
 
-        internal const string ParentProcessName = "winlogon.exe";
-        private const string WinlogonNoExt = "winlogon";
+        // cmd switches that turn the shell into a one-shot scripted invocation (install/script), as
+        // opposed to a bare interactive console. Matched as a whitespace-delimited /c or /k token.
+        private static readonly Regex ScriptSwitchRegex =
+            new Regex(@"(?:^|\s)/[ck]\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private readonly AgentLogger _logger;
-        private readonly Func<int, string?> _parentNameResolver;
+        private readonly Func<int, ProcessProbe?> _processProbe;
         private readonly object _lock = new object();
         private readonly HashSet<int> _seen = new HashSet<int>();
 
@@ -49,15 +61,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
         private bool _disposed;
 
         /// <summary>
-        /// Raised once per process when a watched console spawns with <c>winlogon.exe</c> as its
-        /// parent. The host translates this into a Warning <c>oobe_console_spawned</c> event.
+        /// Raised once per process when a watched console is classified as an interactive console
+        /// (high confidence) or an unclassifiable interactive-session console (low confidence). The
+        /// host translates this into a Warning <c>oobe_console_spawned</c> event.
         /// </summary>
         public event EventHandler<ConsoleSpawnInfo>? BypassConsoleDetected;
 
-        public ConsoleBypassWatcher(AgentLogger logger, Func<int, string?>? parentNameResolver = null)
+        /// <param name="processProbe">Resolves the command line + owner for a live PID; returns null
+        /// when the process has already exited (the instant-close race). Defaults to a WMI query.</param>
+        public ConsoleBypassWatcher(AgentLogger logger, Func<int, ProcessProbe?>? processProbe = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _parentNameResolver = parentNameResolver ?? DefaultResolveParentName;
+            _processProbe = processProbe ?? DefaultProbe;
         }
 
         public void Start()
@@ -68,9 +83,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
                 _started = true;
             }
 
-            // 1) Startup probe — a console already open before the watcher armed (Shift+F10 pressed
-            //    while the agent was installing). Win32_Process exposes the parent PID + session
-            //    directly, so the same classification path is reused.
+            // 1) Startup probe — a console already open before the watcher armed. Win32_Process exposes
+            //    SessionId directly, so the same classification path is reused.
             try
             {
                 using var searcher = new ManagementObjectSearcher(
@@ -84,7 +98,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
                             ToInt(mo["ProcessId"]),
                             ToInt(mo["ParentProcessId"]),
                             ToInt(mo["SessionId"]),
-                            "startup_probe");
+                            ownerSidHint: null,
+                            detectedVia: "startup_probe");
                     }
                 }
             }
@@ -101,7 +116,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
                 _startWatcher = new ManagementEventWatcher(query);
                 _startWatcher.EventArrived += OnProcessStartTrace;
                 _startWatcher.Start();
-                _logger.Info("[ConsoleBypassWatcher] watching Win32_ProcessStartTrace for cmd.exe (parent winlogon.exe)");
+                _logger.Info("[ConsoleBypassWatcher] watching Win32_ProcessStartTrace for cmd.exe (interactive-session + bare command line)");
             }
             catch (Exception ex)
             {
@@ -118,7 +133,8 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
                 var pid = ToInt(e.NewEvent?["ProcessID"]);
                 var parentPid = ToInt(e.NewEvent?["ParentProcessID"]);
                 var sessionId = ToInt(e.NewEvent?["SessionID"]);
-                HandleStart(pid, parentPid, sessionId, "process_start_trace");
+                var ownerSid = TryReadSid(e.NewEvent?["Sid"]); // race-free owner from the trace
+                HandleStart(pid, parentPid, sessionId, ownerSid, "process_start_trace");
             }
             catch (Exception ex)
             {
@@ -127,65 +143,121 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
         }
 
         /// <summary>
-        /// Classification core (internal for tests): resolves the parent name and raises
-        /// <see cref="BypassConsoleDetected"/> exactly once per PID when the parent is winlogon.
-        /// A non-winlogon parent (ordinary install-launched cmd) is ignored.
+        /// Classification core (internal for tests). Gates race-free on <paramref name="sessionId"/>,
+        /// then probes the live process for its command line; raises <see cref="BypassConsoleDetected"/>
+        /// once per PID for an interactive console (bare command line → high confidence) or an
+        /// unreadable interactive-session console (instant-close → low confidence). Scripted
+        /// invocations (<c>cmd /c</c>) and session-0 (service) cmd are ignored.
         /// </summary>
-        internal void HandleStart(int pid, int parentPid, int sessionId, string detectedVia)
+        internal void HandleStart(int pid, int parentPid, int sessionId, string? ownerSidHint, string detectedVia)
         {
-            if (pid <= 0 || parentPid <= 0) return;
-
+            if (pid <= 0) return;
             lock (_lock) { if (_disposed) return; }
 
-            string? parentName;
-            try { parentName = _parentNameResolver(parentPid); }
-            catch (Exception ex)
-            {
-                // Parent already gone / inaccessible — cannot confirm winlogon, so stay conservative
-                // and do not flag (avoids a false positive). winlogon never exits during enrollment.
-                // Deliberately NOT marked seen: the PID may be reused later by a real winlogon-parented
-                // console, which must still be detected.
-                _logger.Debug($"[ConsoleBypassWatcher] parent resolve failed for pid={pid} parent={parentPid}: {ex.Message}");
-                return;
-            }
+            // Race-free gate: an interactive console is never in the service session. This drops the
+            // bulk of legitimate IME/Intune install cmd (SYSTEM, session 0) without even probing.
+            if (sessionId == 0) return;
 
-            if (string.IsNullOrEmpty(parentName) ||
-                !parentName!.Equals(WinlogonNoExt, StringComparison.OrdinalIgnoreCase))
-            {
-                // Not a Shift+F10 SYSTEM console. Do NOT mark the PID seen — an ordinary cmd that
-                // exits could see its PID reused by a later genuine winlogon-parented console, which
-                // must not be suppressed by this non-match.
-                return;
-            }
+            var probe = _processProbe(pid); // null when the process already exited (instant-close)
+            var verdict = Classify(sessionId, probe?.CommandLine);
+            if (verdict == ConsoleVerdict.Ignore) return; // scripted invocation (cmd /c ...)
 
-            // Confirmed bypass console — dedup ONLY here, so the startup probe and the live trace
-            // observing the same console collapse to a single detection, while a non-winlogon start
-            // with the same PID never pre-empts a real one.
+            // Dedup only on a flagged hit, so the startup probe + live trace observing the same console
+            // collapse to one detection, and an ignored start never pre-empts a later real one.
             lock (_lock)
             {
                 if (_disposed) return;
                 if (!_seen.Add(pid)) return;
             }
 
+            bool high = verdict == ConsoleVerdict.InteractiveConsole;
             var info = new ConsoleSpawnInfo(
                 processName: "cmd.exe",
                 processId: pid,
-                parentProcessName: ParentProcessName,
                 parentProcessId: parentPid,
                 sessionId: sessionId,
+                owner: probe?.Owner ?? ownerSidHint,
+                commandLine: probe?.CommandLine,
+                confidence: high ? "high" : "low",
+                classification: high ? "interactive_console" : "interactive_session_unclassified",
                 detectedVia: detectedVia);
 
-            _logger.Warning($"[ConsoleBypassWatcher] SYSTEM console detected: cmd.exe (PID={pid}) " +
-                $"parent winlogon.exe (PID={parentPid}), session={sessionId}, via={detectedVia} — possible Shift+F10");
+            _logger.Warning($"[ConsoleBypassWatcher] interactive console detected: cmd.exe (PID={pid}) " +
+                $"session={sessionId}, confidence={info.Confidence}, via={detectedVia} — possible Shift+F10");
 
             try { BypassConsoleDetected?.Invoke(this, info); }
             catch (Exception ex) { _logger.Warning($"[ConsoleBypassWatcher] handler threw: {ex.Message}"); }
         }
 
-        private static string? DefaultResolveParentName(int parentPid)
+        internal enum ConsoleVerdict { Ignore, InteractiveConsole, UnclassifiedInteractive }
+
+        /// <summary>
+        /// Pure classification (internal for tests): session-0 → Ignore; a scripted <c>cmd /c</c> →
+        /// Ignore; a bare command line → InteractiveConsole (high); an unreadable command line in an
+        /// interactive session → UnclassifiedInteractive (low, the instant-close fallback).
+        /// </summary>
+        internal static ConsoleVerdict Classify(int sessionId, string? commandLine)
         {
-            using var proc = Process.GetProcessById(parentPid);
-            return proc.ProcessName; // "winlogon" (no extension)
+            if (sessionId == 0) return ConsoleVerdict.Ignore;
+            if (commandLine == null) return ConsoleVerdict.UnclassifiedInteractive;
+            if (HasScriptArgument(commandLine)) return ConsoleVerdict.Ignore;
+            return ConsoleVerdict.InteractiveConsole;
+        }
+
+        /// <summary>True when the command line carries a <c>/c</c> or <c>/k</c> run-command switch
+        /// (a scripted invocation), false for a bare interactive shell.</summary>
+        internal static bool HasScriptArgument(string commandLine)
+            => !string.IsNullOrEmpty(commandLine) && ScriptSwitchRegex.IsMatch(commandLine);
+
+        private static ProcessProbe? DefaultProbe(int pid)
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}");
+                using var results = searcher.Get();
+                foreach (ManagementObject mo in results)
+                {
+                    using (mo)
+                    {
+                        var commandLine = mo["CommandLine"]?.ToString();
+                        return new ProcessProbe(commandLine, TryGetOwner(mo));
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Process gone or query failed — treated as the instant-close fallback (low confidence).
+            }
+            return null;
+        }
+
+        private static string? TryGetOwner(ManagementObject process)
+        {
+            try
+            {
+                var outParams = process.InvokeMethod("GetOwner", null, null);
+                if (outParams != null && Convert.ToInt32(outParams["ReturnValue"]) == 0)
+                {
+                    var domain = outParams["Domain"]?.ToString();
+                    var user = outParams["User"]?.ToString();
+                    if (!string.IsNullOrEmpty(user))
+                        return string.IsNullOrEmpty(domain) ? user : $"{domain}\\{user}";
+                }
+            }
+            catch { /* best-effort enrichment */ }
+            return null;
+        }
+
+        private static string? TryReadSid(object? sidValue)
+        {
+            try
+            {
+                if (sidValue is byte[] bytes && bytes.Length > 0)
+                    return new SecurityIdentifier(bytes, 0).Value;
+            }
+            catch { /* best-effort enrichment */ }
+            return null;
         }
 
         private static int ToInt(object? value)
@@ -213,25 +285,45 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Security
         }
     }
 
-    /// <summary>Immutable detail record for a detected bypass console spawn.</summary>
+    /// <summary>Command line + owner for a probed PID; either may be null (best-effort).</summary>
+    public sealed class ProcessProbe
+    {
+        public ProcessProbe(string? commandLine, string? owner)
+        {
+            CommandLine = commandLine;
+            Owner = owner;
+        }
+
+        public string? CommandLine { get; }
+        public string? Owner { get; }
+    }
+
+    /// <summary>Immutable detail record for a detected interactive console spawn.</summary>
     public sealed class ConsoleSpawnInfo
     {
-        public ConsoleSpawnInfo(string processName, int processId, string parentProcessName,
-            int parentProcessId, int sessionId, string detectedVia)
+        public ConsoleSpawnInfo(string processName, int processId, int parentProcessId, int sessionId,
+            string? owner, string? commandLine, string confidence, string classification, string detectedVia)
         {
             ProcessName = processName;
             ProcessId = processId;
-            ParentProcessName = parentProcessName;
             ParentProcessId = parentProcessId;
             SessionId = sessionId;
+            Owner = owner;
+            CommandLine = commandLine;
+            Confidence = confidence;
+            Classification = classification;
             DetectedVia = detectedVia;
         }
 
         public string ProcessName { get; }
         public int ProcessId { get; }
-        public string ParentProcessName { get; }
         public int ParentProcessId { get; }
         public int SessionId { get; }
+        public string? Owner { get; }
+        public string? CommandLine { get; }
+        /// <summary>"high" (bare interactive shell) or "low" (interactive session, command line unreadable).</summary>
+        public string Confidence { get; }
+        public string Classification { get; }
         public string DetectedVia { get; }
     }
 }

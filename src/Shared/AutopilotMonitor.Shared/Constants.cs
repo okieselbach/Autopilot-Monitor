@@ -451,9 +451,13 @@ namespace AutopilotMonitor.Shared
             public const string AutoLogonAnalysis         = "autologon_analysis";
             // OOBE-console / Shift+F10 detection (per-tenant opt-OUT, AnalyzerConfiguration.
             // EnableConsoleBypassDetection, default ON). Two complementary Warning signals:
-            //   oobe_console_spawned    — LIVE: a cmd.exe spawned with parent winlogon.exe while the
-            //                             agent runs (the Shift+F10 SYSTEM-console fingerprint). Precise,
-            //                             low false-positive. Misses presses BEFORE the agent installed.
+            //   oobe_console_spawned    — LIVE: an interactive-session cmd.exe (SessionID != 0) with a
+            //                             bare, non-scripted command line (no /c|/k) — an interactive
+            //                             console a human can type into. confidence=high; an instant-close
+            //                             cmd whose command line was unreadable is confidence=low. Stopped
+            //                             on real-user desktop arrival (Shift+F10 gone). NOT parent-based:
+            //                             the Shift+F10 cmd's parent is a short-lived non-winlogon launcher
+            //                             (field 24H2). Misses presses BEFORE the agent installed.
             //   console_prefetch_detected — STARTUP FORENSIC: a CMD.EXE-*.pf prefetch artifact whose
             //                             last-run is after boot. Covers the pre-agent OOBE window the
             //                             live watcher cannot see, but cannot attribute the run to

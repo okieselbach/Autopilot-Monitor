@@ -13,11 +13,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
     /// <summary>
     /// Lifecycle host for the <see cref="ConsoleBypassWatcher"/>. Opt-OUT per tenant
     /// (AnalyzerConfiguration.EnableConsoleBypassDetection, default ON): created by
-    /// <c>DefaultComponentFactory</c> unless the flag is explicitly disabled. Owns the watcher and translates each
-    /// detected SYSTEM-console spawn into a Warning <c>oobe_console_spawned</c> event on the single
-    /// rail. The event carries the full process signature plus an honest <c>coverageNote</c> /
-    /// <c>coverageComplete:false</c> — the live watcher only sees consoles spawned after the agent
-    /// started; the pre-agent OOBE window is covered (coarsely) by the ConsolePrefetchScanner.
+    /// <c>DefaultComponentFactory</c> unless the flag is explicitly disabled. Owns the watcher and
+    /// translates each detected interactive-console spawn into a Warning <c>oobe_console_spawned</c>
+    /// event on the single rail. The event carries the process signature (session, owner, command line,
+    /// confidence) plus an honest <c>coverageNote</c> / <c>coverageComplete:false</c> — the live watcher
+    /// only sees consoles spawned after the agent started; the pre-agent OOBE window is covered
+    /// (coarsely) by the ConsolePrefetchScanner. The composition root calls <see cref="Stop"/> once the
+    /// real-user desktop arrives (Shift+F10 no longer possible) to avoid post-enrollment false positives.
     /// </summary>
     internal sealed class ConsoleBypassHost : ICollectorHost
     {
@@ -56,6 +58,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
 
         public void Stop() => Dispose();
 
+        /// <summary>
+        /// Lifecycle gate: called by the composition root when the real-user desktop has arrived.
+        /// From that point Shift+F10 is no longer possible, so any further cmd is an ordinary user
+        /// action — stopping the watcher avoids flagging it. Idempotent.
+        /// </summary>
+        public void StopForDesktopArrival()
+        {
+            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1) return;
+            _logger.Info("[ConsoleBypassHost] real-user desktop arrived — Shift+F10 no longer possible, stopping console watcher");
+            Dispose();
+        }
+
         private void OnBypassConsoleDetected(object? sender, ConsoleSpawnInfo info)
         {
             try
@@ -68,18 +82,20 @@ namespace AutopilotMonitor.Agent.V2.Core.Orchestration
                     Severity = EventSeverity.Warning,
                     Source = Name,
                     Phase = EnrollmentPhase.Unknown,
-                    Message = $"SYSTEM console spawned during enrollment: {info.ProcessName} " +
-                              $"(parent {info.ParentProcessName}) — possible Shift+F10",
+                    Message = $"Interactive console spawned during enrollment: {info.ProcessName} " +
+                              $"(session {info.SessionId}, {info.Confidence} confidence) — possible Shift+F10",
                     ImmediateUpload = true,
                     Data = new Dictionary<string, object>
                     {
                         { "decision", "console_spawn_detected" },
                         { "processName", info.ProcessName },
                         { "processId", info.ProcessId },
-                        { "parentProcessName", info.ParentProcessName },
                         { "parentProcessId", info.ParentProcessId },
-                        { "parentMatchesWinlogon", true },
                         { "sessionId", info.SessionId },
+                        { "owner", info.Owner ?? "unknown" },
+                        { "commandLine", info.CommandLine ?? "unavailable" },
+                        { "confidence", info.Confidence },
+                        { "classification", info.Classification },
                         { "detectedVia", info.DetectedVia },
                         { "coverageNote", CoverageNote },
                         { "coverageComplete", false },
