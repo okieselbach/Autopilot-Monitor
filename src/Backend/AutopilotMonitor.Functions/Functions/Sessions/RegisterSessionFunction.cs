@@ -251,7 +251,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 if (string.IsNullOrEmpty(webhookUrl) || providerTypeInt == 0)
                     return;
 
-                var sessionUrl = $"https://portal.autopilotmonitor.com/session/{tenantId}/{sessionId}";
+                var sessionUrl = $"https://portal.autopilotmonitor.com/sessions/{sessionId}";
                 var alert = NotificationAlertBuilder.BuildEnrollmentStartedAlert(
                     session.DeviceName,
                     session.SerialNumber,

@@ -871,7 +871,7 @@ namespace AutopilotMonitor.Functions.Functions.Ingest
 
             var providerType = (WebhookProviderType)providerTypeInt;
             var sessionUrl = updatedSession != null
-                ? $"https://portal.autopilotmonitor.com/session/{request.TenantId}/{request.SessionId}"
+                ? $"https://portal.autopilotmonitor.com/sessions/{request.SessionId}"
                 : null;
 
             // Enrollment completion/failure notification
