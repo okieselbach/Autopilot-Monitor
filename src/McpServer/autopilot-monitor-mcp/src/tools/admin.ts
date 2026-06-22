@@ -166,7 +166,7 @@ export function paginateInventory(
   };
 }
 
-export function registerAdminTools(server: McpServer, ga: boolean): void {
+export function registerAdminTools(server: McpServer, ga: boolean, strictGa: boolean = ga): void {
   // Tool 11: get_api_usage — Global Admin only; not registered for normal users
   // (the `if (ga)` guards the whole single server.registerTool(...) statement).
   if (ga) server.registerTool(
@@ -762,12 +762,13 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
 
   // ── Admin Diagnostic Tools ────────────────────────────────────────────
   // Security note: query_table and query_backend_logs accept arbitrary OData/KQL
-  // expressions. This is by design — these are trusted-admin-only diagnostic tools
-  // gated by GlobalAdmin RBAC on the backend. No client-side filter allowlist is
-  // needed because the backend enforces the same permission boundary.
+  // expressions AND can read secret-bearing tables (e.g. TenantConfiguration). They are
+  // therefore gated on `strictGa` (real Global Admin only), NOT the broader platform scope —
+  // a read-only GlobalReader must not bypass the config-secret redaction via raw table access.
+  // The backend endpoints (global/raw/tables, global/raw/logs) are GlobalAdminOnly to match.
 
   // Tool 20: list_tables — Global Admin only; not registered for normal users.
-  if (ga) server.registerTool(
+  if (strictGa) server.registerTool(
     'list_tables',
     {
       title: 'List Tables',
@@ -786,7 +787,7 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
   );
 
   // Tool 21: query_table — Global Admin only; not registered for normal users.
-  if (ga) server.registerTool(
+  if (strictGa) server.registerTool(
     'query_table',
     {
       title: 'Query Table',
@@ -849,7 +850,7 @@ export function registerAdminTools(server: McpServer, ga: boolean): void {
   );
 
   // Tool 22: query_backend_logs — Global Admin only; not registered for normal users.
-  if (ga) server.registerTool(
+  if (strictGa) server.registerTool(
     'query_backend_logs',
     {
       title: 'Query Backend Logs',

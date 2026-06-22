@@ -11,11 +11,11 @@ import { describe, it, expect } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerTools } from '../tools.js';
 
-function registeredToolNames(ga: boolean): string[] {
+function registeredToolNames(ga: boolean, strictGa: boolean = ga): string[] {
   const server = new McpServer({ name: 'test', version: '0.0.0' });
   // knowledgeBase / eventTypeIndex are optional — pass undefined so this stays a
   // pure unit test with no search-provider or backend dependency.
-  registerTools(server, undefined, undefined, ga);
+  registerTools(server, undefined, undefined, ga, strictGa);
   const internal = server as unknown as { _registeredTools: Record<string, unknown> };
   return Object.keys(internal._registeredTools);
 }
@@ -53,5 +53,20 @@ describe('tool catalog ordering', () => {
     // list_tenants is GA-only — it must not leak into the tenant catalog.
     expect(gaNames).toContain('list_tenants');
     expect(tenantNames).not.toContain('list_tenants');
+  });
+
+  it('gives a Global Reader the platform read tools but NOT the secret-bearing raw tools', () => {
+    // A Global Reader has platform scope (ga=true) but is not a real Global Admin (strictGa=false).
+    const readerNames = registeredToolNames(true, false);
+    const gaNames = registeredToolNames(true, true);
+
+    // Curated cross-tenant read tools are present for the reader…
+    expect(readerNames).toContain('list_tenants');
+    expect(readerNames).toContain('get_api_usage');
+    // …but the raw secret-bearing tools are GA-strict only.
+    for (const raw of ['query_table', 'list_tables', 'query_backend_logs']) {
+      expect(gaNames).toContain(raw);
+      expect(readerNames).not.toContain(raw);
+    }
   });
 });

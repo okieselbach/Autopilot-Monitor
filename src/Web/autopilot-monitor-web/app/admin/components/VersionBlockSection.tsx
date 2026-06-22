@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { useCanMutatePlatform } from "@/hooks/useCanMutatePlatform";
 
 interface BlockedVersion {
   versionPattern: string;
@@ -23,6 +24,8 @@ export function VersionBlockSection({
   setError,
   setSuccessMessage,
 }: VersionBlockSectionProps) {
+  // Read-only Global Readers may view block rules but not add/remove them.
+  const canMutate = useCanMutatePlatform();
   const [versionPattern, setVersionPattern] = useState("");
   const [versionAction, setVersionAction] = useState<"Block" | "Kill">("Block");
   const [versionReason, setVersionReason] = useState("");
@@ -49,6 +52,7 @@ export function VersionBlockSection({
   };
 
   const handleAddRule = async () => {
+    if (!canMutate) return; // read-only Global Reader
     if (!versionPattern.trim()) return;
 
     if (versionAction === "Kill" && !confirm(
@@ -90,6 +94,7 @@ export function VersionBlockSection({
   };
 
   const handleRemoveRule = async (pattern: string) => {
+    if (!canMutate) return; // read-only Global Reader
     try {
       setRemovingPattern(pattern);
       setError(null);
@@ -206,7 +211,7 @@ export function VersionBlockSection({
           )}
           <button
             onClick={handleAddRule}
-            disabled={addingRule || !versionPattern.trim()}
+            disabled={!canMutate || addingRule || !versionPattern.trim()}
             className={`mt-4 px-4 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center space-x-2 ${
               versionAction === "Kill"
                 ? "bg-red-800 hover:bg-red-900 dark:bg-red-700 dark:hover:bg-red-800"
@@ -263,13 +268,17 @@ export function VersionBlockSection({
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{v.createdByEmail}</td>
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{v.reason || "\u2014"}</td>
                       <td className="px-3 py-2">
-                        <button
-                          onClick={() => handleRemoveRule(v.versionPattern)}
-                          disabled={removingPattern === v.versionPattern}
-                          className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
-                        >
-                          {removingPattern === v.versionPattern ? "Removing..." : "Remove"}
-                        </button>
+                        {canMutate ? (
+                          <button
+                            onClick={() => handleRemoveRule(v.versionPattern)}
+                            disabled={removingPattern === v.versionPattern}
+                            className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
+                          >
+                            {removingPattern === v.versionPattern ? "Removing..." : "Remove"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">Read-only</span>
+                        )}
                       </td>
                     </tr>
                   ))}

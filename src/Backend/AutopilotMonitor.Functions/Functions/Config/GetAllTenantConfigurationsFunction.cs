@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using System.Web;
@@ -47,8 +48,14 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 // Web consumers (tenant selectors + admin config editor) depend on this shape.
                 if (parsed.PageSize == null)
                 {
-                    _logger.LogInformation($"GetAllTenantConfigurations (full) by Global Admin {userIdentifier}");
+                    _logger.LogInformation($"GetAllTenantConfigurations (full) by {userIdentifier}");
                     var configurations = await _configService.GetAllConfigurationsAsync();
+
+                    // A read-only GlobalReader gets per-tenant secrets (SAS / webhook URLs / custom
+                    // headers) redacted; a Global Admin gets the full configs. The paginated mode below
+                    // is already a secret-stripped keep-list projection, so it needs no role branch.
+                    if (req.GetRequestContext().IsGlobalReader)
+                        configurations = configurations.Select(c => c.RedactedCopyForReader()).ToList();
 
                     var response = req.CreateResponse(HttpStatusCode.OK);
                     await response.WriteAsJsonAsync(configurations);

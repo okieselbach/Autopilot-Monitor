@@ -37,9 +37,19 @@ namespace AutopilotMonitor.Functions.Functions.Config
 
                 var config = await _configService.GetConfigurationAsync(requestCtx.TargetTenantId);
 
-                // NOTE: Returns full TenantConfiguration including DiagnosticsBlobSasUrl.
-                // Intentional — tenant admins need to view/manage the SAS URL in the Settings UI.
-                // Access restricted to TenantAdminOrGA by PolicyEnforcementMiddleware.
+                // Tenant admins (own tenant) and Global Admins get the full config including
+                // DiagnosticsBlobSasUrl / webhook URLs / custom headers — they manage those in the
+                // Settings UI. Secrets are redacted ONLY for the read-only-reader view (returns a copy;
+                // the cached instance is never mutated). ADDITIVE: a GlobalReader who is ALSO this
+                // tenant's own Admin is acting as the tenant admin here, so they keep the FULL config —
+                // redaction applies only when they are NOT the own-tenant admin (i.e. pure reader, or a
+                // reader viewing a DIFFERENT tenant cross-tenant). This also prevents a "***REDACTED***"
+                // placeholder from ever reaching the Settings save round-trip for an own-tenant admin.
+                var ownTenantAdminView = requestCtx.IsTenantAdmin
+                    && string.Equals(requestCtx.TargetTenantId, requestCtx.TenantId, StringComparison.OrdinalIgnoreCase);
+                if (requestCtx.IsGlobalReader && !ownTenantAdminView)
+                    config = config.RedactedCopyForReader();
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(config);
                 return response;

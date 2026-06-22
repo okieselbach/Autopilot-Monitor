@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest';
 import {
   pickGlobalOrTenantPath,
   isGlobalAdmin,
+  hasGlobalScope,
   getCurrentToken,
   runWithCaller,
 } from '../client.js';
@@ -41,6 +42,14 @@ describe('pickGlobalOrTenantPath — GA gating', () => {
     runWithCaller({ token: 'tenant-token', isGlobalAdmin: false }, () => {
       expect(isGlobalAdmin()).toBe(false);
       expect(pickGlobalOrTenantPath(GLOBAL, TENANT)).toBe(TENANT);
+    });
+  });
+
+  it('routes a read-only Global Reader to /api/global/* (scope, not GA write status)', () => {
+    runWithCaller({ token: 'reader-token', isGlobalAdmin: false, isGlobalReader: true }, () => {
+      expect(isGlobalAdmin()).toBe(false);   // not a write-tier Global Admin
+      expect(hasGlobalScope()).toBe(true);   // but has cross-tenant read scope
+      expect(pickGlobalOrTenantPath(GLOBAL, TENANT)).toBe(GLOBAL);
     });
   });
 

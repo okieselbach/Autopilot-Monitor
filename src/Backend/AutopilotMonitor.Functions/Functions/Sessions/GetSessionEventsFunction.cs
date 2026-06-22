@@ -101,7 +101,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                     // Legacy unpaginated path — full list, no nextLink.
                     var events = await _sessionRepo.GetSessionEventsAsync(requestCtx.TargetTenantId, sessionId);
 
-                    if (events.Count == 0 && requestCtx.IsGlobalAdmin)
+                    if (events.Count == 0 && requestCtx.HasGlobalScope)
                     {
                         var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
                         if (resolvedTenantId != null && !string.Equals(resolvedTenantId, requestCtx.TargetTenantId, StringComparison.OrdinalIgnoreCase))
@@ -131,15 +131,15 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 // Paginated path. Continuation token binds (tenantId, sessionId), so the
                 // tenantId on every page must match the tenant the token was issued for.
                 //
-                // For Global Admin cross-tenant, the nextLink we emit echoes that tenant
-                // back as ?tenantId=, so follow-up pages can re-bind to it. On page 1, if
-                // GA hasn't passed tenantId yet, we resolve it from the session lookup.
+                // For a global-scope caller (GA or read-only GlobalReader) cross-tenant, the nextLink we
+                // emit echoes that tenant back as ?tenantId=, so follow-up pages can re-bind to it. On
+                // page 1, if no tenantId was passed yet, we resolve it from the session lookup.
                 //
-                // For non-GA, ?tenantId= in the URL is ignored — middleware-bound JWT
+                // For non-global callers, ?tenantId= in the URL is ignored — middleware-bound JWT
                 // tenant is authoritative; we must never let a query param override it.
                 var effectiveTenantId = requestCtx.TargetTenantId;
 
-                if (requestCtx.IsGlobalAdmin)
+                if (requestCtx.HasGlobalScope)
                 {
                     if (!string.IsNullOrEmpty(tenantIdQueryParam))
                     {

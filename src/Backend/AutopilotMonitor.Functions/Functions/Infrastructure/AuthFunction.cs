@@ -86,17 +86,19 @@ public class AuthFunction
         // Fail-fast: if any fetch throws, AggregateException propagates → Azure Functions returns 500.
         // This is intentional — all 6 queries are required for the auth decision.
         var tenantConfigTask = _tenantConfigService.GetConfigurationAsync(tenantId);
-        var isGlobalAdminTask = _globalAdminService.IsGlobalAdminAsync(upn);
+        var globalRoleTask = _globalAdminService.GetGlobalRoleAsync(upn);
         var isApprovedTask = _previewWhitelistService.IsApprovedAsync(tenantId);
         var membershipTask = _tenantAdminsService.GetTableMembershipAsync(tenantId, upn);
         var mcpCheckTask = _mcpUserService.IsAllowedAsync(upn);
         var existingAdminsTask = _tenantAdminsService.GetTenantAdminsAsync(tenantId);
 
-        await Task.WhenAll(tenantConfigTask, isGlobalAdminTask, isApprovedTask,
+        await Task.WhenAll(tenantConfigTask, globalRoleTask, isApprovedTask,
                            membershipTask, mcpCheckTask, existingAdminsTask);
 
         var tenantConfig = tenantConfigTask.Result;
-        var isGlobalAdmin = isGlobalAdminTask.Result;
+        var globalRole = globalRoleTask.Result;
+        var isGlobalAdmin = globalRole == Constants.GlobalRoles.GlobalAdmin;
+        var isGlobalReader = globalRole == Constants.GlobalRoles.GlobalReader;
         var isApproved = isApprovedTask.Result;
         var (tableState, tableRole) = membershipTask.Result;
         var mcpCheck = mcpCheckTask.Result;
@@ -114,7 +116,7 @@ public class AuthFunction
 
         // --- Pure decision logic (tested by AuthFunctionTests) ---
         var decision = BuildAuthResult(
-            tenantConfig, isGlobalAdmin, isApproved,
+            tenantConfig, isGlobalAdmin, isGlobalReader, isApproved,
             memberRole, mcpCheck, existingAdmins.Count > 0,
             tenantId, upn, displayName ?? string.Empty, objectId ?? string.Empty);
 
@@ -339,6 +341,7 @@ public class AuthFunction
     internal static AuthDecisionResult BuildAuthResult(
         TenantConfiguration tenantConfig,
         bool isGlobalAdmin,
+        bool isGlobalReader,
         bool isPreviewApproved,
         MemberRoleInfo? memberRole,
         McpAccessCheckResult mcpCheck,
@@ -359,8 +362,8 @@ public class AuthFunction
             });
         }
 
-        // Gate 2: Preview gate (Global Admins bypass)
-        if (!isGlobalAdmin && !isPreviewApproved)
+        // Gate 2: Preview gate (platform roles — GlobalAdmin and read-only GlobalReader — bypass)
+        if (!isGlobalAdmin && !isGlobalReader && !isPreviewApproved)
         {
             return AuthDecisionResult.Blocked(HttpStatusCode.Forbidden, new
             {
@@ -372,8 +375,14 @@ public class AuthFunction
         // Determine admin status: auto-admin if first user (no existing admins and no role yet).
         // needsAutoAdmin keys off the absence of ANY effective role (table or claim) so a
         // claim-derived Admin/Operator in a claim-only tenant is NOT written into the table.
+        // GlobalReader semantics are ADDITIVE (the role adds cross-tenant read; it never removes a
+        // user's independent tenant-role write rights). Auto-admin, however, is not an existing right —
+        // it SILENTLY grants write on first login. We decline that for a read-only-flagged identity:
+        // it removes nothing, and a GlobalReader who should also administer their tenant can be added
+        // to TenantAdmins explicitly. (A pure GlobalReader stays read-only everywhere via the write
+        // evaluators denying a roleless caller.)
         bool isTenantAdmin = memberRole?.Role == Constants.TenantRoles.Admin;
-        bool needsAutoAdmin = memberRole == null && !hasTenantAdmins;
+        bool needsAutoAdmin = memberRole == null && !hasTenantAdmins && !isGlobalReader;
         if (needsAutoAdmin)
         {
             isTenantAdmin = true;
@@ -391,6 +400,7 @@ public class AuthFunction
             displayName,
             objectId,
             isGlobalAdmin,
+            isGlobalReader,
             isTenantAdmin,
             role,
             canManageBootstrapTokens,

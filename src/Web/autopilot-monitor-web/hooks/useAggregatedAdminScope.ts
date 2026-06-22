@@ -60,10 +60,11 @@ export function useAggregatedAdminScope(opts?: {
   urlTenantId?: string;
 }): AggregatedAdminScope {
   const { tenantId } = useTenant();
-  const { user } = useAuth();
+  const { hasGlobalScope } = useAuth();
   const { globalAdminMode } = useAdminMode();
 
-  const isGlobalAdmin = Boolean(globalAdminMode && user?.isGlobalAdmin);
+  // Platform scope (GA or read-only Global Reader) — read-only-safe cross-tenant/aggregated view + selector.
+  const isGlobalAdmin = Boolean(globalAdminMode && hasGlobalScope);
 
   const tenants = useTenantList(isGlobalAdmin);
   const [selectedTenantId, setSelectedTenantId] = useState<string>("");

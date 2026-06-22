@@ -22,7 +22,7 @@ process.env.MCP_RATE_LIMIT_PER_MINUTE = '2';
 const { accessGuard } = await import('../access-guard.js');
 // Same ESM singleton the guard uses internally — so the context set by
 // runWithCaller inside next() is observable here.
-const { isGlobalAdmin, getCurrentToken } = await import('../client.js');
+const { isGlobalAdmin, hasGlobalScope, getCurrentToken } = await import('../client.js');
 
 /** Build an unsigned JWT-shaped token carrying the given claims. */
 function makeToken(claims: Record<string, unknown>): string {
@@ -106,7 +106,7 @@ function runGuard(req: Request): Promise<GuardOutcome> {
       // Read the per-request caller context from inside the async scope.
       done({
         nextCalled: true,
-        ctx: { token: getCurrentToken(), ga: isGlobalAdmin() },
+        ctx: { token: getCurrentToken(), ga: isGlobalAdmin(), scope: hasGlobalScope() },
         status: cap.statusCode,
         body: cap.body,
         headers: cap.headers,
@@ -225,7 +225,7 @@ describe('accessGuard — allow path', () => {
 
     expect(out.nextCalled).toBe(true);
     expect(out.status).toBeNull(); // no response sent on the allow path
-    expect(out.ctx).toEqual({ token, ga: true });
+    expect(out.ctx).toEqual({ token, ga: true, scope: true });
   });
 
   it('propagates isGlobalAdmin:false through the caller context', async () => {
@@ -233,6 +233,23 @@ describe('accessGuard — allow path', () => {
     const out = await runGuard(mockReq(`Bearer ${validToken(uniqueUpn())}`));
     expect(out.nextCalled).toBe(true);
     expect(out.ctx?.ga).toBe(false);
+    expect(out.ctx?.scope).toBe(false);
+  });
+
+  it('maps globalRole=GlobalReader to global scope WITHOUT global-admin (write) status', async () => {
+    stubBackend({ body: { allowed: true, accessGrant: 'GlobalReader', globalRole: 'GlobalReader' } });
+    const out = await runGuard(mockReq(`Bearer ${validToken(uniqueUpn())}`));
+    expect(out.nextCalled).toBe(true);
+    expect(out.ctx?.ga).toBe(false);   // not a Global Admin
+    expect(out.ctx?.scope).toBe(true); // but has cross-tenant read scope
+  });
+
+  it('maps globalRole=GlobalAdmin to both global scope and global-admin status', async () => {
+    stubBackend({ body: { allowed: true, accessGrant: 'GlobalAdmin', globalRole: 'GlobalAdmin' } });
+    const out = await runGuard(mockReq(`Bearer ${validToken(uniqueUpn())}`));
+    expect(out.nextCalled).toBe(true);
+    expect(out.ctx?.ga).toBe(true);
+    expect(out.ctx?.scope).toBe(true);
   });
 });
 

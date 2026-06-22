@@ -101,6 +101,12 @@ export interface ExpandableNavItem {
   label: string;
   icon: React.ReactNode;
   items: ExpandableSubItem[];
+  /**
+   * Item-level visibility within a platform-scope group. Default (undefined) = visible to any platform
+   * scope (Global Admin OR read-only Global Reader). "globalAdminOnly" = real Global Admin only — used for
+   * platform-settings/mutation sub-sections that a read-only Global Reader must not see.
+   */
+  visibility?: "globalAdminOnly";
 }
 
 export interface NavGroup {
@@ -250,7 +256,9 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
         ],
       },
       {
-        id: "ga-settings", label: "Settings", icon: <GearIcon />,
+        // Platform settings are GA-only — a read-only Global Reader must not see them (their secrets
+        // are mutation surfaces; the reader gets redacted/read-only tenant config elsewhere).
+        id: "ga-settings", label: "Settings", icon: <GearIcon />, visibility: "globalAdminOnly",
         items: [
           { id: "ga-global", label: "Global Settings", href: "/admin/settings/global" },
           { id: "ga-diag-paths", label: "Diagnostics Log Paths", href: "/admin/settings/diagnostics-log-paths" },
@@ -260,7 +268,9 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
         ],
       },
       {
-        id: "ga-ops", label: "Ops", icon: <WrenchIcon />,
+        // Ops + Backups + Customs Archive are destructive platform operations — GA-only, hidden from a
+        // read-only Global Reader (routes are also gated via requireGlobalAdmin layouts).
+        id: "ga-ops", label: "Ops", icon: <WrenchIcon />, visibility: "globalAdminOnly",
         items: [
           { id: "ga-maintenance", label: "Maintenance", href: "/admin/ops" },
           { id: "ga-session-cleanup", label: "Session Cleanup", href: "/admin/ops/session-cleanup" },
@@ -269,7 +279,9 @@ export const EXPANDABLE_NAV_GROUPS: ExpandableNavGroup[] = [
         ],
       },
       {
-        id: "ga-software", label: "Software", icon: <GlobeAltIcon />,
+        // Software mapping is vulnerability-data curation (write-heavy CPE mapping/ignore) — GA-only,
+        // hidden from a read-only Global Reader (route also gated via requireGlobalAdmin layout).
+        id: "ga-software", label: "Software", icon: <GlobeAltIcon />, visibility: "globalAdminOnly",
         items: [
           { id: "ga-software-mapping", label: "Software Mapping", href: "/admin/software" },
         ],

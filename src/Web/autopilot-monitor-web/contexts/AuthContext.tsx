@@ -90,6 +90,13 @@ interface UserInfo {
   tenantId: string;
   objectId: string;
   isGlobalAdmin: boolean;
+  /**
+   * Read-only platform tier: cross-tenant VISIBILITY like a Global Admin but no platform mutations.
+   * ADDITIVE — a user may be both a GlobalReader and their own tenant's Admin (then isTenantAdmin is
+   * also true and they keep edit rights on their own tenant). Use {@link AuthContextType.hasGlobalScope}
+   * for visibility gating and isGlobalAdmin for platform-mutation gating.
+   */
+  isGlobalReader: boolean;
   isTenantAdmin: boolean;
   role: 'Admin' | 'Operator' | 'Viewer' | null;
   canManageBootstrapTokens: boolean;
@@ -101,6 +108,8 @@ interface UserInfo {
 interface AuthContextType {
   isAuthenticated: boolean;
   user: UserInfo | null;
+  /** Platform-wide read scope: Global Admin OR read-only Global Reader. Use for cross-tenant VISIBILITY. */
+  hasGlobalScope: boolean;
   isLoading: boolean;
   isPreviewBlocked: boolean;
   previewMessage: string;
@@ -152,6 +161,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
           tenantId: (data.tenantId as string) || account.tenantId || '',
           objectId: (data.objectId as string) || account.homeAccountId || '',
           isGlobalAdmin: (data.isGlobalAdmin as boolean) || false,
+          isGlobalReader: (data.isGlobalReader as boolean) || false,
           isTenantAdmin: (data.isTenantAdmin as boolean) || false,
           role: (data.role as 'Admin' | 'Operator' | 'Viewer' | null) || null,
           canManageBootstrapTokens: (data.canManageBootstrapTokens as boolean) || false,
@@ -205,6 +215,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
               tenantId: account.tenantId || '',
               objectId: account.homeAccountId || '',
               isGlobalAdmin: false,
+              isGlobalReader: false,
               isTenantAdmin: false,
               role: null,
               canManageBootstrapTokens: false,
@@ -225,6 +236,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         tenantId: data.tenantId || account.tenantId || '',
         objectId: data.objectId || account.homeAccountId || '',
         isGlobalAdmin: data.isGlobalAdmin || false,
+        isGlobalReader: data.isGlobalReader || false,
         isTenantAdmin: data.isTenantAdmin || false,
         role: data.role || null,
         canManageBootstrapTokens: data.canManageBootstrapTokens || false,
@@ -257,6 +269,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
         tenantId: account.tenantId || '',
         objectId: account.homeAccountId || '',
         isGlobalAdmin: false,
+        isGlobalReader: false,
         isTenantAdmin: false,
         role: null,
         canManageBootstrapTokens: false,
@@ -393,6 +406,7 @@ function AuthProviderInternal({ children }: { children: React.ReactNode }) {
   const value: AuthContextType = {
     isAuthenticated,
     user,
+    hasGlobalScope: (user?.isGlobalAdmin || user?.isGlobalReader) ?? false,
     isLoading,
     isPreviewBlocked,
     previewMessage,

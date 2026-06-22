@@ -76,11 +76,11 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 var transitions = await _transitionRepo.QueryBySessionAsync(
                     tenantIdForLoad, sessionId, MaxTransitionsToLoad);
 
-                // Global Admin cross-tenant fallback — same pattern as the other session
-                // detail read endpoints. Resolve via SessionsIndex when the effective tenant
-                // has no data. (GlobalAdminOnly gate means we don't need to check IsGlobalAdmin
-                // again, but the SessionsIndex lookup is still the cleanest way to find the
-                // actual tenant for a loose sessionId.)
+                // Global-scope cross-tenant fallback — same pattern as the other session detail read
+                // endpoints. Resolve via SessionsIndex when the effective tenant has no data. (The
+                // GlobalReadOrAdmin gate already restricts this route to platform-scope callers — GA or
+                // read-only GlobalReader — so we don't re-check the role here; the SessionsIndex lookup
+                // is the cleanest way to find the actual tenant for a loose sessionId.)
                 if (signals.Count == 0 && transitions.Count == 0)
                 {
                     var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);

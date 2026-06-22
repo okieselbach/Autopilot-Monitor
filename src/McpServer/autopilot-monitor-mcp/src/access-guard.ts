@@ -33,6 +33,7 @@ interface AccessCacheEntry {
   allowed: boolean;
   reason: string;
   isGlobalAdmin: boolean;
+  isGlobalReader: boolean;
   expiresAt: number;
 }
 
@@ -48,6 +49,7 @@ interface AccessCheckResult {
   allowed: boolean;
   reason: string;
   isGlobalAdmin: boolean;
+  isGlobalReader: boolean;
 }
 
 export function buildCacheKey(upn: string, token: string): string {
@@ -59,7 +61,12 @@ async function checkAccess(upn: string, token: string): Promise<AccessCheckResul
   const cacheKey = buildCacheKey(upn, token);
   const cached = accessCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
-    return { allowed: cached.allowed, reason: cached.reason, isGlobalAdmin: cached.isGlobalAdmin };
+    return {
+      allowed: cached.allowed,
+      reason: cached.reason,
+      isGlobalAdmin: cached.isGlobalAdmin,
+      isGlobalReader: cached.isGlobalReader,
+    };
   }
 
   try {
@@ -70,7 +77,7 @@ async function checkAccess(upn: string, token: string): Promise<AccessCheckResul
     const text = await res.text();
     if (!text) {
       console.error(`[access-guard] Backend returned empty body for ${upn} (status=${res.status})`);
-      return { allowed: false, reason: `Backend returned ${res.status} with empty body`, isGlobalAdmin: false };
+      return { allowed: false, reason: `Backend returned ${res.status} with empty body`, isGlobalAdmin: false, isGlobalReader: false };
     }
 
     const data = JSON.parse(text) as {
@@ -78,11 +85,15 @@ async function checkAccess(upn: string, token: string): Promise<AccessCheckResul
       reason?: string;
       accessGrant?: string;
       isGlobalAdmin?: boolean;
+      // Platform role: "GlobalAdmin" | "GlobalReader" (absent → no platform role). The read-only
+      // GlobalReader gets the same cross-tenant routing as GA because this server is read-only.
+      globalRole?: string;
     };
     const result: AccessCheckResult = {
       allowed: data.allowed === true,
       reason: data.allowed ? (data.accessGrant ?? 'allowed') : (data.reason ?? 'denied'),
-      isGlobalAdmin: data.isGlobalAdmin === true,
+      isGlobalAdmin: data.isGlobalAdmin === true || data.globalRole === 'GlobalAdmin',
+      isGlobalReader: data.globalRole === 'GlobalReader',
     };
 
     accessCache.set(cacheKey, { ...result, expiresAt: Date.now() + ACCESS_CACHE_TTL_MS });
@@ -90,7 +101,7 @@ async function checkAccess(upn: string, token: string): Promise<AccessCheckResul
   } catch (err) {
     console.error(`[access-guard] Backend check failed for ${upn}:`, err);
     // Fail-closed: deny on backend error
-    return { allowed: false, reason: 'Backend access check unavailable', isGlobalAdmin: false };
+    return { allowed: false, reason: 'Backend access check unavailable', isGlobalAdmin: false, isGlobalReader: false };
   }
 }
 
@@ -194,10 +205,13 @@ export function accessGuard(req: Request, res: Response, next: NextFunction): vo
         return;
       }
 
-      // Scope the caller context (token + GA status) to this async context
+      // Scope the caller context (token + platform role) to this async context
       // so concurrent sessions cannot overwrite each other on the event loop,
       // and so tools can route based on role without re-checking the JWT.
-      runWithCaller({ token, isGlobalAdmin: result.isGlobalAdmin }, () => next());
+      runWithCaller(
+        { token, isGlobalAdmin: result.isGlobalAdmin, isGlobalReader: result.isGlobalReader },
+        () => next(),
+      );
     })
     .catch(() => {
       res.status(503).json({ error: 'Access check failed' });

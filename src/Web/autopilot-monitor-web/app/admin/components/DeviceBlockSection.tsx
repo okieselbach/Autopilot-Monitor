@@ -7,6 +7,7 @@ import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch"
 import { trackEvent } from "@/lib/appInsights";
 import { TenantConfiguration } from "./TenantManagementSection";
 import { TenantSearchSelect } from "./TenantSearchSelect";
+import { useCanMutatePlatform } from "@/hooks/useCanMutatePlatform";
 
 interface ResolvedDevice {
   sessionId: string;
@@ -55,6 +56,8 @@ export function DeviceBlockSection({
   setError,
   setSuccessMessage,
 }: DeviceBlockSectionProps) {
+  // Read-only Global Readers reach this page (view scope) but must not block/kill devices.
+  const canMutate = useCanMutatePlatform();
   const [blockSerialNumber, setBlockSerialNumber] = useState("");
   const [blockTenantId, setBlockTenantId] = useState("");
   const [blockDurationHours, setBlockDurationHours] = useState(12);
@@ -171,6 +174,7 @@ export function DeviceBlockSection({
   };
 
   const handleBlockDevice = async () => {
+    if (!canMutate) return; // read-only Global Reader
     if (!blockSerialNumber.trim() || !blockTenantId.trim()) return;
 
     if (blockAction === "Kill" && !confirm(
@@ -232,6 +236,7 @@ export function DeviceBlockSection({
   };
 
   const handleUnblockDevice = async (tenantId: string, serialNumber: string) => {
+    if (!canMutate) return; // read-only Global Reader
     try {
       setUnblockingDevice(serialNumber);
       setError(null);
@@ -257,6 +262,7 @@ export function DeviceBlockSection({
   };
 
   const handleKillDevice = async (device: BlockedDevice) => {
+    if (!canMutate) return; // read-only Global Reader
     if (!confirm(
       `REMOTE KILL: This will permanently shut down the agent on device "${device.serialNumber}" and remove all agent files. This cannot be undone. Continue?`
     )) return;
@@ -349,7 +355,7 @@ export function DeviceBlockSection({
           </div>
           <button
             onClick={onSaveAdminConfig}
-            disabled={savingConfig || !adminConfigExists}
+            disabled={!canMutate || savingConfig || !adminConfigExists}
             className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2"
           >
             {savingConfig ? (
@@ -487,7 +493,7 @@ export function DeviceBlockSection({
           )}
           <button
             onClick={handleBlockDevice}
-            disabled={blockingDevice || !blockSerialNumber.trim() || !blockTenantId}
+            disabled={!canMutate || blockingDevice || !blockSerialNumber.trim() || !blockTenantId}
             className={`mt-4 px-4 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center space-x-2 ${
               blockAction === "Kill"
                 ? "bg-red-800 hover:bg-red-900 dark:bg-red-700 dark:hover:bg-red-800"
@@ -582,7 +588,7 @@ export function DeviceBlockSection({
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{d.reason || "\u2014"}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-col gap-1">
-                          {d.action !== "Kill" && (
+                          {canMutate && d.action !== "Kill" && (
                             <button
                               onClick={() => handleKillDevice(d)}
                               disabled={killingDevice === d.serialNumber}
@@ -591,13 +597,17 @@ export function DeviceBlockSection({
                               {killingDevice === d.serialNumber ? "Killing..." : "Kill"}
                             </button>
                           )}
-                          <button
-                            onClick={() => handleUnblockDevice(d.tenantId, d.serialNumber)}
-                            disabled={unblockingDevice === d.serialNumber}
-                            className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
-                          >
-                            {unblockingDevice === d.serialNumber ? "Removing..." : "Remove"}
-                          </button>
+                          {canMutate ? (
+                            <button
+                              onClick={() => handleUnblockDevice(d.tenantId, d.serialNumber)}
+                              disabled={unblockingDevice === d.serialNumber}
+                              className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-50"
+                            >
+                              {unblockingDevice === d.serialNumber ? "Removing..." : "Remove"}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-400">Read-only</span>
+                          )}
                         </div>
                       </td>
                     </tr>

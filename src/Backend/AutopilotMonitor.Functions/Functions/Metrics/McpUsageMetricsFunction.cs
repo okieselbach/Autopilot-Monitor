@@ -99,7 +99,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var records = await _userUsageRepo.GetUsageByUserAsync(userId, dateFrom, dateTo);
 
                 var ctx = req.GetRequestContext();
-                if (UsageCrossTenantGuard.IsForeignTenantAccess(records, ctx.TenantId, ctx.IsGlobalAdmin))
+                if (UsageCrossTenantGuard.IsForeignTenantAccess(records, ctx.TenantId, ctx.HasGlobalScope))
                 {
                     var foundTenants = records
                         .Select(r => r.TenantId)

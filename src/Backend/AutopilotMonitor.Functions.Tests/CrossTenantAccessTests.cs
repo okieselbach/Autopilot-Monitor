@@ -22,7 +22,7 @@ public class CrossTenantAccessTests
     /// compare to JWT tenant, return whether access should be blocked.
     /// </summary>
     private static (bool isBlocked, string? routeTenantId) SimulateCrossTenantCheck(
-        string httpMethod, string requestPath, string jwtTenantId, bool isGlobalAdmin)
+        string httpMethod, string requestPath, string jwtTenantId, bool hasGlobalScope)
     {
         var entry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
         if (entry == null)
@@ -40,8 +40,8 @@ public class CrossTenantAccessTests
         if (string.IsNullOrEmpty(routeTenantId))
             return (false, null); // no tenantId extracted → no check
 
-        if (isGlobalAdmin)
-            return (false, routeTenantId); // GA bypass
+        if (hasGlobalScope)
+            return (false, routeTenantId); // global-scope bypass (GA or GlobalReader)
 
         var isCrossTenant = !string.Equals(routeTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase);
         return (isCrossTenant, routeTenantId);
@@ -52,7 +52,7 @@ public class CrossTenantAccessTests
     /// fall back to JWT tenant, compare against JWT tenant.
     /// </summary>
     private static (bool isBlocked, string targetTenantId) SimulateQueryParamCheck(
-        string httpMethod, string requestPath, string jwtTenantId, bool isGlobalAdmin, string? queryTenantId)
+        string httpMethod, string requestPath, string jwtTenantId, bool hasGlobalScope, string? queryTenantId)
     {
         var entry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
         if (entry == null)
@@ -63,7 +63,7 @@ public class CrossTenantAccessTests
 
         var targetTenantId = string.IsNullOrWhiteSpace(queryTenantId) ? jwtTenantId : queryTenantId;
 
-        if (isGlobalAdmin)
+        if (hasGlobalScope)
             return (false, targetTenantId);
 
         var isCrossTenant = !string.Equals(targetTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase);
@@ -86,7 +86,7 @@ public class CrossTenantAccessTests
     public void SameTenant_NonGA_IsAllowed(string httpMethod, string pathTemplate)
     {
         var path = string.Format(pathTemplate, TenantA);
-        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, isGlobalAdmin: false);
+        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, hasGlobalScope: false);
 
         Assert.False(isBlocked, $"Same-tenant access should be allowed: {httpMethod} {path}");
         Assert.Equal(TenantA, routeTenantId);
@@ -108,7 +108,7 @@ public class CrossTenantAccessTests
     public void CrossTenant_NonGA_IsBlocked(string httpMethod, string pathTemplate)
     {
         var path = string.Format(pathTemplate, TenantB); // accessing TenantB
-        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, isGlobalAdmin: false);
+        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, hasGlobalScope: false);
 
         Assert.True(isBlocked, $"Cross-tenant access should be blocked: {httpMethod} {path}");
         Assert.Equal(TenantB, routeTenantId);
@@ -124,7 +124,7 @@ public class CrossTenantAccessTests
     public void CrossTenant_GlobalAdmin_IsAllowed(string httpMethod, string pathTemplate)
     {
         var path = string.Format(pathTemplate, TenantB); // accessing TenantB
-        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, isGlobalAdmin: true);
+        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, hasGlobalScope: true);
 
         Assert.False(isBlocked, $"Global Admin should be allowed cross-tenant access: {httpMethod} {path}");
         Assert.Equal(TenantB, routeTenantId);
@@ -139,7 +139,7 @@ public class CrossTenantAccessTests
     [InlineData("GET", "/api/rules/gather")]
     public void JwtImplicitRoutes_NoCrossTenantCheck(string httpMethod, string path)
     {
-        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, isGlobalAdmin: false);
+        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, hasGlobalScope: false);
 
         Assert.False(isBlocked, $"JWT-implicit route should have no cross-tenant check: {httpMethod} {path}");
         Assert.Null(routeTenantId);
@@ -151,7 +151,7 @@ public class CrossTenantAccessTests
     public void SameTenant_DifferentCase_IsAllowed()
     {
         var upperTenant = TenantA.ToUpperInvariant();
-        var (isBlocked, _) = SimulateCrossTenantCheck("GET", $"/api/config/{upperTenant}", TenantA, isGlobalAdmin: false);
+        var (isBlocked, _) = SimulateCrossTenantCheck("GET", $"/api/config/{upperTenant}", TenantA, hasGlobalScope: false);
 
         Assert.False(isBlocked, "Tenant ID comparison should be case-insensitive");
     }
@@ -162,7 +162,7 @@ public class CrossTenantAccessTests
     public void AdminSubRoutes_ExtractCorrectTenantId()
     {
         var path = $"/api/tenants/{TenantA}/admins/user@contoso.com";
-        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck("DELETE", path, TenantA, isGlobalAdmin: false);
+        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck("DELETE", path, TenantA, hasGlobalScope: false);
 
         Assert.False(isBlocked);
         Assert.Equal(TenantA, routeTenantId);
@@ -172,7 +172,7 @@ public class CrossTenantAccessTests
     public void AdminSubRoutes_CrossTenant_IsBlocked()
     {
         var path = $"/api/tenants/{TenantB}/admins/user@contoso.com/permissions";
-        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck("PATCH", path, TenantA, isGlobalAdmin: false);
+        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck("PATCH", path, TenantA, hasGlobalScope: false);
 
         Assert.True(isBlocked);
         Assert.Equal(TenantB, routeTenantId);
@@ -184,7 +184,6 @@ public class CrossTenantAccessTests
     [InlineData("PATCH", "/api/config/{0}/plan")]
     [InlineData("POST", "/api/preview/whitelist/{0}")]
     [InlineData("DELETE", "/api/preview/whitelist/{0}")]
-    [InlineData("GET", "/api/preview/notification-email/{0}")]
     [InlineData("POST", "/api/preview/send-welcome-email/{0}")]
     public void GlobalAdminOnlyRoutes_WithTenantId_HaveRouteParamScoping(string httpMethod, string pathTemplate)
     {
@@ -194,6 +193,39 @@ public class CrossTenantAccessTests
         Assert.NotNull(entry);
         Assert.Equal(EndpointPolicy.GlobalAdminOnly, entry.Policy);
         Assert.Equal(TenantScoping.RouteParam, entry.TenantScoping);
+    }
+
+    // ── GlobalReadOrAdmin routes with {tenantId} keep RouteParam scoping ──
+    // Cross-tenant READ surfaces opened to the read-only GlobalReader tier must still declare
+    // RouteParam so the middleware's HasGlobalScope gate (GA ∪ Reader) governs cross-tenant access.
+
+    [Theory]
+    [InlineData("GET", "/api/preview/notification-email/{0}")]
+    [InlineData("GET", "/api/global/tenants/{0}/deletion-manifests")]
+    public void GlobalReadRoutes_WithTenantId_HaveRouteParamScoping(string httpMethod, string pathTemplate)
+    {
+        var path = string.Format(pathTemplate, TenantA);
+        var entry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, path);
+
+        Assert.NotNull(entry);
+        Assert.Equal(EndpointPolicy.GlobalReadOrAdmin, entry.Policy);
+        Assert.Equal(TenantScoping.RouteParam, entry.TenantScoping);
+    }
+
+    // ── Cross-tenant read by a GlobalReader (global scope, no write power) is allowed ──
+    // The middleware gate is HasGlobalScope (GA ∪ GlobalReader); a read-only reader crosses tenants
+    // for reads exactly like a GA. Modelled by hasGlobalScope:true on a read route.
+
+    [Theory]
+    [InlineData("GET", "/api/config/{0}")]
+    [InlineData("GET", "/api/preview/notification-email/{0}")]
+    public void CrossTenant_GlobalReader_ReadRoute_IsAllowed(string httpMethod, string pathTemplate)
+    {
+        var path = string.Format(pathTemplate, TenantB); // reader in TenantA viewing TenantB
+        var (isBlocked, routeTenantId) = SimulateCrossTenantCheck(httpMethod, path, TenantA, hasGlobalScope: true);
+
+        Assert.False(isBlocked, $"GlobalReader should be allowed cross-tenant read: {httpMethod} {path}");
+        Assert.Equal(TenantB, routeTenantId);
     }
 
     // ── QueryParam: no query param → defaults to JWT tenant ───────────
@@ -208,7 +240,7 @@ public class CrossTenantAccessTests
     [InlineData("GET", "/api/progress/sessions/abc-123/events")]
     public void QueryParam_NoQueryTenant_DefaultsToJwt(string httpMethod, string path)
     {
-        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: false, queryTenantId: null);
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, hasGlobalScope: false, queryTenantId: null);
 
         Assert.False(isBlocked);
         Assert.Equal(TenantA, targetTenantId);
@@ -224,7 +256,7 @@ public class CrossTenantAccessTests
     [InlineData("GET", "/api/progress/sessions/abc-123/events")]
     public void QueryParam_SameTenant_IsAllowed(string httpMethod, string path)
     {
-        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: false, queryTenantId: TenantA);
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, hasGlobalScope: false, queryTenantId: TenantA);
 
         Assert.False(isBlocked);
         Assert.Equal(TenantA, targetTenantId);
@@ -244,7 +276,7 @@ public class CrossTenantAccessTests
     [InlineData("GET", "/api/progress/sessions/abc-123/events")]
     public void QueryParam_CrossTenant_NonGA_IsBlocked(string httpMethod, string path)
     {
-        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: false, queryTenantId: TenantB);
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, hasGlobalScope: false, queryTenantId: TenantB);
 
         Assert.True(isBlocked, $"Cross-tenant query param should be blocked: {httpMethod} {path}");
         Assert.Equal(TenantB, targetTenantId);
@@ -261,7 +293,7 @@ public class CrossTenantAccessTests
     [InlineData("GET", "/api/progress/sessions/abc-123/events")]
     public void QueryParam_CrossTenant_GlobalAdmin_IsAllowed(string httpMethod, string path)
     {
-        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, isGlobalAdmin: true, queryTenantId: TenantB);
+        var (isBlocked, targetTenantId) = SimulateQueryParamCheck(httpMethod, path, TenantA, hasGlobalScope: true, queryTenantId: TenantB);
 
         Assert.False(isBlocked);
         Assert.Equal(TenantB, targetTenantId);

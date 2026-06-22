@@ -52,8 +52,9 @@ public class QuickSearchSessionsFunction
                 return await req.BadRequestAsync("Query parameter 'q' must be at least 2 characters.");
             }
 
-            // Global Admins search across all tenants; regular users are scoped to their own tenant
-            string? tenantId = requestCtx.IsGlobalAdmin ? null : requestCtx.TenantId;
+            // Global-scope callers (GA or read-only GlobalReader) search across all tenants;
+            // regular users are scoped to their own tenant.
+            string? tenantId = requestCtx.HasGlobalScope ? null : requestCtx.TenantId;
 
             var results = await _sessionRepo.QuickSearchSessionsAsync(tenantId, q, limit: 10);
 

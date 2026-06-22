@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { TenantAdminSection } from "./TenantAdminSection";
+import { useCanMutatePlatform } from "@/hooks/useCanMutatePlatform";
 
 export interface TenantConfiguration {
   tenantId: string;
@@ -49,6 +50,8 @@ export function TenantManagementSection({
   setError,
   setSuccessMessage,
 }: TenantManagementSectionProps) {
+  // Read-only Global Readers may view tenants (incl. config report) but not edit them.
+  const canMutate = useCanMutatePlatform();
   const [searchQuery, setSearchQuery] = useState("");
   const [showOnlyWaitlist, setShowOnlyWaitlist] = useState(false);
   const [showOnlyReady, setShowOnlyReady] = useState(false);
@@ -90,6 +93,7 @@ export function TenantManagementSection({
   }, [searchQuery, showOnlyWaitlist, showOnlyReady]);
 
   const handleSaveTenant = async (tenant: TenantConfiguration) => {
+    if (!canMutate) return; // read-only Global Reader
     try {
       setSavingTenant(true);
       setError(null);
@@ -127,6 +131,7 @@ export function TenantManagementSection({
   };
 
   const handleSendWelcomeEmail = async (tenantId: string, email?: string) => {
+    if (!canMutate) return; // read-only Global Reader
     try {
       setSendingWelcomeEmail(true);
       setError(null);
@@ -161,6 +166,7 @@ export function TenantManagementSection({
   };
 
   const handleTogglePreview = async (tenantId: string) => {
+    if (!canMutate) return; // read-only Global Reader
     try {
       setTogglingPreviewTenant(tenantId);
       setError(null);
@@ -356,7 +362,7 @@ export function TenantManagementSection({
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => handleTogglePreview(tenant.tenantId)}
-                                disabled={togglingPreviewTenant === tenant.tenantId}
+                                disabled={!canMutate || togglingPreviewTenant === tenant.tenantId}
                                 className={`px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                                   previewApproved.has(tenant.tenantId)
                                     ? 'bg-amber-500 text-white hover:bg-amber-600'
@@ -514,7 +520,7 @@ export function TenantManagementSection({
                   />
                   <button
                     onClick={() => handleSendWelcomeEmail(editingTenant.tenantId, notificationEmail)}
-                    disabled={sendingWelcomeEmail || !notificationEmail.trim()}
+                    disabled={!canMutate || sendingWelcomeEmail || !notificationEmail.trim()}
                     className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap flex items-center gap-1.5"
                     title="Send or resend the Private Preview welcome email"
                   >
@@ -621,7 +627,7 @@ export function TenantManagementSection({
               </button>
               <button
                 onClick={() => handleSaveTenant(editingTenant)}
-                disabled={savingTenant}
+                disabled={!canMutate || savingTenant}
                 className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center space-x-2"
               >
                 {savingTenant ? (

@@ -9,7 +9,12 @@ import { useTenantList, type TenantInfo } from "@/hooks/useTenantList";
 export type { TenantInfo };
 
 export interface GlobalAdminScope {
-  /** True when Global-Admin mode is toggled on AND the user actually is a global admin. */
+  /**
+   * True when global-scope mode is toggled on AND the user has platform scope (Global Admin OR the
+   * read-only Global Reader). This is a VISIBILITY/routing flag — it drives the tenant selector, the
+   * "Global view" banner and the `/global/` endpoint choice, all of which are read-only-safe. Mutating
+   * actions on these pages must gate separately on the real Global-Admin / own-tenant-admin status.
+   */
   isGlobalAdmin: boolean;
   /** Sorted tenant list for the selector. Empty unless {@link isGlobalAdmin}. */
   tenants: TenantInfo[];
@@ -36,10 +41,11 @@ export interface GlobalAdminScope {
  */
 export function useGlobalAdminScope(): GlobalAdminScope {
   const { tenantId } = useTenant();
-  const { user } = useAuth();
+  const { hasGlobalScope } = useAuth();
   const { globalAdminMode } = useAdminMode();
 
-  const isGlobalAdmin = Boolean(globalAdminMode && user?.isGlobalAdmin);
+  // Platform scope (GA or read-only Global Reader) — read-only-safe cross-tenant view + selector.
+  const isGlobalAdmin = Boolean(globalAdminMode && hasGlobalScope);
 
   const tenants = useTenantList(isGlobalAdmin);
   const [selectedTenantId, setSelectedTenantId] = useState<string>("");

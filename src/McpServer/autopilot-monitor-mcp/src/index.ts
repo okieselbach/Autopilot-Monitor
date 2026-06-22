@@ -15,7 +15,7 @@ import { validatePrecomputedIndex } from './precomputed-index.js';
 import { buildEventTypeSearchDocs } from './resource-catalog.js';
 import { createOAuthRouter } from './oauth.js';
 import { accessGuard } from './access-guard.js';
-import { isGlobalAdmin } from './client.js';
+import { hasGlobalScope, isGlobalAdmin } from './client.js';
 import { API_BASE_URL } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -133,9 +133,10 @@ console.error(`Event-type index ready: ${eventTypeIndex.name} — ${eventTypeInd
 // into every tool description (and re-sent on every tools/list). Keep it short:
 // it is always-on context, not a manual.
 //
-// Role-aware: only a Global Admin sees the cross-tenant scope hint. A normal
-// tenant user gets instructions with no mention of Global-Admin / cross-tenant
-// capability at all — the surface is scoped to what they can actually do.
+// Role-aware: only a platform-scope caller (Global Admin or read-only Global
+// Reader) sees the cross-tenant scope hint. A normal tenant user gets
+// instructions with no mention of cross-tenant capability at all — the surface
+// is scoped to what they can actually do.
 function buildInstructions(ga: boolean): string {
   return [
     'Autopilot-Monitor is a READ-ONLY telemetry server for Windows Autopilot enrollment sessions.',
@@ -146,7 +147,7 @@ function buildInstructions(ga: boolean): string {
     'Pagination: when a response carries `nextLink`, pass that whole string back as `continuation`; stop when it is absent. Results are never silently truncated.',
     'Catalogs: call get_resource(name="event_types"|"device_properties") to discover valid eventType strings and deviceProperties keys before filtering.',
     ga
-      ? 'Scope: omit tenantId for cross-tenant queries (Global Admin only); pass tenantId to scope to one tenant.'
+      ? 'Scope: omit tenantId for cross-tenant queries (platform scope); pass tenantId to scope to one tenant.'
       : 'Scope: all queries are automatically limited to your tenant.',
   ].join('\n');
 }
@@ -157,12 +158,12 @@ function buildInstructions(ga: boolean): string {
  * role: a non-Global-Admin never sees GA-only tools or any cross-tenant / GA
  * wording — reducing both confusion and attack surface.
  */
-function createMcpServer(ga: boolean): McpServer {
+function createMcpServer(ga: boolean, strictGa: boolean): McpServer {
   const s = new McpServer(
     { name: 'Autopilot-Monitor', version: SERVER_VERSION },
     { instructions: buildInstructions(ga) },
   );
-  registerTools(s, knowledgeBase, eventTypeIndex, ga);
+  registerTools(s, knowledgeBase, eventTypeIndex, ga, strictGa);
   registerResources(s);
   registerPrompts(s, ga);
   return s;
@@ -233,10 +234,12 @@ app.all('/mcp', async (req, res) => {
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless: no session tracking
   });
-  // accessGuard ran runWithCaller({ isGlobalAdmin }) around next(), so the
-  // caller's resolved role is available here (and stays active through
-  // transport.handleRequest, where tools/list and tool calls execute).
-  const server = createMcpServer(isGlobalAdmin());
+  // accessGuard ran runWithCaller({ platform role }) around next(), so the
+  // caller's resolved scope is available here (and stays active through
+  // transport.handleRequest, where tools/list and tool calls execute). Tool
+  // catalog + routing key off platform SCOPE (GA or read-only Global Reader),
+  // since the server is read-only and both have identical cross-tenant reach.
+  const server = createMcpServer(hasGlobalScope(), isGlobalAdmin());
 
   // Guarantee cleanup once the response is done, even on client disconnect.
   res.on('close', () => {

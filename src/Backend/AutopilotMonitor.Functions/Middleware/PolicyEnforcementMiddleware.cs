@@ -52,31 +52,24 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
 
         var requestPath = httpContext.Request.Path.Value ?? string.Empty;
         var httpMethod = httpContext.Request.Method;
+        var queryTenantId = httpContext.Request.Query["tenantId"].FirstOrDefault();
 
-        // Look up the catalog policy for this route
-        var catalogEntry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
-
-        if (catalogEntry == null)
+        // Authenticated principal set by AuthenticationMiddleware (null on anonymous/device routes).
+        // Read from FunctionContext.Items (reliable in the isolated worker) rather than httpContext.User.
+        ClaimsPrincipal? principal = null;
+        if (context.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
+            && principalObj is ClaimsPrincipal cp
+            && cp.Identity?.IsAuthenticated == true)
         {
-            // Fail-closed: unregistered route → 403
-            _logger.LogError("[PolicyEnforcement] BLOCKED unregistered route: {Method} {Path} — not in catalog (fail-closed)",
-                httpMethod, requestPath);
-            httpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
-            httpContext.Response.ContentType = "application/json";
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "Forbidden",
-                message = "Access denied."
-            });
-            return;
+            principal = cp;
         }
 
-        // Evaluate the catalog policy for the current user.
+        // All authorization + RequestContext construction is the transport-agnostic DecideAsync seam.
         // Fail-closed on service errors: return 503 (not 500) so clients can retry.
-        CatalogDecisionResult decision;
+        PolicyResult result;
         try
         {
-            decision = await EvaluateCatalogPolicyAsync(context, catalogEntry);
+            result = await DecideAsync(httpMethod, requestPath, queryTenantId, principal);
         }
         catch (Exception ex)
         {
@@ -92,125 +85,127 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
             return;
         }
 
-        if (decision.IsAllowed)
+        if (result.Allowed)
         {
-            // Store resolved context so functions can read IsGlobalAdmin/IsTenantAdmin without re-querying services
-            var principal = context.GetUser();
-            var jwtTenantId = principal?.GetTenantId() ?? string.Empty;
-            var isGlobalAdmin = decision.UserRole == "GlobalAdmin";
-            var targetTenantId = jwtTenantId; // default: JWT tenant
-
-            // Cross-tenant enforcement for routes with {tenantId} in the URL
-            if (catalogEntry.TenantScoping == TenantScoping.RouteParam)
-            {
-                var normalizedPath = requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
-                    ? requestPath.Substring(5)
-                    : requestPath;
-                var match = catalogEntry.RouteRegex.Match(normalizedPath);
-                var routeTenantId = match.Groups["tenantId"].Value;
-
-                if (!string.IsNullOrEmpty(routeTenantId))
-                {
-                    targetTenantId = routeTenantId;
-
-                    if (!isGlobalAdmin && !string.Equals(routeTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access: user={User} jwtTenant={JwtTenant} routeTenant={RouteTenant} path={Path}",
-                            decision.UserIdentifier, jwtTenantId, routeTenantId, requestPath);
-                        httpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
-                        httpContext.Response.ContentType = "application/json";
-                        await httpContext.Response.WriteAsJsonAsync(new
-                        {
-                            error = "CrossTenantAccessDenied",
-                            message = "Access denied. You can only access your own tenant's resources."
-                        });
-                        return;
-                    }
-                }
-            }
-
-            // Cross-tenant enforcement for routes with optional ?tenantId= query parameter
-            if (catalogEntry.TenantScoping == TenantScoping.QueryParam)
-            {
-                var queryTenantId = httpContext.Request.Query["tenantId"].FirstOrDefault();
-                if (!string.IsNullOrWhiteSpace(queryTenantId))
-                {
-                    targetTenantId = queryTenantId;
-
-                    if (!isGlobalAdmin && !string.Equals(queryTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access (query): user={User} jwtTenant={JwtTenant} queryTenant={QueryTenant} path={Path}",
-                            decision.UserIdentifier, jwtTenantId, queryTenantId, requestPath);
-                        httpContext.Response.StatusCode = (int)HttpStatusCode.Forbidden;
-                        httpContext.Response.ContentType = "application/json";
-                        await httpContext.Response.WriteAsJsonAsync(new
-                        {
-                            error = "CrossTenantAccessDenied",
-                            message = "Access denied. You can only access your own tenant's resources."
-                        });
-                        return;
-                    }
-                }
-            }
-
-            context.Items[RequestContext.ItemsKey] = new RequestContext
-            {
-                TenantId = jwtTenantId,
-                TargetTenantId = targetTenantId,
-                UserPrincipalName = decision.UserIdentifier,
-                IsGlobalAdmin = isGlobalAdmin,
-                IsTenantAdmin = decision.UserRole == Constants.TenantRoles.Admin,
-                UserRole = decision.UserRole
-            };
-
-            _logger.LogDebug("[PolicyEnforcement] ALLOW {Method} {Path} policy={Policy} user={User} role={Role}",
-                httpMethod, requestPath, catalogEntry.Policy, decision.UserIdentifier, decision.UserRole);
+            context.Items[RequestContext.ItemsKey] = result.Context!;
+            _logger.LogDebug("[PolicyEnforcement] ALLOW {Method} {Path} user={User} role={Role}",
+                httpMethod, requestPath, result.UserIdentifier, result.UserRole);
             await next(context);
             return;
         }
 
-        // Denied — determine 401 vs 403
-        var statusCode = decision.Reason is "NoJWT" or "MissingClaims"
-            ? HttpStatusCode.Unauthorized
-            : HttpStatusCode.Forbidden;
-
-        _logger.LogWarning("[PolicyEnforcement] DENIED {Method} {Path} policy={Policy} status={Status} user={User} role={Role} reason={Reason}",
-            httpMethod, requestPath, catalogEntry.Policy, (int)statusCode,
-            decision.UserIdentifier, decision.UserRole, decision.Reason);
-
-        httpContext.Response.StatusCode = (int)statusCode;
+        _logger.LogWarning("[PolicyEnforcement] DENIED {Method} {Path} status={Status} user={User} role={Role} reason={Reason}",
+            httpMethod, requestPath, result.StatusCode, result.UserIdentifier, result.UserRole, result.LogReason);
+        httpContext.Response.StatusCode = result.StatusCode;
         httpContext.Response.ContentType = "application/json";
+        await httpContext.Response.WriteAsJsonAsync(new { error = result.ErrorCode, message = result.ErrorMessage });
+    }
 
-        if (statusCode == HttpStatusCode.Unauthorized)
+    /// <summary>
+    /// Transport-agnostic authorization decision: catalog lookup → policy evaluation → cross-tenant
+    /// enforcement → RequestContext construction. Returns an allow (carrying the resolved RequestContext)
+    /// or a deny (carrying the HTTP status + error payload). Extracted from <see cref="Invoke"/> so the
+    /// full decision — including the additive tenant-role resolution that drives RequestContext.IsTenantAdmin —
+    /// is unit-testable without faking the worker's HttpContext feature. <see cref="Invoke"/> is a thin
+    /// adapter that reads the request, calls this, and writes the response.
+    /// </summary>
+    internal async Task<PolicyResult> DecideAsync(
+        string httpMethod, string requestPath, string? queryTenantId, ClaimsPrincipal? principal)
+    {
+        var catalogEntry = EndpointAccessPolicyCatalog.FindPolicy(httpMethod, requestPath);
+        if (catalogEntry == null)
         {
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "AuthenticationRequired",
-                message = "Authentication required. Please provide a valid JWT token."
-            });
+            // Fail-closed: unregistered route → 403
+            _logger.LogError("[PolicyEnforcement] BLOCKED unregistered route: {Method} {Path} — not in catalog (fail-closed)",
+                httpMethod, requestPath);
+            return PolicyResult.Deny((int)HttpStatusCode.Forbidden, "Forbidden", "Access denied.", "anonymous", "N/A", "Unregistered");
         }
-        else
+
+        var decision = await EvaluateCatalogPolicyAsync(principal, catalogEntry);
+
+        if (!decision.IsAllowed)
         {
-            await httpContext.Response.WriteAsJsonAsync(new
-            {
-                error = "InsufficientPermissions",
-                message = "Access denied. You do not have permission to access this resource."
-            });
+            var status = decision.Reason is "NoJWT" or "MissingClaims"
+                ? HttpStatusCode.Unauthorized
+                : HttpStatusCode.Forbidden;
+            var (code, message) = status == HttpStatusCode.Unauthorized
+                ? ("AuthenticationRequired", "Authentication required. Please provide a valid JWT token.")
+                : ("InsufficientPermissions", "Access denied. You do not have permission to access this resource.");
+            return PolicyResult.Deny((int)status, code, message, decision.UserIdentifier, decision.UserRole, decision.Reason);
         }
+
+        var jwtTenantId = principal?.GetTenantId() ?? string.Empty;
+        var isGlobalAdmin = decision.UserRole == Constants.GlobalRoles.GlobalAdmin;
+        var isGlobalReader = decision.UserRole == Constants.GlobalRoles.GlobalReader;
+        // Platform-wide read scope (GA or Reader) governs cross-tenant visibility; write power is GA only.
+        var hasGlobalScope = isGlobalAdmin || isGlobalReader;
+        var targetTenantId = jwtTenantId; // default: JWT tenant
+
+        // Cross-tenant enforcement for routes with {tenantId} in the URL
+        if (catalogEntry.TenantScoping == TenantScoping.RouteParam)
+        {
+            var normalizedPath = requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
+                ? requestPath.Substring(5)
+                : requestPath;
+            var match = catalogEntry.RouteRegex.Match(normalizedPath);
+            var routeTenantId = match.Groups["tenantId"].Value;
+
+            if (!string.IsNullOrEmpty(routeTenantId))
+            {
+                targetTenantId = routeTenantId;
+
+                if (!hasGlobalScope && !string.Equals(routeTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access: user={User} jwtTenant={JwtTenant} routeTenant={RouteTenant} path={Path}",
+                        decision.UserIdentifier, jwtTenantId, routeTenantId, requestPath);
+                    return PolicyResult.Deny((int)HttpStatusCode.Forbidden, "CrossTenantAccessDenied",
+                        "Access denied. You can only access your own tenant's resources.",
+                        decision.UserIdentifier, decision.UserRole, "CrossTenantRoute");
+                }
+            }
+        }
+
+        // Cross-tenant enforcement for routes with optional ?tenantId= query parameter
+        if (catalogEntry.TenantScoping == TenantScoping.QueryParam)
+        {
+            if (!string.IsNullOrWhiteSpace(queryTenantId))
+            {
+                targetTenantId = queryTenantId;
+
+                if (!hasGlobalScope && !string.Equals(queryTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access (query): user={User} jwtTenant={JwtTenant} queryTenant={QueryTenant} path={Path}",
+                        decision.UserIdentifier, jwtTenantId, queryTenantId, requestPath);
+                    return PolicyResult.Deny((int)HttpStatusCode.Forbidden, "CrossTenantAccessDenied",
+                        "Access denied. You can only access your own tenant's resources.",
+                        decision.UserIdentifier, decision.UserRole, "CrossTenantQuery");
+                }
+            }
+        }
+
+        var requestContext = new RequestContext
+        {
+            TenantId = jwtTenantId,
+            TargetTenantId = targetTenantId,
+            UserPrincipalName = decision.UserIdentifier,
+            IsGlobalAdmin = isGlobalAdmin,
+            IsGlobalReader = isGlobalReader,
+            // Additive: a caller's tenant-admin status is its OWN-TENANT role, independent of any
+            // platform role. Evaluators that admit via a platform-role branch still surface the
+            // resolved tenant role on decision.TenantRole; pure-tenant branches leave it null and
+            // carry the role in UserRole — so fall back to UserRole when TenantRole is unset.
+            IsTenantAdmin = (decision.TenantRole ?? decision.UserRole) == Constants.TenantRoles.Admin,
+            UserRole = decision.UserRole
+        };
+
+        return PolicyResult.Allow(requestContext, decision.UserIdentifier, decision.UserRole);
     }
 
     private async Task<CatalogDecisionResult> EvaluateCatalogPolicyAsync(
-        FunctionContext context, EndpointPolicyEntry entry)
+        ClaimsPrincipal? principal, EndpointPolicyEntry entry)
     {
-        // Get the ClaimsPrincipal set by AuthenticationMiddleware (may be null for anonymous routes)
-        ClaimsPrincipal? principal = null;
-        if (context.Items.TryGetValue("ClaimsPrincipal", out var principalObj)
-            && principalObj is ClaimsPrincipal cp
-            && cp.Identity?.IsAuthenticated == true)
-        {
-            principal = cp;
-        }
-
+        // principal is the authenticated ClaimsPrincipal (set by AuthenticationMiddleware), or null on
+        // anonymous/device routes — resolved by the caller (Invoke / DecideAsync).
         var tenantId = principal?.GetTenantId();
         var upn = principal?.GetUserPrincipalName();
         var userIdentifier = upn ?? "anonymous";
@@ -234,11 +229,17 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
             case EndpointPolicy.MemberRead:
                 return await EvaluateMemberReadAsync(tenantId, upn, principal, userIdentifier);
 
+            case EndpointPolicy.TenantAdminOrGlobalReader:
+                return await EvaluateTenantAdminOrGlobalReaderAsync(tenantId, upn, principal, userIdentifier);
+
             case EndpointPolicy.TenantAdminOrGA:
                 return await EvaluateTenantAdminOrGAAsync(tenantId, upn, principal, userIdentifier);
 
             case EndpointPolicy.BootstrapManagerOrGA:
                 return await EvaluateBootstrapManagerOrGAAsync(tenantId, upn, principal, userIdentifier);
+
+            case EndpointPolicy.GlobalReadOrAdmin:
+                return await EvaluateGlobalReadOrAdminAsync(upn, userIdentifier);
 
             case EndpointPolicy.GlobalAdminOnly:
                 return await EvaluateGlobalAdminOnlyAsync(upn, userIdentifier);
@@ -261,9 +262,22 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         if (principal == null)
             return CatalogDecisionResult.Deny(userIdentifier, "N/A", "NoJWT");
 
-        // Global Admin outranks any tenant role.
-        if (!string.IsNullOrEmpty(upn) && await _globalAdminService.IsGlobalAdminAsync(upn))
-            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "ValidJWT+GA");
+        // A platform role (GlobalAdmin or read-only GlobalReader) is surfaced as the primary role so
+        // per-resource gates inside the function can tell GA from Reader (e.g. cross-tenant SignalR
+        // group joins). ADDITIVE: we ALSO resolve the caller's own-tenant role and carry it separately,
+        // so a user who is both GlobalReader and TenantAdmin still has IsTenantAdmin=true in the context
+        // (admin notification group, admin-audience notifications).
+        if (!string.IsNullOrEmpty(upn))
+        {
+            var globalRole = await _globalAdminService.GetGlobalRoleAsync(upn);
+            if (globalRole != null)
+            {
+                var tenantRole = !string.IsNullOrEmpty(tenantId)
+                    ? (await ResolveEffectiveRoleAsync(tenantId, upn, principal))?.Role
+                    : null;
+                return CatalogDecisionResult.Allow(userIdentifier, globalRole, "ValidJWT+GlobalScope", tenantRole);
+            }
+        }
 
         // Resolve the effective tenant role (may be null for non-members). A resolved role is
         // surfaced so the function can distinguish members from roleless end users; either way
@@ -272,7 +286,7 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         {
             var role = await ResolveEffectiveRoleAsync(tenantId, upn, principal);
             if (role?.Role != null)
-                return CatalogDecisionResult.Allow(userIdentifier, role.Role, "ValidJWT+Member");
+                return CatalogDecisionResult.Allow(userIdentifier, role.Role, "ValidJWT+Member", role.Role);
         }
 
         // Authenticated but not a member and not a GA — still allowed (the function decides which
@@ -286,15 +300,50 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(upn))
             return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
 
-        if (await _globalAdminService.IsGlobalAdminAsync(upn))
-            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "GABypass");
+        // Any platform role (GlobalAdmin or read-only GlobalReader) satisfies a member-read. ADDITIVE:
+        // also resolve the own-tenant role and carry it separately so IsTenantAdmin stays correct for a
+        // GlobalReader who is also their tenant's admin (drives admin-audience on /api/notifications).
+        var globalRole = await _globalAdminService.GetGlobalRoleAsync(upn);
+        if (globalRole != null)
+        {
+            var tenantRole = (await ResolveEffectiveRoleAsync(tenantId, upn, principal))?.Role;
+            return CatalogDecisionResult.Allow(userIdentifier, globalRole, "GlobalScopeBypass", tenantRole);
+        }
 
         var role = await ResolveEffectiveRoleAsync(tenantId, upn, principal);
         if (role == null)
             return CatalogDecisionResult.Deny(userIdentifier, "NonMember", "NotInTenant");
 
         // MemberRead allows Admin, Operator, AND Viewer
-        return CatalogDecisionResult.Allow(userIdentifier, role.Role, "TenantMember");
+        return CatalogDecisionResult.Allow(userIdentifier, role.Role, "TenantMember", role.Role);
+    }
+
+    /// <summary>
+    /// Admin-tier tenant READ: own-tenant Admin, OR any platform role (GlobalAdmin / GlobalReader).
+    /// Used on GET routes that expose admin-tier tenant data (e.g. config) so the read-only GlobalReader
+    /// gains visibility without write power, while tenant Operators/Viewers remain excluded. ADDITIVE:
+    /// when admitted via the platform-role branch the caller's own-tenant role is ALSO resolved and
+    /// carried, so a GlobalReader who is also their tenant's Admin keeps IsTenantAdmin=true (config GET
+    /// then serves them the FULL config for their own tenant, redacting only the read-only-reader view).
+    /// </summary>
+    private async Task<CatalogDecisionResult> EvaluateTenantAdminOrGlobalReaderAsync(
+        string? tenantId, string? upn, ClaimsPrincipal? principal, string userIdentifier)
+    {
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(upn))
+            return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
+
+        var globalRole = await _globalAdminService.GetGlobalRoleAsync(upn);
+        if (globalRole != null)
+        {
+            var tenantRole = (await ResolveEffectiveRoleAsync(tenantId, upn, principal))?.Role;
+            return CatalogDecisionResult.Allow(userIdentifier, globalRole, "GlobalScopeBypass", tenantRole);
+        }
+
+        var role = await ResolveEffectiveRoleAsync(tenantId, upn, principal);
+        if (role?.Role == Constants.TenantRoles.Admin)
+            return CatalogDecisionResult.Allow(userIdentifier, Constants.TenantRoles.Admin, "TenantAdmin", Constants.TenantRoles.Admin);
+
+        return CatalogDecisionResult.Deny(userIdentifier, role?.Role ?? "NonMember", "NotAdminOrGlobalScope");
     }
 
     private async Task<CatalogDecisionResult> EvaluateTenantAdminOrGAAsync(
@@ -357,6 +406,24 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         return EntraAppRoleResolver.Resolve(state, tableRole, principal.GetAppRoles(), config.EntraAppRolesEnabled);
     }
 
+    /// <summary>
+    /// Platform-wide cross-tenant READ: admits GlobalAdmin and the read-only GlobalReader. The
+    /// resolved role string flows onto RequestContext so the function still distinguishes GA from
+    /// Reader (e.g. for any in-function write gate).
+    /// </summary>
+    private async Task<CatalogDecisionResult> EvaluateGlobalReadOrAdminAsync(
+        string? upn, string userIdentifier)
+    {
+        if (string.IsNullOrEmpty(upn))
+            return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
+
+        var globalRole = await _globalAdminService.GetGlobalRoleAsync(upn);
+        if (globalRole != null)
+            return CatalogDecisionResult.Allow(userIdentifier, globalRole, "GlobalScope");
+
+        return CatalogDecisionResult.Deny(userIdentifier, "NonGlobal", "NotGlobalScope");
+    }
+
     private async Task<CatalogDecisionResult> EvaluateGlobalAdminOnlyAsync(
         string? upn, string userIdentifier)
     {
@@ -364,9 +431,42 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
             return CatalogDecisionResult.Deny(userIdentifier, "N/A", "MissingClaims");
 
         if (await _globalAdminService.IsGlobalAdminAsync(upn))
-            return CatalogDecisionResult.Allow(userIdentifier, "GlobalAdmin", "IsGA");
+            return CatalogDecisionResult.Allow(userIdentifier, Constants.GlobalRoles.GlobalAdmin, "IsGA");
 
         return CatalogDecisionResult.Deny(userIdentifier, "NonGA", "NotGlobalAdmin");
+    }
+
+    /// <summary>
+    /// Outcome of <see cref="DecideAsync"/>: either an allow carrying the resolved
+    /// <see cref="RequestContext"/>, or a deny carrying the HTTP status + error payload that
+    /// <see cref="Invoke"/> writes. Internal so the middleware decision is unit-testable.
+    /// </summary>
+    internal sealed class PolicyResult
+    {
+        public bool Allowed { get; private init; }
+        public RequestContext? Context { get; private init; }
+        public int StatusCode { get; private init; }
+        public string? ErrorCode { get; private init; }
+        public string? ErrorMessage { get; private init; }
+        public string UserIdentifier { get; private init; } = "anonymous";
+        public string UserRole { get; private init; } = "N/A";
+        public string LogReason { get; private init; } = "";
+
+        public static PolicyResult Allow(RequestContext context, string user, string role)
+            => new() { Allowed = true, Context = context, UserIdentifier = user, UserRole = role, LogReason = "Allow" };
+
+        public static PolicyResult Deny(int statusCode, string errorCode, string errorMessage,
+            string user, string role, string logReason)
+            => new()
+            {
+                Allowed = false,
+                StatusCode = statusCode,
+                ErrorCode = errorCode,
+                ErrorMessage = errorMessage,
+                UserIdentifier = user,
+                UserRole = role,
+                LogReason = logReason,
+            };
     }
 
     /// <summary>
@@ -379,8 +479,17 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         public string UserRole { get; private init; } = "N/A";
         public string Reason { get; private init; } = "";
 
-        public static CatalogDecisionResult Allow(string user, string role, string reason)
-            => new() { IsAllowed = true, UserIdentifier = user, UserRole = role, Reason = reason };
+        /// <summary>
+        /// The caller's independently-resolved tenant role ("Admin"/"Operator"/"Viewer"), when known.
+        /// Carried SEPARATELY from <see cref="UserRole"/> so additive semantics survive: a caller admitted
+        /// via a platform-role branch (e.g. GlobalReader) still surfaces their own-tenant role here, so
+        /// RequestContext.IsTenantAdmin is correct for a user who is both GlobalReader and TenantAdmin.
+        /// Null when not resolved (the allow-path then falls back to <see cref="UserRole"/>).
+        /// </summary>
+        public string? TenantRole { get; private init; }
+
+        public static CatalogDecisionResult Allow(string user, string role, string reason, string? tenantRole = null)
+            => new() { IsAllowed = true, UserIdentifier = user, UserRole = role, Reason = reason, TenantRole = tenantRole };
 
         public static CatalogDecisionResult Deny(string user, string role, string reason)
             => new() { IsAllowed = false, UserIdentifier = user, UserRole = role, Reason = reason };

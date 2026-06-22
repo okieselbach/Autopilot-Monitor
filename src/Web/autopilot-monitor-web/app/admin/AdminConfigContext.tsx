@@ -273,6 +273,9 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   // Save admin config
   const handleSaveAdminConfig = useCallback(async () => {
     if (!adminConfig) return;
+    // Platform settings are GA-only. A read-only Global Reader can reach the admin area (view scope)
+    // but must never persist global config — guard here too (the backend also enforces GlobalAdminOnly).
+    if (!isGlobalAdmin) return;
 
     try {
       setSavingConfig(true);
@@ -319,7 +322,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingConfig(false);
     }
-  }, [adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, desktopDetectorNoCandidateTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, slaNotificationCooldownHours, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, sessionDeletionKillSwitch, getAccessToken]);
+  }, [isGlobalAdmin, adminConfig, globalRateLimit, platformStatsBlobSasUrl, collectorIdleTimeoutMinutes, desktopDetectorNoCandidateTimeoutMinutes, maxSessionWindowHours, maintenanceBlockDurationHours, opsEventRetentionDays, slaNotificationCooldownHours, allowAgentDowngrade, modernDeploymentHarmlessEventIds, enableIndexDualWrite, sessionDeletionKillSwitch, getAccessToken]);
 
   // Reset admin config
   const handleResetAdminConfig = useCallback(() => {
@@ -363,6 +366,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
   // Save diagnostics paths
   const handleSaveDiagPaths = useCallback(async (paths: DiagnosticsLogPath[]) => {
     if (!adminConfig) return;
+    if (!isGlobalAdmin) return; // platform settings are GA-only (also route-gated + backend-enforced)
     try {
       setSavingDiagPaths(true);
       setError(null);
@@ -394,7 +398,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingDiagPaths(false);
     }
-  }, [adminConfig, getAccessToken]);
+  }, [isGlobalAdmin, adminConfig, getAccessToken]);
 
   // Save ops alert config (rules + providers)
   const handleSaveOpsAlertConfig = useCallback(async (
@@ -408,6 +412,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     newAutoActionDurationHours: number,
   ) => {
     if (!adminConfig) return;
+    if (!isGlobalAdmin) return; // platform settings are GA-only (also route-gated + backend-enforced)
     try {
       setSavingOpsAlerts(true);
       setError(null);
@@ -459,7 +464,7 @@ export function AdminConfigProvider({ children }: { children: React.ReactNode })
     } finally {
       setSavingOpsAlerts(false);
     }
-  }, [adminConfig, getAccessToken]);
+  }, [isGlobalAdmin, adminConfig, getAccessToken]);
 
   return (
     <AdminConfigContext.Provider value={{

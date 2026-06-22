@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Caching.Memory;
@@ -15,6 +16,10 @@ public class GlobalAdminService
     private readonly IMemoryCache _cache;
     private readonly ILogger<GlobalAdminService> _logger;
     private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
+
+    // Sentinel stored in the role cache to represent "no global role" (row missing or disabled).
+    // Lets us distinguish a cached negative from a cache miss without nullable boxing games.
+    private const string NoRoleSentinel = "(none)";
 
     public GlobalAdminService(
         IAdminRepository adminRepo,
@@ -34,33 +39,41 @@ public class GlobalAdminService
     /// <returns>True if the user is a Global Admin</returns>
     public virtual async Task<bool> IsGlobalAdminAsync(string? upn)
     {
+        // Single source of truth: GlobalAdmin == the GlobalAdmin platform role.
+        return await GetGlobalRoleAsync(upn) == Constants.GlobalRoles.GlobalAdmin;
+    }
+
+    /// <summary>
+    /// Resolves the caller's platform role from the GlobalAdmins table.
+    /// Returns <see cref="Constants.GlobalRoles.GlobalAdmin"/>, <see cref="Constants.GlobalRoles.GlobalReader"/>,
+    /// or <c>null</c> when the UPN has no enabled GlobalAdmins row. Cached for 5 minutes.
+    /// </summary>
+    public virtual async Task<string?> GetGlobalRoleAsync(string? upn)
+    {
         if (string.IsNullOrWhiteSpace(upn))
         {
-            _logger.LogDebug("IsGlobalAdminAsync: UPN is null or empty");
-            return false;
+            _logger.LogDebug("GetGlobalRoleAsync: UPN is null or empty");
+            return null;
         }
 
         // Normalize UPN to lowercase for case-insensitive comparison
         upn = upn.ToLowerInvariant();
 
-        // Check cache first
-        var cacheKey = $"global-admin:{upn}";
-        if (_cache.TryGetValue<bool>(cacheKey, out var isAdmin))
+        var cacheKey = $"global-role:{upn}";
+        if (_cache.TryGetValue<string>(cacheKey, out var cached) && cached != null)
         {
-            _logger.LogDebug("Global Admin check (from cache): {Upn} -> {IsAdmin}", upn, isAdmin);
-            return isAdmin;
+            _logger.LogDebug("Global role check (from cache): {Upn} -> {Role}", upn, cached);
+            return cached == NoRoleSentinel ? null : cached;
         }
 
-        // Query via repository
-        _logger.LogDebug("Querying repository for Global Admin: {Upn}", upn);
-        var result = await _adminRepo.IsGlobalAdminAsync(upn);
+        _logger.LogDebug("Querying repository for global role: {Upn}", upn);
+        var role = await _adminRepo.GetGlobalRoleAsync(upn);
 
-        _logger.LogDebug("Global Admin check result: {Upn} -> {Result}", upn, result);
+        _logger.LogDebug("Global role check result: {Upn} -> {Role}", upn, role ?? "(none)");
 
-        // Cache the result
-        _cache.Set(cacheKey, result, _cacheDuration);
+        _cache.Set(cacheKey, role ?? NoRoleSentinel, _cacheDuration);
 
-        return result;
+        return role;
     }
 
     /// <summary>
@@ -76,7 +89,7 @@ public class GlobalAdminService
         await _adminRepo.AddGlobalAdminAsync(upn, addedBy);
 
         // Invalidate cache
-        _cache.Remove($"global-admin:{upn}");
+        _cache.Remove($"global-role:{upn}");
 
         return new GlobalAdminEntity
         {
@@ -85,7 +98,8 @@ public class GlobalAdminService
             Upn = upn,
             IsEnabled = true,
             AddedDate = DateTime.UtcNow,
-            AddedBy = addedBy
+            AddedBy = addedBy,
+            Role = Constants.GlobalRoles.GlobalAdmin
         };
     }
 
@@ -99,7 +113,7 @@ public class GlobalAdminService
         await _adminRepo.RemoveGlobalAdminAsync(upn);
 
         // Invalidate cache
-        _cache.Remove($"global-admin:{upn}");
+        _cache.Remove($"global-role:{upn}");
     }
 
     /// <summary>
@@ -112,7 +126,7 @@ public class GlobalAdminService
         await _adminRepo.DisableGlobalAdminAsync(upn);
 
         // Invalidate cache
-        _cache.Remove($"global-admin:{upn}");
+        _cache.Remove($"global-role:{upn}");
     }
 
     /// <summary>
@@ -129,7 +143,8 @@ public class GlobalAdminService
             Upn = e.Upn,
             IsEnabled = e.IsEnabled,
             AddedDate = e.AddedAt,
-            AddedBy = e.AddedBy
+            AddedBy = e.AddedBy,
+            Role = string.IsNullOrEmpty(e.Role) ? Constants.GlobalRoles.GlobalAdmin : e.Role
         }).ToList();
     }
 
@@ -174,4 +189,11 @@ public class GlobalAdminEntity : ITableEntity
     /// UPN of the admin who added this user
     /// </summary>
     public string AddedBy { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Platform role for this entry: <see cref="Constants.GlobalRoles.GlobalAdmin"/> (default) or
+    /// <see cref="Constants.GlobalRoles.GlobalReader"/>. Empty/missing ⇒ GlobalAdmin (back-compat with
+    /// rows created before the GlobalReader tier existed).
+    /// </summary>
+    public string Role { get; set; } = string.Empty;
 }

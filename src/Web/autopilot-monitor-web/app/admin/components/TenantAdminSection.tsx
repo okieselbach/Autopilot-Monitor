@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
+import { useCanMutatePlatform } from "@/hooks/useCanMutatePlatform";
 
 interface TenantAdmin {
   tenantId: string;
@@ -27,6 +28,8 @@ export function TenantAdminSection({
   setError,
   setSuccessMessage,
 }: TenantAdminSectionProps) {
+  // Read-only Global Readers may view tenant members but not add/remove/toggle them.
+  const canMutate = useCanMutatePlatform();
   const [tenantAdmins, setTenantAdmins] = useState<TenantAdmin[]>([]);
   const [loadingAdmins, setLoadingAdmins] = useState(false);
   const [newAdminEmail, setNewAdminEmail] = useState("");
@@ -70,6 +73,7 @@ export function TenantAdminSection({
   }, [tenantId]);
 
   const handleAddTenantAdmin = async () => {
+    if (!canMutate) return; // read-only Global Reader — also closes the Enter-key path past disabled buttons
     if (!newAdminEmail.trim()) return;
 
     try {
@@ -108,6 +112,7 @@ export function TenantAdminSection({
   };
 
   const handleRemoveTenantAdmin = async (adminUpn: string) => {
+    if (!canMutate) return; // read-only Global Reader
     if (!confirm(`Are you sure you want to remove ${adminUpn} as an admin?`)) {
       return;
     }
@@ -145,6 +150,7 @@ export function TenantAdminSection({
   };
 
   const handleToggleTenantAdmin = async (adminUpn: string, isEnabled: boolean) => {
+    if (!canMutate) return; // read-only Global Reader
     try {
       setTogglingAdmin(adminUpn);
       setError(null);
@@ -184,6 +190,7 @@ export function TenantAdminSection({
   };
 
   const handleUpdatePermissions = async (adminUpn: string, role: string, canManageBootstrapTokens: boolean) => {
+    if (!canMutate) return; // read-only Global Reader (consistency with the other mutation handlers)
     try {
       setTogglingAdmin(adminUpn);
       setError(null);
@@ -329,7 +336,7 @@ export function TenantAdminSection({
                         <select
                           value={effectiveRole}
                           onChange={(e) => handleUpdatePermissions(admin.upn, e.target.value, admin.canManageBootstrapTokens)}
-                          disabled={togglingAdmin === admin.upn}
+                          disabled={!canMutate || togglingAdmin === admin.upn}
                           className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
                         >
                           <option value="Admin">Admin</option>
@@ -337,7 +344,7 @@ export function TenantAdminSection({
                         </select>
                         <button
                           onClick={() => handleToggleTenantAdmin(admin.upn, admin.isEnabled)}
-                          disabled={togglingAdmin === admin.upn}
+                          disabled={!canMutate || togglingAdmin === admin.upn}
                           className={`px-2 py-1 text-xs rounded hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed ${
                             admin.isEnabled
                               ? 'bg-yellow-600 text-white hover:bg-yellow-700'
@@ -350,7 +357,7 @@ export function TenantAdminSection({
                         </button>
                         <button
                           onClick={() => handleRemoveTenantAdmin(admin.upn)}
-                          disabled={removingAdmin === admin.upn}
+                          disabled={!canMutate || removingAdmin === admin.upn}
                           className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {removingAdmin === admin.upn ? "..." : "Remove"}
@@ -366,7 +373,7 @@ export function TenantAdminSection({
                               type="checkbox"
                               checked={admin.canManageBootstrapTokens}
                               onChange={(e) => handleUpdatePermissions(admin.upn, "Operator", e.target.checked)}
-                              disabled={togglingAdmin === admin.upn}
+                              disabled={!canMutate || togglingAdmin === admin.upn}
                               className="h-4 w-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500 disabled:opacity-50"
                             />
                             <span className="text-sm text-gray-700">Can manage bootstrap tokens</span>
@@ -434,7 +441,7 @@ export function TenantAdminSection({
               </select>
               <button
                 onClick={() => handleAddTenantAdmin()}
-                disabled={addingAdmin || !newAdminEmail.trim()}
+                disabled={!canMutate || addingAdmin || !newAdminEmail.trim()}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
               >
                 {addingAdmin ? "Adding..." : "Add"}

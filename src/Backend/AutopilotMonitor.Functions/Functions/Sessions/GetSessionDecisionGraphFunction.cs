@@ -56,9 +56,9 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 var transitions = await _transitionRepo.QueryBySessionAsync(
                     requestCtx.TargetTenantId, sessionId, MaxTransitionsToLoad);
 
-                // Global Admin cross-tenant fallback (same pattern as other session-detail reads).
+                // Global-scope (GA or read-only GlobalReader) cross-tenant fallback (same pattern as other session-detail reads).
                 var effectiveTenantId = requestCtx.TargetTenantId;
-                if (transitions.Count == 0 && requestCtx.IsGlobalAdmin)
+                if (transitions.Count == 0 && requestCtx.HasGlobalScope)
                 {
                     var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
                     if (resolvedTenantId != null &&

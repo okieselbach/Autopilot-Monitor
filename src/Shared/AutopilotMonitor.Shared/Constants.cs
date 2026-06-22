@@ -640,6 +640,26 @@ namespace AutopilotMonitor.Shared
             public const string Viewer = "Viewer";
         }
 
+        /// <summary>
+        /// Platform-wide roles stored in the GlobalAdmins table (Role column).
+        /// Empty/missing Role on existing entities is treated as GlobalAdmin for backward compatibility.
+        /// GlobalReader = read-only platform tier: cross-tenant read of telemetry + config (config secrets
+        /// redacted) but performs NO mutating operation and cannot write global settings. Raw table/log
+        /// access stays GlobalAdminOnly (it could dump secret-bearing tables, bypassing redaction).
+        /// </summary>
+        public static class GlobalRoles
+        {
+            public const string GlobalAdmin = "GlobalAdmin";
+            public const string GlobalReader = "GlobalReader";
+        }
+
+        /// <summary>
+        /// Placeholder substituted for secret-bearing string fields (SAS URLs, webhook URLs, API keys,
+        /// custom webhook headers) when a config object is served to a read-only GlobalReader. Non-empty
+        /// secrets become this sentinel so the UI shows "configured but hidden"; empty stays empty.
+        /// </summary>
+        public const string RedactedSecretPlaceholder = "***REDACTED***";
+
         // -----------------------------------------------------------------------
         // Audit logging
         // -----------------------------------------------------------------------

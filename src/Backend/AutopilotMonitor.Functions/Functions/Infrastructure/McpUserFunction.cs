@@ -173,13 +173,17 @@ public class McpUserFunction
             ["accessGrant"] = result.AccessGrant,
             ["reason"] = result.Reason,
         };
-        // Only surface the Global-Admin flag when it is actually true. A normal
-        // tenant user gets no isGlobalAdmin field at all: the MCP access-guard
-        // reads `=== true` (absent → non-GA), and we avoid hinting to ordinary
-        // callers that a Global-Admin tier even exists.
+        // Only surface platform-role flags when the caller actually has one. A normal tenant user gets
+        // neither field: the MCP access-guard reads `globalRole` to decide cross-tenant routing (and
+        // keeps reading `isGlobalAdmin === true` for back-compat / write-tier hints), and we avoid
+        // hinting to ordinary callers that a platform tier even exists.
         if (result.IsGlobalAdmin)
         {
             payload["isGlobalAdmin"] = true;
+        }
+        if (!string.IsNullOrEmpty(result.GlobalRole))
+        {
+            payload["globalRole"] = result.GlobalRole; // "GlobalAdmin" | "GlobalReader"
         }
         await response.WriteAsJsonAsync(payload);
         return response;

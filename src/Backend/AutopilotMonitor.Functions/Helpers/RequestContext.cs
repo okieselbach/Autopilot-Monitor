@@ -19,8 +19,24 @@ public sealed record RequestContext
     /// <summary>The user's UPN (from JWT upn/preferred_username claim).</summary>
     public string UserPrincipalName { get; init; } = string.Empty;
 
-    /// <summary>True if the user is a Global Admin of the platform.</summary>
+    /// <summary>True if the user is a Global Admin of the platform (full read + write).</summary>
     public bool IsGlobalAdmin { get; init; }
+
+    /// <summary>
+    /// True if the user holds the Global Reader platform role: cross-tenant read visibility equal to a
+    /// Global Admin but conferring no platform write/settings capability. Mutually exclusive with
+    /// <see cref="IsGlobalAdmin"/>. Semantics are ADDITIVE — this role grants read and never removes a
+    /// user's independent tenant-role rights, so a UPN that is both a Global Reader and a Tenant Admin of
+    /// its own tenant still passes the tenant-scoped write tiers there (the write evaluators resolve the
+    /// tenant role after the GA check). A pure Global Reader (no tenant role) is read-only everywhere.
+    /// </summary>
+    public bool IsGlobalReader { get; init; }
+
+    /// <summary>
+    /// True when the caller has platform-wide (cross-tenant) read scope — Global Admin OR Global Reader.
+    /// Use for read/visibility decisions and cross-tenant gating; use <see cref="IsGlobalAdmin"/> for writes.
+    /// </summary>
+    public bool HasGlobalScope => IsGlobalAdmin || IsGlobalReader;
 
     /// <summary>True if the user is a Tenant Admin of their own tenant.</summary>
     public bool IsTenantAdmin { get; init; }
@@ -67,7 +83,7 @@ public static class RequestContextExtensions
     /// the role is not resolved and this returns false.
     /// </summary>
     public static bool IsTenantMemberOrGlobalAdmin(this RequestContext ctx)
-        => ctx.IsGlobalAdmin
+        => ctx.HasGlobalScope
             || ctx.UserRole == Constants.TenantRoles.Admin
             || ctx.UserRole == Constants.TenantRoles.Operator
             || ctx.UserRole == Constants.TenantRoles.Viewer;

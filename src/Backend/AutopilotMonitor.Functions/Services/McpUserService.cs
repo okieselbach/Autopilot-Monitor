@@ -1,3 +1,4 @@
+using AutopilotMonitor.Shared;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 using Azure.Data.Tables;
@@ -46,10 +47,13 @@ public class McpUserService
 
         upn = upn.ToLowerInvariant();
 
-        // Always resolve GA status — needed by the MCP server for cross-tenant routing
-        // decisions (GA → /api/global/* with tenantId-as-filter; non-GA → /api/* JWT-bound).
-        // Resolved unconditionally so downstream consumers don't need to re-check.
-        var isGlobalAdmin = await _globalAdminService.IsGlobalAdminAsync(upn);
+        // Always resolve the platform role — needed by the MCP server for cross-tenant routing
+        // decisions (global scope → /api/global/* with tenantId-as-filter; non-global → /api/* JWT-bound).
+        // GlobalReader has the SAME cross-tenant read scope as GA in the (read-only) MCP, so both
+        // platform roles route the same way; only isGlobalAdmin (write power) differs. Resolved
+        // unconditionally so downstream consumers don't need to re-check.
+        var globalRole = await _globalAdminService.GetGlobalRoleAsync(upn);
+        var isGlobalAdmin = globalRole == Constants.GlobalRoles.GlobalAdmin;
 
         var config = await _adminConfigService.GetConfigurationAsync();
         if (!Enum.TryParse<McpAccessPolicy>(config.McpAccessPolicy, out var policy))
@@ -61,13 +65,13 @@ public class McpUserService
                 return McpAccessCheckResult.Denied("MCP access is disabled");
 
             case McpAccessPolicy.AllMembers:
-                return McpAccessCheckResult.Allowed(upn, "AllMembers", isGlobalAdmin);
+                return McpAccessCheckResult.Allowed(upn, "AllMembers", isGlobalAdmin, globalRole);
 
             case McpAccessPolicy.WhitelistOnly:
             default:
-                // Global Admins always have access
-                if (isGlobalAdmin)
-                    return McpAccessCheckResult.Allowed(upn, "GlobalAdmin", true);
+                // Any platform role (GlobalAdmin or read-only GlobalReader) always has MCP access.
+                if (globalRole != null)
+                    return McpAccessCheckResult.Allowed(upn, globalRole, isGlobalAdmin, globalRole);
 
                 // Check McpUsers whitelist (cached)
                 var cacheKey = $"mcp-user:{upn}";
@@ -160,12 +164,19 @@ public class McpAccessCheckResult
     public string AccessGrant { get; init; } = string.Empty;
     public bool IsGlobalAdmin { get; init; }
 
-    public static McpAccessCheckResult Allowed(string upn, string accessGrant, bool isGlobalAdmin = false) => new()
+    /// <summary>
+    /// Platform role of the caller: "GlobalAdmin", "GlobalReader", or null (no platform role). The MCP
+    /// server uses this to grant cross-tenant routing to BOTH platform roles (the server is read-only).
+    /// </summary>
+    public string? GlobalRole { get; init; }
+
+    public static McpAccessCheckResult Allowed(string upn, string accessGrant, bool isGlobalAdmin = false, string? globalRole = null) => new()
     {
         IsAllowed = true,
         Upn = upn,
         AccessGrant = accessGrant,
-        IsGlobalAdmin = isGlobalAdmin
+        IsGlobalAdmin = isGlobalAdmin,
+        GlobalRole = globalRole
     };
 
     public static McpAccessCheckResult Denied(string reason) => new()

@@ -33,17 +33,22 @@ export class ApiError extends Error {
  * Per-request caller context using AsyncLocalStorage.
  *
  * Each incoming MCP request runs inside its own async context (via
- * `runWithCaller`), carrying both the Bearer token and the caller's
- * resolved Global-Admin status. Tools route based on the role:
- *   - GA → /api/global/* (cross-tenant; tenantId is a filter param)
- *   - Tenant-Admin → /api/* (tenant-scoped; JWT-tid is authoritative)
+ * `runWithCaller`), carrying the Bearer token and the caller's resolved
+ * platform role. Tools route on platform SCOPE (Global Admin OR the read-only
+ * Global Reader — the server is read-only, so both have identical cross-tenant
+ * reach):
+ *   - global scope → /api/global/* (cross-tenant; tenantId is a filter param)
+ *   - tenant user  → /api/* (tenant-scoped; JWT-tid is authoritative)
  *
  * Concurrent sessions cannot overwrite each other's context even when
  * async operations interleave on the event loop.
  */
 interface CallerContext {
   token: string;
+  /** True only for a platform Global Admin (write tier — not currently used by the read-only MCP). */
   isGlobalAdmin: boolean;
+  /** True for the read-only Global Reader platform tier. */
+  isGlobalReader?: boolean;
 }
 
 const callerStore = new AsyncLocalStorage<CallerContext>();
@@ -71,13 +76,26 @@ export function isGlobalAdmin(): boolean {
 }
 
 /**
- * Picks the route prefix for the current caller. GA always uses
- * `/api/global/*`; tenant-admins use the tenant-scoped variant. The same
- * `tenantId` query param is meaningful in both worlds — on `/api/global/*`
- * it filters; on `/api/*` it's informational (backend resolves from JWT).
+ * True when the current caller has platform-wide (cross-tenant) scope — a Global
+ * Admin OR a read-only Global Reader. This is what tool routing and tool-catalog
+ * gating key off, because the MCP server is entirely read-only: a Global Reader
+ * has the same cross-tenant reach as a Global Admin here. Defaults to false when
+ * no context is active (e.g. unit tests without an explicit `runWithCaller`).
+ */
+export function hasGlobalScope(): boolean {
+  const store = callerStore.getStore();
+  return store?.isGlobalAdmin === true || store?.isGlobalReader === true;
+}
+
+/**
+ * Picks the route prefix for the current caller. A platform-scope caller (GA or
+ * read-only Global Reader) uses `/api/global/*`; tenant users use the
+ * tenant-scoped variant. The same `tenantId` query param is meaningful in both
+ * worlds — on `/api/global/*` it filters; on `/api/*` it's informational
+ * (backend resolves from JWT).
  */
 export function pickGlobalOrTenantPath(globalPath: string, tenantPath: string): string {
-  return isGlobalAdmin() ? globalPath : tenantPath;
+  return hasGlobalScope() ? globalPath : tenantPath;
 }
 
 /**

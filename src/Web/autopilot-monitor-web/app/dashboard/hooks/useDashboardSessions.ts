@@ -22,6 +22,7 @@ type AddNotification = (
 interface User {
   isTenantAdmin?: boolean;
   isGlobalAdmin?: boolean;
+  isGlobalReader?: boolean;
   role?: string | null;
 }
 
@@ -350,7 +351,7 @@ export function useDashboardSessions({
 
   // Initial fetch — gated on user role + tenant readiness
   useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== "Operator") {
+    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && !user.isGlobalReader && user.role !== "Operator") {
       return; // regular users are redirected elsewhere; don't fetch
     }
     if (!globalAdminMode && !tenantId) return; // wait for real tenant ID

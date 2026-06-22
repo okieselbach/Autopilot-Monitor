@@ -33,7 +33,7 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     mobileDrawerOpen, setMobileDrawerOpen,
   } = useSidebar();
 
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, hasGlobalScope } = useAuth();
   const pathname = usePathname();
 
   // Track desktop breakpoint
@@ -182,7 +182,9 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
     switch (group.visibility) {
       case "all": return true;
       case "adminOrOperator": return isAdminOrOperator;
-      case "globalAdmin": return isGlobalAdmin && globalAdminMode;
+      // Cross-tenant nav is a VISIBILITY surface → any platform scope (GA or read-only GlobalReader).
+      // Mutating controls inside these views are gated separately on isGlobalAdmin.
+      case "globalAdmin": return hasGlobalScope && globalAdminMode;
       default: return false;
     }
   };
@@ -201,6 +203,9 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
         const filteredItems = group.items
           .filter((item) => {
             if (item.id === "cfg-reporting") return hasMcpAccess;
+            // Platform-settings/mutation sub-sections are real-GA-only: hide from a read-only
+            // Global Reader (who reaches the group via hasGlobalScope visibility).
+            if ("visibility" in item && item.visibility === "globalAdminOnly") return isGlobalAdmin;
             return true;
           })
           .map((item) => {
@@ -387,8 +392,8 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   const visibleGroups = NAV_GROUPS.filter(isGroupVisible);
   const hasPageSections = pageSections.length > 0;
 
-  // Regular users see minimal nav
-  const isRegularUser = !isAdminOrOperator && !isGlobalAdmin;
+  // Regular users see minimal nav. A read-only Global Reader has platform scope → full nav.
+  const isRegularUser = !isAdminOrOperator && !hasGlobalScope;
 
   const renderNavContent = (isMobile = false) => (
     <>

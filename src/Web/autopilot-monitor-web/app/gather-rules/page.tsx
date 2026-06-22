@@ -69,7 +69,10 @@ export default function GatherRulesPage() {
   // Global admin tenant scope (tenant list, selector state, override/effective tenant)
   const scope = useGlobalAdminScope();
   const { isGlobalOverride, effectiveTenantId } = scope;
-  const isReadOnly = !user?.isTenantAdmin && !user?.isGlobalAdmin;
+  // Editable only for a real Global Admin (any tenant), or an own-tenant admin viewing their OWN tenant.
+  // A read-only Global Reader — and an own-tenant admin viewing a FOREIGN tenant (cross-tenant override) —
+  // is read-only. Backend also enforces (rules write is TenantAdminOrGA, cross-tenant blocked for non-GA).
+  const isReadOnly = !(user?.isGlobalAdmin || (user?.isTenantAdmin && !isGlobalOverride));
 
   const fetchRules = useCallback(async () => {
     if (!effectiveTenantId) return;

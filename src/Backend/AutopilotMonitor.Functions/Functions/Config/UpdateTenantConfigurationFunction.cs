@@ -63,6 +63,16 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     return badRequest;
                 }
 
+                // Load the stored config up-front so we can (1) restore any redacted secret placeholders
+                // before validation/save and (2) protect GA-only fields below.
+                var existingConfig = await _configService.GetConfigurationAsync(requestCtx.TargetTenantId);
+
+                // Defense-in-depth: a read-only GlobalReader is served a redacted config (secrets replaced
+                // with the ***REDACTED*** sentinel). If such a view is ever round-tripped back on a save,
+                // never persist the placeholder — restore the real secret from the stored config. (Own-tenant
+                // admins are served the FULL config so this is normally a no-op for them.)
+                config.RestoreRedactedSecretsFrom(existingConfig);
+
                 // Validate webhook URLs (SSRF protection)
                 var webhookUrlError = SsrfGuard.ValidateWebhookUrlFormat(config.WebhookUrl);
                 if (webhookUrlError != null)
@@ -109,8 +119,7 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 // Set the actual user identifier for audit logging
                 config.UpdatedBy = userIdentifier;
 
-                // Protect GA-only fields from non-Global-Admin callers
-                var existingConfig = await _configService.GetConfigurationAsync(requestCtx.TargetTenantId);
+                // Protect GA-only fields from non-Global-Admin callers (existingConfig loaded above).
                 if (!requestCtx.IsGlobalAdmin)
                 {
                     if (config.AllowInsecureAgentRequests != existingConfig.AllowInsecureAgentRequests ||

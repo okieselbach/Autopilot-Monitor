@@ -87,7 +87,7 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
             //      "global" sentinel; preserved so existing callers without ?tenantId still work.
             var explicitTenantId = query["tenantId"];
             string tenantId;
-            if (requestCtx.IsGlobalAdmin
+            if (requestCtx.HasGlobalScope
                 && !string.IsNullOrEmpty(explicitTenantId)
                 && Guid.TryParse(explicitTenantId, out _))
             {

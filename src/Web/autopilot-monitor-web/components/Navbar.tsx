@@ -13,7 +13,7 @@ import { useAdminMode } from '@/hooks/useAdminMode';
 import GlobalSearch from './GlobalSearch';
 
 export default function Navbar() {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated, user, hasGlobalScope, logout } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification, clearAll } = useNotifications();
   const { notifications: globalNotifications, dismissNotification: dismissGlobal, dismissAll: dismissAllGlobal } = useGlobalNotifications();
   const { tenantNotifications, dismissTenantNotification, dismissAllTenant } = useTenantNotifications();
@@ -150,8 +150,9 @@ export default function Navbar() {
   // bell as read-only. See TenantNotificationContext + EndpointAccessPolicyCatalog.
   const canDismissTenant = isTenantAdmin || (user?.isGlobalAdmin ?? false);
 
-  // Regular users (non-Admin, non-Operator): show minimal navbar with only Progress Portal
-  if (!isAdminOrOperator && !user?.isGlobalAdmin) {
+  // Regular users (non-Admin, non-Operator, no platform scope): show minimal navbar with only
+  // Progress Portal. A read-only Global Reader has platform scope → gets the full navbar.
+  if (!isAdminOrOperator && !hasGlobalScope) {
     return (
       <nav className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-30">
         <div className="px-3">
@@ -270,7 +271,7 @@ export default function Navbar() {
                   <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
                 </svg>
                 {(() => {
-                  const globalCount = (user?.isGlobalAdmin && globalAdminMode) ? globalNotifications.length : 0;
+                  const globalCount = (hasGlobalScope && globalAdminMode) ? globalNotifications.length : 0;
                   const totalUnread = unreadCount + globalCount + tenantNotifications.length;
                   return totalUnread > 0 ? (
                     <span className="absolute top-0.5 right-0.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold leading-none text-white bg-red-600 rounded-full">
@@ -282,24 +283,33 @@ export default function Navbar() {
 
               {/* Notification Dropdown */}
               {showNotifications && (() => {
-                const showGlobal = user?.isGlobalAdmin && globalAdminMode;
+                const showGlobal = hasGlobalScope && globalAdminMode;
                 const visibleGlobal = showGlobal ? globalNotifications : [];
                 const hasAny = notifications.length > 0 || visibleGlobal.length > 0 || tenantNotifications.length > 0;
+                // "Clear all" should only show when the caller can actually clear something: ephemeral
+                // (client-side, anyone), tenant (if canDismissTenant), or global (real GA only). A read-only
+                // Global Reader viewing only global notifications gets no dead button.
+                const hasClearable =
+                  notifications.length > 0 ||
+                  (canDismissTenant && tenantNotifications.length > 0) ||
+                  (!!user?.isGlobalAdmin && visibleGlobal.length > 0);
 
                 return (
                 <div className="fixed sm:absolute top-16 sm:top-auto left-2 right-2 sm:left-auto sm:right-0 mt-0 sm:mt-2 sm:w-96 bg-white rounded-lg shadow-lg border border-gray-200 z-50 max-h-[calc(100vh-5rem)] sm:max-h-96 overflow-hidden flex flex-col">
                   <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
                     <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
-                    {hasAny && (
+                    {(unreadCount > 0 || hasClearable) && (
                       <div className="flex space-x-2">
                         {unreadCount > 0 && (
                           <button onClick={markAllAsRead} className="text-xs text-blue-600 hover:text-blue-800">
                             Mark all read
                           </button>
                         )}
-                        <button onClick={() => { clearAll(); if (showGlobal) dismissAllGlobal(); if (canDismissTenant && tenantNotifications.length > 0) dismissAllTenant(); }} className="text-xs text-gray-500 hover:text-gray-700">
-                          Clear all
-                        </button>
+                        {hasClearable && (
+                          <button onClick={() => { clearAll(); if (showGlobal && user?.isGlobalAdmin) dismissAllGlobal(); if (canDismissTenant && tenantNotifications.length > 0) dismissAllTenant(); }} className="text-xs text-gray-500 hover:text-gray-700">
+                            Clear all
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -361,11 +371,13 @@ export default function Navbar() {
                                   <p className="text-[10px] text-gray-400 mt-1">{formatTime(new Date(gn.createdAt))}</p>
                                 </div>
                               </div>
-                              <button onClick={(e) => { e.stopPropagation(); dismissGlobal(gn.id); }} className="ml-2 text-gray-300 hover:text-gray-500" title="Dismiss">
-                                <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                              </button>
+                              {user?.isGlobalAdmin && (
+                                <button onClick={(e) => { e.stopPropagation(); dismissGlobal(gn.id); }} className="ml-2 text-gray-300 hover:text-gray-500" title="Dismiss">
+                                  <svg className="w-3.5 h-3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path d="M6 18L18 6M6 6l12 12"></path>
+                                  </svg>
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -441,15 +453,15 @@ export default function Navbar() {
                       </>
                     )}
 
-                    {/* Global Admin Toggle */}
-                    {user?.isGlobalAdmin && (
+                    {/* Global scope toggle — Global Admin or read-only Global Reader */}
+                    {hasGlobalScope && (
                       <div className="mb-1">
                         <div className="flex items-center justify-between py-2 px-2.5 rounded-md bg-purple-50">
                           <div className="flex items-center gap-1.5">
                             <svg className="w-4 h-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            <span className="text-sm text-gray-700">Global Admin</span>
+                            <span className="text-sm text-gray-700">{user?.isGlobalAdmin ? 'Global Admin' : 'Global View'}</span>
                             {globalAdminMode && <span className="text-[10px] text-purple-700 font-semibold">ON</span>}
                           </div>
                           <button onClick={() => { trackEvent("admin_mode_toggled", { enabled: !globalAdminMode, isGlobal: true }); setGlobalAdminMode(!globalAdminMode); }} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${globalAdminMode ? 'bg-purple-600' : 'bg-gray-300'}`}>
@@ -652,14 +664,14 @@ export default function Navbar() {
                           </div>
                         )}
 
-                        {/* Global Admin Toggle */}
-                        {user?.isGlobalAdmin && (
+                        {/* Global scope toggle — Global Admin or read-only Global Reader */}
+                        {hasGlobalScope && (
                           <div className="flex items-center justify-between py-2 px-2.5 rounded-md bg-purple-50 dark:bg-purple-900/30 mb-1">
                             <div className="flex items-center gap-1.5">
                               <svg className="w-4 h-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
-                              <span className="text-sm text-gray-700 dark:text-gray-200">Global Admin</span>
+                              <span className="text-sm text-gray-700 dark:text-gray-200">{user?.isGlobalAdmin ? 'Global Admin' : 'Global View'}</span>
                               {globalAdminMode && <span className="text-[10px] text-purple-700 font-semibold">ON</span>}
                             </div>
                             <button onClick={() => { trackEvent("admin_mode_toggled", { enabled: !globalAdminMode, isGlobal: true }); setGlobalAdminMode(!globalAdminMode); }} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${globalAdminMode ? 'bg-purple-600' : 'bg-gray-300'}`}>
@@ -740,6 +752,11 @@ export default function Navbar() {
                       {user?.isGlobalAdmin && (
                         <span className="inline-block mt-1.5 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800 bg-purple-100 rounded-full">
                           Global Admin
+                        </span>
+                      )}
+                      {user?.isGlobalReader && !user?.isGlobalAdmin && (
+                        <span className="inline-block mt-1.5 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800 bg-purple-50 rounded-full">
+                          Global Reader
                         </span>
                       )}
                       {isOperator && (

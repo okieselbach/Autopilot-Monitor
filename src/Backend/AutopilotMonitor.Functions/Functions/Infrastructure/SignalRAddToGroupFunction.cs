@@ -54,17 +54,20 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                 // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "global-admins"
                 // Users can only join groups for their own tenant (unless they are Global Admin)
 
-                // Explicit validation for the global-admins group
+                // Explicit validation for the global-admins group. This is a READ broadcast group
+                // (cross-tenant new-session/new-event + global-notification live pushes), so any platform
+                // scope — Global Admin OR the read-only Global Reader — may join. Mutating actions remain
+                // gated elsewhere (the reader only RECEIVES pushes).
                 if (request.GroupName == "global-admins")
                 {
-                    if (!requestCtx.IsGlobalAdmin)
+                    if (!requestCtx.HasGlobalScope)
                     {
-                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join global-admins group without being a Global Admin");
+                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join global-admins group without platform scope");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Global Admins can join this group" });
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: platform scope (Global Admin or Global Reader) required to join this group" });
                         return new AddToGroupOutput { HttpResponse = forbiddenResponse };
                     }
-                    _logger.LogInformation($"Global Admin {userEmail} joining global-admins group");
+                    _logger.LogInformation($"Platform-scope user {userEmail} (role={requestCtx.UserRole}) joining global-admins group");
                 }
                 else
                 {
@@ -77,11 +80,13 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         return new AddToGroupOutput { HttpResponse = badRequestResponse };
                     }
 
-                    // Check if user is allowed to join this tenant's group
+                    // Check if user is allowed to join this tenant's group. Cross-tenant joins require
+                    // platform scope (Global Admin OR read-only Global Reader) — both have cross-tenant
+                    // READ scope, and group membership only RECEIVES live updates. The admin/member
+                    // notification-group checks below still gate by the real tenant role.
                     if (requestedTenantId != userTenantId)
                     {
-                        // Check if user is Global Admin (they can join any tenant's group)
-                        if (!requestCtx.IsGlobalAdmin)
+                        if (!requestCtx.HasGlobalScope)
                         {
                             _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to join group for tenant {requestedTenantId}");
                             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -90,7 +95,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         }
                         else
                         {
-                            _logger.LogInformation($"Global Admin {userEmail} joining cross-tenant group: {request.GroupName}");
+                            _logger.LogInformation($"Platform-scope user {userEmail} (role={requestCtx.UserRole}) joining cross-tenant group: {request.GroupName}");
                         }
                     }
 

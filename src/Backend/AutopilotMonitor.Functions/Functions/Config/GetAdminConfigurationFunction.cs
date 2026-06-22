@@ -28,16 +28,20 @@ namespace AutopilotMonitor.Functions.Functions.Config
         {
             try
             {
-                // Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware
-                string userIdentifier = TenantHelper.GetUserIdentifier(req);
+                // Authentication + GlobalReadOrAdmin authorization enforced by PolicyEnforcementMiddleware
+                var requestCtx = req.GetRequestContext();
+                string userIdentifier = requestCtx.UserPrincipalName;
 
-                _logger.LogInformation($"GetAdminConfiguration by Global Admin user {userIdentifier}");
+                _logger.LogInformation("GetAdminConfiguration by {User} (role={Role})", userIdentifier, requestCtx.UserRole);
 
                 var config = await _adminConfigService.GetConfigurationAsync();
 
-                // SECURITY NOTE: Returns full AdminConfiguration including NvdApiKey.
-                // Acceptable because this endpoint is GlobalAdminOnly (single user during preview).
-                // Consider masking NvdApiKey to a write-only sentinel before GA release.
+                // A read-only GlobalReader gets secrets (NvdApiKey, SAS, ops webhook URLs) redacted; a
+                // Global Admin gets the full config. Redaction returns a copy — the cached instance is
+                // never mutated.
+                if (requestCtx.IsGlobalReader)
+                    config = config.RedactedCopyForReader();
+
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 await response.WriteAsJsonAsync(config);
                 return response;

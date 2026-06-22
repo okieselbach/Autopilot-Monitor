@@ -32,24 +32,46 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
 
         public async Task<bool> IsGlobalAdminAsync(string upn)
         {
+            // Delegate to the role resolver so the GlobalAdmin/GlobalReader distinction is enforced at the
+            // repository contract too: an enabled row with Role=GlobalReader is NOT a Global Admin. (Resolving
+            // this only in GlobalAdminService would leave a direct repo caller as a silent privilege-escalation
+            // footgun — a GlobalReader row reading back as "admin".)
+            return await GetGlobalRoleAsync(upn) == Constants.GlobalRoles.GlobalAdmin;
+        }
+
+        public async Task<string?> GetGlobalRoleAsync(string upn)
+        {
             if (string.IsNullOrWhiteSpace(upn))
-                return false;
+                return null;
 
             try
             {
                 var normalizedUpn = upn.ToLowerInvariant();
                 var entity = await _globalAdminsTableClient.GetEntityAsync<GlobalAdminEntity>(
                     "GlobalAdmins", normalizedUpn);
-                return entity?.Value != null && entity.Value.IsEnabled;
+                if (entity?.Value == null || !entity.Value.IsEnabled)
+                    return null;
+
+                // Empty/missing Role on an existing enabled row ⇒ GlobalAdmin (back-compat). An
+                // unrecognized Role string is treated as no role (fail-closed) rather than silently
+                // granting GlobalAdmin.
+                var role = entity.Value.Role;
+                if (string.IsNullOrWhiteSpace(role))
+                    return Constants.GlobalRoles.GlobalAdmin;
+                if (role == Constants.GlobalRoles.GlobalAdmin || role == Constants.GlobalRoles.GlobalReader)
+                    return role;
+
+                _logger.LogWarning("Unrecognized global Role '{Role}' for {Upn} — treating as no role", role, upn);
+                return null;
             }
             catch (RequestFailedException ex) when (ex.Status == 404)
             {
-                return false;
+                return null;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error checking global admin status for {Upn}", upn);
-                return false;
+                _logger.LogError(ex, "Error resolving global role for {Upn}", upn);
+                return null;
             }
         }
 
@@ -64,7 +86,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                     Upn = entity.Upn,
                     IsEnabled = entity.IsEnabled,
                     AddedAt = entity.AddedDate,
-                    AddedBy = entity.AddedBy
+                    AddedBy = entity.AddedBy,
+                    Role = string.IsNullOrWhiteSpace(entity.Role) ? Constants.GlobalRoles.GlobalAdmin : entity.Role
                 });
             }
             return admins;

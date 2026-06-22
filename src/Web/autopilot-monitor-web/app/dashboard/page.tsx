@@ -133,7 +133,7 @@ function HomeContent() {
   // Stats cards: server-side aggregation so the numbers don't drift with whatever
   // the client has paginated into view. Refreshes on SignalR newSession/newevents
   // (debounced) and on SignalR reconnect to recover from any missed messages.
-  const isRegularUser = !!user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== "Operator";
+  const isRegularUser = !!user && !user.isTenantAdmin && !user.isGlobalAdmin && !user.isGlobalReader && user.role !== "Operator";
   const { stats: dashboardStats } = useDashboardStats({
     tenantId,
     globalAdminMode,
@@ -144,9 +144,10 @@ function HomeContent() {
     disabled: isRegularUser,
   });
 
-  // Redirect regular users (non-admin, non-operator) to progress portal – they must never see the session list
+  // Redirect regular users (non-admin, non-operator, no platform scope) to the progress portal — they
+  // must never see the session list. A read-only Global Reader has cross-tenant read scope → stays.
   useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && user.role !== 'Operator') {
+    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && !user.isGlobalReader && user.role !== 'Operator') {
       router.replace("/progress");
     }
   }, [user, router]);
@@ -154,10 +155,11 @@ function HomeContent() {
   const serialValidationEnabled = useTenantSecurityConfig(tenantId, user, getAccessToken, addNotification);
   const tenantList = useTenantList(globalAdminMode, getAccessToken);
 
-  // Disable global admin mode if user is not a global admin
+  // Disable global-scope mode for users without platform scope. A read-only Global Reader keeps it
+  // (their cross-tenant view is read-only-safe; writes are gated separately + backend-enforced).
   useEffect(() => {
-    if (user && !user.isGlobalAdmin && globalAdminMode) {
-      console.log('[Home] User is not a global admin, disabling global admin mode');
+    if (user && !user.isGlobalAdmin && !user.isGlobalReader && globalAdminMode) {
+      console.log('[Home] User has no platform scope, disabling global mode');
       setGlobalAdminMode(false);
     }
   }, [user, globalAdminMode]);

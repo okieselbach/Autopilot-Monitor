@@ -34,7 +34,7 @@ public class AuthFunctionTests
     public void HappyPath_AdminUser_Returns200WithCorrectFields()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -59,7 +59,7 @@ public class AuthFunctionTests
     public void HappyPath_OperatorUser_ReturnsCorrectRole()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: OperatorRole(), mcpCheck: McpDenied(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -76,7 +76,7 @@ public class AuthFunctionTests
     public void HappyPath_ViewerUser_ReturnsCorrectRole()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: ViewerRole(), mcpCheck: McpDenied(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -91,7 +91,7 @@ public class AuthFunctionTests
     public void HappyPath_GlobalAdmin_ReturnsIsGlobalAdminTrue()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: true, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: true, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -99,6 +99,53 @@ public class AuthFunctionTests
         Assert.True(result.IsSuccess);
         var body = ToDynamic(result.Body);
         Assert.True((bool)body.isGlobalAdmin);
+    }
+
+    [Fact]
+    public void HappyPath_GlobalReader_ReturnsIsGlobalReaderTrue_NotGlobalAdmin()
+    {
+        var result = AuthFunction.BuildAuthResult(
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: true, isPreviewApproved: true,
+            memberRole: null, mcpCheck: McpAllowed(),
+            hasTenantAdmins: true,
+            TenantId, Upn, DisplayName, ObjectId);
+
+        Assert.True(result.IsSuccess);
+        var body = ToDynamic(result.Body);
+        Assert.False((bool)body.isGlobalAdmin);
+        Assert.True((bool)body.isGlobalReader);
+    }
+
+    [Fact]
+    public void PreviewGate_GlobalReaderBypassesPreviewGate()
+    {
+        // A read-only platform reader is staff and must bypass the private-preview gate, exactly like a GA.
+        var result = AuthFunction.BuildAuthResult(
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: true, isPreviewApproved: false,
+            memberRole: null, mcpCheck: McpAllowed(),
+            hasTenantAdmins: true,
+            TenantId, Upn, DisplayName, ObjectId);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public void AutoAdmin_NeverTriggered_ForGlobalReader_EvenAsFirstUser()
+    {
+        // GlobalReader is additive (it never removes tenant rights) but must not SILENTLY acquire new
+        // write power: the first-login auto-admin convenience is declined for a read-only-flagged
+        // identity. (Explicit TenantAdmins membership would still grant write — that's the additive path.)
+        var result = AuthFunction.BuildAuthResult(
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: true, isPreviewApproved: true,
+            memberRole: null,
+            mcpCheck: McpAllowed(),
+            hasTenantAdmins: false, // first user in this tenant
+            TenantId, Upn, DisplayName, ObjectId);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.NeedsAutoAdmin);
+        var body = ToDynamic(result.Body);
+        Assert.False((bool)body.isTenantAdmin);
     }
 
     // -------------------------------------------------------------------------
@@ -112,7 +159,7 @@ public class AuthFunctionTests
         config.Disabled = true;
 
         var result = AuthFunction.BuildAuthResult(
-            config, isGlobalAdmin: false, isPreviewApproved: true,
+            config, isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -131,7 +178,7 @@ public class AuthFunctionTests
         config.DisabledReason = "Terms of service violation";
 
         var result = AuthFunction.BuildAuthResult(
-            config, isGlobalAdmin: false, isPreviewApproved: true,
+            config, isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -148,7 +195,7 @@ public class AuthFunctionTests
         config.Disabled = true;
 
         var result = AuthFunction.BuildAuthResult(
-            config, isGlobalAdmin: true, isPreviewApproved: true,
+            config, isGlobalAdmin: true, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -167,7 +214,7 @@ public class AuthFunctionTests
         config.DisabledUntil = DateTime.UtcNow.AddHours(-1); // expired
 
         var result = AuthFunction.BuildAuthResult(
-            config, isGlobalAdmin: false, isPreviewApproved: true,
+            config, isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -183,7 +230,7 @@ public class AuthFunctionTests
     public void PreviewGate_NotApproved_Returns403PrivatePreview()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: false,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: false,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -198,7 +245,7 @@ public class AuthFunctionTests
     public void PreviewGate_GlobalAdminBypassesPreviewGate()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: true, isPreviewApproved: false,
+            DefaultConfig(), isGlobalAdmin: true, isGlobalReader: false, isPreviewApproved: false,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -214,7 +261,7 @@ public class AuthFunctionTests
     public void AutoAdmin_FirstUser_NoExistingAdmins_BecomesAdmin()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: null, // no role yet
             mcpCheck: McpDenied(),
             hasTenantAdmins: false, // no existing admins
@@ -232,7 +279,7 @@ public class AuthFunctionTests
     public void AutoAdmin_NotTriggered_WhenAdminsExist()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: null, // no role — new user but admins exist
             mcpCheck: McpDenied(),
             hasTenantAdmins: true, // admins already exist
@@ -252,7 +299,7 @@ public class AuthFunctionTests
         // user into the TenantAdmins table. needsAutoAdmin keys off memberRole == null, not on
         // "not admin", so an Entra app-role Operator in a claim-only tenant stays an Operator.
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: OperatorRole(), // came from the "roles" claim
             mcpCheck: McpDenied(),
             hasTenantAdmins: false, // no explicit TenantAdmins table rows
@@ -269,7 +316,7 @@ public class AuthFunctionTests
     public void AutoAdmin_NotTriggered_WhenUserAlreadyAdmin()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(),
             mcpCheck: McpDenied(),
             hasTenantAdmins: true,
@@ -289,7 +336,7 @@ public class AuthFunctionTests
     public void McpAccess_Allowed_ReturnsTrue()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpAllowed(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -302,7 +349,7 @@ public class AuthFunctionTests
     public void McpAccess_Denied_ReturnsFalse()
     {
         var result = AuthFunction.BuildAuthResult(
-            DefaultConfig(), isGlobalAdmin: false, isPreviewApproved: true,
+            DefaultConfig(), isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: true,
             memberRole: AdminRole(), mcpCheck: McpDenied(),
             hasTenantAdmins: true,
             TenantId, Upn, DisplayName, ObjectId);
@@ -322,7 +369,7 @@ public class AuthFunctionTests
         config.Disabled = true;
 
         var result = AuthFunction.BuildAuthResult(
-            config, isGlobalAdmin: false, isPreviewApproved: false,
+            config, isGlobalAdmin: false, isGlobalReader: false, isPreviewApproved: false,
             memberRole: null, mcpCheck: McpDenied(),
             hasTenantAdmins: false,
             TenantId, Upn, DisplayName, ObjectId);

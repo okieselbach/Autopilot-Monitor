@@ -159,7 +159,9 @@ public class EndpointPolicyCatalogCompletenessTests
 
         Assert.NotNull(getConfig);
         Assert.NotNull(putConfig);
-        Assert.Equal(EndpointPolicy.TenantAdminOrGA, getConfig.Policy);
+        // GET config read is admin-tier read (own-tenant Admin / GA / read-only GlobalReader);
+        // PUT config write stays Admin/GA only.
+        Assert.Equal(EndpointPolicy.TenantAdminOrGlobalReader, getConfig.Policy);
         Assert.Equal(EndpointPolicy.TenantAdminOrGA, putConfig.Policy);
 
         var getRules = EndpointAccessPolicyCatalog.FindPolicy("GET", "/api/rules/gather");
@@ -221,46 +223,48 @@ public class EndpointPolicyCatalogCompletenessTests
     }
 
     /// <summary>
-    /// The three global/apps/* routes must be locked to GlobalAdminOnly with
-    /// TenantScoping.None (the optional ?tenantId= query param is intentional cross-tenant
-    /// scoping, enforced inside the function — not by the middleware).
-    /// A future accidental downgrade of the policy tier would be caught here, whereas
-    /// the generic completeness test only guarantees that *some* entry exists.
+    /// The three global/apps/* routes must be cross-tenant READS — GlobalReadOrAdmin (GA + read-only
+    /// GlobalReader) — with TenantScoping.None (the optional ?tenantId= query param is intentional
+    /// cross-tenant scoping, enforced inside the function — not by the middleware). A future accidental
+    /// downgrade below the global-scope tier (e.g. to MemberRead, exposing them to tenant members)
+    /// would be caught here, whereas the generic completeness test only guarantees *some* entry exists.
     /// </summary>
     [Theory]
     [InlineData("GET", "/api/global/apps/list",                       "global/apps/list")]
     [InlineData("GET", "/api/global/apps/Company%20Portal/analytics", "global/apps/{appName}/analytics")]
     [InlineData("GET", "/api/global/apps/Company%20Portal/sessions",  "global/apps/{appName}/sessions")]
-    public void GlobalAppsRoutes_AreGlobalAdminOnly(string method, string path, string expectedTemplate)
+    public void GlobalAppsRoutes_AreGlobalReadOrAdmin(string method, string path, string expectedTemplate)
     {
         var entry = EndpointAccessPolicyCatalog.FindPolicy(method, path);
 
         Assert.NotNull(entry);
         Assert.Equal(expectedTemplate, entry!.RouteTemplate);
-        Assert.Equal(EndpointPolicy.GlobalAdminOnly, entry.Policy);
+        Assert.Equal(EndpointPolicy.GlobalReadOrAdmin, entry.Policy);
         Assert.Equal(TenantScoping.None, entry.TenantScoping);
     }
 
     /// <summary>
-    /// Inspector v1 endpoints (signals, decision-graph, reducer-verification) MUST be locked
-    /// to GlobalAdminOnly while the UI matures (Plan §M6 — primary use case is modelling
-    /// 2-stage WhiteGlove deployments). Defense-in-depth against an accidental policy
-    /// downgrade that would expose decision internals to tenant admins before the lift.
+    /// Inspector v1 endpoints (signals, decision-graph, reducer-verification) MUST stay locked to a
+    /// platform-scope tier while the UI matures (Plan §M6 — primary use case is modelling 2-stage
+    /// WhiteGlove deployments). They are now GlobalReadOrAdmin (GA + read-only GlobalReader): still
+    /// invisible to tenant admins/members, but visible to the read-only platform tier. Defense-in-depth
+    /// against an accidental downgrade to a tenant tier (MemberRead/TenantAdminOrGA) that would expose
+    /// decision internals before the lift.
     ///
-    /// When the v2 adminMode lift happens, signals+decision-graph move back to MemberRead
-    /// with TenantScoping.QueryParam. reducer-verification stays GlobalAdminOnly forever.
+    /// When the v2 adminMode lift happens, signals+decision-graph move to MemberRead with
+    /// TenantScoping.QueryParam. reducer-verification stays platform-scope (never tenant-visible).
     /// </summary>
     [Theory]
     [InlineData("GET", "/api/sessions/abc-123/signals",              "sessions/{sessionId}/signals")]
     [InlineData("GET", "/api/sessions/abc-123/decision-graph",       "sessions/{sessionId}/decision-graph")]
     [InlineData("GET", "/api/sessions/abc-123/reducer-verification", "sessions/{sessionId}/reducer-verification")]
-    public void InspectorRoutes_AreGlobalAdminOnly(string method, string path, string expectedTemplate)
+    public void InspectorRoutes_AreGlobalReadOrAdmin(string method, string path, string expectedTemplate)
     {
         var entry = EndpointAccessPolicyCatalog.FindPolicy(method, path);
 
         Assert.NotNull(entry);
         Assert.Equal(expectedTemplate, entry!.RouteTemplate);
-        Assert.Equal(EndpointPolicy.GlobalAdminOnly, entry.Policy);
+        Assert.Equal(EndpointPolicy.GlobalReadOrAdmin, entry.Policy);
         Assert.Equal(TenantScoping.None, entry.TenantScoping);
     }
 

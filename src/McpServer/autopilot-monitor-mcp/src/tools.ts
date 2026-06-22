@@ -6,19 +6,24 @@ import { registerAdminTools } from './tools/admin.js';
 
 /**
  * Registers the tool catalog for a single request, tailored to the caller's role.
- * When `ga` is false (normal tenant user), Global-Admin-only tools are not
- * registered at all — they never appear in tools/list — and the remaining tools'
- * descriptions carry no cross-tenant / Global-Admin wording.
+ *
+ * `ga` here means platform SCOPE (Global Admin OR read-only Global Reader) — the broad gate for
+ * cross-tenant read tools. `strictGa` is true ONLY for a real Global Admin and gates the few raw
+ * tools whose backend endpoints stay GlobalAdminOnly (list_tables / query_table / query_backend_logs)
+ * because they can dump secret-bearing tables that the GlobalReader config redaction would otherwise
+ * hide. When `ga` is false (normal tenant user) no platform tool is registered at all — they never
+ * appear in tools/list — and the remaining tools' descriptions carry no cross-tenant wording.
  */
 export function registerTools(
   server: McpServer,
   knowledgeBase: SearchProvider | undefined,
   eventTypeIndex: SearchProvider | undefined,
   ga: boolean,
+  strictGa: boolean = ga,
 ): void {
   registerSessionTools(server, ga);
   registerSearchTools(server, knowledgeBase, eventTypeIndex, ga);
-  registerAdminTools(server, ga);
+  registerAdminTools(server, ga, strictGa);
   sortToolCatalog(server);
 }
 

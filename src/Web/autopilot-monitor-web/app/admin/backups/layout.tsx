@@ -1,0 +1,7 @@
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+
+// Backups (trigger backup, restore-row) are write operations — real Global Admin only. Nav-hidden for
+// a read-only Global Reader; gate by route too.
+export default function BackupsLayout({ children }: { children: React.ReactNode }) {
+  return <ProtectedRoute requireGlobalAdmin>{children}</ProtectedRoute>;
+}

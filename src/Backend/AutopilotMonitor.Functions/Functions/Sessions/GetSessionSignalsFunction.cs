@@ -62,8 +62,8 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
                 var signals = await _signalRepo.QueryBySessionAsync(
                     requestCtx.TargetTenantId, sessionId, maxResults);
 
-                // Global Admin cross-tenant fallback — mirror GetSessionEventsFunction pattern.
-                if (signals.Count == 0 && requestCtx.IsGlobalAdmin)
+                // Global-scope (GA or read-only GlobalReader) cross-tenant fallback — mirror GetSessionEventsFunction pattern.
+                if (signals.Count == 0 && requestCtx.HasGlobalScope)
                 {
                     var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
                     if (resolvedTenantId != null &&

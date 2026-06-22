@@ -44,9 +44,9 @@ namespace AutopilotMonitor.Functions.Functions.Rules
             var requestCtx = req.GetRequestContext();
             var effectiveTenantId = requestCtx.TargetTenantId;
 
-            // Global Admin cross-tenant fallback: resolve actual tenant upfront
-            // (needed for both read and write paths)
-            if (requestCtx.IsGlobalAdmin)
+            // Global-scope (GA or read-only GlobalReader) cross-tenant fallback: resolve actual tenant
+            // upfront so the read works cross-tenant for any platform-scope caller.
+            if (requestCtx.HasGlobalScope)
             {
                 var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
                 if (resolvedTenantId != null && !string.Equals(resolvedTenantId, effectiveTenantId, StringComparison.OrdinalIgnoreCase))

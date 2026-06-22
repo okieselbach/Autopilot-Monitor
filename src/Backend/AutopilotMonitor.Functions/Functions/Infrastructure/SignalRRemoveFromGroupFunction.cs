@@ -54,17 +54,18 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                 // Group names are in format: "tenant-{tenantId}", "session-{tenantId}-{sessionId}", or "global-admins"
                 // Users can only leave groups for their own tenant (unless they are Global Admin)
 
-                // Explicit validation for the global-admins group
+                // Explicit validation for the global-admins group — symmetric with AddToGroup: any
+                // platform scope (Global Admin OR read-only Global Reader) that could join may also leave.
                 if (request.GroupName == "global-admins")
                 {
-                    if (!requestCtx.IsGlobalAdmin)
+                    if (!requestCtx.HasGlobalScope)
                     {
-                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave global-admins group without being a Global Admin");
+                        _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave global-admins group without platform scope");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Global Admins can leave this group" });
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: platform scope (Global Admin or Global Reader) required for this group" });
                         return new RemoveFromGroupOutput { HttpResponse = forbiddenResponse };
                     }
-                    _logger.LogInformation($"Global Admin {userEmail} leaving global-admins group");
+                    _logger.LogInformation($"Platform-scope user {userEmail} (role={requestCtx.UserRole}) leaving global-admins group");
                 }
                 else
                 {
@@ -77,11 +78,11 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         return new RemoveFromGroupOutput { HttpResponse = badRequestResponse };
                     }
 
-                    // Check if user is allowed to leave this tenant's group
+                    // Check if user is allowed to leave this tenant's group — platform scope (GA or
+                    // read-only Global Reader) may leave any tenant's group, symmetric with AddToGroup.
                     if (requestedTenantId != userTenantId)
                     {
-                        // Check if user is Global Admin (they can leave any tenant's group)
-                        if (!requestCtx.IsGlobalAdmin)
+                        if (!requestCtx.HasGlobalScope)
                         {
                             _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave group for tenant {requestedTenantId}");
                             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -90,7 +91,7 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         }
                         else
                         {
-                            _logger.LogInformation($"Global Admin {userEmail} leaving cross-tenant group: {request.GroupName}");
+                            _logger.LogInformation($"Platform-scope user {userEmail} (role={requestCtx.UserRole}) leaving cross-tenant group: {request.GroupName}");
                         }
                     }
 

@@ -8,14 +8,21 @@ import { savePostLoginReturnUrl } from "../lib/postLoginReturn";
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requireGlobalAdmin?: boolean;
+  /**
+   * Require platform scope: Global Admin OR the read-only Global Reader. Use for cross-tenant areas
+   * a reader may VIEW (e.g. the /admin data pages). Within such areas, mutating controls + the
+   * platform-settings sub-pages stay gated on the real Global-Admin status (nav-hidden for readers,
+   * backend-enforced 403/redaction).
+   */
+  requireGlobalScope?: boolean;
 }
 
 /**
  * Protects routes by requiring authentication
- * Optionally requires Global Admin role
+ * Optionally requires Global Admin role, or platform scope (Global Admin or read-only Global Reader).
  */
-export function ProtectedRoute({ children, requireGlobalAdmin = false }: ProtectedRouteProps) {
-  const { isAuthenticated, user, isLoading, login } = useAuth();
+export function ProtectedRoute({ children, requireGlobalAdmin = false, requireGlobalScope = false }: ProtectedRouteProps) {
+  const { isAuthenticated, user, hasGlobalScope, isLoading, login } = useAuth();
   const router = useRouter();
 
   // Once authenticated, remember it so transient auth-state flips (e.g. MSAL
@@ -69,8 +76,12 @@ export function ProtectedRoute({ children, requireGlobalAdmin = false }: Protect
     return null;
   }
 
-  // Show nothing if requires global admin but user is not (will redirect)
-  if (requireGlobalAdmin && user && !user.isGlobalAdmin) {
+  // Show nothing if the route's platform requirement isn't met.
+  // requireGlobalAdmin → real Global Admin only; requireGlobalScope → Global Admin OR Global Reader.
+  const platformDenied =
+    (requireGlobalAdmin && user && !user.isGlobalAdmin) ||
+    (requireGlobalScope && user && !hasGlobalScope);
+  if (platformDenied) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full text-center">

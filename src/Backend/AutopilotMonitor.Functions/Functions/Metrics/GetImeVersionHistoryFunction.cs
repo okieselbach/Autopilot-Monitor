@@ -35,7 +35,7 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var response = req.CreateResponse(HttpStatusCode.OK);
 
-                if (requestCtx.IsGlobalAdmin)
+                if (requestCtx.HasGlobalScope)
                 {
                     await response.WriteAsJsonAsync(versions);
                 }

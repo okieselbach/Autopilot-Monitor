@@ -6,6 +6,7 @@ import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch"
 import { extractContinuation } from "@/lib/paginationLink";
 import { isGuid } from "@/utils/inputValidation";
 import { trackEvent } from "@/lib/appInsights";
+import { useCanMutatePlatform } from "@/hooks/useCanMutatePlatform";
 
 const PAGE_SIZE = 20;
 
@@ -73,6 +74,9 @@ export function SessionReportsSection({
   getAccessToken,
   setError,
 }: SessionReportsSectionProps) {
+  // Admin Note is GA-only (PATCH session-reports/{id}/note is GlobalAdminOnly). A read-only Global
+  // Reader may view reports + notes but not edit them.
+  const canMutate = useCanMutatePlatform();
   const [reports, setReports] = useState<SessionReport[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedReport, setSelectedReport] = useState<SessionReport | null>(null);
@@ -482,9 +486,10 @@ export function SessionReportsSection({
                     <textarea
                       value={adminNoteValue}
                       onChange={e => { setAdminNoteValue(e.target.value); setNoteSaveResult(null); }}
+                      readOnly={!canMutate}
                       rows={3}
-                      placeholder="Add an internal note about this report..."
-                      className="w-full text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none placeholder:text-gray-400"
+                      placeholder={canMutate ? "Add an internal note about this report..." : "No note"}
+                      className="w-full text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none placeholder:text-gray-400 read-only:opacity-60 read-only:cursor-not-allowed"
                     />
                     <div className="flex items-center justify-between mt-1.5">
                       <div className="text-xs">
@@ -502,8 +507,8 @@ export function SessionReportsSection({
                       </div>
                       <button
                         onClick={handleSaveAdminNote}
-                        disabled={savingNote}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-md transition-colors text-xs font-medium"
+                        disabled={!canMutate || savingNote}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-md transition-colors text-xs font-medium disabled:cursor-not-allowed"
                       >
                         {savingNote ? (
                           <>

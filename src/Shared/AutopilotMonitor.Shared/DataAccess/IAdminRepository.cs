@@ -12,6 +12,11 @@ namespace AutopilotMonitor.Shared.DataAccess
     {
         // --- Global Admins ---
         Task<bool> IsGlobalAdminAsync(string upn);
+        /// <summary>
+        /// Resolves the platform role for a UPN: "GlobalAdmin", "GlobalReader", or null when there is no
+        /// enabled GlobalAdmins row. Empty/missing Role on an existing enabled row ⇒ "GlobalAdmin" (back-compat).
+        /// </summary>
+        Task<string?> GetGlobalRoleAsync(string upn);
         Task<List<GlobalAdminEntry>> GetAllGlobalAdminsAsync();
         Task<bool> AddGlobalAdminAsync(string upn, string addedBy);
         Task<bool> RemoveGlobalAdminAsync(string upn);
@@ -43,6 +48,8 @@ namespace AutopilotMonitor.Shared.DataAccess
         public bool IsEnabled { get; set; } = true;
         public DateTime AddedAt { get; set; }
         public string AddedBy { get; set; } = string.Empty;
+        /// <summary>Platform role: "GlobalAdmin" (default) or "GlobalReader". Empty ⇒ GlobalAdmin (back-compat).</summary>
+        public string Role { get; set; } = string.Empty;
     }
 
     public class McpUserEntry

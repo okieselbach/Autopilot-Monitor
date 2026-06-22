@@ -26,16 +26,20 @@ interface GlobalNotificationContextType {
 const GlobalNotificationContext = createContext<GlobalNotificationContextType | undefined>(undefined);
 
 export function GlobalNotificationProvider({ children }: { children: React.ReactNode }) {
-  const { user, getAccessToken } = useAuth();
+  const { user, hasGlobalScope, getAccessToken } = useAuth();
   const { connection, isConnected, joinGroup, leaveGroup } = useSignalR();
   const [notifications, setNotifications] = useState<GlobalNotification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const fetchingRef = useRef(false);
 
-  const isGlobal = user?.isGlobalAdmin === true;
+  // View scope (hasGlobalScope = GA OR read-only Global Reader) gates the read surfaces: FETCH/hydrate
+  // (backend global/notifications GET is GlobalReadOrAdmin) AND the SignalR global-admins live-group join
+  // (backend now admits HasGlobalScope — read broadcast, reader only receives). canManageGlobal (real GA)
+  // gates only dismiss/clear, which the backend keeps GlobalAdminOnly.
+  const canManageGlobal = user?.isGlobalAdmin === true;
 
   const fetchNotifications = useCallback(async () => {
-    if (!isGlobal || fetchingRef.current) return;
+    if (!hasGlobalScope || fetchingRef.current) return;
     fetchingRef.current = true;
 
     try {
@@ -52,43 +56,45 @@ export function GlobalNotificationProvider({ children }: { children: React.React
     } finally {
       fetchingRef.current = false;
     }
-  }, [isGlobal, getAccessToken]);
+  }, [hasGlobalScope, getAccessToken]);
 
   // Initial state hydration. Re-fetched on SignalR reconnect to recover any deltas
   // pushed during the disconnect window.
   useEffect(() => {
-    if (!isGlobal) {
+    if (!hasGlobalScope) {
       setNotifications([]);
       return;
     }
     setIsLoading(true);
     fetchNotifications().finally(() => setIsLoading(false));
-  }, [isGlobal, fetchNotifications]);
+  }, [hasGlobalScope, fetchNotifications]);
 
   useEffect(() => {
-    if (!connection || !isGlobal) return;
+    if (!connection || !hasGlobalScope) return;
     const handler = () => { fetchNotifications(); };
     connection.onreconnected(handler);
-  }, [connection, isGlobal, fetchNotifications]);
+  }, [connection, hasGlobalScope, fetchNotifications]);
 
   // Re-fetch when globalAdminMode is toggled in localStorage
   useEffect(() => {
     const handleStorageChange = () => {
-      if (isGlobal) {
+      if (hasGlobalScope) {
         fetchNotifications();
       }
     };
     window.addEventListener('localStorageChange', handleStorageChange);
     return () => window.removeEventListener('localStorageChange', handleStorageChange);
-  }, [isGlobal, fetchNotifications]);
+  }, [hasGlobalScope, fetchNotifications]);
 
-  // Group membership: only Global Admins join the global-admins group.
+  // Group membership: any platform scope (GA or read-only Global Reader) joins the global-admins live
+  // group — it is a READ broadcast group (backend now admits HasGlobalScope), so a reader receives live
+  // notification pushes too. Dismiss/clear remain GA-only (guarded above).
   useEffect(() => {
-    if (!isConnected || !isGlobal) return;
+    if (!isConnected || !hasGlobalScope) return;
     const group = 'global-admins';
     joinGroup(group);
     return () => { leaveGroup(group); };
-  }, [isConnected, isGlobal, joinGroup, leaveGroup]);
+  }, [isConnected, hasGlobalScope, joinGroup, leaveGroup]);
 
   // Live-push handlers.
   useEffect(() => {
@@ -118,6 +124,9 @@ export function GlobalNotificationProvider({ children }: { children: React.React
   }, [connection]);
 
   const dismissNotification = useCallback(async (id: string) => {
+    // Dismiss is GA-only (backend GlobalAdminOnly). A read-only Global Reader must not even optimistically
+    // clear their view. UI dismiss buttons are also hidden for readers.
+    if (!canManageGlobal) return;
     setNotifications(prev => prev.filter(n => n.id !== id));
 
     try {
@@ -129,9 +138,10 @@ export function GlobalNotificationProvider({ children }: { children: React.React
     } catch {
       // Best-effort; backend push will reconcile other tabs if dismiss eventually lands
     }
-  }, [getAccessToken]);
+  }, [canManageGlobal, getAccessToken]);
 
   const dismissAll = useCallback(async () => {
+    if (!canManageGlobal) return; // GA-only (see dismissNotification)
     setNotifications([]);
 
     try {
@@ -143,7 +153,7 @@ export function GlobalNotificationProvider({ children }: { children: React.React
     } catch {
       // Best-effort
     }
-  }, [getAccessToken]);
+  }, [canManageGlobal, getAccessToken]);
 
   const unreadCount = notifications.length;
 

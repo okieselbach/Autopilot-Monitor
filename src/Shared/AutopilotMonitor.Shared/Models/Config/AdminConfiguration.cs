@@ -460,6 +460,29 @@ namespace AutopilotMonitor.Shared.Models
         public string MsrcLastSyncUtc { get; set; } = default!;
 
         /// <summary>
+        /// Returns a shallow copy with all secret-bearing string fields replaced by
+        /// <see cref="Constants.RedactedSecretPlaceholder"/> (empty values are left empty). Used when
+        /// serving the global config to a read-only GlobalReader so SAS URLs / API keys / webhook URLs
+        /// (which could enable external mutations) never leave the backend. The original (cached) instance
+        /// is never mutated.
+        ///
+        /// SECURITY: this is a deny-list — every new secret string field MUST be added here.
+        /// <c>AdminConfigurationRedactionTests</c> guards against drift.
+        /// </summary>
+        public AdminConfiguration RedactedCopyForReader()
+        {
+            var copy = (AdminConfiguration)MemberwiseClone();
+            copy.PlatformStatsBlobSasUrl = Redact(copy.PlatformStatsBlobSasUrl);
+            copy.NvdApiKey = Redact(copy.NvdApiKey);
+            copy.OpsAlertTeamsWebhookUrl = Redact(copy.OpsAlertTeamsWebhookUrl);
+            copy.OpsAlertSlackWebhookUrl = Redact(copy.OpsAlertSlackWebhookUrl);
+            return copy;
+
+            static string Redact(string? value)
+                => string.IsNullOrEmpty(value) ? (value ?? string.Empty) : Constants.RedactedSecretPlaceholder;
+        }
+
+        /// <summary>
         /// Creates default configuration
         /// </summary>
         public static AdminConfiguration CreateDefault()

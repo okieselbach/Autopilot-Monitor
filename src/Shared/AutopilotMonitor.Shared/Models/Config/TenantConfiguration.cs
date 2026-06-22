@@ -615,6 +615,44 @@ namespace AutopilotMonitor.Shared.Models
         // ===== HELPER METHODS =====
 
         /// <summary>
+        /// Returns a shallow copy with all secret-bearing string fields replaced by
+        /// <see cref="Constants.RedactedSecretPlaceholder"/> (empty values are left empty). Used when
+        /// serving a tenant config to a read-only GlobalReader so SAS URLs / webhook URLs / custom
+        /// webhook headers (which could enable external mutations) never leave the backend. The original
+        /// (cached) instance is never mutated.
+        ///
+        /// SECURITY: this is a deny-list — every new secret string field MUST be added here.
+        /// <c>TenantConfigurationRedactionTests</c> guards against drift.
+        /// </summary>
+        public TenantConfiguration RedactedCopyForReader()
+        {
+            var copy = (TenantConfiguration)MemberwiseClone();
+            copy.DiagnosticsBlobSasUrl = Redact(copy.DiagnosticsBlobSasUrl);
+            copy.TeamsWebhookUrl = Redact(copy.TeamsWebhookUrl);
+            copy.WebhookUrl = Redact(copy.WebhookUrl);
+            copy.WebhookCustomHeadersJson = Redact(copy.WebhookCustomHeadersJson);
+            return copy;
+
+            static string Redact(string? value)
+                => string.IsNullOrEmpty(value) ? (value ?? string.Empty) : Constants.RedactedSecretPlaceholder;
+        }
+
+        /// <summary>
+        /// Defense-in-depth for the redacted read-only view: for each secret string field, if THIS object
+        /// carries the <see cref="Constants.RedactedSecretPlaceholder"/> sentinel (i.e. a redacted config
+        /// was round-tripped back on a save), restore the real value from <paramref name="existing"/>.
+        /// Mutates this instance. Must mirror the field set in <see cref="RedactedCopyForReader"/>.
+        /// </summary>
+        public void RestoreRedactedSecretsFrom(TenantConfiguration existing)
+        {
+            if (existing == null) return;
+            if (DiagnosticsBlobSasUrl == Constants.RedactedSecretPlaceholder) DiagnosticsBlobSasUrl = existing.DiagnosticsBlobSasUrl;
+            if (TeamsWebhookUrl == Constants.RedactedSecretPlaceholder) TeamsWebhookUrl = existing.TeamsWebhookUrl;
+            if (WebhookUrl == Constants.RedactedSecretPlaceholder) WebhookUrl = existing.WebhookUrl;
+            if (WebhookCustomHeadersJson == Constants.RedactedSecretPlaceholder) WebhookCustomHeadersJson = existing.WebhookCustomHeadersJson;
+        }
+
+        /// <summary>
         /// Returns the effective webhook URL and provider type, handling legacy TeamsWebhookUrl migration.
         /// New fields take priority; falls back to TeamsWebhookUrl as TeamsLegacyConnector.
         /// </summary>

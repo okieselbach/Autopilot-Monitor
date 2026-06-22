@@ -46,9 +46,9 @@ namespace AutopilotMonitor.Functions.Functions.Sessions
 
                 var session = await _sessionRepo.GetSessionAsync(requestCtx.TargetTenantId, sessionId);
 
-                // Global Admin cross-tenant fallback: if not found in the effective tenant,
-                // try resolving the actual tenant via SessionsIndex
-                if (session == null && requestCtx.IsGlobalAdmin)
+                // Global-scope (GA or read-only GlobalReader) cross-tenant fallback: if not found in the
+                // effective tenant, try resolving the actual tenant via SessionsIndex
+                if (session == null && requestCtx.HasGlobalScope)
                 {
                     var resolvedTenantId = await _sessionRepo.FindSessionTenantIdAsync(sessionId);
                     if (resolvedTenantId != null && !string.Equals(resolvedTenantId, requestCtx.TargetTenantId, StringComparison.OrdinalIgnoreCase))
