@@ -1076,9 +1076,10 @@ export function registerAdminTools(server: McpServer, ga: boolean, strictGa: boo
         'the host MCP client cannot list/read MCP-protocol resources (common with ' +
         'stateless HTTP MCP servers). Available names:\n' +
         '  - "event_types": catalog of valid eventType strings for search_sessions_by_event\n' +
-        '  - "device_properties": catalog of dot-notation keys for the deviceProperties filter on search_sessions',
+        '  - "device_properties": catalog of dot-notation keys for the deviceProperties filter on search_sessions\n' +
+        '  - "diag_zip_layout": expected file layout of an agent diagnostics ZIP (what get_session_diagnostics returns you for local analysis)',
       inputSchema: {
-        name: z.enum(['event_types', 'device_properties']).describe('Resource name'),
+        name: z.enum(['event_types', 'device_properties', 'diag_zip_layout']).describe('Resource name'),
       },
       annotations: READ_ONLY_OPEN,
     },

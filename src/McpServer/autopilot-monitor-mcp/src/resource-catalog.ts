@@ -1,9 +1,10 @@
 /**
  * Source-of-truth for the static resource catalogs (event types, device
- * properties). Consumed by both `resources.ts` (MCP-protocol resources)
- * and the `get_resource` tool (workaround for stateless-HTTP MCP clients
- * whose resource discovery is broken).
+ * properties, diagnostics ZIP layout). Consumed by both `resources.ts`
+ * (MCP-protocol resources) and the `get_resource` tool (workaround for
+ * stateless-HTTP MCP clients whose resource discovery is broken).
  */
+import { DIAG_ZIP_MAP } from './diag-zip-map.js';
 
 // Single source of truth for the model-facing event-type catalog. MUST stay in
 // sync with C# `Constants.EventTypes` (Shared) — enforced by the vitest drift test
@@ -344,7 +345,7 @@ export function assertKnownDevicePropertyKeys(keys: string[]): void {
   );
 }
 
-export type ResourceName = 'event_types' | 'device_properties';
+export type ResourceName = 'event_types' | 'device_properties' | 'diag_zip_layout';
 
 export function getResourceContent(name: ResourceName): unknown {
   switch (name) {
@@ -352,5 +353,7 @@ export function getResourceContent(name: ResourceName): unknown {
       return EVENT_TYPES_CATALOG;
     case 'device_properties':
       return DEVICE_PROPERTIES_CATALOG;
+    case 'diag_zip_layout':
+      return DIAG_ZIP_MAP;
   }
 }

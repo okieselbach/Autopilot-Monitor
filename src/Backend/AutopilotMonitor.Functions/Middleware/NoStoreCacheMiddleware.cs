@@ -34,6 +34,8 @@ public class NoStoreCacheMiddleware : IFunctionsWorkerMiddleware
         // Session list / search / diagnostic-download surfaces — PII session payloads
         "/api/sessions",
         "/api/diagnostics/download-url",       // proxies diagnostics ZIP content
+        "/api/diagnostics/download-ticket",    // returns a short-lived signed download ticket (credential)
+        "/api/diagnostics/download",           // ticket-gated anonymous ZIP stream (?t=...)
         // GA cross-tenant raw + global PII surfaces
         "/api/raw/sessions",
         "/api/raw/events",

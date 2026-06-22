@@ -134,6 +134,10 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "stats/platform",            EndpointPolicy.PublicAnonymous),
         new("GET",    "bootstrap/validate/{code}", EndpointPolicy.PublicAnonymous),
         new("POST",   "agent/distress",             EndpointPolicy.PublicAnonymous),
+        // Ticket-gated diagnostics download (MCP/AI clients with no JWT). The HMAC-signed
+        // ticket is the sole authority — authz happened at mint time (diagnostics/download-ticket,
+        // MemberRead). See DiagnosticsTicketDownloadFunction.
+        new("GET",    "diagnostics/download",       EndpointPolicy.PublicAnonymous),
 
         // ── DeviceOrBootstrapAuth ───────────────────────────────────────
         new("POST",   "agent/register-session",    EndpointPolicy.DeviceOrBootstrapAuth),
@@ -209,6 +213,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "audit/hardware-rejected", EndpointPolicy.MemberRead),
         new("GET",    "audit/device-not-registered", EndpointPolicy.MemberRead),
         new("GET",    "diagnostics/download-url",  EndpointPolicy.MemberRead, TenantScoping.QueryParam),
+        new("POST",   "diagnostics/download-ticket", EndpointPolicy.MemberRead, TenantScoping.QueryParam),
         new("GET",    "rules/gather",              EndpointPolicy.MemberRead),
         new("GET",    "rules/analyze",             EndpointPolicy.MemberRead),
         new("GET",    "rules/ime-log-patterns",    EndpointPolicy.MemberRead),

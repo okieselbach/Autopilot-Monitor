@@ -19,6 +19,8 @@ public class NoStoreCacheMiddlewareTests
     // Session list + diagnostics-download surfaces — PII session payloads / proxied ZIPs
     [InlineData("/api/sessions")]
     [InlineData("/api/diagnostics/download-url")]
+    [InlineData("/api/diagnostics/download-ticket")]   // short-lived signed download credential
+    [InlineData("/api/diagnostics/download")]          // ticket-gated anonymous ZIP stream
     // /api/search/* — quick, sessions, sessions-by-event, sessions-by-cve (all return session PII)
     [InlineData("/api/search/quick")]
     [InlineData("/api/search/sessions")]

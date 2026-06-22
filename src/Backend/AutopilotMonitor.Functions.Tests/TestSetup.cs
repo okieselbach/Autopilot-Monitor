@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using AutopilotMonitor.Shared.Diagnostics;
 using AutopilotMonitor.Shared.Pagination;
 
 namespace AutopilotMonitor.Functions.Tests;
@@ -20,5 +21,6 @@ internal static class TestSetup
         var key = new byte[32];
         for (int i = 0; i < key.Length; i++) key[i] = (byte)(i * 7 + 13);
         ContinuationToken.SetSigningKeyForTesting(key);
+        DiagnosticsDownloadTicket.SetSigningKeyForTesting(key);
     }
 }

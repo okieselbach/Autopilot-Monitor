@@ -6,6 +6,8 @@ import { READ_ONLY, MAX_RESULT_SIZE_CHARS, toolResultText, SessionIdSchema, isBe
 import { toolError } from './error-handler.js';
 import { assertKnownEventType, assertKnownDevicePropertyKeys } from '../resource-catalog.js';
 import { interpolateAnalysisResults } from '../interpolate-rule-template.js';
+import { API_BASE_URL } from '../config.js';
+import { DIAG_ZIP_MAP } from '../diag-zip-map.js';
 
 // ── Session summary constants ───────────────────────────────────────────
 
@@ -243,6 +245,99 @@ export function registerSessionTools(server: McpServer, ga: boolean): void {
         return toolResultText({ session: sessionData, analysis: analysisData }, MAX_RESULT_SIZE_CHARS.small);
       } catch (error: unknown) {
         return toolError('get_session', args, error);
+      }
+    })
+  );
+
+  // Tool 3b: get_session_diagnostics
+  server.registerTool(
+    'get_session_diagnostics',
+    {
+      title: 'Get Session Diagnostics (Agent Log ZIP)',
+      description:
+        'Returns a short-lived, ready-to-use download URL for the agent DIAGNOSTICS ZIP of a session ' +
+        '(agent logs, DecisionCore journal/signals, IME logs, final-status.json), plus a "zipMap" ' +
+        'describing the archive layout. This is the highest-value source for root-causing why an ' +
+        'enrollment went wrong: correlate the on-device agent log against the backend Events table.\n\n' +
+        'CLIENT REQUIREMENT: this needs a client that can download files and run local file/shell tools ' +
+        '(e.g. Claude Code or another agentic client). A pure chat client (Claude Desktop, claude.ai web) ' +
+        'has no local filesystem and CANNOT unzip the binary archive — there this tool only yields a ' +
+        'download link a human could open manually, not an automated analysis.\n\n' +
+        'HOW TO USE: download the ZIP from "downloadUrl" — NO auth header needed, it is a short-lived ' +
+        'signed ticket (~10 min) — then unzip and analyze it LOCALLY. The backend never unzips or parses ' +
+        'it; you process it on your side and enrich with get_session_events / query_raw_events / ' +
+        'search_knowledge. Read files in zipMap priority order; AppWorkload*.log can be hundreds of MB → ' +
+        'grep, never read whole.\n\n' +
+        'If "available" is false there is no uploaded diagnostics package (upload mode may be Off or ' +
+        'OnFailure on a successful session) — proceed with backend telemetry only. ' +
+        'Tenant admins get their own tenant\'s diagnostics; ' +
+        (ga ? 'Global Admins can pass tenantId to target any tenant.' : 'tenantId is optional and defaults to your tenant.'),
+      inputSchema: {
+        sessionId: SessionIdSchema.describe('Session UUID'),
+        tenantId: z.string().optional().describe(ga ? 'Tenant ID. If omitted, auto-resolved from the session (Global Admin can access any tenant).' : 'Tenant ID. If omitted, auto-resolved from the session.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => withToolTelemetry('get_session_diagnostics', async () => {
+      try {
+        const { sessionId, tenantId } = args;
+        const q = buildQuery({ tenantId } as Record<string, string | undefined>);
+        // The backend wraps the session in a { success, session } envelope (GetSessionFunction);
+        // fall back to the raw object so both shapes work (mirrors get_session_summary).
+        const sessionResp = await apiFetch(`/api/sessions/${sessionId}${q}`) as Record<string, unknown>;
+        const session = (sessionResp.session ?? sessionResp) as Record<string, unknown>;
+
+        const blobName = typeof session.diagnosticsBlobName === 'string' ? session.diagnosticsBlobName : '';
+        // tenantId for the ticket: explicit arg → session's tenantId → (tenant user) JWT default.
+        const resolvedTenantId = tenantId
+          ?? (typeof session.tenantId === 'string' ? session.tenantId : undefined);
+
+        if (!blobName) {
+          return toolResultText({
+            available: false,
+            sessionId,
+            reason:
+              'No diagnostics package was uploaded for this session. This is often expected — the ' +
+              'tenant\'s diagnostics upload mode may be Off, or OnFailure on a session that succeeded. ' +
+              'Proceed with backend telemetry (get_session_summary / get_session_events).',
+          }, MAX_RESULT_SIZE_CHARS.small);
+        }
+
+        // Mint a download ticket. MemberRead + cross-tenant scoping enforced backend-side;
+        // ?tenantId= is the GA filter / tenant-user validation. blobName travels in the body.
+        const ticketPath = `/api/diagnostics/download-ticket${buildQuery({ tenantId: resolvedTenantId } as Record<string, string | undefined>)}`;
+        const ticket = await apiFetch(ticketPath, {
+          method: 'POST',
+          body: JSON.stringify({ blobName }),
+        }) as { url?: string; expiresAt?: string; blobName?: string; destination?: string; sizeBytes?: number | null };
+
+        if (!ticket?.url) {
+          return toolError('get_session_diagnostics', args,
+            new Error('Backend did not return a download URL for the diagnostics ticket.'));
+        }
+
+        const downloadUrl = ticket.url.startsWith('http') ? ticket.url : `${API_BASE_URL}${ticket.url}`;
+
+        return toolResultText({
+          available: true,
+          sessionId,
+          tenantId: resolvedTenantId,
+          blobName: ticket.blobName ?? blobName,
+          destination: ticket.destination,
+          sizeBytes: ticket.sizeBytes ?? null,
+          downloadUrl,
+          expiresAt: ticket.expiresAt,
+          instructions:
+            'Download the ZIP from downloadUrl with NO auth header (it carries a short-lived signed ' +
+            'ticket). Unzip it locally and analyze on your side — the backend does not parse it. ' +
+            'Read files per zipMap.files priority; AppWorkload*.log can be huge → grep only. Then ' +
+            'correlate the agent log timeline against backend events (get_session_events / ' +
+            'query_raw_events) and look up rules/patterns via search_knowledge. The download URL ' +
+            'expires at expiresAt — re-call this tool for a fresh one if needed.',
+          zipMap: DIAG_ZIP_MAP,
+        }, MAX_RESULT_SIZE_CHARS.small);
+      } catch (error: unknown) {
+        return toolError('get_session_diagnostics', args, error);
       }
     })
   );

@@ -49,6 +49,61 @@ export function registerPrompts(server: McpServer, ga: boolean): void {
   );
 
   server.registerPrompt(
+    'debug-session',
+    {
+      title: 'Debug Session (Backend + Agent Diagnostics)',
+      description:
+        'Deep end-to-end session debug: correlate backend telemetry with the on-device agent ' +
+        'diagnostics ZIP (downloaded + analyzed locally). The high-leverage workflow for "why did ' +
+        'this enrollment go wrong". Requires a client with local file/shell tools (e.g. Claude Code).',
+      argsSchema: {
+        sessionId: z.string().describe('Session UUID to debug'),
+        question: z.string().optional().describe('Optional specific question, e.g. "why is it failed?"'),
+        tenantId: z
+          .string()
+          .optional()
+          .describe(ga ? 'Optional tenant ID. Omit to auto-resolve from the session (Global Admin).' : 'Optional tenant ID. Defaults to your tenant.'),
+      },
+    },
+    ({ sessionId, question, tenantId }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text:
+              `Debug enrollment session ${sessionId}` +
+              (tenantId ? ` (tenant ${tenantId})` : '') +
+              (question ? `. Focus: ${question}` : '') +
+              '.\n\n' +
+              'Do a correlated client↔backend analysis:\n' +
+              `1. Call get_session_summary(sessionId="${sessionId}"${tenantId ? `, tenantId="${tenantId}"` : ''}) ` +
+              'first — status, noise-filtered timeline, stats, rule analysis in one shot.\n' +
+              `2. Call get_session_diagnostics(sessionId="${sessionId}"${tenantId ? `, tenantId="${tenantId}"` : ''}). ` +
+              'If available=true, DOWNLOAD the ZIP from downloadUrl using your local tools (no auth header — ' +
+              'it is a short-lived signed ticket), unzip it locally, and read files per the returned zipMap: ' +
+              'start with AgentState/final-status.json and the agent log (grep [ERROR]/[WARN] first), then ' +
+              'journal/signal logs. AppWorkload*.log can be hundreds of MB → grep only, never read whole. ' +
+              'If available=false, note it and continue with backend data only.\n' +
+              '3. Build a correlated timeline merging the agent log (client truth) with the backend Events. ' +
+              'Use get_session_events / query_raw_events for the raw stream around the first error; gaps ' +
+              'between agent log and Events reveal upload/network issues. Use search_knowledge to look up ' +
+              'rules / IME patterns / error codes you encounter.\n' +
+              (ga
+                ? '4. If the problem looks like a backend ingest/upload issue (events the agent logged as sent ' +
+                  'are missing, or status disagrees with events), use query_backend_logs (App Insights KQL) and ' +
+                  'query_table (e.g. RuleResults, AppInstallSummaries) to trace it.\n'
+                : '') +
+              '\nThen report: (a) final outcome + phase reached, (b) the single most likely root cause with ' +
+              'the specific evidence (agent-log line AND/OR backend event), (c) concrete remediation, ' +
+              '(d) confidence level. Cite both client and backend sources where they corroborate.',
+          },
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
     'cve-exposure-audit',
     {
       title: 'CVE Exposure Audit',

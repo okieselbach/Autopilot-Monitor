@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { EVENT_TYPES_CATALOG, DEVICE_PROPERTIES_CATALOG } from './resource-catalog.js';
+import { DIAG_ZIP_MAP } from './diag-zip-map.js';
 
 /**
  * MCP-protocol resources. Note that some clients (e.g. Claude Code's HTTP-MCP
@@ -44,6 +45,28 @@ export function registerResources(server: McpServer): void {
           uri: 'autopilot://device-properties',
           mimeType: 'application/json',
           text: JSON.stringify(DEVICE_PROPERTIES_CATALOG, null, 2),
+        },
+      ],
+    })
+  );
+
+  server.registerResource(
+    'diag_zip_layout',
+    'autopilot://diag-zip-layout',
+    {
+      title: 'Diagnostics ZIP Layout',
+      mimeType: 'application/json',
+      description:
+        'Expected file layout of an agent diagnostics ZIP. get_session_diagnostics returns a download ' +
+        'URL for the archive plus this map so the client can extract + analyze it locally (the backend ' +
+        'never unzips it). Read files in priority order; AppWorkload*.log can be hundreds of MB → grep only.',
+    },
+    async () => ({
+      contents: [
+        {
+          uri: 'autopilot://diag-zip-layout',
+          mimeType: 'application/json',
+          text: JSON.stringify(DIAG_ZIP_MAP, null, 2),
         },
       ],
     })
