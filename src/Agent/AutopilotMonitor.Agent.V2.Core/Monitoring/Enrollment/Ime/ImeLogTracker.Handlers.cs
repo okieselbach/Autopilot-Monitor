@@ -237,6 +237,35 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                 : GetCurrentPlatformScript();
         }
 
+        // Session 6b4993e5 fix — platform-script stdout/exit cross-contamination.
+        //
+        // AgentExecutor.exe hosts BOTH platform scripts (…\Policies\Scripts\<id>.ps1) and
+        // proactive-remediation scripts (…\IMECache\HealthScripts\<id>\detect.ps1), and writes
+        // their lines interleaved into the shared AgentExecutor.log. The policyId-less
+        // PS-AGENT-EXITCODE ("Powershell exit code is N") and PS-AGENT-OUTPUT ("write output
+        // done. output = …") lines are routed to whichever platform script
+        // _lastPlatformScriptPolicyId points at. A remediation invocation's start
+        // ("Adding argument remediationScript …") does NOT match PS-AGENT-SCRIPT-START, so it
+        // never moves the pointer — its exit/output then bleed into the last-started PLATFORM
+        // script's slot (observed: platform c3e0124c emitted result=Failed but with exit 0 +
+        // stdout "[Compliant] No Classic Teams found" — the Teams remediation's output).
+        //
+        // Each AgentExecutor process logs "ExecutorLog AgentExecutor gets invoked" first, so a
+        // new banner means the previous invocation's line-capture context is over. Clearing the
+        // pointer here scopes line-capture to a single invocation: the immediately following
+        // "Adding argument powershell …\Policies\Scripts\<id>.ps1" (PS-AGENT-SCRIPT-START)
+        // re-establishes it for a platform invocation, while a remediation invocation leaves it
+        // null so its exit/output are dropped (the remediation's authoritative data still
+        // arrives via HS-NEW-RESULT). The platform script's final result is unaffected — it is
+        // keyed by policyId via PS-SCRIPT-RESULT, not by this pointer.
+        private void HandleAgentExecutorInvocationBoundary()
+        {
+            if (_lastPlatformScriptPolicyId == null) return;
+            _logger.Debug(
+                $"ImeLogTracker: AgentExecutor invocation boundary — clearing platform-script line-capture pointer (was {_lastPlatformScriptPolicyId}).");
+            _lastPlatformScriptPolicyId = null;
+        }
+
         private void HandleScriptContext(Match match, Dictionary<string, string> parameters)
         {
             var context = match.Groups["context"]?.Value;

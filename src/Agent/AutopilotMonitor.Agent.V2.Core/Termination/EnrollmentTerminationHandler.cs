@@ -189,6 +189,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
                     // Error by now and excluded by the probe itself.
                     EmitStarvedUserEspApps(args);
 
+                    // Session 6b4993e5 / fc48c71a — on an ESP terminal Apps-subcategory failure,
+                    // name the in-flight device app(s) (e.g. stuck Downloading at 0%) as the likely
+                    // cause WITHOUT mutating their state, so the failure is no longer visible only
+                    // via the opaque "Apps (Error)" registry string. Runs after the Installing→Error
+                    // promotion above, so the remaining in-flight set is the Downloading/pending tail.
+                    MaybeEmitEspAppsFailureCorrelation(state, args);
+
                     EmitAppTrackingSummary();
                 }
 
@@ -466,6 +473,103 @@ namespace AutopilotMonitor.Agent.V2.Core.Termination
             catch (Exception ex)
             {
                 _logger.Warning($"EnrollmentTerminationHandler: app_install_starved terminal sweep failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sessions 6b4993e5 / fc48c71a correlation. On an ESP terminal failure of the DeviceSetup
+        /// <b>Apps</b> subcategory, the device app(s) were stuck mid-flight (e.g. RealmJoin stuck
+        /// Downloading at 0%) and IME never logged a per-app enforcement error, so
+        /// <c>app_tracking_summary</c> reports <c>0 failed</c> and the failure is only visible via
+        /// the opaque <c>"Apps (Error)"</c> registry string. This emits an
+        /// <c>esp_apps_failure_correlation</c> event naming the in-flight device app(s) as the
+        /// likely cause — <b>without</b> mutating their state. We deliberately do NOT fabricate an
+        /// <c>app_install_failed</c> for a failure IME never reported (user decision); the app stays
+        /// honestly <c>Downloading</c>. <see cref="MaybePromoteActiveInstallsAsStuck"/> runs first
+        /// and promotes <c>Installing</c> apps to Error, so the remaining in-flight set here is the
+        /// Downloading / InProgress / pending tail.
+        /// <para>Gated to the Apps subcategory via <see cref="EspTerminalFailureSnapshot.IsAppsSubcategory"/>
+        /// and the same terminal discriminator as the promotion path, so a non-Apps failure (or a
+        /// non-ESP terminal outcome) never attaches the correlation. Only <see cref="AppPackageState.IsActive"/>
+        /// device apps (InProgress / Downloading / Installing) are named — queued apps that never
+        /// started are not blamed. Best-effort.</para>
+        /// </summary>
+        private void MaybeEmitEspAppsFailureCorrelation(DecisionState state, EnrollmentTerminatedEventArgs args)
+        {
+            if (_post == null) return;
+            if (!ShouldPromoteActiveInstallsAsStuck(state, args)) return;
+
+            EspTerminalFailureSnapshot failureContext = null;
+            try { failureContext = _appTracking.LastEspTerminalFailure; }
+            catch (Exception ex) { _logger.Warning($"EnrollmentTerminationHandler: lastEspTerminalFailureAccessor threw: {ex.Message}"); }
+
+            // Only the Apps subcategory describes app outcomes — a non-Apps ESP failure
+            // (SecurityPolicies, certificate enrolment, …) must not blame in-flight apps.
+            if (failureContext == null || !failureContext.IsAppsSubcategory) return;
+
+            var packages = TryGetPackageStates();
+            if (packages == null) return;
+
+            try
+            {
+                var apps = new List<Dictionary<string, object>>();
+                var names = new List<string>();
+                foreach (var pkg in packages)
+                {
+                    if (pkg == null) continue;
+                    if (pkg.Targeted != AppTargeted.Device) continue;
+                    // Codex P2: only blame apps that were genuinely *active* when the ESP gave up —
+                    // IsActive == InProgress / Downloading / Installing. This deliberately excludes
+                    // queued apps that never started (Unknown / NotInstalled / pending) as well as
+                    // terminal (Installed / Skipped / Postponed) and Error apps, so the "likely
+                    // cause" claim is the in-flight install (e.g. RealmJoin stuck Downloading), not
+                    // the not-completed tail.
+                    if (!pkg.IsActive) continue;
+
+                    var name = string.IsNullOrEmpty(pkg.Name) ? (pkg.Id ?? "(unknown)") : pkg.Name;
+                    names.Add(name);
+                    apps.Add(new Dictionary<string, object>
+                    {
+                        { "appId", pkg.Id ?? string.Empty },
+                        { "appName", name },
+                        { "state", pkg.InstallationState.ToString() },
+                        { "progressPercent", pkg.ProgressPercent },
+                        { "bytesDownloaded", pkg.BytesDownloaded },
+                        { "bytesTotal", pkg.BytesTotal },
+                    });
+                }
+
+                if (apps.Count == 0) return;
+
+                var nameList = string.Join(", ", names);
+                _logger.Info(
+                    $"EnrollmentTerminationHandler: ESP DeviceSetup/Apps failed with {apps.Count} in-flight device app(s) — " +
+                    $"emitting esp_apps_failure_correlation ({nameList}).");
+
+                _post.Emit(new EnrollmentEvent
+                {
+                    SessionId = _configuration.SessionId,
+                    TenantId = _configuration.TenantId,
+                    EventType = Constants.EventTypes.EspAppsFailureCorrelation,
+                    Severity = EventSeverity.Warning,
+                    Source = "EnrollmentTerminationHandler",
+                    Phase = EnrollmentPhase.Unknown,
+                    Message = $"ESP DeviceSetup/Apps failed; {apps.Count} device app(s) never completed (likely cause): {nameList}.",
+                    Data = new Dictionary<string, object>
+                    {
+                        { "failedSubcategory", failureContext.FailedSubcategory ?? "Apps" },
+                        { "category", failureContext.Category ?? "DeviceSetup" },
+                        { "errorCode", failureContext.ErrorCode ?? string.Empty },
+                        { "inFlightDeviceAppCount", apps.Count },
+                        { "likelyCauseApps", apps },
+                        { "note", "Device apps still in flight (Downloading/InProgress) when the ESP failed the Apps subcategory; IME logged no per-app error. A failed first install attempt may predate the agent's log window." },
+                    },
+                    ImmediateUpload = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"EnrollmentTerminationHandler: esp_apps_failure_correlation emit failed: {ex.Message}");
             }
         }
 

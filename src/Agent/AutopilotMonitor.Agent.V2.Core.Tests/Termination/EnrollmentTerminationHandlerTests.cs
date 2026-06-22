@@ -1088,6 +1088,96 @@ namespace AutopilotMonitor.Agent.V2.Core.Tests.Termination
         }
 
         // ----------------------------------------------------------------
+        // Sessions 6b4993e5 / fc48c71a: esp_apps_failure_correlation
+        // ----------------------------------------------------------------
+
+        private static AppPackageState BuildInFlightDeviceApp(string id, string name, AppInstallationState state, long bytesTotal)
+        {
+            var pkg = new AppPackageState(id, listPos: 0);
+            pkg.UpdateName(name);
+            pkg.UpdateState(state, newProgressPercent: 0, upgradeOnly: false, bytesDownloaded: 0, bytesTotal: bytesTotal);
+            SetTargeted(pkg, AppTargeted.Device);
+            return pkg;
+        }
+
+        [Fact]
+        public void EspAppsFailureCorrelation_names_inflight_device_app_without_mutating_state()
+        {
+            using var rig = new Rig();
+            rig.State = BuildEspTerminalFailureState();
+            rig.LastEspTerminalFailureOverride = new EspTerminalFailureSnapshot("0x80070002", "Apps", "DeviceSetup");
+            var realmJoin = BuildInFlightDeviceApp("c1dcbb7d-60a3-4703-b5b0-04b3e9037db0", "RealmJoin Agent (Device)", AppInstallationState.Downloading, 2988784);
+            rig.Packages.Add(realmJoin);
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.Contains("esp_apps_failure_correlation", rig.EmittedEventTypes);
+            var data = rig.DataOf("esp_apps_failure_correlation");
+            Assert.NotNull(data);
+            Assert.Equal("Apps", data!["failedSubcategory"]);
+            Assert.Equal(1, Convert.ToInt32(data["inFlightDeviceAppCount"]));
+            var apps = Assert.IsAssignableFrom<IEnumerable<Dictionary<string, object>>>(data["likelyCauseApps"]);
+            Assert.Contains(apps, a => (string)a["appName"] == "RealmJoin Agent (Device)" && (string)a["state"] == "Downloading");
+
+            // Correlation must NOT mutate app state — no fabricated app_install_failed.
+            Assert.Equal(AppInstallationState.Downloading, realmJoin.InstallationState);
+            Assert.False(realmJoin.IsError);
+            Assert.DoesNotContain("app_install_failed", rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void EspAppsFailureCorrelation_skipped_when_failure_is_not_apps_subcategory()
+        {
+            using var rig = new Rig();
+            rig.State = BuildEspTerminalFailureState();
+            // A non-Apps ESP failure must not blame in-flight apps.
+            rig.LastEspTerminalFailureOverride = new EspTerminalFailureSnapshot(null, "SecurityPolicies", "DeviceSetup");
+            rig.Packages.Add(BuildInFlightDeviceApp("dev-1", "Some Device App", AppInstallationState.Downloading, 1000));
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.DoesNotContain("esp_apps_failure_correlation", rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void EspAppsFailureCorrelation_skipped_when_no_inflight_device_apps()
+        {
+            using var rig = new Rig();
+            rig.State = BuildEspTerminalFailureState();
+            rig.LastEspTerminalFailureOverride = new EspTerminalFailureSnapshot("0x80070002", "Apps", "DeviceSetup");
+            // A *user*-targeted downloading app is not a DeviceSetup/Apps culprit; nothing to name.
+            var userApp = BuildInFlightDeviceApp("user-1", "User App", AppInstallationState.Downloading, 1000);
+            SetTargeted(userApp, AppTargeted.User);
+            rig.Packages.Add(userApp);
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.DoesNotContain("esp_apps_failure_correlation", rig.EmittedEventTypes);
+        }
+
+        [Fact]
+        public void EspAppsFailureCorrelation_skips_queued_device_apps_that_never_started()
+        {
+            // Codex P2: a device app still in Unknown/NotInstalled (queued, never began
+            // downloading/installing) is NOT a likely cause — only IsActive apps are named.
+            using var rig = new Rig();
+            rig.State = BuildEspTerminalFailureState();
+            rig.LastEspTerminalFailureOverride = new EspTerminalFailureSnapshot("0x80070002", "Apps", "DeviceSetup");
+            var queued = new AppPackageState("queued-1", listPos: 0); // stays Unknown — IsActive == false
+            queued.UpdateName("Queued Device App");
+            SetTargeted(queued, AppTargeted.Device);
+            rig.Packages.Add(queued);
+
+            rig.Build().Handle(sender: null!,
+                Args(EnrollmentTerminationReason.DecisionTerminalStage, EnrollmentTerminationOutcome.Failed, SessionStage.Failed));
+
+            Assert.DoesNotContain("esp_apps_failure_correlation", rig.EmittedEventTypes);
+        }
+
+        // ----------------------------------------------------------------
         // Liveness plan PR3: app_install_starved terminal sweep
         // ----------------------------------------------------------------
 

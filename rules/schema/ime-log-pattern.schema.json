@@ -68,6 +68,7 @@
             "scriptExitCode",
             "scriptOutput",
             "scriptCompleted",
+            "resetPlatformScriptContext",
             "healthScriptResult",
             "healthScriptDetectionResult",
             "captureExitCode",

@@ -437,6 +437,13 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
                         HandleScriptCompleted(match, pattern.Parameters);
                         break;
 
+                    case "resetplatformscriptcontext":
+                        // Session 6b4993e5 fix: a fresh AgentExecutor invocation banner
+                        // ("ExecutorLog AgentExecutor gets invoked") ends the previous
+                        // invocation's line-capture context. See HandleAgentExecutorInvocationBoundary.
+                        HandleAgentExecutorInvocationBoundary();
+                        break;
+
                     case "healthscriptresult":
                         HandleHealthScriptResult(match, pattern.Parameters);
                         break;
@@ -453,6 +460,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.Ime
             catch (Exception ex)
             {
                 _logger.Warning($"ImeLogTracker: error handling match for {pattern.PatternId}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Test seam: run a single already-assembled log message through the active-pattern
+        /// pipeline exactly as <see cref="CheckLogFilesAsync"/> does per line (match against
+        /// <c>_activePatterns</c> → <see cref="HandlePatternMatch"/>). Lets unit tests drive the
+        /// script / app handlers deterministically without writing CMTrace files or spinning the
+        /// poller. <paramref name="sourceTimestampUtc"/> populates the entry timestamp some
+        /// handlers read via <see cref="LastMatchedLogTimestamp"/>.
+        /// </summary>
+        internal void ProcessLogMessageForTest(string message, DateTime? sourceTimestampUtc = null)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+            var entry = sourceTimestampUtc.HasValue
+                ? new CmTraceLogEntry { Timestamp = sourceTimestampUtc.Value, Message = message }
+                : null;
+            foreach (var pattern in _activePatterns)
+            {
+                try
+                {
+                    var match = pattern.Regex.Match(message);
+                    if (match.Success)
+                        HandlePatternMatch(pattern, match, message, entry);
+                }
+                catch (RegexMatchTimeoutException) { }
             }
         }
 

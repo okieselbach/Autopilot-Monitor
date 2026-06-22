@@ -253,6 +253,12 @@ namespace AutopilotMonitor.Shared
             // returns false after the ESP page exited, and again at termination for leftovers.
             // This is the actionable customer hint behind "session hangs in AccountSetup".
             public const string AppInstallStarved   = "app_install_starved";
+            // Session 6b4993e5 / fc48c71a — on an ESP terminal failure of the DeviceSetup Apps
+            // subcategory, names the device app(s) still in flight (e.g. stuck Downloading at 0%)
+            // as the likely cause. Emitted WITHOUT mutating app state (no fabricated
+            // app_install_failed); the app stays honestly Downloading. Lets MCP/Web surface the
+            // culprit instead of only the opaque "Apps (Error)" registry string.
+            public const string EspAppsFailureCorrelation = "esp_apps_failure_correlation";
             public const string NetworkStateChange  = "network_state_change";
             public const string NetworkConnectivityCheck = "network_connectivity_check";
             public const string ErrorDetected       = "error_detected";
