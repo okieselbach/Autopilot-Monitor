@@ -30,6 +30,7 @@ export function TenantAdminSection({
   const [tenantAdmins, setTenantAdmins] = useState<TenantAdmin[]>([]);
   const [loadingAdmins, setLoadingAdmins] = useState(false);
   const [newAdminEmail, setNewAdminEmail] = useState("");
+  const [newMemberRole, setNewMemberRole] = useState<string>("Admin");
   const [addingAdmin, setAddingAdmin] = useState(false);
   const [removingAdmin, setRemovingAdmin] = useState<string | null>(null);
   const [togglingAdmin, setTogglingAdmin] = useState<string | null>(null);
@@ -78,7 +79,7 @@ export function TenantAdminSection({
       const response = await authenticatedFetch(api.tenants.admins(tenantId), getAccessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ upn: newAdminEmail.trim() }),
+        body: JSON.stringify({ upn: newAdminEmail.trim(), role: newMemberRole }),
       });
 
       if (!response.ok) {
@@ -86,7 +87,7 @@ export function TenantAdminSection({
         throw new Error(errorData.error || `Failed to add admin: ${response.statusText}`);
       }
 
-      setSuccessMessage(`Admin ${newAdminEmail} added successfully!`);
+      setSuccessMessage(`${newMemberRole} ${newAdminEmail} added successfully!`);
       setNewAdminEmail("");
 
       // Refresh admin list
@@ -182,6 +183,46 @@ export function TenantAdminSection({
     }
   };
 
+  const handleUpdatePermissions = async (adminUpn: string, role: string, canManageBootstrapTokens: boolean) => {
+    try {
+      setTogglingAdmin(adminUpn);
+      setError(null);
+
+      const response = await authenticatedFetch(api.tenants.adminPermissions(tenantId, adminUpn), getAccessToken, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, canManageBootstrapTokens }),
+      });
+
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch {
+          errorData = { error: `Failed to update permissions: ${response.statusText}` };
+        }
+        throw new Error(errorData.error || `Failed to update permissions: ${response.statusText}`);
+      }
+
+      setSuccessMessage(`Permissions for ${adminUpn} updated successfully!`);
+
+      // Refresh admin list
+      await fetchTenantAdmins(tenantId);
+
+      // Auto-hide success message after 3 seconds
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        console.error("Session expired while updating member permissions");
+      } else {
+        console.error("Error updating member permissions:", err);
+      }
+      setError(err instanceof Error ? err.message : "Failed to update permissions");
+    } finally {
+      setTogglingAdmin(null);
+    }
+  };
+
   // Admin Pagination with Search
   const filteredAdmins = tenantAdmins.filter(admin =>
     admin.upn.toLowerCase().includes(adminSearchQuery.toLowerCase())
@@ -252,13 +293,16 @@ export function TenantAdminSection({
             ) : (
               <>
                 <div className="space-y-2">
-                  {paginatedAdmins.map((admin) => (
+                  {paginatedAdmins.map((admin) => {
+                    const effectiveRole = admin.role ?? "Admin";
+                    return (
                     <div
                       key={admin.upn}
-                      className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 bg-white border rounded text-sm ${
+                      className={`p-2 bg-white border rounded text-sm ${
                         admin.isEnabled ? 'border-purple-200' : 'border-gray-300 bg-gray-50'
                       }`}
                     >
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <div className="font-medium text-gray-900 truncate">{admin.upn}</div>
@@ -281,7 +325,16 @@ export function TenantAdminSection({
                           Added {new Date(admin.addedDate).toLocaleDateString()} by {admin.addedBy}
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={effectiveRole}
+                          onChange={(e) => handleUpdatePermissions(admin.upn, e.target.value, admin.canManageBootstrapTokens)}
+                          disabled={togglingAdmin === admin.upn}
+                          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
+                        >
+                          <option value="Admin">Admin</option>
+                          <option value="Operator">Operator</option>
+                        </select>
                         <button
                           onClick={() => handleToggleTenantAdmin(admin.upn, admin.isEnabled)}
                           disabled={togglingAdmin === admin.upn}
@@ -303,8 +356,26 @@ export function TenantAdminSection({
                           {removingAdmin === admin.upn ? "..." : "Remove"}
                         </button>
                       </div>
+                      </div>
+
+                      {/* Bootstrap token permission toggle for Operators */}
+                      {effectiveRole === "Operator" && (
+                        <div className="mt-2 pt-2 border-t border-gray-200">
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={admin.canManageBootstrapTokens}
+                              onChange={(e) => handleUpdatePermissions(admin.upn, "Operator", e.target.checked)}
+                              disabled={togglingAdmin === admin.upn}
+                              className="h-4 w-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500 disabled:opacity-50"
+                            />
+                            <span className="text-sm text-gray-700">Can manage bootstrap tokens</span>
+                          </label>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Pagination */}
@@ -353,6 +424,14 @@ export function TenantAdminSection({
                   }
                 }}
               />
+              <select
+                value={newMemberRole}
+                onChange={(e) => setNewMemberRole(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+              >
+                <option value="Admin">Admin</option>
+                <option value="Operator">Operator</option>
+              </select>
               <button
                 onClick={() => handleAddTenantAdmin()}
                 disabled={addingAdmin || !newAdminEmail.trim()}
