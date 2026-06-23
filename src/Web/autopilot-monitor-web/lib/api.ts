@@ -204,6 +204,9 @@ export const api = {
       `${API_BASE_URL}/api/metrics/usage${qs({ tenantId })}`,
     globalUsage: (tenantId?: string) =>
       `${API_BASE_URL}/api/global/metrics/usage${qs({ tenantId })}`,
+    // Cross-tenant live presence: web users active within the last windowMinutes (GA / Global Reader).
+    activeUsers: (windowMinutes?: number) =>
+      `${API_BASE_URL}/api/global/presence${qs({ windowMinutes: windowMinutes != null ? String(windowMinutes) : undefined })}`,
     app: (tenantId: string, days: number) =>
       `${API_BASE_URL}/api/metrics/app${qs({ tenantId, days: String(days) })}`,
     globalApp: (days: number, tenantId?: string) =>

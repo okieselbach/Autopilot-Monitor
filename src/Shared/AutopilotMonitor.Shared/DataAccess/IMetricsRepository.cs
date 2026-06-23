@@ -32,6 +32,16 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<UserActivityMetrics> GetUserActivityMetricsAsync(string tenantId);
         Task<UserActivityMetrics> GetAllUserActivityMetricsAsync();
         Task<(int uniqueUsers, int loginCount)> GetUserActivityForDateAsync(string? tenantId, DateTime date);
+        /// <summary>Retention cleanup: deletes UserActivity login rows whose LoginAt is older than the cutoff. Returns the number deleted.</summary>
+        Task<int> DeleteUserActivityOlderThanAsync(DateTime cutoffUtc);
+
+        // --- Live Presence (one row per user, upserted) ---
+        /// <summary>Upserts the caller's presence row (PK=tenantId, RK=SHA-256(lowercase UPN) hex) with LastSeen=now.</summary>
+        Task RecordUserPresenceAsync(string tenantId, string upn, string userRole);
+        /// <summary>Returns all users whose LastSeen falls within the given window, newest first (cross-tenant).</summary>
+        Task<List<UserPresenceEntry>> GetActivePresenceAsync(TimeSpan window);
+        /// <summary>Retention cleanup: deletes presence rows whose LastSeen is older than the cutoff (drops one-off testers). Returns the number deleted.</summary>
+        Task<int> DeleteUserPresenceOlderThanAsync(DateTime cutoffUtc);
 
         // --- Metrics Summary (Agent API) ---
         Task<List<object>> GetMetricsSummaryAsync(string? tenantId, int days = 30);
@@ -47,6 +57,11 @@ namespace AutopilotMonitor.Shared.DataAccess
 
     public class UserActivityMetrics
     {
+        /// <summary>
+        /// Distinct users with a login row in the UserActivity table. NOTE: that table is pruned to the
+        /// retention window (90 days), so this is "unique users within retention", NOT an all-time total.
+        /// The cumulative all-time figure is the monotonic high-water-mark in PlatformStats.TotalUsers.
+        /// </summary>
         public int TotalUniqueUsers { get; set; }
         public int DailyLogins { get; set; }
         public int ActiveUsersLast7Days { get; set; }

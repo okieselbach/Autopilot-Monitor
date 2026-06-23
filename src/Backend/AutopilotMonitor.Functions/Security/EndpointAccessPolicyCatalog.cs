@@ -324,6 +324,7 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "global/sessions",            EndpointPolicy.GlobalReadOrAdmin),
         new("GET",    "global/stats/sessions",      EndpointPolicy.GlobalReadOrAdmin),
         new("GET",    "global/audit/logs",          EndpointPolicy.GlobalReadOrAdmin),
+        new("GET",    "global/presence",            EndpointPolicy.GlobalReadOrAdmin),
         new("GET",    "global/tenants-with-deletion-manifests", EndpointPolicy.GlobalReadOrAdmin),
         new("GET",    "global/metrics/platform",    EndpointPolicy.GlobalReadOrAdmin),
         new("GET",    "global/metrics/app",         EndpointPolicy.GlobalReadOrAdmin),

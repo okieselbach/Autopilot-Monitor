@@ -527,6 +527,110 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        // ===== LIVE PRESENCE METHODS =====
+
+        /// <summary>
+        /// Derives a collision-free, case-insensitive Azure Table RowKey from a UPN: the SHA-256 hash
+        /// of the lowercased UPN as hex. A hash (rather than char-replacement) guarantees distinct UPNs
+        /// never collide — replacing disallowed chars with '_' would map e.g. "a/b@x" and "a_b@x" to the
+        /// same key, letting one user overwrite the other. The original UPN is kept in the Upn column.
+        /// </summary>
+        internal static string PresenceRowKey(string upn)
+        {
+            var normalized = (upn ?? string.Empty).ToLowerInvariant();
+            var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalized));
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Upserts a single presence row (PK=tenantId, RK=hash(UPN)) stamped with LastSeen=now.
+        /// One row per user — overwritten on every call, so the table never grows past the distinct-user count.
+        /// </summary>
+        public async Task RecordUserPresenceAsync(string tenantId, string upn, string userRole)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserPresence);
+                var entity = new TableEntity(tenantId, PresenceRowKey(upn))
+                {
+                    ["Upn"] = upn ?? string.Empty,
+                    ["UserRole"] = userRole ?? string.Empty,
+                    ["LastSeen"] = DateTime.UtcNow
+                };
+
+                await tableClient.UpsertEntityAsync(entity, TableUpdateMode.Replace);
+            }
+            catch (Exception ex)
+            {
+                // Presence is best-effort observability — never fail the request it rode in on.
+                _logger.LogDebug(ex, "Failed to record presence for {Upn} in tenant {TenantId}", upn, tenantId);
+            }
+        }
+
+        /// <summary>
+        /// Returns all users whose LastSeen is within the given window (cross-tenant), newest first.
+        /// Intentionally NOT wrapped in a swallow-and-return-empty try/catch: a storage failure must
+        /// surface to the caller so the operator-facing endpoint returns 5xx, rather than masquerade as
+        /// "0 users active". The query projects only the columns it needs to keep the response lean.
+        /// </summary>
+        public async Task<List<UserPresenceEntry>> GetActivePresenceAsync(TimeSpan window)
+        {
+            var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserPresence);
+            var cutoff = DateTime.UtcNow - window;
+            var filter = $"LastSeen ge datetime'{cutoff:yyyy-MM-ddTHH:mm:ss}Z'";
+            // PartitionKey is included explicitly: it carries TenantId (read below) and the SDK's
+            // projection only guarantees the columns named in select.
+            var query = tableClient.QueryAsync<TableEntity>(
+                filter: filter,
+                select: new[] { "PartitionKey", "Upn", "UserRole", "LastSeen" });
+
+            var results = new List<UserPresenceEntry>();
+            await foreach (var entity in query)
+            {
+                results.Add(new UserPresenceEntry
+                {
+                    TenantId = entity.PartitionKey ?? string.Empty,
+                    Upn = entity.GetString("Upn") ?? string.Empty,
+                    UserRole = entity.GetString("UserRole") ?? string.Empty,
+                    LastSeen = entity.GetDateTime("LastSeen") ?? DateTime.MinValue
+                });
+            }
+
+            results.Sort((a, b) => b.LastSeen.CompareTo(a.LastSeen));
+            return results;
+        }
+
+        /// <summary>
+        /// Retention cleanup: deletes presence rows whose LastSeen is older than the cutoff. Keeps the
+        /// table to genuinely-recent users — one-off testers don't linger indefinitely (data minimization).
+        /// </summary>
+        public async Task<int> DeleteUserPresenceOlderThanAsync(DateTime cutoffUtc)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserPresence);
+                var filter = $"LastSeen lt datetime'{cutoffUtc:yyyy-MM-ddTHH:mm:ss}Z'";
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                    deleted++;
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation("Deleted {Count} stale presence rows older than {Cutoff:yyyy-MM-dd}", deleted, cutoffUtc);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete stale presence rows");
+                return 0;
+            }
+        }
+
         /// <summary>
         /// Gets user activity metrics for a specific tenant
         /// </summary>
@@ -682,6 +786,38 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogError(ex, $"Failed to get user activity for date {date:yyyy-MM-dd}");
                 return (0, 0);
+            }
+        }
+
+        /// <summary>
+        /// Retention cleanup: deletes UserActivity login rows whose LoginAt is older than the cutoff.
+        /// The table is append-only (one row per login) and is otherwise only wiped on tenant offboarding,
+        /// so without this it grows unbounded and the full-table metrics scans get progressively slower.
+        /// </summary>
+        public async Task<int> DeleteUserActivityOlderThanAsync(DateTime cutoffUtc)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UserActivity);
+                var filter = $"LoginAt lt datetime'{cutoffUtc:yyyy-MM-ddTHH:mm:ss}Z'";
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                    deleted++;
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation("Deleted {Count} user activity rows older than {Cutoff:yyyy-MM-dd}", deleted, cutoffUtc);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete old user activity rows");
+                return 0;
             }
         }
 

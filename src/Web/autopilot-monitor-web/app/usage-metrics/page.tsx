@@ -323,7 +323,7 @@ export default function UsageMetricsPage() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-white rounded-lg shadow p-6">
-                  <div className="text-sm text-gray-500 mb-1">Total Users</div>
+                  <div className="text-sm text-gray-500 mb-1">Unique Users (90d)</div>
                   <div className="text-3xl font-bold text-gray-900">{metrics.users.total.toLocaleString()}</div>
                 </div>
                 <div className="bg-white rounded-lg shadow p-6">
@@ -347,7 +347,7 @@ export default function UsageMetricsPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 opacity-40">
                 <div>
-                  <div className="text-sm text-gray-500 mb-1">Total Users</div>
+                  <div className="text-sm text-gray-500 mb-1">Unique Users (90d)</div>
                   <div className="text-3xl font-bold text-gray-400">--</div>
                 </div>
                 <div>

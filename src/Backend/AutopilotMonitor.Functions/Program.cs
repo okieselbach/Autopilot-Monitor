@@ -41,6 +41,9 @@ builder.UseMiddleware<GlobalExceptionMiddleware>();
 builder.UseMiddleware<AuthenticationMiddleware>();
 builder.UseMiddleware<PolicyEnforcementMiddleware>();
 builder.UseMiddleware<UserRateLimitMiddleware>();
+// After policy enforcement (RequestContext resolved): record best-effort "last seen" presence for
+// authenticated web users so a Global Admin can see who is active right now. Throttled + fail-open.
+builder.UseMiddleware<UserPresenceMiddleware>();
 
 // Configure JSON serialization to use camelCase
 builder.Services.Configure<JsonSerializerOptions>(options =>

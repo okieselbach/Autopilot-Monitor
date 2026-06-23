@@ -707,6 +707,10 @@ namespace AutopilotMonitor.Shared
             public const string AuditLogs      = "AuditLogs";
             public const string UsageMetrics   = "UsageMetrics";
             public const string UserActivity   = "UserActivity";
+            // Live presence: ONE row per user (PK=TenantId, RowKey=SHA-256(lowercase UPN) hex), overwritten
+            // on each authenticated web request. Self-maintaining (size = distinct users); "active now"
+            // is a read-time LastSeen window filter, not row deletion. See UserPresenceMiddleware.
+            public const string UserPresence   = "UserPresence";
 
             // Rules engine tables
             public const string RuleResults    = "RuleResults";
@@ -871,6 +875,7 @@ namespace AutopilotMonitor.Shared
                 AuditLogs,
                 UsageMetrics,
                 UserActivity,
+                UserPresence,
                 RuleResults,
                 GatherRules,
                 AnalyzeRules,

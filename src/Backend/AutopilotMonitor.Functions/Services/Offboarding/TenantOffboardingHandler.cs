@@ -57,6 +57,7 @@ namespace AutopilotMonitor.Functions.Services.Offboarding
             Constants.TableNames.AuditLogs,
             Constants.TableNames.UsageMetrics,
             Constants.TableNames.UserActivity,
+            Constants.TableNames.UserPresence,
             Constants.TableNames.AppInstallSummaries,
             Constants.TableNames.TenantAdmins,
             Constants.TableNames.BootstrapSessions, // main rows; CodeLookup discriminator below

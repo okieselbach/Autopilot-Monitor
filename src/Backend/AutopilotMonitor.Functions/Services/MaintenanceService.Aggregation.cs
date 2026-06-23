@@ -287,6 +287,40 @@ namespace AutopilotMonitor.Functions.Services
             {
                 _logger.LogWarning(ex, "Failed to cleanup old rule stats");
             }
+
+            // User activity retention: delete login rows older than 90 days. The UserActivity table is
+            // append-only (one row per login) and is otherwise only wiped on tenant offboarding, so
+            // without this it grows unbounded and the full-table activity-metric scans get slower.
+            try
+            {
+                var userActivityCutoff = DateTime.UtcNow.AddDays(-90);
+                var deletedUserActivity = await _metricsRepo.DeleteUserActivityOlderThanAsync(userActivityCutoff);
+
+                if (deletedUserActivity > 0)
+                    _logger.LogInformation("User activity cleanup: deleted {Count} login rows older than 90 days", deletedUserActivity);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old user activity");
+            }
+
+            // Presence retention: delete stale presence rows older than 1 day. Presence is purely a
+            // "currently active" view (read only for windows ≤60 min); historical activity is covered by
+            // the UserActivity table, so older presence rows carry zero value. A 1-day window minimizes
+            // data (a one-off tester's UPN doesn't linger) and keeps the LastSeen scan in
+            // GetActivePresenceAsync (a cross-partition scan polled every 30s by the GA page) tiny.
+            try
+            {
+                var presenceCutoff = DateTime.UtcNow.AddDays(-1);
+                var deletedPresence = await _metricsRepo.DeleteUserPresenceOlderThanAsync(presenceCutoff);
+
+                if (deletedPresence > 0)
+                    _logger.LogInformation("Presence cleanup: deleted {Count} stale rows older than 1 day", deletedPresence);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup stale presence rows");
+            }
         }
 
         /// <summary>
@@ -328,10 +362,15 @@ namespace AutopilotMonitor.Functions.Services
 
                 var existingStats = await _metricsRepo.GetPlatformStatsAsync();
 
+                // "Users Seen" is a cumulative, public-facing high-water-mark. UserActivity is pruned to
+                // 90 days, so the recomputed `totalUsers` only reflects recent loginers — clamp it to the
+                // previously-persisted value so the cumulative figure can never regress after a cleanup.
+                var cumulativeUsers = Math.Max(totalUsers, existingStats?.TotalUsers ?? 0);
+
                 var stats = new PlatformStats
                 {
                     TotalEnrollments = totalEnrollments,
-                    TotalUsers = totalUsers,
+                    TotalUsers = cumulativeUsers,
                     TotalTenants = tenantIds.Count,
                     TotalSignedUpTenants = allConfigs.Count,
                     UniqueDeviceModels = uniqueModels.Count,
@@ -347,7 +386,7 @@ namespace AutopilotMonitor.Functions.Services
 
                 sw.Stop();
                 _logger.LogInformation($"Platform stats recomputed in {sw.ElapsedMilliseconds}ms: " +
-                    $"{totalEnrollments} enrollments, {totalUsers} users, {tenantIds.Count} tenants, {uniqueModels.Count} models");
+                    $"{totalEnrollments} enrollments, {cumulativeUsers} users (cumulative), {tenantIds.Count} tenants, {uniqueModels.Count} models");
             }
             catch (Exception ex)
             {

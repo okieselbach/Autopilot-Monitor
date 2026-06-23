@@ -362,7 +362,7 @@ export function SectionPlatformUsage() {
             {metrics.users.total > 0 || metrics.users.dailyLogins > 0 || metrics.users.active7Days > 0 || metrics.users.active30Days > 0 ? (
               <div className="space-y-4">
                 <div className="bg-white rounded-lg shadow p-6">
-                  <div className="text-sm text-gray-500 mb-1">Total Users</div>
+                  <div className="text-sm text-gray-500 mb-1">Unique Users (90d)</div>
                   <div className="text-3xl font-bold text-gray-900">{metrics.users.total.toLocaleString()}</div>
                 </div>
                 <div className="bg-white rounded-lg shadow p-6">
@@ -385,7 +385,7 @@ export function SectionPlatformUsage() {
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="space-y-4 mb-4 opacity-40">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-500">Total Users</span>
+                    <span className="text-sm text-gray-500">Unique Users (90d)</span>
                     <span className="text-xl font-bold text-gray-400">--</span>
                   </div>
                   <div className="flex items-center justify-between">

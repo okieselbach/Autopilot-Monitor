@@ -59,6 +59,18 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<(int uniqueUsers, int loginCount)> GetUserActivityForDateAsync(string? tenantId, DateTime date)
             => _storage.GetUserActivityForDateAsync(tenantId, date);
 
+        public Task<int> DeleteUserActivityOlderThanAsync(DateTime cutoffUtc)
+            => _storage.DeleteUserActivityOlderThanAsync(cutoffUtc);
+
+        public Task RecordUserPresenceAsync(string tenantId, string upn, string userRole)
+            => _storage.RecordUserPresenceAsync(tenantId, upn, userRole);
+
+        public Task<List<UserPresenceEntry>> GetActivePresenceAsync(TimeSpan window)
+            => _storage.GetActivePresenceAsync(window);
+
+        public Task<int> DeleteUserPresenceOlderThanAsync(DateTime cutoffUtc)
+            => _storage.DeleteUserPresenceOlderThanAsync(cutoffUtc);
+
         public Task<List<object>> GetMetricsSummaryAsync(string? tenantId, int days = 30)
             => _storage.GetMetricsSummaryAsync(tenantId, days);
 
