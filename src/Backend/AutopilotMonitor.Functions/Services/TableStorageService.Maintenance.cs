@@ -71,6 +71,46 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
+        /// Retention cleanup: deletes audit log entries whose Timestamp is older than the cutoff.
+        /// The AuditLogs table is append-only (one row per admin action) and is otherwise only
+        /// wiped on tenant offboarding, so without this it grows unbounded. Filters server-side on
+        /// the per-row "Timestamp" property and selects only PK/RK to keep the scan cheap.
+        /// </summary>
+        public async Task<int> DeleteAuditLogsOlderThanAsync(DateTime cutoffUtc)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AuditLogs);
+                var filter = $"Timestamp lt datetime'{cutoffUtc:yyyy-MM-ddTHH:mm:ss}Z'";
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    try
+                    {
+                        await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                        deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete audit log {PK}/{RK}", entity.PartitionKey, entity.RowKey);
+                    }
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation("Deleted {Count} audit log entries older than {Cutoff:yyyy-MM-dd}", deleted, cutoffUtc);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete old audit log entries");
+                return 0;
+            }
+        }
+
+        /// <summary>
         /// Gets audit log entries for a tenant within an optional UTC date window.
         /// No row cap — returns the full filtered set, sorted newest-first.
         /// </summary>

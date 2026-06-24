@@ -10,6 +10,9 @@ const OPS_EVENT_TYPES: Record<string, string[]> = {
   Maintenance: [
     "MaintenanceCompleted",
     "MaintenanceFailed",
+    // Soft watchdog (Warning): a maintenance run completed but exceeded the 10min threshold and is
+    // climbing toward the host's 60min functionTimeout. Backend helper RecordMaintenanceLongRunningAsync.
+    "MaintenanceLongRunning",
     "OpsEventCleanup",
     "SessionTimeouts",
     // Cascade-delete maintenance (PR6) — dual-register per memory feedback_ops_event_types_dual_register.

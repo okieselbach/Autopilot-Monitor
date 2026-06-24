@@ -170,6 +170,45 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        public async Task<int> DeleteNotificationsByRetentionAsync(DateTime dismissedCutoffUtc, DateTime unreadCutoffUtc)
+        {
+            try
+            {
+                // Cross-partition retention sweep (one partition per tenant). Hybrid policy mirrors the
+                // global notifications table: a dismissed row drops 30 days after DISMISSAL (DismissedAt),
+                // unread rows survive until the long creation-age cutoff so an unacknowledged tenant-admin
+                // warning is never silently lost. The server-side filter keeps only prune-eligible rows on the wire.
+                var filter = NotificationRetentionFilter.BuildPredicate(dismissedCutoffUtc, unreadCutoffUtc);
+                var query = _table.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    try
+                    {
+                        await _table.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                        deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete tenant notification {PK}/{RK}", entity.PartitionKey, entity.RowKey);
+                    }
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation(
+                        "Deleted {Count} tenant notifications (dismissed<{DismissedCutoff:yyyy-MM-dd}, any<{UnreadCutoff:yyyy-MM-dd})",
+                        deleted, dismissedCutoffUtc, unreadCutoffUtc);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete old tenant notifications");
+                return 0;
+            }
+        }
+
         private static GlobalNotification MapToGlobalNotification(TableEntity entity)
         {
             return new GlobalNotification

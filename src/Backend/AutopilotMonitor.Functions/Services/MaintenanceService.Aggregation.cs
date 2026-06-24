@@ -588,6 +588,99 @@ namespace AutopilotMonitor.Functions.Services
                 _logger.LogError(ex, "OpsEvents cleanup failed");
             }
         }
+
+        /// <summary>
+        /// Retention cleanup for append-only tables that previously had no purge mechanism and
+        /// therefore grew unbounded: GlobalNotifications + TenantNotifications (hybrid: dismissed 30d /
+        /// unread 180d), HardwareRejectionNotificationTracker (30d), AuditLogs (180d), UsageMetrics
+        /// (180d), BackupJobs (365d). Each table is handled in its own try/catch so one failure never
+        /// blocks the others. Retention windows are fixed product decisions (no AdminConfig knob),
+        /// mirroring the DistressReports pattern. PlatformStats is intentionally excluded — it is a
+        /// single upserted row, not append-only.
+        /// </summary>
+        private async Task CleanupUnboundedTablesAsync()
+        {
+            // Notifications use a hybrid policy: dismissed rows drop at the short window, but an
+            // unread (still-actionable) admin warning survives until the long window so it is never
+            // silently lost inside the dismiss window.
+            const int notificationDismissedRetentionDays = 30;
+            const int notificationUnreadRetentionDays = 180;
+            const int hardwareRejectionRetentionDays = 30;
+            const int auditLogRetentionDays = 180;
+            const int usageMetricsRetentionDays = 180;
+            const int backupJobRetentionDays = 365;
+
+            var now = DateTime.UtcNow;
+            var notificationDismissedCutoff = now.AddDays(-notificationDismissedRetentionDays);
+            var notificationUnreadCutoff = now.AddDays(-notificationUnreadRetentionDays);
+
+            try
+            {
+                var deleted = await _notificationRepo.DeleteNotificationsByRetentionAsync(notificationDismissedCutoff, notificationUnreadCutoff);
+                if (deleted > 0)
+                    _logger.LogInformation("Global notifications cleanup: deleted {Count} rows (dismissed {DismissedDays}d / unread {UnreadDays}d)", deleted, notificationDismissedRetentionDays, notificationUnreadRetentionDays);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old global notifications");
+            }
+
+            try
+            {
+                var deleted = await _tenantNotificationRepo.DeleteNotificationsByRetentionAsync(notificationDismissedCutoff, notificationUnreadCutoff);
+                if (deleted > 0)
+                    _logger.LogInformation("Tenant notifications cleanup: deleted {Count} rows (dismissed {DismissedDays}d / unread {UnreadDays}d)", deleted, notificationDismissedRetentionDays, notificationUnreadRetentionDays);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old tenant notifications");
+            }
+
+            try
+            {
+                var deleted = await _hardwareRejectionTracker.DeleteOlderThanAsync(now.AddDays(-hardwareRejectionRetentionDays));
+                if (deleted > 0)
+                    _logger.LogInformation("Hardware-rejection tracker cleanup: deleted {Count} rows older than {Days} days", deleted, hardwareRejectionRetentionDays);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old hardware-rejection tracker rows");
+            }
+
+            try
+            {
+                var deleted = await _maintenanceRepo.DeleteAuditLogsOlderThanAsync(now.AddDays(-auditLogRetentionDays));
+                if (deleted > 0)
+                    _logger.LogInformation("Audit log cleanup: deleted {Count} entries older than {Days} days", deleted, auditLogRetentionDays);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old audit logs");
+            }
+
+            try
+            {
+                var cutoffDate = now.AddDays(-usageMetricsRetentionDays).ToString("yyyy-MM-dd");
+                var deleted = await _metricsRepo.DeleteUsageMetricsSnapshotsOlderThanAsync(cutoffDate);
+                if (deleted > 0)
+                    _logger.LogInformation("Usage metrics cleanup: deleted {Count} snapshots older than {Cutoff}", deleted, cutoffDate);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old usage metrics snapshots");
+            }
+
+            try
+            {
+                var deleted = await _backupJobsRepo.DeleteJobsOlderThanAsync(now.AddDays(-backupJobRetentionDays));
+                if (deleted > 0)
+                    _logger.LogInformation("Backup job cleanup: deleted {Count} records older than {Days} days", deleted, backupJobRetentionDays);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to cleanup old backup job records");
+            }
+        }
         /// <summary>
         /// Detects and cleans up orphaned events — events stored in the Events table
         /// whose session no longer exists in the Sessions table.

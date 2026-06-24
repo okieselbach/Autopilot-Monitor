@@ -48,6 +48,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             bool excludeDeletions = false, AuditLogQueryFilters? filters = null)
             => _storage.GetAllAuditLogsPageAsync(dateFrom, dateTo, pageSize, continuation, excludeDeletions, filters);
 
+        public Task<int> DeleteAuditLogsOlderThanAsync(DateTime cutoffUtc)
+            => _storage.DeleteAuditLogsOlderThanAsync(cutoffUtc);
+
         public Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate)
             => _storage.GetSessionsOlderThanAsync(tenantId, cutoffDate);
 

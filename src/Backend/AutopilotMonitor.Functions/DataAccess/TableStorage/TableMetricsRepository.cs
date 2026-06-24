@@ -29,6 +29,9 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<bool> HasUsageMetricsSnapshotAsync(string date)
             => _storage.HasUsageMetricsSnapshotAsync(date);
 
+        public Task<int> DeleteUsageMetricsSnapshotsOlderThanAsync(string cutoffDate)
+            => _storage.DeleteUsageMetricsSnapshotsOlderThanAsync(cutoffDate);
+
         public Task<bool> StoreAppInstallSummaryAsync(AppInstallSummary summary)
             => _storage.StoreAppInstallSummaryAsync(summary);
 

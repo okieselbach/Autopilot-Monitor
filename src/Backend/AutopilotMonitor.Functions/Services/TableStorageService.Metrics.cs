@@ -155,6 +155,47 @@ namespace AutopilotMonitor.Functions.Services
             }
         }
 
+        /// <summary>
+        /// Retention cleanup: deletes UsageMetrics snapshot rows whose date (PartitionKey,
+        /// "yyyy-MM-dd") is strictly older than <paramref name="cutoffDate"/> (also "yyyy-MM-dd").
+        /// The table holds one row per (date, tenant + "global") and is otherwise never pruned,
+        /// so without this it grows by ~(tenants+1) rows per day forever. PartitionKey is a
+        /// lexically-sortable date string, so the server-side range filter is partition-efficient.
+        /// </summary>
+        public async Task<int> DeleteUsageMetricsSnapshotsOlderThanAsync(string cutoffDate)
+        {
+            try
+            {
+                var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.UsageMetrics);
+                var filter = $"PartitionKey lt '{cutoffDate.Replace("'", "''")}'";
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    try
+                    {
+                        await tableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                        deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete usage metrics snapshot {PK}/{RK}", entity.PartitionKey, entity.RowKey);
+                    }
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation("Deleted {Count} usage metrics snapshots older than {Cutoff}", deleted, cutoffDate);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete old usage metrics snapshots");
+                return 0;
+            }
+        }
+
         // ===== APP INSTALL SUMMARIES METHODS =====
 
         /// <summary>

@@ -60,6 +60,17 @@ namespace AutopilotMonitor.Functions.Services
                 $"Maintenance failed: {error}",
                 null, triggeredBy, new { error });
 
+        /// <summary>
+        /// Early-warning signal: a maintenance run finished but took longer than the soft threshold.
+        /// The 2h Maintenance timer shares the host's 60min functionTimeout; a run that is climbing
+        /// toward that ceiling (e.g. a large first-time retention backlog) surfaces here as Warning so
+        /// operators are alerted before a future run is hard-aborted (which would emit no event at all).
+        /// </summary>
+        public Task RecordMaintenanceLongRunningAsync(int durationMs, int thresholdMinutes, string triggeredBy)
+            => WriteAsync(OpsEventCategory.Maintenance, "MaintenanceLongRunning", OpsEventSeverity.Warning,
+                $"Maintenance took {durationMs}ms (> {thresholdMinutes}min soft threshold; host aborts at 60min) — triggered by {triggeredBy}",
+                null, triggeredBy, new { durationMs, thresholdMinutes });
+
         public Task RecordOpsEventCleanupAsync(int deletedCount, int retentionDays)
             => WriteAsync(OpsEventCategory.Maintenance, "OpsEventCleanup", OpsEventSeverity.Info,
                 $"Cleaned up {deletedCount} ops events older than {retentionDays} days",

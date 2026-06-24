@@ -54,6 +54,10 @@ namespace AutopilotMonitor.Functions.Services
         private readonly IUserUsageRepository _userUsageRepo;
         private readonly IDistressReportRepository _distressReportRepo;
         private readonly IOpsEventRepository _opsEventRepo;
+        private readonly INotificationRepository _notificationRepo;
+        private readonly ITenantNotificationRepository _tenantNotificationRepo;
+        private readonly IHardwareRejectionNotificationTracker _hardwareRejectionTracker;
+        private readonly DataAccess.TableStorage.BackupJobsRepository _backupJobsRepo;
         private readonly OpsEventService _opsEventService;
         private readonly Analyze.IAnalyzeOnEnrollmentEndProducer _analyzeProducer;
         private readonly IAzureMonitorMetricsReader _metricsReader;
@@ -78,6 +82,10 @@ namespace AutopilotMonitor.Functions.Services
             IUserUsageRepository userUsageRepo,
             IDistressReportRepository distressReportRepo,
             IOpsEventRepository opsEventRepo,
+            INotificationRepository notificationRepo,
+            ITenantNotificationRepository tenantNotificationRepo,
+            IHardwareRejectionNotificationTracker hardwareRejectionTracker,
+            DataAccess.TableStorage.BackupJobsRepository backupJobsRepo,
             OpsEventService opsEventService,
             Analyze.IAnalyzeOnEnrollmentEndProducer analyzeProducer,
             IAzureMonitorMetricsReader metricsReader,
@@ -97,6 +105,10 @@ namespace AutopilotMonitor.Functions.Services
             _userUsageRepo = userUsageRepo;
             _distressReportRepo = distressReportRepo;
             _opsEventRepo = opsEventRepo;
+            _notificationRepo = notificationRepo;
+            _tenantNotificationRepo = tenantNotificationRepo;
+            _hardwareRejectionTracker = hardwareRejectionTracker;
+            _backupJobsRepo = backupJobsRepo;
             _opsEventService = opsEventService;
             _analyzeProducer = analyzeProducer;
             _metricsReader = metricsReader;
@@ -127,6 +139,7 @@ namespace AutopilotMonitor.Functions.Services
                 await CleanupOldUsageDataAsync();
                 await CleanupOldDistressReportsAsync();
                 await CleanupOldOpsEventsAsync();
+                await CleanupUnboundedTablesAsync();
                 await CleanupOrphanedEventsAsync();
                 await CheckAgentBlobStorageAsync();
                 await CheckEmbeddedCertExpiryAsync();
@@ -141,6 +154,17 @@ namespace AutopilotMonitor.Functions.Services
                 maintenanceStart.Stop();
                 _logger.LogInformation($"Daily maintenance completed in {maintenanceStart.ElapsedMilliseconds}ms");
                 await _opsEventService.RecordMaintenanceCompletedAsync((int)maintenanceStart.ElapsedMilliseconds, "Timer");
+
+                // Soft watchdog: the run completed, but if it is climbing toward the host's 60min
+                // functionTimeout (e.g. a large first-time retention backlog deleting row-by-row),
+                // surface a Warning OpsEvent now — a future hard-abort at the ceiling would emit
+                // nothing. Threshold is well below the limit so operators get lead time to react.
+                const int longRunThresholdMinutes = 10;
+                if (maintenanceStart.Elapsed.TotalMinutes > longRunThresholdMinutes)
+                {
+                    await _opsEventService.RecordMaintenanceLongRunningAsync(
+                        (int)maintenanceStart.ElapsedMilliseconds, longRunThresholdMinutes, "Timer");
+                }
             }
             catch (Exception ex)
             {
@@ -178,6 +202,7 @@ namespace AutopilotMonitor.Functions.Services
                     // responsibility. The manual trigger keeps the non-session housekeeping below
                     // (usage logs, rule-stats, cert expiry, SignalR quota, poison-queue watcher).
                     await CleanupOldUsageDataAsync();
+                    await CleanupUnboundedTablesAsync();
                     result.DataCleanupExecuted = true;
 
                     // --- Backfill & repair tasks (manual-only, not in timer path) ---

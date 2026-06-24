@@ -18,6 +18,14 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> DismissNotificationAsync(string notificationId, string dismissedBy);
         Task<int> DismissAllNotificationsAsync();
 
+        /// <summary>
+        /// Hybrid retention cleanup: deletes dismissed notifications whose <c>DismissedAt</c> is older
+        /// than <paramref name="dismissedCutoffUtc"/> (tail measured from dismissal) and any notification
+        /// whose <c>CreatedAt</c> is older than <paramref name="unreadCutoffUtc"/>. Unread rows in between
+        /// are kept so an unacknowledged admin warning is never silently lost. Returns rows deleted.
+        /// </summary>
+        Task<int> DeleteNotificationsByRetentionAsync(DateTime dismissedCutoffUtc, DateTime unreadCutoffUtc);
+
         // --- Session Reports ---
         Task<bool> StoreSessionReportMetadataAsync(SessionReportMetadata metadata);
 

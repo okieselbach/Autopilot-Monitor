@@ -151,6 +151,48 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        public async Task<int> DeleteNotificationsByRetentionAsync(DateTime dismissedCutoffUtc, DateTime unreadCutoffUtc)
+        {
+            try
+            {
+                // Hybrid retention: a dismissed row drops 30 days after DISMISSAL (DismissedAt), unread
+                // (still-actionable) rows survive until the long creation-age cutoff so an unacknowledged
+                // admin warning is never silently lost inside the dismiss window. The long clause is the
+                // catch-all that bounds the table regardless of dismiss state. All global notifications
+                // live in one "notifications" partition; the SDK filters server-side.
+                var filter = "PartitionKey eq 'notifications' and " +
+                    NotificationRetentionFilter.BuildPredicate(dismissedCutoffUtc, unreadCutoffUtc);
+                var query = _notificationsTableClient.QueryAsync<TableEntity>(
+                    filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    try
+                    {
+                        await _notificationsTableClient.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                        deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete global notification {PK}/{RK}", entity.PartitionKey, entity.RowKey);
+                    }
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation(
+                        "Deleted {Count} global notifications (dismissed<{DismissedCutoff:yyyy-MM-dd}, any<{UnreadCutoff:yyyy-MM-dd})",
+                        deleted, dismissedCutoffUtc, unreadCutoffUtc);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete old global notifications");
+                return 0;
+            }
+        }
+
         // --- Session Reports ---
 
         public async Task<bool> StoreSessionReportMetadataAsync(SessionReportMetadata metadata)

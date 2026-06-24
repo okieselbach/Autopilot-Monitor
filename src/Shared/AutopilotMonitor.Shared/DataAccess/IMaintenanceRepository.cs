@@ -50,6 +50,12 @@ namespace AutopilotMonitor.Shared.DataAccess
             DateTime? dateFrom, DateTime? dateTo, int pageSize, string? continuation,
             bool excludeDeletions = false, AuditLogQueryFilters? filters = null);
 
+        /// <summary>
+        /// Retention cleanup: deletes audit log entries older than <paramref name="cutoffUtc"/>
+        /// across all tenants. Returns the number of rows deleted.
+        /// </summary>
+        Task<int> DeleteAuditLogsOlderThanAsync(DateTime cutoffUtc);
+
         // --- Data Retention Queries ---
         Task<List<SessionSummary>> GetSessionsOlderThanAsync(string tenantId, DateTime cutoffDate);
         Task<List<SessionSummary>> GetSessionsByDateRangeAsync(DateTime startDate, DateTime endDate, string? tenantId = null);

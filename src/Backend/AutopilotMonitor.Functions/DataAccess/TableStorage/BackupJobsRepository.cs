@@ -109,6 +109,37 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        /// <summary>
+        /// Retention cleanup: deletes job rows whose QueuedAtUtc is older than <paramref name="cutoffUtc"/>.
+        /// Job records are an append-only audit trail (one row per backup/restore run) and are otherwise
+        /// never pruned. A job still Queued/Running after the (year-long) cutoff is unambiguously dead,
+        /// so age alone is a safe deletion predicate. Returns the number of rows deleted.
+        /// </summary>
+        public virtual async Task<int> DeleteJobsOlderThanAsync(DateTime cutoffUtc, CancellationToken ct = default)
+        {
+            var filter = $"PartitionKey eq '{PartitionKey}' and QueuedAtUtc lt datetime'{cutoffUtc:yyyy-MM-ddTHH:mm:ss}Z'";
+
+            int deleted = 0;
+            await foreach (var entity in _table.QueryAsync<TableEntity>(
+                filter: filter, select: new[] { "PartitionKey", "RowKey" }, cancellationToken: ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    await _table.DeleteEntityAsync(entity.PartitionKey, entity.RowKey, cancellationToken: ct).ConfigureAwait(false);
+                    deleted++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete backup job {RK}", entity.RowKey);
+                }
+            }
+
+            if (deleted > 0)
+                _logger.LogInformation("Deleted {Count} backup job records older than {Cutoff:yyyy-MM-dd}", deleted, cutoffUtc);
+
+            return deleted;
+        }
+
         // ── Mapping: Entity ↔ Domain ───────────────────────────────────────────
 
         internal static BackupJobStatusEntity MapToEntity(BackupJobStatus job)

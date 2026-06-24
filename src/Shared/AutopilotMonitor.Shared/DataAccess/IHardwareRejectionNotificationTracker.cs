@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 
 namespace AutopilotMonitor.Shared.DataAccess
@@ -16,5 +17,11 @@ namespace AutopilotMonitor.Shared.DataAccess
         /// Manufacturer and model are matched case-insensitively after trim.
         /// </summary>
         Task<bool> TryRegisterFirstNotificationAsync(string tenantId, string manufacturer, string model);
+
+        /// <summary>
+        /// Retention cleanup: deletes tracker rows whose FirstNotifiedAt is older than
+        /// <paramref name="cutoffUtc"/>. Pruning re-arms the dedup for that model. Returns rows deleted.
+        /// </summary>
+        Task<int> DeleteOlderThanAsync(DateTime cutoffUtc);
     }
 }

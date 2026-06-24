@@ -16,6 +16,8 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<List<UsageMetricsSnapshot>> GetUsageMetricsSnapshotAsync(
             string? tenantId = null, string? startDate = null, string? endDate = null, int maxResults = 100);
         Task<bool> HasUsageMetricsSnapshotAsync(string date);
+        /// <summary>Retention cleanup: deletes UsageMetrics snapshots whose date (PK, "yyyy-MM-dd") is older than the cutoff. Returns the number deleted.</summary>
+        Task<int> DeleteUsageMetricsSnapshotsOlderThanAsync(string cutoffDate);
 
         // --- App Install Summaries ---
         Task<bool> StoreAppInstallSummaryAsync(AppInstallSummary summary);

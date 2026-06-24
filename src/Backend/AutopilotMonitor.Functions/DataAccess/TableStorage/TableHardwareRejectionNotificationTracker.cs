@@ -68,6 +68,43 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             }
         }
 
+        public async Task<int> DeleteOlderThanAsync(DateTime cutoffUtc)
+        {
+            try
+            {
+                // Rows are insert-once (AddEntityAsync, never updated), so FirstNotifiedAt == creation time.
+                // Pruning here resets the lifetime dedup for a given model: if the same model is rejected
+                // again after the cutoff, the bell fires once more — acceptable, since the portal only
+                // surfaces recent rejections anyway.
+                var filter = $"FirstNotifiedAt lt datetime'{cutoffUtc:yyyy-MM-ddTHH:mm:ss}Z'";
+                var query = _table.QueryAsync<TableEntity>(filter: filter, select: new[] { "PartitionKey", "RowKey" });
+
+                int deleted = 0;
+                await foreach (var entity in query)
+                {
+                    try
+                    {
+                        await _table.DeleteEntityAsync(entity.PartitionKey, entity.RowKey);
+                        deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete hardware-rejection tracker row {PK}/{RK}", entity.PartitionKey, entity.RowKey);
+                    }
+                }
+
+                if (deleted > 0)
+                    _logger.LogInformation("Deleted {Count} hardware-rejection tracker rows older than {Cutoff:yyyy-MM-dd}", deleted, cutoffUtc);
+
+                return deleted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete old hardware-rejection tracker rows");
+                return 0;
+            }
+        }
+
         internal static string BuildRowKey(string manufacturer, string model)
         {
             var mfr = (manufacturer ?? string.Empty).Trim().ToLowerInvariant();
