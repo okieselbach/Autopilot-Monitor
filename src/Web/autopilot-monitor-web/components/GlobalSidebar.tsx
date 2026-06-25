@@ -399,14 +399,18 @@ export function GlobalSidebar({ children }: { children: ReactNode }) {
   // Regular users see minimal nav. A read-only Global Reader has platform scope, and a delegated MSP admin
   // has fleet scope → both get the (group-filtered) nav rather than the minimal regular-user list.
   const isRegularUser = !isAdminOrOperator && !hasFleetScope;
+  // The Dashboard (own-tenant session list) is only meaningful for a genuine own-tenant/platform user.
+  // A delegated-only MSP admin has no own-tenant stake — /dashboard would just bounce them to /fleet —
+  // so hide the link for them; their entry point is the Fleet group.
+  const showDashboard = isAdminOrOperator || hasGlobalScope;
 
   const renderNavContent = (isMobile = false) => (
     <>
       {/* Global nav — only when authenticated */}
       {isAuthenticated && (
         <>
-          {/* Dashboard — hidden for regular users (no admin/operator access) */}
-          {!isRegularUser && (
+          {/* Dashboard — own-tenant session list; hidden for regular users AND delegated-only MSP admins */}
+          {showDashboard && (
             <ul className="space-y-0.5">
               {renderGlobalItem(DASHBOARD_ITEM)}
             </ul>
