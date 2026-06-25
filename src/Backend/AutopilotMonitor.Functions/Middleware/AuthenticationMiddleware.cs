@@ -95,13 +95,22 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
             var tenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
             var issuer = jwtToken.Issuer;
 
+            // Reject missing or non-GUID tenant IDs BEFORE building a tenant-specific authority.
+            // The tid here is unverified (signature is checked later), so a garbage value would
+            // otherwise drive an outbound OIDC-metadata fetch to a bogus authority — a DoS/cost
+            // surface on malformed-token floods. Every legitimate Entra token (including consumer
+            // MSA, tid 9188040d-…) carries a GUID tid, so this reject is loss-free.
+            if (!Guid.TryParse(tenantId, out _))
+            {
+                _logger.LogWarning("[Auth Middleware] Rejected token with missing/non-GUID tid for {Path}", requestPath);
+                throw new SecurityTokenValidationException("Token tid claim is missing or not a valid GUID");
+            }
+
             // Determine which endpoint to use based on the issuer (v1.0 vs v2.0)
             var isV1Token = issuer.Contains("sts.windows.net");
-            var tenantSpecificAuthority = tenantId != null
-                ? (isV1Token
-                    ? $"https://login.microsoftonline.com/{tenantId}"  // v1.0
-                    : $"https://login.microsoftonline.com/{tenantId}/v2.0")  // v2.0
-                : "https://login.microsoftonline.com/common/v2.0";
+            var tenantSpecificAuthority = isV1Token
+                ? $"https://login.microsoftonline.com/{tenantId}"  // v1.0
+                : $"https://login.microsoftonline.com/{tenantId}/v2.0";  // v2.0
 
             // Get or create cached configuration manager for this tenant
             IConfigurationManager<OpenIdConnectConfiguration>? tenantConfigManager = null;
@@ -152,7 +161,7 @@ public class AuthenticationMiddleware : IFunctionsWorkerMiddleware
                 throw new InvalidOperationException("Failed to get or create configuration manager");
             }
 
-            var openIdConfig = await tenantConfigManager.GetConfigurationAsync(CancellationToken.None);
+            var openIdConfig = await tenantConfigManager.GetConfigurationAsync(context.CancellationToken);
 
             // Set up token validation parameters with OIDC signing keys
             var validationParameters = new TokenValidationParameters
