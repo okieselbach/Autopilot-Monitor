@@ -68,7 +68,7 @@ export default function FleetPage() {
         <RollupTile label="Tenants" value={String(myTenants.length)} />
         <RollupTile label="Active sessions" value={String(rollup.activeCount)} />
         <RollupTile label="Failed" value={String(rollup.failedLastNDays)} tone={rollup.failedLastNDays > 0 ? "danger" : "default"} />
-        <RollupTile label="Success rate" value={`${rollup.successRatePct}%`} tone={successTone(rollup.successRatePct, rollup.totalLastNDays)} />
+        <RollupTile label="Success rate" value={`${rollup.successRatePct}%`} tone={successTone(rollup.successRatePct, rollup.succeededLastNDays + rollup.failedLastNDays)} />
       </div>
 
       {myTenants.length === 0 ? (
@@ -88,9 +88,13 @@ export default function FleetPage() {
 
 type Tone = "default" | "danger";
 
-/** Amber/red emphasis only once we actually have sessions to judge — an empty tenant isn't "failing". */
-function successTone(pct: number, total: number): Tone {
-  if (total === 0) return "default";
+/**
+ * Red emphasis only once there are TERMINAL sessions to judge — the success rate is terminal-only
+ * (succeeded / succeeded+failed), so a tenant with only active/pending sessions reads 0% but isn't
+ * "failing"; don't flag it.
+ */
+function successTone(pct: number, terminalCount: number): Tone {
+  if (terminalCount === 0) return "default";
   return pct < 80 ? "danger" : "default";
 }
 
@@ -123,7 +127,7 @@ function FleetCard({ tenant, summary }: { tenant: TenantInfo; summary?: FleetSum
         <Metric
           label="Success"
           value={summary ? `${summary.successRatePct}%` : "—"}
-          danger={!!summary && successTone(summary.successRatePct, summary.totalLastNDays) === "danger"}
+          danger={!!summary && successTone(summary.successRatePct, summary.succeededLastNDays + summary.failedLastNDays) === "danger"}
         />
       </div>
     </div>

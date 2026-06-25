@@ -37,16 +37,28 @@ describe("computeFleetRollup", () => {
     expect(r.failedLastNDays).toBe(2);
   });
 
-  it("weights the success rate by session volume, not by tenant", () => {
-    // A: 900/1000 = 90%, B: 0/10 = 0%. A naive average would be 45%; the weighted rate is 900/1010 ≈ 89.1%.
+  it("weights the success rate by terminal-session volume, not by tenant", () => {
+    // A: 900 succeeded / 100 failed = 90%, B: 0 succeeded / 10 failed = 0%. A naive average would be 45%;
+    // the weighted terminal rate is 900 / (900 + 100 + 10) = 900/1010 ≈ 89.1%.
     const r = computeFleetRollup([
-      summary({ totalLastNDays: 1000, succeededLastNDays: 900 }),
-      summary({ totalLastNDays: 10, succeededLastNDays: 0 }),
+      summary({ succeededLastNDays: 900, failedLastNDays: 100, totalLastNDays: 1000 }),
+      summary({ succeededLastNDays: 0, failedLastNDays: 10, totalLastNDays: 10 }),
     ]);
     expect(r.successRatePct).toBeCloseTo(89.1, 1);
   });
 
-  it("reports 0% success when the fleet has no sessions", () => {
+  it("excludes active/pending sessions from the success-rate denominator (terminal-only)", () => {
+    // Matches the per-tenant card / backend semantic: 90 succeeded, 10 failed, 900 active. The card shows
+    // 90/(90+10) = 90%; a total-based roll-up would wrongly show 90/1000 = 9%. Lock in terminal-only.
+    const r = computeFleetRollup([
+      summary({ succeededLastNDays: 90, failedLastNDays: 10, activeCount: 900, totalLastNDays: 1000 }),
+    ]);
+    expect(r.successRatePct).toBe(90);
+    expect(r.activeCount).toBe(900);
+    expect(r.totalLastNDays).toBe(1000);
+  });
+
+  it("reports 0% success when the fleet has no terminal sessions", () => {
     const r = computeFleetRollup([summary({ activeCount: 1 }), summary({})]);
     expect(r.totalLastNDays).toBe(0);
     expect(r.successRatePct).toBe(0);
