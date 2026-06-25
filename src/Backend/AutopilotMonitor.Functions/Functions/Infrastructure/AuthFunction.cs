@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Net;
 using AutopilotMonitor.Functions.Extensions;
 using AutopilotMonitor.Functions.Security;
@@ -20,6 +21,7 @@ public class AuthFunction
 {
     private readonly ILogger<AuthFunction> _logger;
     private readonly GlobalAdminService _globalAdminService;
+    private readonly DelegatedAdminService _delegatedAdminService;
     private readonly TenantConfigurationService _tenantConfigService;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly IMetricsRepository _metricsRepo;
@@ -31,6 +33,7 @@ public class AuthFunction
     public AuthFunction(
         ILogger<AuthFunction> logger,
         GlobalAdminService globalAdminService,
+        DelegatedAdminService delegatedAdminService,
         TenantConfigurationService tenantConfigService,
         TenantAdminsService tenantAdminsService,
         IMetricsRepository metricsRepo,
@@ -41,6 +44,7 @@ public class AuthFunction
     {
         _logger = logger;
         _globalAdminService = globalAdminService;
+        _delegatedAdminService = delegatedAdminService;
         _tenantConfigService = tenantConfigService;
         _tenantAdminsService = tenantAdminsService;
         _metricsRepo = metricsRepo;
@@ -87,18 +91,22 @@ public class AuthFunction
         // This is intentional — all 6 queries are required for the auth decision.
         var tenantConfigTask = _tenantConfigService.GetConfigurationAsync(tenantId);
         var globalRoleTask = _globalAdminService.GetGlobalRoleAsync(upn);
+        var delegatedScopeTask = _delegatedAdminService.GetScopeAsync(upn);
         var isApprovedTask = _previewWhitelistService.IsApprovedAsync(tenantId);
         var membershipTask = _tenantAdminsService.GetTableMembershipAsync(tenantId, upn);
         var mcpCheckTask = _mcpUserService.IsAllowedAsync(upn);
         var existingAdminsTask = _tenantAdminsService.GetTenantAdminsAsync(tenantId);
 
-        await Task.WhenAll(tenantConfigTask, globalRoleTask, isApprovedTask,
+        await Task.WhenAll(tenantConfigTask, globalRoleTask, delegatedScopeTask, isApprovedTask,
                            membershipTask, mcpCheckTask, existingAdminsTask);
 
         var tenantConfig = tenantConfigTask.Result;
         var globalRole = globalRoleTask.Result;
         var isGlobalAdmin = globalRole == Constants.GlobalRoles.GlobalAdmin;
         var isGlobalReader = globalRole == Constants.GlobalRoles.GlobalReader;
+        // The tenants this caller manages as a delegated ("MSP") admin (empty for non-delegated users).
+        // Surfaced to the web app so it can show fleet/switcher UI and bound it to this set.
+        var delegatedTenantIds = delegatedScopeTask.Result.TenantIds;
         var isApproved = isApprovedTask.Result;
         var (tableState, tableRole) = membershipTask.Result;
         var mcpCheck = mcpCheckTask.Result;
@@ -118,7 +126,8 @@ public class AuthFunction
         var decision = BuildAuthResult(
             tenantConfig, isGlobalAdmin, isGlobalReader, isApproved,
             memberRole, mcpCheck, existingAdmins.Count > 0,
-            tenantId, upn, displayName ?? string.Empty, objectId ?? string.Empty);
+            tenantId, upn, displayName ?? string.Empty, objectId ?? string.Empty,
+            delegatedTenantIds);
 
         if (!decision.IsSuccess)
         {
@@ -346,8 +355,14 @@ public class AuthFunction
         MemberRoleInfo? memberRole,
         McpAccessCheckResult mcpCheck,
         bool hasTenantAdmins,
-        string tenantId, string upn, string displayName, string objectId)
+        string tenantId, string upn, string displayName, string objectId,
+        IReadOnlyCollection<string>? delegatedTenantIds = null)
     {
+        // A delegated ("MSP") admin manages a subset of OTHER tenants. They are explicitly authorized, so —
+        // like a Global Admin / Reader — they bypass the private-preview gate even when their own home tenant
+        // is not on the waitlist. Empty/null for non-delegated callers.
+        var managedTenantIds = delegatedTenantIds ?? System.Array.Empty<string>();
+        var isDelegated = managedTenantIds.Count > 0;
         // Gate 1: Suspended tenant
         if (tenantConfig.IsCurrentlyDisabled())
         {
@@ -362,8 +377,8 @@ public class AuthFunction
             });
         }
 
-        // Gate 2: Preview gate (platform roles — GlobalAdmin and read-only GlobalReader — bypass)
-        if (!isGlobalAdmin && !isGlobalReader && !isPreviewApproved)
+        // Gate 2: Preview gate (platform roles — GlobalAdmin / GlobalReader — and delegated MSP admins bypass)
+        if (!isGlobalAdmin && !isGlobalReader && !isDelegated && !isPreviewApproved)
         {
             return AuthDecisionResult.Blocked(HttpStatusCode.Forbidden, new
             {
@@ -402,6 +417,10 @@ public class AuthFunction
             isGlobalAdmin,
             isGlobalReader,
             isTenantAdmin,
+            // Delegated ("MSP") scope: the OTHER tenants this caller may manage (read-only this phase) and a
+            // convenience flag. The web app uses these for fleet/switcher UI, bounded to this set.
+            isDelegated,
+            delegatedTenantIds = managedTenantIds,
             role,
             canManageBootstrapTokens,
             hasMcpAccess = mcpCheck.IsAllowed,
