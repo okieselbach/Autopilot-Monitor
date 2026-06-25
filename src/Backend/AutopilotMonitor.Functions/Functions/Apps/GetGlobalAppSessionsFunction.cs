@@ -75,7 +75,7 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                     "Global apps/{App}/sessions requested (user: {User}, tenantId: {TenantId})",
                     decodedAppName, userEmail, scopedTenantId ?? "<all>");
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, scopedTenantId);
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, scopedTenantId, days);
                 var body = await AppsAnalyticsHelper.BuildSessionsResponseAsync(
                     summaries, _sessionRepo, decodedAppName, days,
                     statusFilter, modelFilter, versionFilter, offset, limit);

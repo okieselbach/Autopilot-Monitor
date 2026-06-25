@@ -50,7 +50,7 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                 if (int.TryParse(query["days"], out var parsedDays) && parsedDays > 0 && parsedDays <= 365)
                     days = parsedDays;
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId);
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId, days);
                 var body = await AppsAnalyticsHelper.BuildAnalyticsResponseAsync(
                     summaries, _sessionRepo, decodedAppName, days);
 

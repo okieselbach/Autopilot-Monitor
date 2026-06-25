@@ -35,11 +35,11 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         public Task<bool> StoreAppInstallSummaryAsync(AppInstallSummary summary)
             => _storage.StoreAppInstallSummaryAsync(summary);
 
-        public Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId)
-            => _storage.GetAppInstallSummariesByTenantAsync(tenantId);
+        public Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId, DateTime? sinceUtc = null)
+            => _storage.GetAppInstallSummariesByTenantAsync(tenantId, sinceUtc);
 
-        public Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync()
-            => _storage.GetAllAppInstallSummariesAsync();
+        public Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync(DateTime? sinceUtc = null)
+            => _storage.GetAllAppInstallSummariesAsync(sinceUtc);
 
         public Task<PlatformStats?> GetPlatformStatsAsync()
             => _storage.GetPlatformStatsAsync();

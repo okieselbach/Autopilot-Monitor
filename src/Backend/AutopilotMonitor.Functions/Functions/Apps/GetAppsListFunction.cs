@@ -46,7 +46,7 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                     return bad;
                 }
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId);
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId, days);
                 var body = AppsAnalyticsHelper.BuildAppsListResponse(
                     summaries, days, paging.PageSize, paging.Skip,
                     nextOffset => $"/api/apps/list?days={days}&pageSize={paging.PageSize}&skip={nextOffset}");

@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Threading;
 using AutopilotMonitor.Shared.DataAccess;
 using AutopilotMonitor.Shared.Models;
 
@@ -66,17 +67,55 @@ namespace AutopilotMonitor.Functions.Functions.Apps
 
         // ── Data loaders ────────────────────────────────────────────────────
 
+        /// <summary>Caps concurrent session point-reads in the device-model join so a wide app doesn't fan out hundreds of simultaneous Table reads.</summary>
+        private const int SessionJoinConcurrency = 10;
+
         /// <summary>
-        /// Loads app install summaries for the given scope.
+        /// Loads app install summaries for the given scope, scoped server-side to the last
+        /// <paramref name="days"/> days via a <c>StartedAt ge</c> filter (so a days=30 view does not
+        /// dematerialize the full StartedAt history). The cutoff is derived just before the in-memory
+        /// cutoff the Build* methods re-apply, so the server filter is never narrower than the in-memory
+        /// one — at worst it returns a few extra boundary rows that the in-memory filter trims.
         /// - tenantId != null → tenant-scoped (per-tenant endpoint or global admin viewing one tenant)
         /// - tenantId == null → all tenants (global admin aggregated view)
         /// </summary>
         public static async Task<List<AppInstallSummary>> LoadSummariesAsync(
-            IMetricsRepository repo, string? tenantId)
+            IMetricsRepository repo, string? tenantId, int days)
         {
+            var sinceUtc = DateTime.UtcNow.AddDays(-days);
             return string.IsNullOrEmpty(tenantId)
-                ? await repo.GetAllAppInstallSummariesAsync()
-                : await repo.GetAppInstallSummariesByTenantAsync(tenantId);
+                ? await repo.GetAllAppInstallSummariesAsync(sinceUtc)
+                : await repo.GetAppInstallSummariesByTenantAsync(tenantId, sinceUtc);
+        }
+
+        /// <summary>
+        /// Resolves the (TenantId, SessionId) → SessionSummary lookup used by the device-model join.
+        /// Point-reads run with bounded concurrency (<see cref="SessionJoinConcurrency"/>) rather than the
+        /// previous serial await-in-loop, which cost one sequential round-trip per distinct session.
+        /// Keys with an empty tenant or session id are skipped; misses (deleted session) are simply absent.
+        /// </summary>
+        private static async Task<Dictionary<string, SessionSummary>> LoadSessionLookupAsync(
+            ISessionRepository sessionRepo, IEnumerable<(string TenantId, string SessionId)> keys)
+        {
+            var distinct = keys
+                .Where(k => !string.IsNullOrEmpty(k.TenantId) && !string.IsNullOrEmpty(k.SessionId))
+                .Distinct()
+                .ToList();
+
+            using var gate = new SemaphoreSlim(SessionJoinConcurrency);
+            var tasks = distinct.Select(async key =>
+            {
+                await gate.WaitAsync();
+                try { return (key, sess: await sessionRepo.GetSessionAsync(key.TenantId, key.SessionId)); }
+                finally { gate.Release(); }
+            });
+
+            var results = await Task.WhenAll(tasks);
+
+            var lookup = new Dictionary<string, SessionSummary>();
+            foreach (var (key, sess) in results)
+                if (sess != null) lookup[$"{key.TenantId}|{key.SessionId}"] = sess;
+            return lookup;
         }
 
         // ── /apps/list ──────────────────────────────────────────────────────
@@ -308,14 +347,8 @@ namespace AutopilotMonitor.Functions.Functions.Apps
             // Device-model correlation: join via session lookup.
             // Global-admin (no tenant filter) summaries may span multiple tenants, so we use
             // each summary's own TenantId for the lookup instead of a single passed-in tenantId.
-            var distinctKeys = summaries.Select(s => (s.TenantId, s.SessionId)).Distinct().ToList();
-            var sessionLookup = new Dictionary<string, SessionSummary>();
-            foreach (var (tid, sid) in distinctKeys)
-            {
-                if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(sid)) continue;
-                var sess = await sessionRepo.GetSessionAsync(tid, sid);
-                if (sess != null) sessionLookup[$"{tid}|{sid}"] = sess;
-            }
+            var sessionLookup = await LoadSessionLookupAsync(
+                sessionRepo, summaries.Select(s => (s.TenantId, s.SessionId)));
 
             var deviceModelBreakdown = summaries
                 .Where(s => sessionLookup.ContainsKey($"{s.TenantId}|{s.SessionId}"))
@@ -411,14 +444,8 @@ namespace AutopilotMonitor.Functions.Functions.Apps
 
             // Batch-fetch sessions for device info. Uses each summary's TenantId so global-admin
             // aggregated view works correctly across tenants.
-            var distinctKeys = summaries.Select(s => (s.TenantId, s.SessionId)).Distinct().ToList();
-            var sessionLookup = new Dictionary<string, SessionSummary>();
-            foreach (var (tid, sid) in distinctKeys)
-            {
-                if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(sid)) continue;
-                var sess = await sessionRepo.GetSessionAsync(tid, sid);
-                if (sess != null) sessionLookup[$"{tid}|{sid}"] = sess;
-            }
+            var sessionLookup = await LoadSessionLookupAsync(
+                sessionRepo, summaries.Select(s => (s.TenantId, s.SessionId)));
 
             if (!string.IsNullOrWhiteSpace(modelFilter))
             {

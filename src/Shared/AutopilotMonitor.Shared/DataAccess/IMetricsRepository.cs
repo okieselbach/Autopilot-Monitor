@@ -21,8 +21,10 @@ namespace AutopilotMonitor.Shared.DataAccess
 
         // --- App Install Summaries ---
         Task<bool> StoreAppInstallSummaryAsync(AppInstallSummary summary);
-        Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId);
-        Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync();
+        /// <summary>Gets a tenant's app install summaries. Pass <paramref name="sinceUtc"/> to push the window's <c>StartedAt ge</c> filter server-side; null returns the full partition (legacy behaviour).</summary>
+        Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId, DateTime? sinceUtc = null);
+        /// <summary>Gets all tenants' app install summaries. Pass <paramref name="sinceUtc"/> to scope the (otherwise full-table) scan to the window; null returns everything (legacy behaviour).</summary>
+        Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync(DateTime? sinceUtc = null);
 
         // --- Platform Stats ---
         Task<PlatformStats?> GetPlatformStatsAsync();

@@ -32,7 +32,7 @@ public class SlaMetricsServiceTests
             .ReturnsAsync(sessions);
 
         var metricsRepo = new Mock<IMetricsRepository>();
-        metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(tenantId))
+        metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(tenantId, It.IsAny<DateTime?>()))
             .ReturnsAsync(appInstalls ?? new List<AppInstallSummary>());
 
         var configService = new Mock<TenantConfigurationService>(

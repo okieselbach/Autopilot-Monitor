@@ -57,7 +57,7 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                     return bad;
                 }
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, scopedTenantId);
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, scopedTenantId, days);
                 var tenantQs = string.IsNullOrEmpty(scopedTenantId) ? string.Empty : $"&tenantId={scopedTenantId}";
                 var body = AppsAnalyticsHelper.BuildAppsListResponse(
                     summaries, days, paging.PageSize, paging.Skip,

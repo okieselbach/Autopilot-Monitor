@@ -47,9 +47,11 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
                 var sessions = !string.IsNullOrWhiteSpace(tenantIdFilter)
                     ? await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1), tenantIdFilter)
                     : await _maintenanceRepo.GetSessionsByDateRangeAsync(cutoff, DateTime.UtcNow.AddDays(1));
+                // Push the window server-side so only in-window rows are deserialized. The in-memory
+                // Where below stays as the exact trim (the OData StartedAt filter is second-granular).
                 var allSummaries = !string.IsNullOrWhiteSpace(tenantIdFilter)
-                    ? await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantIdFilter)
-                    : await _metricsRepo.GetAllAppInstallSummariesAsync();
+                    ? await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantIdFilter, cutoff)
+                    : await _metricsRepo.GetAllAppInstallSummariesAsync(cutoff);
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 var result = GetGeographicMetricsFunction.ComputeGeographicMetrics(sessions, summaries, groupBy);

@@ -24,9 +24,9 @@ public class UsageMetricsServiceWindowTests
             .ReturnsAsync(new UserActivityMetrics());
         metricsRepo.Setup(r => r.GetAllUserActivityMetricsAsync())
             .ReturnsAsync(new UserActivityMetrics());
-        metricsRepo.Setup(r => r.GetAllAppInstallSummariesAsync())
+        metricsRepo.Setup(r => r.GetAllAppInstallSummariesAsync(It.IsAny<DateTime?>()))
             .ReturnsAsync(new List<AppInstallSummary>());
-        metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>()))
+        metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>(), It.IsAny<DateTime?>()))
             .ReturnsAsync(new List<AppInstallSummary>());
         metricsRepo.Setup(r => r.GetPlatformStatsAsync())
             .ReturnsAsync((PlatformStats?)null);

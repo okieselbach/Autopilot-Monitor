@@ -196,13 +196,13 @@ public class SlaTenantStatusLifecycleTests
             _sessionRepo.Setup(r => r.GetSessionsPageAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<string?>()))
                 .ReturnsAsync(new RawPage<SessionSummary>(new List<SessionSummary>(), null));
             // Default: no app installs
-            _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>()))
+            _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>(), It.IsAny<DateTime?>()))
                 .ReturnsAsync(new List<AppInstallSummary>());
         }
 
         public void SetAppInstalls(string tenantId, List<AppInstallSummary> apps)
         {
-            _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(tenantId)).ReturnsAsync(apps);
+            _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(tenantId, It.IsAny<DateTime?>())).ReturnsAsync(apps);
         }
 
         public void SetTenants(params TenantConfiguration[] tenants)
@@ -427,7 +427,7 @@ public class SlaTenantStatusLifecycleTests
         var opsSvc = new OpsEventService(opsRepo.Object, NullLogger<OpsEventService>.Instance, alertDispatch);
 
         var metricsRepo = new Mock<IMetricsRepository>();
-        metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>()))
+        metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>(), It.IsAny<DateTime?>()))
             .ReturnsAsync(new List<AppInstallSummary>());
         var svc = new SlaBreachEvaluationService(
             tenantConfigSvc, configRepoMock.Object, maintenanceRepo.Object, sessionRepo.Object,
@@ -862,7 +862,7 @@ public class SlaTenantStatusLifecycleTests
 
             _sessionRepo.Setup(r => r.GetSessionsPageAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int>(), It.IsAny<string?>()))
                 .ReturnsAsync(new RawPage<SessionSummary>(new List<SessionSummary>(), null));
-            _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>()))
+            _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(It.IsAny<string>(), It.IsAny<DateTime?>()))
                 .ReturnsAsync(new List<AppInstallSummary>());
         }
 
@@ -873,7 +873,7 @@ public class SlaTenantStatusLifecycleTests
             => _maintenanceRepo.Setup(r => r.GetSessionsByDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>(), tenantId)).ReturnsAsync(sessions);
 
         public void SetAppInstalls(string tenantId, List<AppInstallSummary> apps)
-            => _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(tenantId)).ReturnsAsync(apps);
+            => _metricsRepo.Setup(r => r.GetAppInstallSummariesByTenantAsync(tenantId, It.IsAny<DateTime?>())).ReturnsAsync(apps);
     }
 
     /// <summary>

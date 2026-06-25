@@ -328,16 +328,24 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all app install summaries for a tenant (fleet-level metrics)
+        /// Gets app install summaries for a tenant (fleet-level metrics). When <paramref name="sinceUtc"/>
+        /// is supplied, a server-side <c>StartedAt ge</c> filter is applied so a windowed view (e.g. the
+        /// app dashboard's days=30) does not dematerialize the tenant's entire StartedAt history. The
+        /// filter still scans the partition (no secondary index on StartedAt), but only the in-window rows
+        /// are deserialized and returned over the wire. <paramref name="sinceUtc"/> is a server-derived
+        /// DateTime (never caller-supplied text), so interpolating it into the OData filter is injection-safe.
         /// </summary>
-        public async Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId)
+        public async Task<List<AppInstallSummary>> GetAppInstallSummariesByTenantAsync(string tenantId, DateTime? sinceUtc = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
-                var query = tableClient.QueryAsync<TableEntity>(filter: $"PartitionKey eq '{tenantId}'");
+                var filter = $"PartitionKey eq '{tenantId}'";
+                if (sinceUtc.HasValue)
+                    filter += $" and StartedAt ge datetime'{sinceUtc.Value:yyyy-MM-ddTHH:mm:ss}Z'";
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
 
                 var summaries = new List<AppInstallSummary>();
                 await foreach (var entity in query)
@@ -355,14 +363,20 @@ namespace AutopilotMonitor.Functions.Services
         }
 
         /// <summary>
-        /// Gets all app install summaries across all tenants (for global admin mode)
+        /// Gets all app install summaries across all tenants (for global admin mode). When
+        /// <paramref name="sinceUtc"/> is supplied, a server-side <c>StartedAt ge</c> filter scopes the
+        /// (otherwise full-table) scan to the window so only in-window rows are deserialized.
+        /// <paramref name="sinceUtc"/> is server-derived, so interpolating it is injection-safe.
         /// </summary>
-        public async Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync()
+        public async Task<List<AppInstallSummary>> GetAllAppInstallSummariesAsync(DateTime? sinceUtc = null)
         {
             try
             {
                 var tableClient = _tableServiceClient.GetTableClient(Constants.TableNames.AppInstallSummaries);
-                var query = tableClient.QueryAsync<TableEntity>();
+                var filter = sinceUtc.HasValue
+                    ? $"StartedAt ge datetime'{sinceUtc.Value:yyyy-MM-ddTHH:mm:ss}Z'"
+                    : null;
+                var query = tableClient.QueryAsync<TableEntity>(filter: filter);
 
                 var summaries = new List<AppInstallSummary>();
                 await foreach (var entity in query)

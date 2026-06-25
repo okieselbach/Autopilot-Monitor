@@ -40,7 +40,9 @@ namespace AutopilotMonitor.Functions.Functions.Metrics
 
                 var cutoff = DateTime.UtcNow.AddDays(-days);
 
-                var allSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId);
+                // Push the window server-side so only in-window rows are deserialized. The in-memory
+                // Where below stays as the exact trim (the OData StartedAt filter is second-granular).
+                var allSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId, cutoff);
                 var summaries = allSummaries.Where(s => s.StartedAt >= cutoff).ToList();
 
                 // Aggregation (slowest/failing ranking + Delivery Optimization rollup) is shared

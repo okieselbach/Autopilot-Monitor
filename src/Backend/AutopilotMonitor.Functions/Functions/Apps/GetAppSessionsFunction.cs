@@ -64,7 +64,7 @@ namespace AutopilotMonitor.Functions.Functions.Apps
                 if (int.TryParse(query["limit"], out var parsedLimit) && parsedLimit > 0)
                     limit = Math.Min(parsedLimit, MaxLimit);
 
-                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId);
+                var summaries = await AppsAnalyticsHelper.LoadSummariesAsync(_metricsRepo, tenantId, days);
                 var body = await AppsAnalyticsHelper.BuildSessionsResponseAsync(
                     summaries, _sessionRepo, decodedAppName, days,
                     statusFilter, modelFilter, versionFilter, offset, limit);
