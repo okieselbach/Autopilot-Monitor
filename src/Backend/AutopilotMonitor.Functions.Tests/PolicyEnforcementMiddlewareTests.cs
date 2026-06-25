@@ -331,6 +331,39 @@ public class PolicyEnforcementMiddlewareTests
     }
 
     [Fact]
+    public async Task Delegated_SessionEvents_QueryParam_AllowedForAssignedTenant()
+    {
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        // The core MSP drill-in read: a managed tenant's session event timeline.
+        // GET sessions/{id}/events is MemberRead + QueryParam — reachable via the delegated scope.
+        var result = await h.Middleware.DecideAsync(
+            "GET", "/api/sessions/abc-123/events", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.True(result.Allowed);
+        Assert.Equal(TenantB, result.Context!.TargetTenantId);
+        Assert.True(result.Context!.IsDelegatedReader);
+    }
+
+    [Fact]
+    public async Task Delegated_SessionMutation_IsForbidden()
+    {
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB); // read-only over B
+
+        // A delegated reader must NOT mutate a managed tenant's session. POST sessions/{id}/mark-failed is
+        // TenantAdminOrGA — not a delegated read tier — so the read-only drill-in stays read-only.
+        var result = await h.Middleware.DecideAsync(
+            "POST", "/api/sessions/abc-123/mark-failed", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
     public async Task Delegated_CrossTenantRead_UnassignedTenant_HitsCrossTenantGate()
     {
         const string upn = "msp@partner.example";

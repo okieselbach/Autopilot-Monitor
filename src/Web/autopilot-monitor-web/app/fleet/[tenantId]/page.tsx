@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenantList } from "@/hooks/useTenantList";
 import { SessionStatusBadge } from "@/components/SessionStatusBadge";
@@ -30,9 +30,10 @@ function ArrowLeftIcon({ className = "h-4 w-4" }: { className?: string }) {
  * all-tenants path here. As client-side defense in depth we also refuse a tenantId the caller doesn't
  * manage (unless they hold full platform scope) BEFORE issuing any fetch.
  *
- * This is a recent-activity overview (stats + session list); deep session-detail drill-in is a follow-up —
- * it needs a `/api/global/sessions/{id}` (+ /events) endpoint, since the tenant-scoped `/api/sessions/{id}`
- * detail path is MemberRead-only and not reachable for a delegated, non-member caller.
+ * Stats + session list, and each row opens the full session-detail page for the managed tenant via
+ * `/sessions/{id}?tenantId=`. No new backend endpoint is needed: the detail reads are MemberRead + QueryParam,
+ * which the delegated scope already rescues; the detail page renders read-only for a delegated viewer
+ * (mutations hidden). Inspector stays Global-Admin-only.
  */
 export default function FleetTenantPage() {
   const params = useParams<{ tenantId: string }>();
@@ -127,7 +128,7 @@ export default function FleetTenantPage() {
                 No sessions in the last {DAYS} days.
               </div>
             ) : (
-              <SessionList sessions={sessions} hasMore={hasMore} />
+              <SessionList sessions={sessions} hasMore={hasMore} tenantId={tenantId} />
             )}
           </div>
         </>
@@ -176,9 +177,13 @@ function phaseLabel(phase: number): string {
   return PHASE_LABELS[phase] ?? "—";
 }
 
-/** Read-only session table for the drill-in. Rows are intentionally non-navigable until a global
- * session-detail endpoint exists (see page-level note). */
-function SessionList({ sessions, hasMore }: { sessions: Session[]; hasMore: boolean }) {
+/** Read-only session table for the drill-in. Rows open the full session-detail page for the managed tenant
+ * via `?tenantId=` — the backend serves the reads (MemberRead + delegated scope) and the detail page renders
+ * read-only for a delegated viewer (write actions hidden). */
+function SessionList({ sessions, hasMore, tenantId }: { sessions: Session[]; hasMore: boolean; tenantId: string }) {
+  const router = useRouter();
+  const open = (sessionId: string) =>
+    router.push(`/sessions/${sessionId}?tenantId=${encodeURIComponent(tenantId)}`);
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -195,7 +200,11 @@ function SessionList({ sessions, hasMore }: { sessions: Session[]; hasMore: bool
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
           {sessions.map((s) => (
-            <tr key={s.sessionId} className="text-sm">
+            <tr
+              key={s.sessionId}
+              onClick={() => open(s.sessionId)}
+              className="cursor-pointer text-sm hover:bg-gray-50 dark:hover:bg-gray-700/40"
+            >
               <td className="px-5 py-3">
                 <div className="font-medium text-gray-900 dark:text-white">
                   {s.deviceName || s.serialNumber || "—"}
