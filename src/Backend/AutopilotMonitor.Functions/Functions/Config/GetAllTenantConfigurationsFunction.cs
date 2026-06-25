@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
@@ -6,6 +7,7 @@ using System.Web;
 using AutopilotMonitor.Functions.Helpers;
 using AutopilotMonitor.Functions.Pagination;
 using AutopilotMonitor.Functions.Services;
+using AutopilotMonitor.Shared.Models;
 using AutopilotMonitor.Shared.Pagination;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -58,15 +60,14 @@ namespace AutopilotMonitor.Functions.Functions.Config
                     // never writes a default row). exists==false drops any id with no config row.
                     var reads = await Task.WhenAll(requestCtx.AllowedTenantIds.Select(async tid =>
                         await _configService.TryGetConfigurationAsync(tid)));
-                    var subset = reads.Where(r => r.exists).Select(r => r.config).ToList();
+                    var subset = ExistingManagedConfigs(reads);
                     _logger.LogInformation("GetAllTenantConfigurations (delegated subset, {Count} tenants) by {User}",
                         subset.Count, userIdentifier);
 
                     if (parsed.PageSize == null)
                     {
-                        var redacted = subset.Select(c => c.RedactedCopyForReader()).ToList();
                         var resp = req.CreateResponse(HttpStatusCode.OK);
-                        await resp.WriteAsJsonAsync(redacted);
+                        await resp.WriteAsJsonAsync(DelegatedBareArrayView(subset));
                         return resp;
                     }
 
@@ -149,5 +150,24 @@ namespace AutopilotMonitor.Functions.Functions.Config
                 return response;
             }
         }
+
+        /// <summary>
+        /// From the per-tenant point-read results, keep only the managed tenants that actually HAVE a config
+        /// row (exists). A delegated caller's AllowedTenantIds is the authoritative bound; an id with no row
+        /// (offboarded / never onboarded) is silently dropped rather than surfaced as an empty default.
+        /// Pure + testable seam (handler HTTP entry is not unit-tested — see GetAllBlockedDevicesFunctionTests).
+        /// </summary>
+        internal static List<TenantConfiguration> ExistingManagedConfigs(
+            IEnumerable<(TenantConfiguration config, bool exists)> reads)
+            => reads.Where(r => r.exists).Select(r => r.config).ToList();
+
+        /// <summary>
+        /// The delegated bare-array view of config/all: every managed-tenant config with its secrets
+        /// (SAS / webhook URLs / custom headers) redacted. A delegated admin is never a Global Admin, so it
+        /// must NEVER receive unredacted secrets for a tenant it merely manages. Pure + testable.
+        /// </summary>
+        internal static List<TenantConfiguration> DelegatedBareArrayView(
+            IEnumerable<TenantConfiguration> existingManaged)
+            => existingManaged.Select(c => c.RedactedCopyForReader()).ToList();
     }
 }
