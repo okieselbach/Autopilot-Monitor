@@ -44,7 +44,9 @@ export function useTenantSessions(tenantId: string, days: number): TenantSession
     }
 
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true, error: false }));
+    // Clear rows on every new tenant fetch — otherwise navigating A→B briefly renders A's sessions under
+    // B's heading until B's request lands (both in scope, so not a leak, but misleading in the drill-in).
+    setState({ sessions: [], loading: true, hasMore: false, error: false });
 
     const run = async () => {
       try {
