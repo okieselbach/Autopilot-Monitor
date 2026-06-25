@@ -25,17 +25,20 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly ILogger<PolicyEnforcementMiddleware> _logger;
     private readonly GlobalAdminService _globalAdminService;
+    private readonly DelegatedAdminService _delegatedAdminService;
     private readonly TenantAdminsService _tenantAdminsService;
     private readonly TenantConfigurationService _tenantConfigService;
 
     public PolicyEnforcementMiddleware(
         ILogger<PolicyEnforcementMiddleware> logger,
         GlobalAdminService globalAdminService,
+        DelegatedAdminService delegatedAdminService,
         TenantAdminsService tenantAdminsService,
         TenantConfigurationService tenantConfigService)
     {
         _logger = logger;
         _globalAdminService = globalAdminService;
+        _delegatedAdminService = delegatedAdminService;
         _tenantAdminsService = tenantAdminsService;
         _tenantConfigService = tenantConfigService;
     }
@@ -123,64 +126,68 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
 
         var decision = await EvaluateCatalogPolicyAsync(principal, catalogEntry);
 
-        if (!decision.IsAllowed)
-        {
-            var status = decision.Reason is "NoJWT" or "MissingClaims"
-                ? HttpStatusCode.Unauthorized
-                : HttpStatusCode.Forbidden;
-            var (code, message) = status == HttpStatusCode.Unauthorized
-                ? ("AuthenticationRequired", "Authentication required. Please provide a valid JWT token.")
-                : ("InsufficientPermissions", "Access denied. You do not have permission to access this resource.");
-            return PolicyResult.Deny((int)status, code, message, decision.UserIdentifier, decision.UserRole, decision.Reason);
-        }
-
         var jwtTenantId = principal?.GetTenantId() ?? string.Empty;
-        var isGlobalAdmin = decision.UserRole == Constants.GlobalRoles.GlobalAdmin;
-        var isGlobalReader = decision.UserRole == Constants.GlobalRoles.GlobalReader;
+        var upn = principal?.GetUserPrincipalName();
+        var isGlobalAdmin = decision.IsAllowed && decision.UserRole == Constants.GlobalRoles.GlobalAdmin;
+        var isGlobalReader = decision.IsAllowed && decision.UserRole == Constants.GlobalRoles.GlobalReader;
         // Platform-wide read scope (GA or Reader) governs cross-tenant visibility; write power is GA only.
         var hasGlobalScope = isGlobalAdmin || isGlobalReader;
-        var targetTenantId = jwtTenantId; // default: JWT tenant
 
-        // Cross-tenant enforcement for routes with {tenantId} in the URL
-        if (catalogEntry.TenantScoping == TenantScoping.RouteParam)
+        // Resolve the target tenant for tenant-scoped routes ({tenantId} in path, or ?tenantId= query).
+        // crossTenant = the route names a tenant OTHER than the caller's JWT tenant.
+        var (targetTenantId, namedTarget) = ResolveTarget(catalogEntry, requestPath, queryTenantId, jwtTenantId);
+        var crossTenant = namedTarget != null
+            && !string.Equals(namedTarget, jwtTenantId, StringComparison.OrdinalIgnoreCase);
+
+        // Delegated ("scoped global" / MSP) resolution. A delegated admin reaches a SUBSET of tenants —
+        // ONLY on tenant-scoped read routes where the named target is in its scope. We resolve lazily:
+        // skip when the caller already has full platform scope, is anonymous, or the request is not a
+        // cross-tenant scoped route (own-tenant + non-scoped routes never need a delegated grant). This
+        // keeps the common authenticated path free of the extra table read.
+        string? delegatedRole = null;
+        IReadOnlyCollection<string>? allowedTenantIds = null;
+        var isScopedRoute = catalogEntry.TenantScoping is TenantScoping.RouteParam or TenantScoping.QueryParam;
+        if (!hasGlobalScope && !string.IsNullOrEmpty(upn) && isScopedRoute && crossTenant)
         {
-            var normalizedPath = requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
-                ? requestPath.Substring(5)
-                : requestPath;
-            var match = catalogEntry.RouteRegex.Match(normalizedPath);
-            var routeTenantId = match.Groups["tenantId"].Value;
+            var scope = await _delegatedAdminService.GetScopeAsync(upn);
+            delegatedRole = scope.RoleFor(namedTarget);
+            if (delegatedRole != null)
+                allowedTenantIds = scope.TenantIds;
+        }
+        // A delegated grant only applies to the READ tiers — never to write tiers (TenantAdminOrGA,
+        // GlobalAdminOnly, …). This is the single fact that keeps delegation read-only in this phase and
+        // prevents a delegated READER from crossing into a write on a tenant they merely read.
+        var delegatedGrantsRead = delegatedRole != null && IsDelegatedReadTier(catalogEntry.Policy);
 
-            if (!string.IsNullOrEmpty(routeTenantId))
+        // Policy-tier admission. If the evaluator denied a delegated-only caller (no own-tenant membership,
+        // no platform role) but they ARE a delegated reader of this read route's target, rescue the denial.
+        if (!decision.IsAllowed)
+        {
+            if (delegatedGrantsRead)
             {
-                targetTenantId = routeTenantId;
-
-                if (!hasGlobalScope && !string.Equals(routeTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access: user={User} jwtTenant={JwtTenant} routeTenant={RouteTenant} path={Path}",
-                        decision.UserIdentifier, jwtTenantId, routeTenantId, requestPath);
-                    return PolicyResult.Deny((int)HttpStatusCode.Forbidden, "CrossTenantAccessDenied",
-                        "Access denied. You can only access your own tenant's resources.",
-                        decision.UserIdentifier, decision.UserRole, "CrossTenantRoute");
-                }
+                decision = CatalogDecisionResult.Allow(decision.UserIdentifier, Constants.DelegatedRoles.DelegatedReader, "DelegatedScope");
+            }
+            else
+            {
+                var status = decision.Reason is "NoJWT" or "MissingClaims"
+                    ? HttpStatusCode.Unauthorized
+                    : HttpStatusCode.Forbidden;
+                var (code, message) = status == HttpStatusCode.Unauthorized
+                    ? ("AuthenticationRequired", "Authentication required. Please provide a valid JWT token.")
+                    : ("InsufficientPermissions", "Access denied. You do not have permission to access this resource.");
+                return PolicyResult.Deny((int)status, code, message, decision.UserIdentifier, decision.UserRole, decision.Reason);
             }
         }
 
-        // Cross-tenant enforcement for routes with optional ?tenantId= query parameter
-        if (catalogEntry.TenantScoping == TenantScoping.QueryParam)
+        // Cross-tenant enforcement: a caller may reach a tenant other than its own ONLY with full platform
+        // scope OR a delegated READ grant for that exact target. Applies to RouteParam/QueryParam routes.
+        if (crossTenant && !hasGlobalScope && !delegatedGrantsRead)
         {
-            if (!string.IsNullOrWhiteSpace(queryTenantId))
-            {
-                targetTenantId = queryTenantId;
-
-                if (!hasGlobalScope && !string.Equals(queryTenantId, jwtTenantId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access (query): user={User} jwtTenant={JwtTenant} queryTenant={QueryTenant} path={Path}",
-                        decision.UserIdentifier, jwtTenantId, queryTenantId, requestPath);
-                    return PolicyResult.Deny((int)HttpStatusCode.Forbidden, "CrossTenantAccessDenied",
-                        "Access denied. You can only access your own tenant's resources.",
-                        decision.UserIdentifier, decision.UserRole, "CrossTenantQuery");
-                }
-            }
+            _logger.LogWarning("[PolicyEnforcement] BLOCKED cross-tenant access: user={User} jwtTenant={JwtTenant} target={Target} scoping={Scoping} path={Path}",
+                decision.UserIdentifier, jwtTenantId, namedTarget, catalogEntry.TenantScoping, requestPath);
+            return PolicyResult.Deny((int)HttpStatusCode.Forbidden, "CrossTenantAccessDenied",
+                "Access denied. You can only access your own tenant's resources.",
+                decision.UserIdentifier, decision.UserRole, "CrossTenant");
         }
 
         var requestContext = new RequestContext
@@ -190,6 +197,11 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
             UserPrincipalName = decision.UserIdentifier,
             IsGlobalAdmin = isGlobalAdmin,
             IsGlobalReader = isGlobalReader,
+            // Delegated flags reflect the caller's role for THIS request's target (null unless a delegated
+            // grant applied). Phase 1: both confer read only — no write tier admits a delegated caller.
+            IsDelegatedReader = delegatedRole == Constants.DelegatedRoles.DelegatedReader,
+            IsDelegatedAdmin = delegatedRole == Constants.DelegatedRoles.DelegatedAdmin,
+            AllowedTenantIds = allowedTenantIds,
             // Additive: a caller's tenant-admin status is its OWN-TENANT role, independent of any
             // platform role. Evaluators that admit via a platform-role branch still surface the
             // resolved tenant role on decision.TenantRole; pure-tenant branches leave it null and
@@ -200,6 +212,40 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
 
         return PolicyResult.Allow(requestContext, decision.UserIdentifier, decision.UserRole);
     }
+
+    /// <summary>
+    /// Resolves the request's target tenant. Returns the effective TargetTenantId (defaults to the JWT
+    /// tenant) and the explicitly-named tenant from the route/query (null when the route does not name one,
+    /// so the caller can distinguish "no target named" from "target == own tenant"). Pure — no auth.
+    /// </summary>
+    private static (string targetTenantId, string? namedTarget) ResolveTarget(
+        EndpointPolicyEntry catalogEntry, string requestPath, string? queryTenantId, string jwtTenantId)
+    {
+        if (catalogEntry.TenantScoping == TenantScoping.RouteParam)
+        {
+            var normalizedPath = requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
+                ? requestPath.Substring(5)
+                : requestPath;
+            var routeTenantId = catalogEntry.RouteRegex.Match(normalizedPath).Groups["tenantId"].Value;
+            if (!string.IsNullOrEmpty(routeTenantId))
+                return (routeTenantId, routeTenantId);
+        }
+        else if (catalogEntry.TenantScoping == TenantScoping.QueryParam && !string.IsNullOrWhiteSpace(queryTenantId))
+        {
+            return (queryTenantId, queryTenantId);
+        }
+
+        return (jwtTenantId, null);
+    }
+
+    /// <summary>
+    /// The READ policy tiers a delegated (scoped-global / MSP) assignment may satisfy for a tenant in its
+    /// scope. Deliberately excludes every write tier (TenantAdminOrGA, BootstrapManagerOrGA, GlobalAdminOnly)
+    /// and the cross-tenant aggregate tier (GlobalReadOrAdmin — its endpoints fan out over ALL tenants and
+    /// are only safe for delegated callers once bounded to AllowedTenantIds; that bounding lands in Phase 2).
+    /// </summary>
+    private static bool IsDelegatedReadTier(EndpointPolicy policy)
+        => policy is EndpointPolicy.MemberRead or EndpointPolicy.TenantAdminOrGlobalReader;
 
     private async Task<CatalogDecisionResult> EvaluateCatalogPolicyAsync(
         ClaimsPrincipal? principal, EndpointPolicyEntry entry)

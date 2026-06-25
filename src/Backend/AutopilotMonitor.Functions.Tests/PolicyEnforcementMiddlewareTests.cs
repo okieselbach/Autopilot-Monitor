@@ -43,24 +43,42 @@ public class PolicyEnforcementMiddlewareTests
                     Role = Constants.TenantRoles.Admin,
                     IsEnabled = true,
                 });
+
+        /// <summary>Grants the caller a delegated assignment over <paramref name="tenantId"/> at the given role.</summary>
+        public void AsDelegated(string tenantId, string role = Constants.DelegatedRoles.DelegatedReader) =>
+            Repo.Setup(r => r.GetDelegatedTenantsAsync(It.IsAny<string>()))
+                .ReturnsAsync(new List<DelegatedAdminEntry>
+                {
+                    new()
+                    {
+                        TenantId = tenantId.ToLowerInvariant(),
+                        Role = role,
+                        IsEnabled = true,
+                        Status = Constants.DelegatedStatus.Active,
+                        Source = Constants.DelegatedSource.OperatorGranted,
+                    },
+                });
     }
 
     private static Harness BuildHarness()
     {
         var repo = new Mock<IAdminRepository>();
-        // Defaults: no platform role, no tenant membership. Tests override per-case.
+        // Defaults: no platform role, no tenant membership, no delegated assignments. Tests override per-case.
         repo.Setup(r => r.GetGlobalRoleAsync(It.IsAny<string>())).ReturnsAsync((string?)null);
         repo.Setup(r => r.GetTenantMemberAsync(It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync((TenantMember?)null);
+        repo.Setup(r => r.GetDelegatedTenantsAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<DelegatedAdminEntry>());
 
         var cache = new MemoryCache(new MemoryCacheOptions());
         var globalAdmin = new GlobalAdminService(repo.Object, cache, NullLogger<GlobalAdminService>.Instance);
+        var delegatedAdmin = new DelegatedAdminService(repo.Object, cache, NullLogger<DelegatedAdminService>.Instance);
         var tenantAdmins = new TenantAdminsService(repo.Object, cache, NullLogger<TenantAdminsService>.Instance);
         var tenantConfig = new TenantConfigurationService(
             Mock.Of<IConfigRepository>(), NullLogger<TenantConfigurationService>.Instance, cache);
 
         var mw = new PolicyEnforcementMiddleware(
-            NullLogger<PolicyEnforcementMiddleware>.Instance, globalAdmin, tenantAdmins, tenantConfig);
+            NullLogger<PolicyEnforcementMiddleware>.Instance, globalAdmin, delegatedAdmin, tenantAdmins, tenantConfig);
 
         return new Harness { Middleware = mw, Repo = repo };
     }
@@ -261,5 +279,123 @@ public class PolicyEnforcementMiddlewareTests
         Assert.False(result.Allowed);
         Assert.Equal(403, result.StatusCode);
         Assert.Equal("Forbidden", result.ErrorCode);
+    }
+
+    // ── Delegated admin ("scoped global" / MSP): reads a SUBSET of tenants ──────────
+    // A delegated reader signs into their OWN home tenant (TenantA) but manages TenantB.
+
+    [Fact]
+    public async Task Delegated_CrossTenantRead_RouteParam_AllowedForAssignedTenant()
+    {
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB); // delegated reader of B; NOT a member of A, no global role
+
+        // GET config/{B} is TenantAdminOrGlobalReader + RouteParam — a delegated read tier.
+        var result = await h.Middleware.DecideAsync("GET", $"/api/config/{TenantB}", null, AuthedPrincipal(TenantA, upn));
+
+        Assert.True(result.Allowed);
+        var rc = result.Context!;
+        Assert.Equal(TenantB, rc.TargetTenantId);
+        Assert.True(rc.IsDelegatedReader);
+        Assert.True(rc.IsDelegated);
+        Assert.True(rc.HasFleetScope);
+        Assert.False(rc.IsGlobalReader);   // delegated is NOT platform scope
+        Assert.False(rc.IsTenantAdmin);    // no own-tenant admin ⇒ config GET redacts secrets for them
+        Assert.Contains(TenantB.ToLowerInvariant(), rc.AllowedTenantIds!);
+    }
+
+    [Fact]
+    public async Task Delegated_CrossTenantRead_QueryParam_AllowedForAssignedTenant()
+    {
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        // GET sessions/{id} is MemberRead + QueryParam — the function reads ?tenantId=.
+        var result = await h.Middleware.DecideAsync(
+            "GET", "/api/sessions/abc-123", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.True(result.Allowed);
+        Assert.Equal(TenantB, result.Context!.TargetTenantId);
+        Assert.True(result.Context!.IsDelegatedReader);
+    }
+
+    [Fact]
+    public async Task Delegated_CrossTenantRead_UnassignedTenant_HitsCrossTenantGate()
+    {
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);        // delegated to B only
+        h.AsTenantAdmin(TenantA, upn); // admin of own tenant A ⇒ passes the read tier…
+
+        // …but tries to cross into a THIRD tenant they were never assigned ⇒ blocked at the cross-tenant gate.
+        const string tenantC = "33333333-3333-3333-3333-333333333333";
+        var result = await h.Middleware.DecideAsync("GET", $"/api/config/{tenantC}", null, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+        Assert.Equal("CrossTenantAccessDenied", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Delegated_NonMember_UnassignedTenant_IsForbidden()
+    {
+        // A pure delegated admin of B (no own-tenant membership) hitting an unassigned tenant C is denied
+        // at the policy tier (not a member, not global, not delegated of C) — still 403, just earlier.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        const string tenantC = "33333333-3333-3333-3333-333333333333";
+        var result = await h.Middleware.DecideAsync("GET", $"/api/config/{tenantC}", null, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegated_WriteRoute_OnAssignedTenant_IsForbidden()
+    {
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB, Constants.DelegatedRoles.DelegatedAdmin); // even a DelegatedAdmin row…
+
+        // PUT config/{B} is TenantAdminOrGA (write). Phase 1: delegation never satisfies a write tier.
+        var result = await h.Middleware.DecideAsync("PUT", $"/api/config/{TenantB}", null, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegated_OwnHomeTenant_NonMember_IsStillForbidden()
+    {
+        // A delegated admin of B who is NOT a member of their own home tenant A must not gain read of A
+        // just by being a delegated admin of something else.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        // GET config/{A} — A is their JWT tenant, but they have no membership there.
+        var result = await h.Middleware.DecideAsync("GET", $"/api/config/{TenantA}", null, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegated_DoesNotReachAggregateGlobalEndpoint()
+    {
+        // Cross-tenant AGGREGATE endpoints (GlobalReadOrAdmin) fan out over ALL tenants and are not
+        // bounded to the delegated subset until Phase 2 — a delegated admin must NOT reach them yet.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        var result = await h.Middleware.DecideAsync("GET", "/api/global/sessions", null, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
     }
 }
