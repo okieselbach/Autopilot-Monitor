@@ -157,7 +157,10 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         // A delegated grant only applies to the READ tiers — never to write tiers (TenantAdminOrGA,
         // GlobalAdminOnly, …). This is the single fact that keeps delegation read-only in this phase and
         // prevents a delegated READER from crossing into a write on a tenant they merely read.
-        var delegatedGrantsRead = delegatedRole != null && IsDelegatedReadTier(catalogEntry.Policy);
+        // ExcludeDelegated routes (platform-operational GA/Reader-only reads whose {tenantId} template forces
+        // RouteParam) opt OUT of the delegated rescue entirely — the None-equivalent for a scoped route.
+        var delegatedGrantsRead = delegatedRole != null && IsDelegatedReadTier(catalogEntry.Policy)
+            && !catalogEntry.ExcludeDelegated;
 
         // Policy-tier admission. If the evaluator denied a delegated-only caller (no own-tenant membership,
         // no platform role) but they ARE a delegated reader of this read route's target, rescue the denial.
@@ -263,7 +266,12 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
     private static bool IsDelegatedReadTier(EndpointPolicy policy)
         => policy is EndpointPolicy.MemberRead
             or EndpointPolicy.TenantAdminOrGlobalReader
-            or EndpointPolicy.GlobalReadOrAdmin;
+            or EndpointPolicy.GlobalReadOrAdmin
+            // Subset-tier routes (global/sessions, global/stats/sessions) admit a delegated caller for the
+            // bounded AGGREGATE (no tenantId, handler bounds to AllowedTenantIds); the single-tenant ?tenantId=
+            // DRILL still flows through the scoped-route cross-tenant guard, which requires this tier to count
+            // as a delegated read tier so RoleFor(target) can rescue the cross-tenant block.
+            or EndpointPolicy.GlobalReadOrDelegatedSubset;
 
     private async Task<CatalogDecisionResult> EvaluateCatalogPolicyAsync(
         ClaimsPrincipal? principal, EndpointPolicyEntry entry)

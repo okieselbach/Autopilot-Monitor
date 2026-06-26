@@ -896,10 +896,26 @@ namespace AutopilotMonitor.Functions.Services
         /// Cross-tenant paged variant of <see cref="GetAllSessionsAsync"/>.
         /// <paramref name="tenantIdFilter"/> optionally restricts to one tenant.
         /// </summary>
+        /// <summary>
+        /// True when a BOUNDED (delegated/MSP) caller asks for a single-tenant drill that is OUTSIDE its
+        /// managed set. The middleware enforces the allow-list for a cross-tenant target, but NOT when
+        /// ?tenantId= equals the caller's own JWT tenant (crossTenant=false short-circuits the delegated
+        /// scoped-route check) — so the single-tenant drill in the repo must re-check the bound itself.
+        /// </summary>
+        private static bool DrillOutsideBound(IReadOnlyCollection<string>? allowedTenantIds, string? tenantIdFilter)
+            => allowedTenantIds != null
+                && !string.IsNullOrEmpty(tenantIdFilter)
+                && !new HashSet<string>(allowedTenantIds, StringComparer.OrdinalIgnoreCase).Contains(tenantIdFilter!);
+
         public async Task<RawPage<SessionSummary>> GetAllSessionsPageAsync(
-            string? tenantIdFilter, int? days, int pageSize, string? continuation)
+            string? tenantIdFilter, int? days, int pageSize, string? continuation,
+            IReadOnlyCollection<string>? allowedTenantIds = null)
         {
             if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            // Bounded (delegated) single-tenant drill outside the managed set → empty, never the per-tenant scan.
+            if (DrillOutsideBound(allowedTenantIds, tenantIdFilter))
+                return new RawPage<SessionSummary>(new List<SessionSummary>(), null);
 
             // When tenantIdFilter is set and is a valid tenantId, route through
             // the per-tenant SessionsIndex scan — natively-ordered, cheaper.
@@ -908,7 +924,7 @@ namespace AutopilotMonitor.Functions.Services
                 return await GetSessionsPageAsync(tenantIdFilter!, days, pageSize, continuation);
             }
 
-            var page = await FetchAllSessionsPageInternalAsync(maxResults: pageSize, cursor: continuation, days: days);
+            var page = await FetchAllSessionsPageInternalAsync(maxResults: pageSize, cursor: continuation, days: days, allowedTenantIds: allowedTenantIds);
             return new RawPage<SessionSummary>(page.Sessions, page.HasMore ? page.NextCursor : null);
         }
 
@@ -917,8 +933,13 @@ namespace AutopilotMonitor.Functions.Services
         /// <paramref name="tenantIdFilter"/> optionally restricts to a single tenant
         /// (routed through the per-tenant index for efficiency).
         /// </summary>
-        public async Task<List<SessionSummary>> GetAllSessionsAsync(string? tenantIdFilter = null, int? days = null)
+        public async Task<List<SessionSummary>> GetAllSessionsAsync(string? tenantIdFilter = null, int? days = null, IReadOnlyCollection<string>? allowedTenantIds = null)
         {
+            // Bounded (delegated) single-tenant drill outside the managed set → empty (covers stats too,
+            // which funnel through here). See DrillOutsideBound.
+            if (DrillOutsideBound(allowedTenantIds, tenantIdFilter))
+                return new List<SessionSummary>();
+
             if (!string.IsNullOrEmpty(tenantIdFilter))
             {
                 return await GetSessionsAsync(tenantIdFilter!, days);
@@ -928,7 +949,7 @@ namespace AutopilotMonitor.Functions.Services
             string? token = null;
             do
             {
-                var page = await GetAllSessionsPageAsync(tenantIdFilter: null, days, pageSize: 1000, continuation: token);
+                var page = await GetAllSessionsPageAsync(tenantIdFilter: null, days, pageSize: 1000, continuation: token, allowedTenantIds: allowedTenantIds);
                 all.AddRange(page.Items);
                 token = page.NextRawToken;
             } while (!string.IsNullOrEmpty(token));
@@ -953,11 +974,11 @@ namespace AutopilotMonitor.Functions.Services
         /// Cross-tenant variant. Routes through the per-tenant index when
         /// <paramref name="tenantIdFilter"/> is set (cheaper scan).
         /// </summary>
-        public async Task<SessionStats> GetAllSessionStatsAsync(string? tenantIdFilter, int days)
+        public async Task<SessionStats> GetAllSessionStatsAsync(string? tenantIdFilter, int days, IReadOnlyCollection<string>? allowedTenantIds = null)
         {
             if (days < 1) throw new ArgumentOutOfRangeException(nameof(days));
 
-            var sessions = await GetAllSessionsAsync(tenantIdFilter, days);
+            var sessions = await GetAllSessionsAsync(tenantIdFilter, days, allowedTenantIds);
             return AggregateSessionStats(sessions, days);
         }
 
@@ -1073,7 +1094,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <see cref="GetAllSessionsPageAsync"/> (single page).
         /// </summary>
         private async Task<(List<SessionSummary> Sessions, bool HasMore, string? NextCursor)> FetchAllSessionsPageInternalAsync(
-            int maxResults, string? cursor, int? days)
+            int maxResults, string? cursor, int? days, IReadOnlyCollection<string>? allowedTenantIds = null)
         {
             try
             {
@@ -1088,8 +1109,25 @@ namespace AutopilotMonitor.Functions.Services
                     tenantIds.Add(entity.PartitionKey);
                 }
 
+                // Delegated ("MSP") bound: restrict the cross-tenant fan-out to the caller's managed subset.
+                // This is the SAME per-tenant loop the Global Admin aggregate uses — only the tenant set
+                // shrinks, so the merge/cursor/pagination below stay identical. Comparison is case-insensitive
+                // because AllowedTenantIds is lowercased while the config PartitionKey casing is not guaranteed.
+                if (allowedTenantIds != null)
+                {
+                    var allowed = new HashSet<string>(allowedTenantIds, StringComparer.OrdinalIgnoreCase);
+                    tenantIds = tenantIds.Where(t => allowed.Contains(t)).ToList();
+                }
+
                 if (tenantIds.Count == 0 && string.IsNullOrEmpty(cursor))
                 {
+                    // A BOUNDED (delegated/MSP) request must NEVER fall back to the unbounded primary-table
+                    // scan: an empty allowed set (managed tenant has no config row, config momentarily empty,
+                    // or a casing mismatch) means "none of YOUR tenants" → empty page, not ALL tenants. The
+                    // primary-table fallback is only the GA all-tenants safety net for a fresh/empty config.
+                    if (allowedTenantIds != null)
+                        return (new List<SessionSummary>(), false, null);
+
                     var fallback = await FetchAllSessionsFromPrimaryTableInternalAsync(maxResults, days);
                     return (fallback.Sessions, fallback.HasMore, NextCursor: null);
                 }

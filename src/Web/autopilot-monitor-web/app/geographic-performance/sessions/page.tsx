@@ -9,6 +9,8 @@ import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { useAdminMode } from "@/hooks/useAdminMode";
 import { SessionStatusBadge } from "@/components/SessionStatusBadge";
+import { GlobalAdminBanner } from "@/components/GlobalAdminBanner";
+import { boundTenantToDelegatedScope } from "@/utils/delegatedScope";
 
 interface SessionSummary {
   sessionId: string;
@@ -90,15 +92,26 @@ function LocationSessionsContent() {
   const hasInitialFetch = useRef(false);
 
   const { tenantId } = useTenant();
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, user, hasGlobalScope } = useAuth();
 
   const { globalAdminMode } = useAdminMode();
+  // A cross-tenant caller deep-links the selected tenant via ?tenantId= (set by the geographic page for a
+  // GA override OR a delegated/MSP admin). Its presence — or GA mode — drives the cross-tenant endpoint;
+  // an empty tenantId in GA mode is the all-tenants aggregate.
+  const urlTenantId = searchParams.get("tenantId") || "";
+  const crossTenant = globalAdminMode || !!urlTenantId;
+  // Defense-in-depth: a delegated ("MSP") reader (no platform scope) may only drill a managed tenant. Bind
+  // the deep-linked tenant to the managed set before sending — an out-of-scope ?tenantId= degrades to the
+  // bounded aggregate (which the backend then denies for a delegated caller). crossTenant stays keyed on the
+  // raw presence so it never falls back to the caller's own-tenant endpoint.
+  const isDelegatedScope = !!user?.isDelegated && !hasGlobalScope;
+  const boundedTenantId = boundTenantToDelegatedScope(urlTenantId || undefined, isDelegatedScope, user?.delegatedTenantIds);
 
   const fetchSessions = useCallback(async () => {
     if (!locationKey) return;
     try {
-      const endpoint = globalAdminMode
-        ? api.metrics.globalGeographicSessions(Number(days), groupBy, locationKey)
+      const endpoint = crossTenant
+        ? api.metrics.globalGeographicSessions(Number(days), groupBy, locationKey, boundedTenantId)
         : api.metrics.geographicSessions(tenantId, Number(days), groupBy, locationKey);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
@@ -114,14 +127,14 @@ function LocationSessionsContent() {
     } finally {
       setLoading(false);
     }
-  }, [globalAdminMode, tenantId, getAccessToken, days, groupBy, locationKey]);
+  }, [crossTenant, boundedTenantId, tenantId, getAccessToken, days, groupBy, locationKey]);
 
   useEffect(() => {
-    if (!globalAdminMode && !tenantId) return;
+    if (!crossTenant && !tenantId) return;
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchSessions();
-  }, [tenantId, globalAdminMode, fetchSessions]);
+  }, [tenantId, crossTenant, fetchSessions]);
 
   const timeLabel = days === "7" ? "7 Days" : days === "30" ? "30 Days" : "90 Days";
 
@@ -159,6 +172,8 @@ function LocationSessionsContent() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
+        {/* Delegated ("MSP") admin: blue cross-tenant banner (GA gets the purple one below). */}
+        <GlobalAdminBanner show={isDelegatedScope} delegated subtitle="viewing one managed tenant" />
         {globalAdminMode && (
           <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">

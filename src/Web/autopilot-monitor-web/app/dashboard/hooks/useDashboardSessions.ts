@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { extractContinuation } from "@/lib/paginationLink";
 import { asGuidOrUndefined } from "@/utils/inputValidation";
+import { boundTenantToDelegatedScope } from "@/utils/delegatedScope";
 import type { NotificationType } from "@/contexts/NotificationContext";
 import type { Session } from "../types";
 
@@ -23,6 +24,8 @@ interface User {
   isTenantAdmin?: boolean;
   isGlobalAdmin?: boolean;
   isGlobalReader?: boolean;
+  isDelegated?: boolean;
+  delegatedTenantIds?: string[];
   role?: string | null;
 }
 
@@ -39,7 +42,17 @@ interface SignalRApi {
 interface UseDashboardSessionsParams {
   user: User | null | undefined;
   tenantId: string | null | undefined;
+  /**
+   * Cross-tenant mode: drives the `/global/sessions` endpoint choice + cross-tenant event acceptance.
+   * True for a real GA in GA mode AND for a delegated ("MSP") admin (whose aggregate the backend bounds
+   * to the managed subset). Named globalAdminMode for back-compat; see {@link joinGlobalAdmins}.
+   */
   globalAdminMode: boolean;
+  /**
+   * Whether to join the cross-tenant `global-admins` SignalR broadcast group. Real GA only — a delegated
+   * caller has no platform scope and would be rejected (403); they rely on the per-tenant reconnect refetch.
+   */
+  joinGlobalAdmins: boolean;
   tenantIdFilter: string;
   adminMode: boolean;
   getAccessToken: (forceRefresh?: boolean) => Promise<string | null>;
@@ -73,6 +86,7 @@ export function useDashboardSessions({
   user,
   tenantId,
   globalAdminMode,
+  joinGlobalAdmins,
   tenantIdFilter,
   adminMode,
   getAccessToken,
@@ -81,6 +95,8 @@ export function useDashboardSessions({
   signalR,
 }: UseDashboardSessionsParams): UseDashboardSessionsReturn {
   const { on, off, isConnected, joinGroup, leaveGroup } = signalR;
+  const joinGlobalAdminsRef = useRef(joinGlobalAdmins);
+  joinGlobalAdminsRef.current = joinGlobalAdmins;
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +111,13 @@ export function useDashboardSessions({
   globalAdminModeRef.current = globalAdminMode;
   const tenantIdRef = useRef(tenantId);
   tenantIdRef.current = tenantId;
+  // Delegated ("MSP") bound for the cross-tenant filter: a delegated reader (no platform scope) may only
+  // drill a managed tenant. Refs so the fetch closure reads live values without re-creating it (matches the
+  // other scope refs). isDelegatedScope excludes a delegated user who is ALSO GA/Reader (those are unbounded).
+  const isDelegatedScopeRef = useRef(false);
+  isDelegatedScopeRef.current = !!user?.isDelegated && !user?.isGlobalAdmin && !user?.isGlobalReader;
+  const delegatedTenantIdsRef = useRef<string[] | undefined>(undefined);
+  delegatedTenantIdsRef.current = user?.delegatedTenantIds;
 
   // Refs for fetch closures (refetch is called from various effects/handlers and should
   // always see current filter values without forcing dependency-driven recreation)
@@ -201,7 +224,11 @@ export function useDashboardSessions({
       // a loadMore-with-continuation always queries with the same filter scope the
       // continuation was issued for. globalTenantIdOverride wins (refetchWith path).
       const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : submittedTenantIdFilterRef.current.trim();
-      const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
+      // Defense-in-depth: a delegated caller must never request a tenant outside its managed set, even via a
+      // hand-crafted ?tenant= deep link or a free-typed GUID — drop it to the bounded aggregate. The backend
+      // bounds this too; this just keeps the client from ever asking for an unmanaged tenant.
+      const effectiveTenantFilter = boundTenantToDelegatedScope(
+        asGuidOrUndefined(rawFilter), isDelegatedScopeRef.current, delegatedTenantIdsRef.current);
       const pageSize = getInitialPageSize();
       const opts = loadMoreContinuation
         ? { pageSize, continuation: loadMoreContinuation }
@@ -351,7 +378,7 @@ export function useDashboardSessions({
 
   // Initial fetch — gated on user role + tenant readiness
   useEffect(() => {
-    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && !user.isGlobalReader && user.role !== "Operator") {
+    if (user && !user.isTenantAdmin && !user.isGlobalAdmin && !user.isGlobalReader && !user.isDelegated && user.role !== "Operator") {
       return; // regular users are redirected elsewhere; don't fetch
     }
     if (!globalAdminMode && !tenantId) return; // wait for real tenant ID
@@ -392,26 +419,28 @@ export function useDashboardSessions({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, tenantId]);
 
-  // Join/leave global-admins group when Global Admin mode changes
+  // Join/leave the cross-tenant global-admins broadcast group. Real GA only (joinGlobalAdmins) — a
+  // delegated ("MSP") caller has no platform scope and would be rejected (403); the dashboard still reads
+  // the bounded aggregate and recovers live state via the reconnect refetch above.
   useEffect(() => {
     if (!isConnected) return;
 
-    if (globalAdminMode) {
-      console.log("[Dashboard] Global Admin mode enabled: joining global-admins group");
+    if (joinGlobalAdmins) {
+      console.log("[Dashboard] joining global-admins group");
       joinGroup("global-admins");
     } else {
-      console.log("[Dashboard] Global Admin mode disabled: leaving global-admins group");
+      console.log("[Dashboard] leaving global-admins group");
       leaveGroup("global-admins");
     }
 
     return () => {
-      if (globalAdminMode) {
+      if (joinGlobalAdmins) {
         console.log("[Dashboard] Component unmounting: leaving global-admins group");
         leaveGroup("global-admins");
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, globalAdminMode]);
+  }, [isConnected, joinGlobalAdmins]);
 
   // SignalR listeners — re-register when connection cycles
   useEffect(() => {

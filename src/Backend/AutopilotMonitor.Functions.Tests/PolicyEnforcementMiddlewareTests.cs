@@ -427,19 +427,38 @@ public class PolicyEnforcementMiddlewareTests
     }
 
     [Fact]
-    public async Task Delegated_AggregateGlobalEndpoint_NoTenantId_IsForbidden()
+    public void GlobalSessions_IsBoundedSubsetTier()
     {
-        // The no-tenantId AGGREGATE path of a global endpoint fans out over ALL tenants. Even though
-        // global/sessions is QueryParam-scoped (Phase 2a), a delegated caller WITHOUT ?tenantId= resolves no
-        // target ⇒ no delegated grant ⇒ denied. Only the single-tenant (?tenantId=X) path is open to them.
+        // global/sessions + global/stats/sessions are GlobalReadOrDelegatedSubset (bounded aggregate for
+        // delegated) yet keep QueryParam scoping (single-tenant drill). config/all is the same tier sans drill.
+        foreach (var path in new[] { "/api/global/sessions", "/api/global/stats/sessions" })
+        {
+            var entry = EndpointAccessPolicyCatalog.FindPolicy("GET", path);
+            Assert.NotNull(entry);
+            Assert.Equal(EndpointPolicy.GlobalReadOrDelegatedSubset, entry!.Policy);
+            Assert.Equal(TenantScoping.QueryParam, entry.TenantScoping);
+        }
+    }
+
+    [Fact]
+    public async Task Delegated_GlobalSessions_NoTenantId_IsBoundedAggregate()
+    {
+        // global/sessions WITHOUT ?tenantId= is the BOUNDED aggregate for a delegated ("MSP") caller: the
+        // subset tier admits them and publishes the managed set on AllowedTenantIds, which the handler uses
+        // to restrict the cross-tenant fan-out to those tenants. (global/metrics/summary, still on the plain
+        // GlobalReadOrAdmin tier, stays forbidden without a tenantId — see Delegated_MetricsSummary_* below.)
         const string upn = "msp@partner.example";
         var h = BuildHarness();
         h.AsDelegated(TenantB);
 
         var result = await h.Middleware.DecideAsync("GET", "/api/global/sessions", null, AuthedPrincipal(TenantA, upn));
 
-        Assert.False(result.Allowed);
-        Assert.Equal(403, result.StatusCode);
+        Assert.True(result.Allowed);
+        var rc = result.Context!;
+        Assert.True(rc.IsDelegatedReader);
+        Assert.False(rc.IsGlobalReader);
+        Assert.NotNull(rc.AllowedTenantIds);
+        Assert.Contains(TenantB.ToLowerInvariant(), rc.AllowedTenantIds!);
     }
 
     [Fact]
@@ -526,6 +545,29 @@ public class PolicyEnforcementMiddlewareTests
     }
 
     [Fact]
+    public async Task Delegated_GlobalSessions_HomeTenantDrill_AdmittedButNotInAllowedSet()
+    {
+        // global/sessions?tenantId=<the caller's OWN JWT tenant> — crossTenant is false, so the delegated
+        // scoped-route check is skipped and the subset tier admits the caller. This is BY DESIGN (admit +
+        // publish AllowedTenantIds, handler bounds): the home tenant is NOT in AllowedTenantIds, so the repo
+        // (TableStorageService.DrillOutsideBound) returns empty. This test pins that contract so the bound is
+        // never silently widened to include the unmanaged home tenant. Covered end-to-end by
+        // DelegatedBoundedAggregateTests.BoundedDrill/Stats_UnmanagedTenant_*.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        var result = await h.Middleware.DecideAsync("GET", "/api/global/sessions", TenantA, AuthedPrincipal(TenantA, upn));
+
+        Assert.True(result.Allowed);
+        var rc = result.Context!;
+        Assert.True(rc.IsDelegatedReader);
+        Assert.NotNull(rc.AllowedTenantIds);
+        Assert.DoesNotContain(TenantA.ToLowerInvariant(), rc.AllowedTenantIds!);
+        Assert.Contains(TenantB.ToLowerInvariant(), rc.AllowedTenantIds!);
+    }
+
+    [Fact]
     public async Task Delegated_AggregateOnlyRoute_WithTenantId_StaysBlocked()
     {
         // global/presence is AGGREGATE-ONLY: its handler ignores ?tenantId= and returns ALL tenants'
@@ -539,6 +581,107 @@ public class PolicyEnforcementMiddlewareTests
 
         Assert.False(result.Allowed);
         Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegated_OpsEvents_WithManagedTenantId_IsForbidden()
+    {
+        // ops-events is platform-operational (GA/Reader-only BY INTENT), so it is TenantScoping.None — a
+        // delegated ("MSP") admin must NOT reach it even with a tenantId in their managed set. Unlike the
+        // aggregate-only routes above this is a DELIBERATE least-privilege choice (the handler COULD bound by
+        // tenant), not a technical can't-bound limitation. If this ever flips to QueryParam, delegated regains it.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        var result = await h.Middleware.DecideAsync("GET", "/api/global/ops-events", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task GlobalReader_OpsEvents_IsAllowed()
+    {
+        // The None scoping excludes only delegated — the read-only Global Reader (and GA) keep ops-events.
+        const string upn = "reader@contoso.com";
+        var h = BuildHarness();
+        h.AsGlobalRole(Constants.GlobalRoles.GlobalReader);
+
+        var result = await h.Middleware.DecideAsync("GET", "/api/global/ops-events", null, AuthedPrincipal(TenantA, upn));
+
+        Assert.True(result.Allowed);
+    }
+
+    [Fact]
+    public async Task Delegated_CustomsArchive_OnManagedTenant_IsForbidden_ExcludeDelegated()
+    {
+        // customs-archive is offboarding cleanup (platform-operational) — GA/Reader-only via the
+        // excludeDelegated flag, even though it is GlobalReadOrAdmin + RouteParam (a delegated read-tier
+        // scoped route). A delegated admin with the archived tenant in scope is still denied. This is the
+        // None-equivalent for a {tenantId} route (which the convention test forbids from being None).
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        var result = await h.Middleware.DecideAsync(
+            "GET", $"/api/global/customs-archive/{TenantB}/hist-1", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegated_DeletionManifests_OnManagedTenant_IsForbidden_ExcludeDelegated()
+    {
+        // global/tenants/{tenantId}/deletion-manifests is platform-operational (cascade-delete restore prep) —
+        // excludeDelegated keeps it GA/Reader-only despite being a delegated read-tier RouteParam route.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        var result = await h.Middleware.DecideAsync(
+            "GET", $"/api/global/tenants/{TenantB}/deletion-manifests", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delegated_PreviewNotificationEmail_OnManagedTenant_IsForbidden_ExcludeDelegated()
+    {
+        // preview/notification-email/{tenantId} is the platform's private-preview welcome-email config (a GA
+        // ONBOARDING artifact, not the tenant's operational data) — excludeDelegated keeps it GA/Reader-only.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        var result = await h.Middleware.DecideAsync(
+            "GET", $"/api/preview/notification-email/{TenantB}", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(403, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task GlobalReader_ExcludeDelegatedRoutes_StillAllowed()
+    {
+        // excludeDelegated removes ONLY the delegated rescue — the read-only Global Reader (and GA) keep
+        // these platform-operational reads (mirrors the ops-events / "GA und GA-Reader" intent).
+        const string upn = "reader@contoso.com";
+        var h = BuildHarness();
+        h.AsGlobalRole(Constants.GlobalRoles.GlobalReader);
+
+        var manifests = await h.Middleware.DecideAsync(
+            "GET", $"/api/global/tenants/{TenantB}/deletion-manifests", TenantB, AuthedPrincipal(TenantA, upn));
+        var archive = await h.Middleware.DecideAsync(
+            "GET", $"/api/global/customs-archive/{TenantB}/hist-1", TenantB, AuthedPrincipal(TenantA, upn));
+        var previewEmail = await h.Middleware.DecideAsync(
+            "GET", $"/api/preview/notification-email/{TenantB}", TenantB, AuthedPrincipal(TenantA, upn));
+
+        Assert.True(manifests.Allowed);
+        Assert.True(archive.Allowed);
+        Assert.True(previewEmail.Allowed);
     }
 
     [Fact]
@@ -560,23 +703,43 @@ public class PolicyEnforcementMiddlewareTests
     // reachable by a delegated admin. None == aggregate-only == GA/Reader-only. Pins the leak-critical split.
 
     [Theory]
-    // SAFE — opened to delegated single-tenant access:
-    [InlineData("GET", "/api/global/sessions", TenantScoping.QueryParam)]
+    // SAFE — opened to delegated single-tenant access. (global/sessions + global/stats/sessions moved to
+    // the GlobalReadOrDelegatedSubset tier — see GlobalSessions_IsBoundedSubsetTier below.)
     [InlineData("GET", "/api/global/audit/logs", TenantScoping.QueryParam)]
     [InlineData("GET", "/api/global/metrics/app", TenantScoping.QueryParam)]
     [InlineData("GET", "/api/global/metrics/fleet-health", TenantScoping.QueryParam)]
     [InlineData("GET", "/api/global/metrics/summary", TenantScoping.QueryParam)]
     [InlineData("GET", "/api/global/search/sessions", TenantScoping.QueryParam)]
-    // AGGREGATE-ONLY — MUST stay None (unreachable by delegated):
+    // AGGREGATE-ONLY or GA/Reader-ONLY-by-intent — MUST stay None (unreachable by delegated):
     [InlineData("GET", "/api/global/presence", TenantScoping.None)]
     [InlineData("GET", "/api/global/metrics/platform", TenantScoping.None)]
     [InlineData("GET", "/api/global/distress-reports", TenantScoping.None)]
+    // ops-events is platform-OPERATIONAL data — GA/Reader-only by intent (not a can't-bound limit), so None.
+    [InlineData("GET", "/api/global/ops-events", TenantScoping.None)]
     public void GlobalRoute_DelegatedAccessibility_MatchesContract(string method, string path, TenantScoping expected)
     {
         var entry = EndpointAccessPolicyCatalog.FindPolicy(method, path);
         Assert.NotNull(entry);
         Assert.Equal(EndpointPolicy.GlobalReadOrAdmin, entry!.Policy);
         Assert.Equal(expected, entry.TenantScoping);
+    }
+
+    // ── Catalog contract: platform-operational GA/Reader-only reads carry ExcludeDelegated ──
+    // The None-equivalent for {tenantId}-RouteParam routes (which the {tenantId}-convention forbids from
+    // being None): GlobalReadOrAdmin keeps GA + read-only Reader, ExcludeDelegated removes the delegated rescue.
+
+    [Theory]
+    [InlineData("GET", "/api/global/customs-archive")]
+    [InlineData("GET", "/api/global/customs-archive/tid-1/hist-1")]
+    [InlineData("GET", "/api/global/customs-archive/tid-1/hist-1/arc-1")]
+    [InlineData("GET", "/api/global/tenants/tid-1/deletion-manifests")]
+    [InlineData("GET", "/api/preview/notification-email/tid-1")]
+    public void PlatformOperationalReads_ExcludeDelegated(string method, string path)
+    {
+        var entry = EndpointAccessPolicyCatalog.FindPolicy(method, path);
+        Assert.NotNull(entry);
+        Assert.Equal(EndpointPolicy.GlobalReadOrAdmin, entry!.Policy);
+        Assert.True(entry.ExcludeDelegated);
     }
 
     // ── Phase 2b: config/all is a bounded-subset aggregate (GlobalReadOrDelegatedSubset) ──

@@ -1,5 +1,6 @@
 using System.Net;
 using AutopilotMonitor.Functions.Helpers;
+using AutopilotMonitor.Functions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
@@ -11,11 +12,14 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
     public class SignalRRemoveFromGroupFunction
     {
         private readonly ILogger<SignalRRemoveFromGroupFunction> _logger;
+        private readonly DelegatedAdminService _delegatedAdminService;
 
         public SignalRRemoveFromGroupFunction(
-            ILogger<SignalRRemoveFromGroupFunction> logger)
+            ILogger<SignalRRemoveFromGroupFunction> logger,
+            DelegatedAdminService delegatedAdminService)
         {
             _logger = logger;
+            _delegatedAdminService = delegatedAdminService;
         }
 
         [Function("RemoveFromGroup")]
@@ -79,10 +83,18 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                     }
 
                     // Check if user is allowed to leave this tenant's group — platform scope (GA or
-                    // read-only Global Reader) may leave any tenant's group, symmetric with AddToGroup.
+                    // read-only Global Reader) may leave any tenant's group, symmetric with AddToGroup; a
+                    // delegated ("MSP") admin may leave a managed tenant's group (symmetric with the join).
                     if (requestedTenantId != userTenantId)
                     {
-                        if (!requestCtx.HasGlobalScope)
+                        var allowedCrossTenant = requestCtx.HasGlobalScope;
+                        if (!allowedCrossTenant && !string.IsNullOrEmpty(userEmail))
+                        {
+                            var scope = await _delegatedAdminService.GetScopeAsync(userEmail);
+                            allowedCrossTenant = scope.RoleFor(requestedTenantId) != null;
+                        }
+
+                        if (!allowedCrossTenant)
                         {
                             _logger.LogWarning($"User {userEmail} (tenant {userTenantId}) attempted to leave group for tenant {requestedTenantId}");
                             var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
@@ -91,27 +103,21 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         }
                         else
                         {
-                            _logger.LogInformation($"Platform-scope user {userEmail} (role={requestCtx.UserRole}) leaving cross-tenant group: {request.GroupName}");
+                            _logger.LogInformation($"User {userEmail} (role={requestCtx.UserRole}) leaving cross-tenant group: {request.GroupName}");
                         }
                     }
 
-                    // Symmetric with AddToGroup: the privileged notification groups are membership-gated.
-                    // A roleless authenticated end user is never in these groups, so reject the leave too
-                    // (defense-in-depth — keeps join/leave authorization identical).
-                    if (SignalRGroupHelper.IsTenantNotifyAdminGroup(request.GroupName)
-                        && !requestCtx.IsTenantAdmin
-                        && !requestCtx.IsGlobalAdmin)
+                    // Symmetric with AddToGroup: the privileged notification groups are role-gated AGAINST THE
+                    // GROUP'S TENANT (not the caller's home tenant). Keeps join/leave authorization identical
+                    // so a cross-tenant caller's home-tenant role never authorizes another tenant's group.
+                    var notifyDenial = SignalRGroupHelper.CheckNotifyGroupAccess(request.GroupName, requestedTenantId, requestCtx);
+                    if (notifyDenial != SignalRGroupHelper.NotifyGroupDenial.None)
                     {
+                        var message = notifyDenial == SignalRGroupHelper.NotifyGroupDenial.AdminTier
+                            ? "Access denied: Only Tenant Admins can leave the admin notification group"
+                            : "Access denied: Only tenant members can leave the notification group";
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Tenant Admins can leave the admin notification group" });
-                        return new RemoveFromGroupOutput { HttpResponse = forbiddenResponse };
-                    }
-
-                    if (SignalRGroupHelper.IsTenantNotifyMemberGroup(request.GroupName)
-                        && !requestCtx.IsTenantMemberOrGlobalAdmin())
-                    {
-                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only tenant members can leave the notification group" });
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message });
                         return new RemoveFromGroupOutput { HttpResponse = forbiddenResponse };
                     }
                 }

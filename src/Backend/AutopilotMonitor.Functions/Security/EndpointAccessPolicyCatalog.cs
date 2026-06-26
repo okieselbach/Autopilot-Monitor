@@ -102,16 +102,27 @@ public sealed class EndpointPolicyEntry
     public EndpointPolicy Policy { get; }
     public TenantScoping TenantScoping { get; }
 
+    /// <summary>
+    /// When true, a delegated ("MSP") admin is NEVER admitted to this route, even though its policy is a
+    /// delegated read tier (GlobalReadOrAdmin) on a scoped (RouteParam/QueryParam) route. Use for
+    /// platform-OPERATIONAL global reads — offboarding/deletion cleanup, ops-class data — that must stay
+    /// Global Admin + read-only Global Reader only. This is the equivalent of <see cref="TenantScoping.None"/>
+    /// for routes whose <c>{tenantId}</c> template FORCES RouteParam (the {tenantId}-convention test forbids
+    /// None there, so None alone cannot exclude delegated). Only ever RESTRICTS — it can never grant access.
+    /// </summary>
+    public bool ExcludeDelegated { get; }
+
     // Pre-compiled regex for matching actual request paths against the route template
     internal Regex RouteRegex { get; }
 
     public EndpointPolicyEntry(string httpMethod, string routeTemplate, EndpointPolicy policy,
-        TenantScoping tenantScoping = TenantScoping.None)
+        TenantScoping tenantScoping = TenantScoping.None, bool excludeDelegated = false)
     {
         HttpMethod = httpMethod.ToUpperInvariant();
         RouteTemplate = routeTemplate;
         Policy = policy;
         TenantScoping = tenantScoping;
+        ExcludeDelegated = excludeDelegated;
         RouteRegex = BuildRouteRegex(routeTemplate);
     }
 
@@ -314,7 +325,8 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "global/sessions/{sessionId}/delete/preview",   EndpointPolicy.GlobalReadOrAdmin),
         new("POST",   "global/sessions/{sessionId}/restore",          EndpointPolicy.GlobalAdminOnly),
         new("GET",    "global/sessions/{sessionId}/deletion-manifest", EndpointPolicy.GlobalReadOrAdmin),
-        new("GET",    "global/tenants/{tenantId}/deletion-manifests",  EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam),
+        // Platform-operational (cascade-delete restore prep) — GA + read-only Reader only, NOT delegated.
+        new("GET",    "global/tenants/{tenantId}/deletion-manifests",  EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam, excludeDelegated: true),
         new("GET",    "global/session-deletions",                    EndpointPolicy.GlobalReadOrAdmin),
         new("GET",    "global/raw/sessions",                  EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam),
         new("GET",    "global/raw/events",                    EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam),
@@ -341,10 +353,16 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "preview/whitelist",          EndpointPolicy.GlobalReadOrAdmin),
         new("POST",   "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("DELETE", "preview/whitelist/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
-        new("GET",    "preview/notification-email/{tenantId}", EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam),
+        // Private-preview welcome-email config — platform ONBOARDING artifact, GA + read-only Reader only,
+        // NOT delegated (an MSP manages active customer tenants, not the platform's preview onboarding).
+        new("GET",    "preview/notification-email/{tenantId}", EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam, excludeDelegated: true),
         new("POST",   "preview/send-welcome-email/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
-        new("GET",    "global/sessions",            EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam),
-        new("GET",    "global/stats/sessions",      EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam),
+        // Subset tier (like config/all): a delegated ("MSP") caller is admitted WITHOUT a named tenantId and
+        // the handler bounds the aggregate to RequestContext.AllowedTenantIds (its managed subset). With a
+        // named ?tenantId= the QueryParam path drills into that single tenant (middleware validates it is in
+        // the caller's scope). GA/Reader keep full cross-tenant access (unbounded aggregate + any drill).
+        new("GET",    "global/sessions",            EndpointPolicy.GlobalReadOrDelegatedSubset, TenantScoping.QueryParam),
+        new("GET",    "global/stats/sessions",      EndpointPolicy.GlobalReadOrDelegatedSubset, TenantScoping.QueryParam),
         new("GET",    "global/audit/logs",          EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam),
         new("GET",    "global/presence",            EndpointPolicy.GlobalReadOrAdmin),
         new("GET",    "global/tenants-with-deletion-manifests", EndpointPolicy.GlobalReadOrAdmin),
@@ -392,9 +410,11 @@ public static class EndpointAccessPolicyCatalog
         // The {tenantId} route param is the OFFBOARDED tenant whose data was archived;
         // the operator (GA) does not belong to that tenant. RouteParam scoping declares
         // that the route's tenantId is supplied from the URL, not from the caller's JWT.
-        new("GET",    "global/customs-archive",                                                  EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam),
-        new("GET",    "global/customs-archive/{tenantId}/{historyRowKey}",                       EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam),
-        new("GET",    "global/customs-archive/{tenantId}/{historyRowKey}/{archiveRowKey}",       EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam),
+        // excludeDelegated: platform-operational cleanup — GA + read-only Reader only. A delegated ("MSP")
+        // admin manages ACTIVE customer tenants, not offboarded-tenant archives, so it is NOT admitted.
+        new("GET",    "global/customs-archive",                                                  EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam, excludeDelegated: true),
+        new("GET",    "global/customs-archive/{tenantId}/{historyRowKey}",                       EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam, excludeDelegated: true),
+        new("GET",    "global/customs-archive/{tenantId}/{historyRowKey}/{archiveRowKey}",       EndpointPolicy.GlobalReadOrAdmin, TenantScoping.RouteParam, excludeDelegated: true),
         new("DELETE", "global/customs-archive/{tenantId}/{historyRowKey}/{archiveRowKey}",       EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("DELETE", "global/customs-archive/{tenantId}/{historyRowKey}",                       EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("GET",    "health/detailed",            EndpointPolicy.AuthenticatedUser),
@@ -446,7 +466,13 @@ public static class EndpointAccessPolicyCatalog
         new("GET",    "notifications",                                   EndpointPolicy.MemberRead, TenantScoping.Jwt),
         new("POST",   "notifications/dismiss-all",                       EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
         new("POST",   "notifications/{notificationId}/dismiss",          EndpointPolicy.TenantAdminOrGA, TenantScoping.Jwt),
-        new("GET",    "global/ops-events",                              EndpointPolicy.GlobalReadOrAdmin, TenantScoping.QueryParam),
+        // ops-events is PLATFORM-OPERATIONAL data (Consent/Maintenance/Security/Tenant/Agent/SLA) for the
+        // platform operator — GA + read-only Global Reader ONLY. Deliberately TenantScoping.None (NOT
+        // QueryParam) so a delegated ("MSP") admin is NOT admitted: they manage customer tenants, not the
+        // platform's operations. None means the middleware runs no scoped-route delegated rescue, so the
+        // GlobalReadOrAdmin evaluator denies a non-global caller. The handler still honors an optional
+        // ?tenantId= drill for a GA/Reader (who already see all tenants) — see GetOpsEventsFunction.
+        new("GET",    "global/ops-events",                              EndpointPolicy.GlobalReadOrAdmin, TenantScoping.None),
     };
 
     /// <summary>

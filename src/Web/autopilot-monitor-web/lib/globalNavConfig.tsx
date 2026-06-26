@@ -141,12 +141,19 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     // Delegated ("MSP") admins manage a subset of tenants. This is their primary entry point; full
     // platform admins (GA/Reader) use the richer Global Admin section instead, so it is hidden for them
-    // (see GlobalSidebar "fleet" visibility = delegated && !platform scope).
+    // (see GlobalSidebar "fleet" visibility = delegated && !platform scope). The analytics items below are
+    // the SAME pages a Global Admin sees, but the tenant switcher on each is bounded to the managed subset.
     id: "fleet",
     label: "Fleet",
     visibility: "fleet",
     items: [
       { id: "fleet-tenants", label: "Managed Tenants", href: "/fleet", icon: <GlobeAltIcon /> },
+      { id: "fleet-fleet-health", label: "Fleet Health", href: "/fleet-health", icon: <ChartBarIcon /> },
+      { id: "fleet-apps", label: "Software", href: "/apps", icon: <CubeIcon /> },
+      { id: "fleet-geographic", label: "Geographic Perf.", href: "/geographic-performance", icon: <GlobeAltIcon /> },
+      { id: "fleet-sla", label: "SLA Compliance", href: "/sla", icon: <ShieldCheckIcon /> },
+      { id: "fleet-usage", label: "Usage Metrics", href: "/usage-metrics", icon: <TrendingUpIcon /> },
+      { id: "fleet-audit", label: "Audit Log", href: "/audit", icon: <ClipboardDocumentIcon /> },
     ],
   },
   {

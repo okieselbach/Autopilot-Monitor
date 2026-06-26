@@ -39,10 +39,10 @@ public class McpUserServiceDelegatedTests
         _adminConfig = new Mock<AdminConfigurationService>(
             Mock.Of<IConfigRepository>(), NullLogger<AdminConfigurationService>.Instance, cache) { CallBase = false };
 
-        // Defaults: no platform role, no delegated scope, WhitelistOnly, not whitelisted.
+        // Defaults: no platform role, no delegated scope, WhitelistOnly, no McpUsers row (NotPresent).
         _globalAdmin.Setup(x => x.GetGlobalRoleAsync(It.IsAny<string>())).ReturnsAsync((string?)null);
         _delegatedAdmin.Setup(x => x.GetScopeAsync(It.IsAny<string>())).ReturnsAsync(DelegatedScope.Empty);
-        _adminRepo.Setup(x => x.IsMcpUserAsync(It.IsAny<string>())).ReturnsAsync(false);
+        _adminRepo.Setup(x => x.GetMcpUserAsync(It.IsAny<string>())).ReturnsAsync((McpUserEntry?)null);
         SetPolicy(McpAccessPolicy.WhitelistOnly);
 
         _sut = new McpUserService(
@@ -81,8 +81,8 @@ public class McpUserServiceDelegatedTests
             result.DelegatedTenantIds!.OrderBy(t => t));
         // No write assignment ⇒ DelegatedReader is the strongest role.
         Assert.Equal(Constants.DelegatedRoles.DelegatedReader, result.DelegatedRole);
-        // Never falls through to the whitelist lookup for a delegated admin.
-        _adminRepo.Verify(x => x.IsMcpUserAsync(It.IsAny<string>()), Times.Never);
+        // The delegated auto-grant fires WITHOUT an enabled whitelist row (GetMcpUserAsync → NotPresent);
+        // the row is consulted only as a kill-switch, covered by DelegatedOnly_WithDisabledMcpUserRow_*.
     }
 
     [Fact]
@@ -137,12 +137,29 @@ public class McpUserServiceDelegatedTests
     [Fact]
     public async Task Whitelisted_NonDelegated_IsAllowed_WithNoDelegatedInfo()
     {
-        _adminRepo.Setup(x => x.IsMcpUserAsync(It.IsAny<string>())).ReturnsAsync(true);
+        _adminRepo.Setup(x => x.GetMcpUserAsync(It.IsAny<string>()))
+            .ReturnsAsync(new McpUserEntry { Upn = DelegatedUpn, IsEnabled = true });
 
         var result = await _sut.IsAllowedAsync(DelegatedUpn);
 
         Assert.True(result.IsAllowed);
         Assert.Equal("McpUser", result.AccessGrant);
         Assert.Null(result.DelegatedTenantIds);
+    }
+
+    [Fact]
+    public async Task DelegatedOnly_WithDisabledMcpUserRow_IsDenied_KillSwitch()
+    {
+        // Operator kill-switch: disabling a delegated (MSP) caller's McpUsers row revokes MCP access even
+        // though their delegated scope is still active — the explicit Disabled row wins over the auto-grant,
+        // so an operator need not unwind the delegations to cut MCP access. A MISSING row would NOT block
+        // (that is the normal delegated case, covered above).
+        SetDelegated((TenantA, Constants.DelegatedRoles.DelegatedReader));
+        _adminRepo.Setup(x => x.GetMcpUserAsync(It.IsAny<string>()))
+            .ReturnsAsync(new McpUserEntry { Upn = DelegatedUpn, IsEnabled = false });
+
+        var result = await _sut.IsAllowedAsync(DelegatedUpn);
+
+        Assert.False(result.IsAllowed);
     }
 }

@@ -1,3 +1,5 @@
+using System;
+
 namespace AutopilotMonitor.Functions.Helpers;
 
 /// <summary>
@@ -60,6 +62,50 @@ public static class SignalRGroupHelper
     /// </summary>
     public static bool IsTenantNotifyMemberGroup(string groupName)
         => groupName.StartsWith("tenant-") && groupName.EndsWith(TenantNotifyMemberSuffix);
+
+    /// <summary>Why a notification-group join/leave was refused — drives the caller's 403 message.</summary>
+    public enum NotifyGroupDenial
+    {
+        /// <summary>Allowed (not a notification group, or the caller is authorized for it).</summary>
+        None,
+        /// <summary>Admin-tier notify group, caller is not its tenant's Admin (or a Global Admin).</summary>
+        AdminTier,
+        /// <summary>Member-tier notify group, caller is not its tenant's member (or platform scope).</summary>
+        MemberTier
+    }
+
+    /// <summary>
+    /// Authorizes a join/leave of a tenant NOTIFICATION group, binding the caller's role to the GROUP's
+    /// tenant — not merely to the caller's own home tenant. This is the leak-critical distinction once
+    /// cross-tenant callers (a delegated "MSP" reader, or a Global Reader) are admitted past the broadcast
+    /// cross-tenant gate: <see cref="RequestContext.IsTenantAdmin"/> / <see cref="RequestContext.IsTenantMemberRole"/>
+    /// describe the caller's HOME-tenant role, so they may only authorize a group for that SAME tenant.
+    /// A different (managed) tenant's notify group requires either full platform scope or, for the admin
+    /// tier, Global Admin — a home-tenant role must never confer authority over another tenant's group.
+    /// Pure (no I/O) so the cross-tenant admission stays in the function and this stays unit-testable.
+    /// </summary>
+    /// <param name="groupName">The requested group.</param>
+    /// <param name="requestedTenantId">The tenant the group belongs to (from <see cref="ExtractTenantIdFromGroupName"/>).</param>
+    /// <param name="ctx">The resolved request context (carries the caller's HOME-tenant roles + scope).</param>
+    public static NotifyGroupDenial CheckNotifyGroupAccess(
+        string groupName, string? requestedTenantId, RequestContext ctx)
+    {
+        var sameTenant = !string.IsNullOrEmpty(requestedTenantId)
+            && string.Equals(requestedTenantId, ctx.TenantId, StringComparison.OrdinalIgnoreCase);
+
+        // Admin-tier: own-tenant Admin, or any Global Admin. A cross-tenant caller (delegated MSP reader,
+        // or a Global Reader who merely happens to be admin of their OWN tenant) is NOT admitted here.
+        if (IsTenantNotifyAdminGroup(groupName) && !(sameTenant && ctx.IsTenantAdmin) && !ctx.IsGlobalAdmin)
+            return NotifyGroupDenial.AdminTier;
+
+        // Member-tier: own-tenant member (any role), or full platform scope (GA/Reader retain their
+        // cross-tenant read of the member payload). A delegated MSP caller's HOME membership does NOT
+        // admit them to a MANAGED tenant's member group.
+        if (IsTenantNotifyMemberGroup(groupName) && !(sameTenant && ctx.IsTenantMemberRole()) && !ctx.HasGlobalScope)
+            return NotifyGroupDenial.MemberTier;
+
+        return NotifyGroupDenial.None;
+    }
 
     public static string TenantNotifyMemberGroup(string tenantId) => $"tenant-{tenantId}{TenantNotifyMemberSuffix}";
     public static string TenantNotifyAdminGroup(string tenantId) => $"tenant-{tenantId}{TenantNotifyAdminSuffix}";
