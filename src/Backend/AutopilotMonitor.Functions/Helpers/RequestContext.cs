@@ -116,7 +116,16 @@ public static class RequestContextExtensions
     /// </summary>
     public static bool IsTenantMemberOrGlobalAdmin(this RequestContext ctx)
         => ctx.HasGlobalScope
-            || ctx.UserRole == Constants.TenantRoles.Admin
+            || ctx.IsTenantMemberRole();
+
+    /// <summary>
+    /// True if the caller holds an OWN-TENANT member role (Admin/Operator/Viewer) — independent of any
+    /// platform (GA/Reader) or delegated scope. Use this when a check must bind to the caller's HOME
+    /// tenant specifically (e.g. cross-tenant notification groups), so a home-tenant role is never
+    /// mistaken for authority over a DIFFERENT tenant's group.
+    /// </summary>
+    public static bool IsTenantMemberRole(this RequestContext ctx)
+        => ctx.UserRole == Constants.TenantRoles.Admin
             || ctx.UserRole == Constants.TenantRoles.Operator
             || ctx.UserRole == Constants.TenantRoles.Viewer;
 

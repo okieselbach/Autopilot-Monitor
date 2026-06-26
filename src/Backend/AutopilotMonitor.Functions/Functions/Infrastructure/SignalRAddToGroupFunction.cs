@@ -118,27 +118,20 @@ namespace AutopilotMonitor.Functions.Functions.Infrastructure
                         }
                     }
 
-                    // Admin-tier notification group: only Tenant Admins or Global Admins may join.
-                    if (SignalRGroupHelper.IsTenantNotifyAdminGroup(request.GroupName)
-                        && !requestCtx.IsTenantAdmin
-                        && !requestCtx.IsGlobalAdmin)
+                    // Notification groups carry the full per-tenant payload (the REST list is Member/Admin-tier
+                    // gated), so they are role-gated AGAINST THE GROUP'S TENANT — not the caller's home tenant.
+                    // This is leak-critical for a cross-tenant caller admitted above (a delegated "MSP" reader,
+                    // or a Global Reader): their home-tenant Admin/member role must NOT let them join a DIFFERENT
+                    // (managed) tenant's notify group. See SignalRGroupHelper.CheckNotifyGroupAccess.
+                    var notifyDenial = SignalRGroupHelper.CheckNotifyGroupAccess(request.GroupName, requestedTenantId, requestCtx);
+                    if (notifyDenial != SignalRGroupHelper.NotifyGroupDenial.None)
                     {
-                        _logger.LogWarning($"User {userEmail} (role={requestCtx.UserRole}) attempted to join Admin-tier notification group: {request.GroupName}");
+                        var message = notifyDenial == SignalRGroupHelper.NotifyGroupDenial.AdminTier
+                            ? "Access denied: Only Tenant Admins can join the admin notification group"
+                            : "Access denied: Only tenant members can join the notification group";
+                        _logger.LogWarning($"User {userEmail} (role={requestCtx.UserRole}) attempted to join {notifyDenial} notification group for tenant {requestedTenantId}: {request.GroupName}");
                         var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only Tenant Admins can join the admin notification group" });
-                        return new AddToGroupOutput { HttpResponse = forbiddenResponse };
-                    }
-
-                    // Member-tier notification group: requires tenant membership (any role) or GA.
-                    // The endpoint policy (AuthenticatedUserWithRole) admits roleless end users so the
-                    // Progress Portal works, but the notification push carries the full payload (the
-                    // REST list is MemberRead-gated), so a roleless caller must not join this group.
-                    if (SignalRGroupHelper.IsTenantNotifyMemberGroup(request.GroupName)
-                        && !requestCtx.IsTenantMemberOrGlobalAdmin())
-                    {
-                        _logger.LogWarning($"User {userEmail} (role={requestCtx.UserRole}) attempted to join Member-tier notification group without a tenant role: {request.GroupName}");
-                        var forbiddenResponse = req.CreateResponse(HttpStatusCode.Forbidden);
-                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message = "Access denied: Only tenant members can join the notification group" });
+                        await forbiddenResponse.WriteAsJsonAsync(new { success = false, message });
                         return new AddToGroupOutput { HttpResponse = forbiddenResponse };
                     }
                 }
