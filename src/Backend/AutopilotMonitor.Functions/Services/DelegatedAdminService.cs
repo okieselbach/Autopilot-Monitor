@@ -21,7 +21,12 @@ public class DelegatedAdminService
     private readonly IAdminRepository _adminRepo;
     private readonly IMemoryCache _cache;
     private readonly ILogger<DelegatedAdminService> _logger;
-    private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
+    // Per-process cache: on scaled-out Flex Consumption, the scope invalidation in UpsertAsync/revoke
+    // only clears the mutating instance, so other instances serve a stale delegated (MSP) scope until
+    // expiry. A short TTL caps that cross-instance window so a granted/revoked delegated assignment
+    // self-heals in seconds. The lookup is a small Table Storage query. Do NOT raise this back to
+    // minutes "for performance" — it reintroduces the role flip-flop (see TenantAdminsService).
+    private readonly TimeSpan _cacheDuration = TimeSpan.FromSeconds(30);
 
     public DelegatedAdminService(
         IAdminRepository adminRepo,
@@ -36,7 +41,7 @@ public class DelegatedAdminService
     /// <summary>
     /// Resolves the caller's effective delegated scope: the set of tenants it may access and the role per
     /// tenant. Only <see cref="Constants.DelegatedStatus.Active"/> + enabled rows with a recognized role
-    /// contribute; pending/revoked/disabled/unknown-role rows are ignored (fail-closed). Cached 5 minutes.
+    /// contribute; pending/revoked/disabled/unknown-role rows are ignored (fail-closed). Cached briefly (see _cacheDuration).
     /// Returns an empty (never null) scope for a UPN with no effective assignments.
     /// </summary>
     public virtual async Task<DelegatedScope> GetScopeAsync(string? upn)

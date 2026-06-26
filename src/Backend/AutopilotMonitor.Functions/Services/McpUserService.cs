@@ -22,7 +22,12 @@ public class McpUserService
     private readonly GlobalAdminService _globalAdminService;
     private readonly DelegatedAdminService _delegatedAdminService;
     private readonly AdminConfigurationService _adminConfigService;
-    private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
+    // Per-process cache for the McpUsers whitelist lookup. On scaled-out Flex Consumption an add/remove
+    // of an McpUsers row only invalidates the mutating instance, so other instances serve a stale
+    // allow/deny until expiry. A short TTL caps that cross-instance window so an MCP-access grant/revoke
+    // self-heals in seconds. The lookup is a single Table Storage point-read. Do NOT raise this back to
+    // minutes "for performance" — it reintroduces the access flip-flop (see TenantAdminsService).
+    private readonly TimeSpan _cacheDuration = TimeSpan.FromSeconds(30);
 
     public McpUserService(
         IAdminRepository adminRepo,
