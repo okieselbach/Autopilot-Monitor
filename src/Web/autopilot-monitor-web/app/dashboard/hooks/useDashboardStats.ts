@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { asGuidOrUndefined } from "@/utils/inputValidation";
+import { boundTenantToDelegatedScope } from "@/utils/delegatedScope";
 import type { NotificationType } from "@/contexts/NotificationContext";
 
 export interface DashboardStats {
@@ -39,6 +40,13 @@ interface UseDashboardStatsParams {
   tenantId: string | null | undefined;
   globalAdminMode: boolean;
   submittedTenantIdFilter: string;
+  /**
+   * Delegated ("MSP") cross-tenant bound: when isDelegatedScope is true the submitted filter is restricted
+   * to delegatedTenantIds before it is sent (an out-of-scope / deep-linked tenant degrades to the bounded
+   * aggregate). GA/Reader are unbounded. Defense-in-depth on top of the backend bound.
+   */
+  isDelegatedScope?: boolean;
+  delegatedTenantIds?: string[];
   days?: number;
   getAccessToken: (forceRefresh?: boolean) => Promise<string | null>;
   addNotification: AddNotification;
@@ -73,6 +81,8 @@ export function useDashboardStats({
   tenantId,
   globalAdminMode,
   submittedTenantIdFilter,
+  isDelegatedScope = false,
+  delegatedTenantIds,
   days = DEFAULT_DAYS,
   getAccessToken,
   addNotification,
@@ -90,6 +100,10 @@ export function useDashboardStats({
   globalAdminModeRef.current = globalAdminMode;
   const submittedFilterRef = useRef(submittedTenantIdFilter);
   submittedFilterRef.current = submittedTenantIdFilter;
+  const isDelegatedScopeRef = useRef(isDelegatedScope);
+  isDelegatedScopeRef.current = isDelegatedScope;
+  const delegatedTenantIdsRef = useRef(delegatedTenantIds);
+  delegatedTenantIdsRef.current = delegatedTenantIds;
   const daysRef = useRef(days);
   daysRef.current = days;
   const disabledRef = useRef(disabled);
@@ -119,7 +133,12 @@ export function useDashboardStats({
     try {
       const url = globalAdminModeRef.current
         ? api.globalSessions.stats({
-            tenantId: asGuidOrUndefined(submittedFilterRef.current.trim()),
+            // Defense-in-depth: bound a delegated caller's filter to its managed set before sending
+            // (an out-of-scope deep-linked tenant degrades to the bounded aggregate). See boundTenantToDelegatedScope.
+            tenantId: boundTenantToDelegatedScope(
+              asGuidOrUndefined(submittedFilterRef.current.trim()),
+              isDelegatedScopeRef.current,
+              delegatedTenantIdsRef.current),
             days: daysRef.current,
           })
         : api.sessions.stats({ days: daysRef.current });

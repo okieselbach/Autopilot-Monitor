@@ -150,6 +150,10 @@ function HomeContent() {
     tenantId,
     globalAdminMode: crossTenant,
     submittedTenantIdFilter,
+    // Delegated ("MSP") reader (no platform scope): bound the stats filter to the managed set, mirroring the
+    // session list. A delegated user who is ALSO GA/Reader stays unbounded.
+    isDelegatedScope: isDelegated && !hasGlobalScope,
+    delegatedTenantIds: user?.delegatedTenantIds,
     getAccessToken,
     addNotification,
     signalR,

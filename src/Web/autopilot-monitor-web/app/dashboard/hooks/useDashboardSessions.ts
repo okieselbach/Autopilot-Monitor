@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { extractContinuation } from "@/lib/paginationLink";
 import { asGuidOrUndefined } from "@/utils/inputValidation";
+import { boundTenantToDelegatedScope } from "@/utils/delegatedScope";
 import type { NotificationType } from "@/contexts/NotificationContext";
 import type { Session } from "../types";
 
@@ -24,6 +25,7 @@ interface User {
   isGlobalAdmin?: boolean;
   isGlobalReader?: boolean;
   isDelegated?: boolean;
+  delegatedTenantIds?: string[];
   role?: string | null;
 }
 
@@ -109,6 +111,13 @@ export function useDashboardSessions({
   globalAdminModeRef.current = globalAdminMode;
   const tenantIdRef = useRef(tenantId);
   tenantIdRef.current = tenantId;
+  // Delegated ("MSP") bound for the cross-tenant filter: a delegated reader (no platform scope) may only
+  // drill a managed tenant. Refs so the fetch closure reads live values without re-creating it (matches the
+  // other scope refs). isDelegatedScope excludes a delegated user who is ALSO GA/Reader (those are unbounded).
+  const isDelegatedScopeRef = useRef(false);
+  isDelegatedScopeRef.current = !!user?.isDelegated && !user?.isGlobalAdmin && !user?.isGlobalReader;
+  const delegatedTenantIdsRef = useRef<string[] | undefined>(undefined);
+  delegatedTenantIdsRef.current = user?.delegatedTenantIds;
 
   // Refs for fetch closures (refetch is called from various effects/handlers and should
   // always see current filter values without forcing dependency-driven recreation)
@@ -215,7 +224,11 @@ export function useDashboardSessions({
       // a loadMore-with-continuation always queries with the same filter scope the
       // continuation was issued for. globalTenantIdOverride wins (refetchWith path).
       const rawFilter = globalTenantIdOverride !== undefined ? globalTenantIdOverride : submittedTenantIdFilterRef.current.trim();
-      const effectiveTenantFilter = asGuidOrUndefined(rawFilter);
+      // Defense-in-depth: a delegated caller must never request a tenant outside its managed set, even via a
+      // hand-crafted ?tenant= deep link or a free-typed GUID — drop it to the bounded aggregate. The backend
+      // bounds this too; this just keeps the client from ever asking for an unmanaged tenant.
+      const effectiveTenantFilter = boundTenantToDelegatedScope(
+        asGuidOrUndefined(rawFilter), isDelegatedScopeRef.current, delegatedTenantIdsRef.current);
       const pageSize = getInitialPageSize();
       const opts = loadMoreContinuation
         ? { pageSize, continuation: loadMoreContinuation }

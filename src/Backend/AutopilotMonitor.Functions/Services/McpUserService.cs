@@ -93,24 +93,28 @@ public class McpUserService
                     return McpAccessCheckResult.Allowed(
                         upn, globalRole, isGlobalAdmin, globalRole, delegatedTenantIds, delegatedRole);
 
+                // Resolve the caller's McpUsers whitelist state ONCE (cached): NotPresent / Enabled / Disabled.
+                var whitelistState = await ResolveWhitelistStateAsync(upn);
+
+                // SECURITY (operator kill-switch): an EXPLICITLY DISABLED McpUsers row overrides the
+                // delegated (MSP) auto-grant below. An operator can revoke a delegated caller's MCP access
+                // by disabling their McpUsers row WITHOUT unwinding every delegated assignment — one lever.
+                // A MISSING row is NOT a kill-switch: a delegated admin normally has no McpUsers row at all
+                // and must still be auto-granted. (Order matters — this MUST precede the delegated grant.)
+                if (whitelistState == McpWhitelistState.Disabled)
+                    return McpAccessCheckResult.Denied("User not enabled for MCP usage (account is disabled on the MCP whitelist)");
+
                 // A delegated (MSP) admin with an active scope is granted MCP access automatically under
                 // WhitelistOnly — "delegated = scoped global", and they are already curated via the
-                // Delegated Admins UI, so a separate McpUsers row would be redundant friction. Their reach
-                // is bounded client- and server-side to the managed tenant set; no platform/aggregate path.
+                // Delegated Admins UI, so a separate enabled McpUsers row would be redundant friction. Their
+                // reach is bounded client- and server-side to the managed tenant set; no platform/aggregate
+                // path. (An explicit Disabled row above still revokes this.)
                 if (!delegatedScope.IsEmpty)
                     return McpAccessCheckResult.Allowed(
                         upn, "DelegatedAdmin", isGlobalAdmin: false, globalRole: null,
                         delegatedTenantIds: delegatedTenantIds, delegatedRole: delegatedRole);
 
-                // Check McpUsers whitelist (cached)
-                var cacheKey = $"mcp-user:{upn}";
-                if (!_cache.TryGetValue<bool>(cacheKey, out var isMcpUser))
-                {
-                    isMcpUser = await _adminRepo.IsMcpUserAsync(upn);
-                    _cache.Set(cacheKey, isMcpUser, _cacheDuration);
-                }
-
-                return isMcpUser
+                return whitelistState == McpWhitelistState.Enabled
                     ? McpAccessCheckResult.Allowed(upn, "McpUser", false, null, delegatedTenantIds, delegatedRole)
                     // Surfaced to the end user by the MCP server's access guard. Keep it
                     // self-explanatory so a denied colleague understands they simply need
@@ -196,6 +200,29 @@ public class McpUserService
         => scope.TenantIds.Any(scope.CanWrite)
             ? Constants.DelegatedRoles.DelegatedAdmin
             : Constants.DelegatedRoles.DelegatedReader;
+
+    private enum McpWhitelistState { NotPresent, Enabled, Disabled }
+
+    /// <summary>
+    /// Resolves (and briefly caches) the caller's McpUsers whitelist state: NotPresent (no row),
+    /// Enabled (row + IsEnabled), or Disabled (row + !IsEnabled). A Disabled row is an operator
+    /// kill-switch that also revokes a delegated/MSP caller's auto-grant — see <see cref="IsAllowedAsync"/>.
+    /// Cached under the same key the mutation methods (Add/Remove/SetEnabled) invalidate, so an
+    /// enable/disable self-heals within the TTL (and immediately on the mutating instance).
+    /// </summary>
+    private async Task<McpWhitelistState> ResolveWhitelistStateAsync(string upn)
+    {
+        var cacheKey = $"mcp-user:{upn}";
+        if (_cache.TryGetValue<McpWhitelistState>(cacheKey, out var cached))
+            return cached;
+
+        var entry = await _adminRepo.GetMcpUserAsync(upn);
+        var state = entry == null
+            ? McpWhitelistState.NotPresent
+            : entry.IsEnabled ? McpWhitelistState.Enabled : McpWhitelistState.Disabled;
+        _cache.Set(cacheKey, state, _cacheDuration);
+        return state;
+    }
 }
 
 public class McpAccessCheckResult
