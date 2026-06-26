@@ -896,11 +896,26 @@ namespace AutopilotMonitor.Functions.Services
         /// Cross-tenant paged variant of <see cref="GetAllSessionsAsync"/>.
         /// <paramref name="tenantIdFilter"/> optionally restricts to one tenant.
         /// </summary>
+        /// <summary>
+        /// True when a BOUNDED (delegated/MSP) caller asks for a single-tenant drill that is OUTSIDE its
+        /// managed set. The middleware enforces the allow-list for a cross-tenant target, but NOT when
+        /// ?tenantId= equals the caller's own JWT tenant (crossTenant=false short-circuits the delegated
+        /// scoped-route check) — so the single-tenant drill in the repo must re-check the bound itself.
+        /// </summary>
+        private static bool DrillOutsideBound(IReadOnlyCollection<string>? allowedTenantIds, string? tenantIdFilter)
+            => allowedTenantIds != null
+                && !string.IsNullOrEmpty(tenantIdFilter)
+                && !new HashSet<string>(allowedTenantIds, StringComparer.OrdinalIgnoreCase).Contains(tenantIdFilter!);
+
         public async Task<RawPage<SessionSummary>> GetAllSessionsPageAsync(
             string? tenantIdFilter, int? days, int pageSize, string? continuation,
             IReadOnlyCollection<string>? allowedTenantIds = null)
         {
             if (pageSize < 1) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+            // Bounded (delegated) single-tenant drill outside the managed set → empty, never the per-tenant scan.
+            if (DrillOutsideBound(allowedTenantIds, tenantIdFilter))
+                return new RawPage<SessionSummary>(new List<SessionSummary>(), null);
 
             // When tenantIdFilter is set and is a valid tenantId, route through
             // the per-tenant SessionsIndex scan — natively-ordered, cheaper.
@@ -920,6 +935,11 @@ namespace AutopilotMonitor.Functions.Services
         /// </summary>
         public async Task<List<SessionSummary>> GetAllSessionsAsync(string? tenantIdFilter = null, int? days = null, IReadOnlyCollection<string>? allowedTenantIds = null)
         {
+            // Bounded (delegated) single-tenant drill outside the managed set → empty (covers stats too,
+            // which funnel through here). See DrillOutsideBound.
+            if (DrillOutsideBound(allowedTenantIds, tenantIdFilter))
+                return new List<SessionSummary>();
+
             if (!string.IsNullOrEmpty(tenantIdFilter))
             {
                 return await GetSessionsAsync(tenantIdFilter!, days);

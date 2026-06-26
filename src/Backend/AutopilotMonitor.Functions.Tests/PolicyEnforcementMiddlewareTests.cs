@@ -545,6 +545,29 @@ public class PolicyEnforcementMiddlewareTests
     }
 
     [Fact]
+    public async Task Delegated_GlobalSessions_HomeTenantDrill_AdmittedButNotInAllowedSet()
+    {
+        // global/sessions?tenantId=<the caller's OWN JWT tenant> — crossTenant is false, so the delegated
+        // scoped-route check is skipped and the subset tier admits the caller. This is BY DESIGN (admit +
+        // publish AllowedTenantIds, handler bounds): the home tenant is NOT in AllowedTenantIds, so the repo
+        // (TableStorageService.DrillOutsideBound) returns empty. This test pins that contract so the bound is
+        // never silently widened to include the unmanaged home tenant. Covered end-to-end by
+        // DelegatedBoundedAggregateTests.BoundedDrill/Stats_UnmanagedTenant_*.
+        const string upn = "msp@partner.example";
+        var h = BuildHarness();
+        h.AsDelegated(TenantB);
+
+        var result = await h.Middleware.DecideAsync("GET", "/api/global/sessions", TenantA, AuthedPrincipal(TenantA, upn));
+
+        Assert.True(result.Allowed);
+        var rc = result.Context!;
+        Assert.True(rc.IsDelegatedReader);
+        Assert.NotNull(rc.AllowedTenantIds);
+        Assert.DoesNotContain(TenantA.ToLowerInvariant(), rc.AllowedTenantIds!);
+        Assert.Contains(TenantB.ToLowerInvariant(), rc.AllowedTenantIds!);
+    }
+
+    [Fact]
     public async Task Delegated_AggregateOnlyRoute_WithTenantId_StaysBlocked()
     {
         // global/presence is AGGREGATE-ONLY: its handler ignores ?tenantId= and returns ALL tenants'

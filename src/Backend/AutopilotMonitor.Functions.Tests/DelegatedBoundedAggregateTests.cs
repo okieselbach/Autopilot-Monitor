@@ -24,6 +24,9 @@ public class DelegatedBoundedAggregateTests
 {
     private const string ConfigTenant   = "11111111-1111-1111-1111-111111111111";
     private const string ManagedTenant  = "22222222-2222-2222-2222-222222222222";
+    // A tenant the delegated caller is NOT managing — e.g. their own JWT/home tenant, the one route the
+    // middleware's crossTenant short-circuit does not allow-list-check.
+    private const string UnmanagedTenant = "33333333-3333-3333-3333-333333333333";
 
     [Fact]
     public async Task BoundedAggregate_EmptyManagedSet_ReturnsEmpty_NeverUnboundedScan()
@@ -62,6 +65,44 @@ public class DelegatedBoundedAggregateTests
         sessionsClient.Verify(c => c.QueryAsync<TableEntity>(
             It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
             Times.AtLeastOnce());
+    }
+
+    [Fact]
+    public async Task BoundedDrill_UnmanagedTenant_ReturnsEmpty_NeverScansThatTenant()
+    {
+        // Delegated caller drills ?tenantId=<a tenant NOT in the managed set> — e.g. their own JWT/home
+        // tenant, where the middleware crossTenant short-circuit skips the allow-list check. Must read nothing.
+        var leak = new[] { new TableEntity(UnmanagedTenant, "row1"), new TableEntity(UnmanagedTenant, "row2") };
+        var indexClient = MockTableClientReturning(leak);
+        var sessionsClient = MockTableClientReturning(leak);
+
+        var storage = BuildStorage(new Mock<TableClient>(), sessionsClient, indexClient);
+
+        var page = await storage.GetAllSessionsPageAsync(
+            tenantIdFilter: UnmanagedTenant, days: null, pageSize: 10, continuation: null,
+            allowedTenantIds: new[] { ManagedTenant });
+
+        Assert.Empty(page.Items);
+        AssertNeverQueried(indexClient);
+        AssertNeverQueried(sessionsClient);
+    }
+
+    [Fact]
+    public async Task BoundedStats_UnmanagedTenant_ReturnsZero_NeverScansThatTenant()
+    {
+        // Same escalation via the stats path (global/stats/sessions?tenantId=<home>).
+        var leak = new[] { new TableEntity(UnmanagedTenant, "row1") };
+        var indexClient = MockTableClientReturning(leak);
+        var sessionsClient = MockTableClientReturning(leak);
+
+        var storage = BuildStorage(new Mock<TableClient>(), sessionsClient, indexClient);
+
+        var stats = await storage.GetAllSessionStatsAsync(
+            UnmanagedTenant, days: 7, allowedTenantIds: new[] { ManagedTenant });
+
+        Assert.Equal(0, stats.TotalLastNDays);
+        AssertNeverQueried(indexClient);
+        AssertNeverQueried(sessionsClient);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
