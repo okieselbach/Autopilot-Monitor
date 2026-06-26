@@ -225,8 +225,8 @@ export const api = {
     // response.
     geographicSessions: (tenantId: string, days: number, groupBy: string, locationKey: string) =>
       `${API_BASE_URL}/api/metrics/geographic/sessions${qs({ tenantId, days: String(days), groupBy, locationKey, full: '1' })}`,
-    globalGeographicSessions: (days: number, groupBy: string, locationKey: string) =>
-      `${API_BASE_URL}/api/global/metrics/geographic/sessions${qs({ days: String(days), groupBy, locationKey, full: '1' })}`,
+    globalGeographicSessions: (days: number, groupBy: string, locationKey: string, tenantId?: string) =>
+      `${API_BASE_URL}/api/global/metrics/geographic/sessions${qs({ tenantId, days: String(days), groupBy, locationKey, full: '1' })}`,
     platform: (opts?: { limit?: number; days?: number }) =>
       `${API_BASE_URL}/api/global/metrics/platform${qs({
         limit: opts?.limit?.toString(),
@@ -433,8 +433,9 @@ export const api = {
         continuation: opts?.continuation,
         excludeDeletions: opts?.excludeDeletions ? 'true' : undefined,
       })}`,
-    globalLogs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string; excludeDeletions?: boolean }) =>
+    globalLogs: (opts?: { dateFrom?: string; dateTo?: string; pageSize?: number; continuation?: string; excludeDeletions?: boolean; tenantId?: string }) =>
       `${API_BASE_URL}/api/global/audit/logs${qs({
+        tenantId: opts?.tenantId,
         dateFrom: opts?.dateFrom,
         dateTo: opts?.dateTo,
         pageSize: opts?.pageSize?.toString(),

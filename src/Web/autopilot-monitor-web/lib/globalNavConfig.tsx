@@ -153,9 +153,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "fleet-geographic", label: "Geographic Perf.", href: "/geographic-performance", icon: <GlobeAltIcon /> },
       { id: "fleet-sla", label: "SLA Compliance", href: "/sla", icon: <ShieldCheckIcon /> },
       { id: "fleet-usage", label: "Usage Metrics", href: "/usage-metrics", icon: <TrendingUpIcon /> },
-      // Audit Log deferred for delegated: the page drives off raw globalAdminMode with no tenant selector
-      // and its global/audit/logs read is GA-aggregate (no tenantId) — wiring a scoped selector is a
-      // separate follow-up. The backend route stays QueryParam so a delegated ?tenantId= read is possible.
+      { id: "fleet-audit", label: "Audit Log", href: "/audit", icon: <ClipboardDocumentIcon /> },
     ],
   },
   {

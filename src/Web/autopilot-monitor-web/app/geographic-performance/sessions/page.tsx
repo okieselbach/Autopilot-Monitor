@@ -93,12 +93,17 @@ function LocationSessionsContent() {
   const { getAccessToken } = useAuth();
 
   const { globalAdminMode } = useAdminMode();
+  // A cross-tenant caller deep-links the selected tenant via ?tenantId= (set by the geographic page for a
+  // GA override OR a delegated/MSP admin). Its presence — or GA mode — drives the cross-tenant endpoint;
+  // an empty tenantId in GA mode is the all-tenants aggregate.
+  const urlTenantId = searchParams.get("tenantId") || "";
+  const crossTenant = globalAdminMode || !!urlTenantId;
 
   const fetchSessions = useCallback(async () => {
     if (!locationKey) return;
     try {
-      const endpoint = globalAdminMode
-        ? api.metrics.globalGeographicSessions(Number(days), groupBy, locationKey)
+      const endpoint = crossTenant
+        ? api.metrics.globalGeographicSessions(Number(days), groupBy, locationKey, urlTenantId || undefined)
         : api.metrics.geographicSessions(tenantId, Number(days), groupBy, locationKey);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (response.ok) {
@@ -114,14 +119,14 @@ function LocationSessionsContent() {
     } finally {
       setLoading(false);
     }
-  }, [globalAdminMode, tenantId, getAccessToken, days, groupBy, locationKey]);
+  }, [crossTenant, urlTenantId, tenantId, getAccessToken, days, groupBy, locationKey]);
 
   useEffect(() => {
-    if (!globalAdminMode && !tenantId) return;
+    if (!crossTenant && !tenantId) return;
     if (hasInitialFetch.current) return;
     hasInitialFetch.current = true;
     fetchSessions();
-  }, [tenantId, globalAdminMode, fetchSessions]);
+  }, [tenantId, crossTenant, fetchSessions]);
 
   const timeLabel = days === "7" ? "7 Days" : days === "30" ? "30 Days" : "90 Days";
 

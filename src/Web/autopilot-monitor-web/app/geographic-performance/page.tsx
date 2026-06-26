@@ -459,7 +459,10 @@ export default function GeographicPerformancePage() {
                           } ${selectedLocation === loc.locationKey ? "bg-blue-50" : ""}`}
                           onClick={() => {
                             const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90;
-                            router.push(`/geographic-performance/sessions?locationKey=${encodeURIComponent(loc.locationKey)}&days=${days}&groupBy=${groupBy}`);
+                            // Carry the selected tenant into the drill-in so a cross-tenant caller (GA override
+                            // or delegated/MSP) scopes the session list to it. Empty = GA all-tenants aggregate.
+                            const tenantParam = selectedTenantId ? `&tenantId=${selectedTenantId}` : "";
+                            router.push(`/geographic-performance/sessions?locationKey=${encodeURIComponent(loc.locationKey)}&days=${days}&groupBy=${groupBy}${tenantParam}`);
                           }}
                           onMouseEnter={() => setSelectedLocation(loc.locationKey)}
                         >

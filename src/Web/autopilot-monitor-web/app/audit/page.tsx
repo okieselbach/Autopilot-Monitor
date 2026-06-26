@@ -2,14 +2,15 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { api } from '@/lib/api';
 import { authenticatedFetch, TokenExpiredError } from "@/lib/authenticatedFetch";
 import { extractContinuation } from "@/lib/paginationLink";
-import { useAdminMode } from "@/hooks/useAdminMode";
+import { useAggregatedAdminScope } from "@/hooks";
+import { TenantScopeSelector } from "@/components/TenantScopeSelector";
+import { GlobalAdminBanner, globalAdminSubtitle } from "@/components/GlobalAdminBanner";
 
 
 interface AuditLogEntry {
@@ -63,7 +64,6 @@ function dateInputToIsoEnd(value: string): string {
 export default function AuditPage() {
   const router = useRouter();
 
-  const { tenantId } = useTenant();
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
 
@@ -85,7 +85,11 @@ export default function AuditPage() {
   const [continuationStack, setContinuationStack] = useState<Array<string | null>>([]);
   const [pageNumber, setPageNumber] = useState(1);
 
-  const { globalAdminMode } = useAdminMode();
+  // Cross-tenant scope: a GA/Reader gets the "All tenants" aggregate AND a per-tenant drill-down; a
+  // delegated ("MSP") admin gets the per-tenant dropdown only (no aggregate). selectedTenantId is the audit
+  // tenant filter ("" = GA aggregate). scopeKey changes on tenant/GA-mode change → drives the refetch.
+  const scope = useAggregatedAdminScope();
+  const { isGlobalAdmin: crossTenant, selectedTenantId, scopeInitialized, scopeKey } = scope;
 
   // The DEFAULT view ("All (excl. deletions)") is resolved server-side: the
   // backend drops per-session deletion bookkeeping and back-fills the page, so
@@ -107,7 +111,11 @@ export default function AuditPage() {
         continuation: nextContinuation ?? undefined,
         excludeDeletions,
       };
-      const endpoint = globalAdminMode ? api.audit.globalLogs(opts) : api.audit.logs(opts);
+      // Cross-tenant: globalLogs with the selected tenant ("" → GA aggregate over all tenants; a managed
+      // tenant for a delegated caller, validated server-side). Own-tenant member: the tenant-scoped logs.
+      const endpoint = crossTenant
+        ? api.audit.globalLogs({ ...opts, tenantId: selectedTenantId || undefined })
+        : api.audit.logs(opts);
       const response = await authenticatedFetch(endpoint, getAccessToken);
       if (!response.ok) {
         addNotification('error', 'Backend Error', `Failed to load audit logs: ${response.statusText}`, 'audit-fetch-error');
@@ -131,7 +139,7 @@ export default function AuditPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [addNotification, dateFromIso, dateToIso, getAccessToken, globalAdminMode, excludeDeletions]);
+  }, [addNotification, dateFromIso, dateToIso, getAccessToken, crossTenant, selectedTenantId, excludeDeletions]);
 
   // Initial / window-change fetch resets pagination state.
   // fetchPage is intentionally excluded from deps: its identity churns whenever
@@ -143,13 +151,16 @@ export default function AuditPage() {
   // useCallback closure is rebuilt from the same window deps the effect
   // already tracks, so the latest fetchPage is invoked when the effect runs.
   useEffect(() => {
-    if (!globalAdminMode && !tenantId) return;
+    // Wait until the scope's default selection settles (own tenant, or the first managed tenant for a
+    // delegated caller) so we don't fire a wasted request in the wrong scope. scopeKey changes on a
+    // tenant/GA-mode switch → refetch from page 1.
+    if (!scopeInitialized) return;
     setContinuation(null);
     setContinuationStack([]);
     setPageNumber(1);
     fetchPage(null, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, globalAdminMode, dateFromIso, dateToIso, excludeDeletions]);
+  }, [scopeKey, scopeInitialized, dateFromIso, dateToIso, excludeDeletions]);
 
   const handleRefresh = () => {
     fetchPage(continuation, false);
@@ -237,15 +248,11 @@ export default function AuditPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
-        {globalAdminMode && (
-          <div className="bg-purple-700 text-white text-sm px-4 py-2 flex items-center justify-center space-x-2">
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="font-medium">Global Admin View</span>
-            <span className="text-purple-300">&mdash; aggregating data across all tenants</span>
-          </div>
-        )}
+        <GlobalAdminBanner
+          show={crossTenant}
+          delegated={scope.isDelegatedScope}
+          subtitle={globalAdminSubtitle(scope, "aggregating data across all tenants")}
+        />
         <header className="bg-white shadow">
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
@@ -258,16 +265,19 @@ export default function AuditPage() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+              <div className="flex items-center gap-3">
+                <TenantScopeSelector scope={scope} allowAggregated />
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
               >
                 <svg className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
                 <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-              </button>
+                </button>
+              </div>
             </div>
           </div>
         </header>
