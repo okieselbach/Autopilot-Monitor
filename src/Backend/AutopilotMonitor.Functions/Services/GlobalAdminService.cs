@@ -15,7 +15,12 @@ public class GlobalAdminService
     private readonly IAdminRepository _adminRepo;
     private readonly IMemoryCache _cache;
     private readonly ILogger<GlobalAdminService> _logger;
-    private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
+    // Per-process cache: on scaled-out Flex Consumption, the _cache.Remove on add/remove/disable
+    // only clears the mutating instance, so other instances serve a stale global role until expiry.
+    // A short TTL caps that cross-instance window so a granted/revoked GlobalAdmin or GlobalReader
+    // role self-heals in seconds. The lookup is a single Table Storage point-read. Do NOT raise this
+    // back to minutes "for performance" — it reintroduces the role flip-flop (see TenantAdminsService).
+    private readonly TimeSpan _cacheDuration = TimeSpan.FromSeconds(30);
 
     // Sentinel stored in the role cache to represent "no global role" (row missing or disabled).
     // Lets us distinguish a cached negative from a cache miss without nullable boxing games.
@@ -46,7 +51,7 @@ public class GlobalAdminService
     /// <summary>
     /// Resolves the caller's platform role from the GlobalAdmins table.
     /// Returns <see cref="Constants.GlobalRoles.GlobalAdmin"/>, <see cref="Constants.GlobalRoles.GlobalReader"/>,
-    /// or <c>null</c> when the UPN has no enabled GlobalAdmins row. Cached for 5 minutes.
+    /// or <c>null</c> when the UPN has no enabled GlobalAdmins row. Cached briefly (see _cacheDuration).
     /// </summary>
     public virtual async Task<string?> GetGlobalRoleAsync(string? upn)
     {

@@ -16,7 +16,15 @@ public class TenantAdminsService
     private readonly IAdminRepository _adminRepo;
     private readonly IMemoryCache _cache;
     private readonly ILogger<TenantAdminsService> _logger;
-    private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
+    // Authorization state is cached per-process (IMemoryCache). On a scaled-out Flex Consumption
+    // plan InvalidateMemberCache only clears the instance that handled the grant/revoke mutation;
+    // other warm instances keep serving the stale role until their entry expires. A short TTL caps
+    // that cross-instance divergence window (newly-granted role appears, revoked role disappears)
+    // so a role change self-heals in seconds instead of minutes. The underlying lookup is a single
+    // Table Storage point-read (PK+RK), so the extra reads are negligible. Do NOT raise this back
+    // to minutes "for performance" — it reintroduces the role flip-flop. Matches the 30s
+    // cross-instance revalidation convention used by BlockedDeviceService.
+    private readonly TimeSpan _cacheDuration = TimeSpan.FromSeconds(30);
 
     public TenantAdminsService(
         IAdminRepository adminRepo,
