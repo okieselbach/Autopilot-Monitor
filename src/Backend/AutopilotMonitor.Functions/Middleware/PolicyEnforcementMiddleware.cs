@@ -157,7 +157,10 @@ public class PolicyEnforcementMiddleware : IFunctionsWorkerMiddleware
         // A delegated grant only applies to the READ tiers — never to write tiers (TenantAdminOrGA,
         // GlobalAdminOnly, …). This is the single fact that keeps delegation read-only in this phase and
         // prevents a delegated READER from crossing into a write on a tenant they merely read.
-        var delegatedGrantsRead = delegatedRole != null && IsDelegatedReadTier(catalogEntry.Policy);
+        // ExcludeDelegated routes (platform-operational GA/Reader-only reads whose {tenantId} template forces
+        // RouteParam) opt OUT of the delegated rescue entirely — the None-equivalent for a scoped route.
+        var delegatedGrantsRead = delegatedRole != null && IsDelegatedReadTier(catalogEntry.Policy)
+            && !catalogEntry.ExcludeDelegated;
 
         // Policy-tier admission. If the evaluator denied a delegated-only caller (no own-tenant membership,
         // no platform role) but they ARE a delegated reader of this read route's target, rescue the denial.

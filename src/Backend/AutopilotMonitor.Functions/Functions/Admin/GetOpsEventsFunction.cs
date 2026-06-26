@@ -12,9 +12,16 @@ using Microsoft.Extensions.Logging;
 namespace AutopilotMonitor.Functions.Functions.Admin
 {
     /// <summary>
-    /// Global Admin endpoint: returns operational events from the OpsEvents table.
-    /// Supports optional category + dateFrom/dateTo filters and opt-in pagination.
-    /// Authentication + GlobalAdminOnly authorization enforced by PolicyEnforcementMiddleware.
+    /// Cross-tenant READ endpoint for PLATFORM-OPERATIONAL events (Consent/Maintenance/Security/Tenant/Agent/
+    /// SLA). Supports optional category + dateFrom/dateTo filters and opt-in pagination. Authentication +
+    /// GlobalReadOrAdmin + TenantScoping.None enforced by PolicyEnforcementMiddleware — a Global Admin and the
+    /// read-only Global Reader reach it, but a delegated ("MSP") admin does NOT: ops-events is the platform
+    /// operator's view, not customer telemetry, so it stays GA/Reader-only (None ⇒ no scoped-route rescue for
+    /// delegated; see EndpointAccessPolicyCatalog + PolicyEnforcementMiddlewareTests.Delegated_OpsEvents_*).
+    /// The optional ?tenantId= is a DRILL for a GA/Reader (who already see all tenants); OpsEvents is
+    /// partitioned by CATEGORY (not tenant), so <see cref="FilterByTenant"/> applies the drill in-memory.
+    /// That filter is drill CORRECTNESS, not a tenant-isolation boundary — every caller here already has full
+    /// cross-tenant scope.
     /// </summary>
     public class GetOpsEventsFunction
     {
@@ -58,16 +65,12 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                     extrasList.Add(new KeyValuePair<string, string?>("tenantId", filterTenantId));
                 var extras = extrasList.Count > 0 ? extrasList.ToArray() : null;
 
-                static IEnumerable<OpsEventEntry> ApplyTenantFilter(
-                    IEnumerable<OpsEventEntry> source, string? tenantFilter) =>
-                    string.IsNullOrEmpty(tenantFilter)
-                        ? source
-                        : source.Where(e => string.Equals(e.TenantId, tenantFilter, StringComparison.OrdinalIgnoreCase));
-
                 if (parsed.PageSize == null)
                 {
                     var events = await _repository.GetOpsEventsAsync(category, parsed.DateFrom, parsed.DateTo);
-                    var filtered = ApplyTenantFilter(events, filterTenantId).ToList();
+                    // Drill correctness: apply the optional ?tenantId= GA/Reader drill in-memory (OpsEvents PK
+                    // = category, so the storage query can't). Not a tenant-isolation boundary — see class doc.
+                    var filtered = FilterByTenant(events, filterTenantId).ToList();
                     return await req.OkAsync(new { success = true, count = filtered.Count, events = filtered });
                 }
 
@@ -98,7 +101,8 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 var page = await _repository.GetOpsEventsPageAsync(
                     category, parsed.DateFrom, parsed.DateTo, parsed.PageSize.Value, azureToken);
 
-                var pageItems = ApplyTenantFilter(page.Items, filterTenantId).ToList();
+                // Drill correctness: same optional ?tenantId= GA/Reader drill on the paged path — see FilterByTenant.
+                var pageItems = FilterByTenant(page.Items, filterTenantId).ToList();
 
                 string? nextLink = null;
                 if (!string.IsNullOrEmpty(page.NextRawToken))
@@ -132,5 +136,19 @@ namespace AutopilotMonitor.Functions.Functions.Admin
                 return await req.InternalServerErrorAsync(_logger, ex, "Get ops events");
             }
         }
+
+        /// <summary>
+        /// Applies the optional ?tenantId= DRILL to an OpsEvents result set: OpsEvents rows are partitioned by
+        /// CATEGORY, not tenant, so the storage query can't filter by tenant — this in-memory pass does. A
+        /// null/empty filter (the default GA/Reader cross-tenant view) passes everything through. This is
+        /// DRILL CORRECTNESS, not a tenant-isolation boundary: ops-events is GA/Reader-only (catalog
+        /// TenantScoping.None — a delegated caller cannot reach the route), and a GA/Reader already has full
+        /// cross-tenant scope. Internal so the drill has direct unit coverage (GetOpsEventsFunctionTests).
+        /// </summary>
+        internal static IEnumerable<OpsEventEntry> FilterByTenant(
+            IEnumerable<OpsEventEntry> source, string? tenantFilter) =>
+            string.IsNullOrEmpty(tenantFilter)
+                ? source
+                : source.Where(e => string.Equals(e.TenantId, tenantFilter, StringComparison.OrdinalIgnoreCase));
     }
 }
