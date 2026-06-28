@@ -88,7 +88,9 @@ export default function AuditPage() {
   // Cross-tenant scope: a GA/Reader gets the "All tenants" aggregate AND a per-tenant drill-down; a
   // delegated ("MSP") admin gets the per-tenant dropdown only (no aggregate). selectedTenantId is the audit
   // tenant filter ("" = GA aggregate). scopeKey changes on tenant/GA-mode change → drives the refetch.
-  const scope = useAggregatedAdminScope();
+  // GA/Reader starts in the aggregated "All tenants" view; a delegated ("MSP") admin has no aggregate and
+  // still defaults to its first managed tenant via the normal tenant switcher.
+  const scope = useAggregatedAdminScope({ defaultAggregated: true });
   const { isGlobalAdmin: crossTenant, selectedTenantId, scopeInitialized, scopeKey } = scope;
 
   // The DEFAULT view ("All (excl. deletions)") is resolved server-side: the

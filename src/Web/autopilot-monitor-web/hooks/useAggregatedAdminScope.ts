@@ -54,6 +54,9 @@ export interface AggregatedAdminScope {
  *
  * @param opts.urlGlobal  seed from `?global=1` — when set, honor the URL's tenant scope on init (GA only).
  * @param opts.urlTenantId seed from `?tenantId=` — the specific tenant to select ("" = aggregated, GA only).
+ * @param opts.defaultAggregated when set, a GA/Reader defaults to the aggregated "All tenants" view ("")
+ *   instead of their own tenant. A `?global=1` URL seed still wins on first init. No effect for a delegated
+ *   caller (never aggregated) or a regular user. Used by the audit page, which starts cross-tenant.
  *
  * Pair with `<TenantScopeSelector scope={scope} allowAggregated />` and
  * `<GlobalAdminBanner show={scope.isGlobalAdmin} delegated={scope.isDelegatedScope} subtitle={globalAdminSubtitle(scope)} />`.
@@ -61,6 +64,7 @@ export interface AggregatedAdminScope {
 export function useAggregatedAdminScope(opts?: {
   urlGlobal?: boolean;
   urlTenantId?: string;
+  defaultAggregated?: boolean;
 }): AggregatedAdminScope {
   const { tenantId } = useTenant();
   const { hasGlobalScope, user } = useAuth();
@@ -90,6 +94,7 @@ export function useAggregatedAdminScope(opts?: {
 
   const urlGlobal = opts?.urlGlobal;
   const urlTenantId = opts?.urlTenantId;
+  const defaultAggregated = opts?.defaultAggregated ?? false;
 
   const [prevIsGlobalAdmin, setPrevIsGlobalAdmin] = useState(isGlobalAdmin);
 
@@ -104,12 +109,19 @@ export function useAggregatedAdminScope(opts?: {
       if (prevIsGlobalAdmin !== isGlobalAdmin) setPrevIsGlobalAdmin(isGlobalAdmin);
     }
   } else if (tenantId && (!scopeInitialized || prevIsGlobalAdmin !== isGlobalAdmin)) {
-    // GA/Reader (or a non-global user): default to own tenant, honoring a ?global=1 URL seed on first init.
+    // GA/Reader (or a non-global user): default to own tenant — unless a ?global=1 URL seed (first init only)
+    // or the page's defaultAggregated opt selects the cross-tenant aggregate ("") instead.
     const firstInit = !scopeInitialized;
     setPrevIsGlobalAdmin(isGlobalAdmin);
     setScopeInitialized(true);
     setSelectedTenantId(
-      isGlobalAdmin ? (firstInit && urlGlobal ? urlTenantId ?? "" : tenantId) : ""
+      isGlobalAdmin
+        ? firstInit && urlGlobal
+          ? urlTenantId ?? ""
+          : defaultAggregated
+            ? ""
+            : tenantId
+        : ""
     );
   }
 
