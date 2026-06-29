@@ -582,6 +582,16 @@ export function createOAuthRouter(): Router {
       state: proxyState,
       code_challenge,
       code_challenge_method: 'S256',
+      // Force the Entra account picker instead of silently reusing whatever
+      // account the system/default browser already has an SSO session for.
+      // Without this, a user whose default browser is signed into the WRONG
+      // tenant/account gets authenticated as that account with no chance to
+      // switch — and working around it by pasting the URL into another browser
+      // profile fails, because the native client's loopback listener has
+      // already closed by then (ERR_CONNECTION_REFUSED). select_account lets
+      // the user choose the correct account in the same browser the client
+      // opened, keeping the loopback callback alive.
+      prompt: 'select_account',
     });
 
     res.redirect(`${AUTHORITY}/oauth2/v2.0/authorize?${entraParams}`);

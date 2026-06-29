@@ -263,6 +263,9 @@ describe('/oauth/authorize — PKCE S256 enforcement', () => {
     expect(location).toContain('code_challenge_method=S256');
     // The client's challenge is forwarded unchanged.
     expect(location).toContain('E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
+    // Force the account picker so a wrong default-browser SSO session can't be
+    // silently reused.
+    expect(location).toContain('prompt=select_account');
   });
 
   it('accepts a trailing-slash variant of the registered loopback redirect (VS Code repro)', async () => {
