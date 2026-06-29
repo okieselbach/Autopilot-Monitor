@@ -224,6 +224,7 @@ function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion, displa
           )}
         </div>
         <div className="flex items-center space-x-3 text-xs flex-shrink-0 ml-2">
+          <span className={`font-medium ${statusColor}`}>{card.headerLabel}</span>
           {cardDurationLabel && (
             <span
               className={`font-mono ${isCardSlow ? "text-amber-600 font-medium" : "text-gray-500"}`}
@@ -232,7 +233,6 @@ function ScriptCardView({ card, showScriptOutput, latestBootstrapVersion, displa
               {cardDurationLabel}
             </span>
           )}
-          <span className={`font-medium ${statusColor}`}>{card.headerLabel}</span>
           <svg className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${phasesOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
