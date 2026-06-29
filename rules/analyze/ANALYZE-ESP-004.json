@@ -1,0 +1,73 @@
+{
+  "$schema": "../schema/analyze-rule.schema.json",
+  "ruleId": "ANALYZE-ESP-004",
+  "title": "ESP Timeout with 'Continue Anyway' (Soft Failure)",
+  "description": "Detects an ESP terminal failure on a profile that allows 'Continue anyway'. The enrollment is reported as failed, but the user most likely dismissed the error screen and reached the desktop — a soft failure rather than an unusable device.",
+  "severity": "warning",
+  "category": "esp",
+  "version": "1.0.0",
+  "enabled": true,
+  "baseConfidence": 80,
+  "conditions": [
+    {
+      "signal": "enrollment_failed",
+      "source": "event_type",
+      "eventType": "enrollment_failed",
+      "operator": "exists",
+      "value": "",
+      "required": true
+    },
+    {
+      "signal": "may_have_continued",
+      "source": "event_type",
+      "eventType": "enrollment_failed",
+      "dataField": "mayHaveContinuedAnyway",
+      "operator": "equals",
+      "value": "true",
+      "required": true
+    },
+    {
+      "signal": "espSyncFailureTimeoutMinutes",
+      "source": "event_type",
+      "eventType": "enrollment_failed",
+      "dataField": "espSyncFailureTimeoutMinutes",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    },
+    {
+      "signal": "failedSubcategory",
+      "source": "event_type",
+      "eventType": "enrollment_failed",
+      "dataField": "failedSubcategory",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    },
+    {
+      "signal": "appName",
+      "source": "event_type",
+      "eventType": "app_install_failed",
+      "dataField": "appName",
+      "operator": "exists",
+      "value": "",
+      "required": false
+    }
+  ],
+  "confidenceFactors": [
+    { "signal": "app_failed", "condition": "exists", "weight": 10 }
+  ],
+  "explanation": "This enrollment was reported as **failed** because the Enrollment Status Page reached its configured terminal timeout (`{{espSyncFailureTimeoutMinutes}} min`) before all blocking items finished. The ESP profile, however, allows **'Continue anyway'** — so the user most likely dismissed the error screen and reached the desktop with a working, though not fully provisioned, device.\n\nThe agent only observes the ESP terminal failure on the device side; it cannot see what the user did after the failure screen. Treat this as a **soft failure**: the device may well be in productive use, while at least one blocking item (`{{failedSubcategory}}` subcategory / app `{{appName}}`) did not complete inside the ESP window.\n\nA cluster of these across a tenant almost always points at one slow blocking app holding the whole fleet at the ESP timeout wall, not at broken devices. Any field still shown as a literal `{{…}}` placeholder was simply not recorded for this session (e.g. a certificate-only failure has no failed app).",
+  "remediation": [
+    {
+      "title": "Relieve ESP pressure so enrollments finish inside the window",
+      "steps": [
+        "Identify the slow blocking app (`{{appName}}`) and either remove it from the ESP 'block device use until these required apps are installed' list, or raise the ESP installation timeout (currently {{espSyncFailureTimeoutMinutes}} min).",
+        "If the app legitimately needs longer than the ESP allows, make it non-blocking and let it install after the desktop arrives.",
+        "Verify the app's detection rule matches after install — an app that installs but fails detection times out the ESP on every device (see ANALYZE-APP-013).",
+        "If a subcategory such as Certificates is reported under '{{failedSubcategory}}', confirm the certificate/connector actually delivers — 'Continue anyway' hides a missing certificate, it does not fix it."
+      ]
+    }
+  ],
+  "tags": ["esp", "timeout", "continue-anyway", "soft-failure", "enrollment"]
+}
