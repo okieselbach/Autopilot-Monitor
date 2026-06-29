@@ -465,6 +465,14 @@ function HomeContent() {
               onBlockDevice={blockDevice}
               fullWidth={fullWidth}
               onToggleFullWidth={toggleFullWidth}
+              sessionLinkTarget={
+                crossTenant
+                  ? (s) =>
+                      s.tenantId
+                        ? `/sessions/${s.sessionId}?tenantId=${encodeURIComponent(s.tenantId)}`
+                        : `/sessions/${s.sessionId}`
+                  : undefined
+              }
             />
           )}
         </div>

@@ -96,9 +96,10 @@ interface SessionTableProps {
   onBlockDevice: (serialNumber: string, tenantId: string, deviceName?: string) => void;
   fullWidth: boolean;
   onToggleFullWidth: () => void;
-  /** Builds the row's navigation target. Defaults to `/sessions/{id}`; the Fleet drill-in overrides it to
-   * append `?tenantId=` so a delegated viewer opens the session in the managed tenant's (read-only) context. */
-  sessionLinkTarget?: (sessionId: string) => string;
+  /** Builds the row's navigation target. Defaults to `/sessions/{id}`; a cross-tenant viewer overrides it to
+   * append `?tenantId=` so a delegated viewer opens the session in the managed tenant's (read-only) context.
+   * Receives the whole session because the target tenant is per-row (session.tenantId), not derivable from id. */
+  sessionLinkTarget?: (session: Session) => string;
 }
 
 export function SessionTable({
@@ -142,8 +143,8 @@ export function SessionTable({
   sessionLinkTarget,
 }: SessionTableProps) {
   const router = useRouter();
-  const linkFor = (sessionId: string) =>
-    sessionLinkTarget ? sessionLinkTarget(sessionId) : `/sessions/${sessionId}`;
+  const linkFor = (session: Session) =>
+    sessionLinkTarget ? sessionLinkTarget(session) : `/sessions/${session.sessionId}`;
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(getInitialVisibleColumns);
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
@@ -551,7 +552,7 @@ export function SessionTable({
                 const selected = searchSuggestions[searchSelectedIndex];
                 setShowSearchSuggestions(false);
                 setSearchSelectedIndex(-1);
-                router.push(linkFor(selected.session.sessionId));
+                router.push(linkFor(selected.session));
                 return;
               }
               if (e.key === "Escape") {
@@ -593,7 +594,7 @@ export function SessionTable({
                   onClick={() => {
                     setShowSearchSuggestions(false);
                     setSearchSelectedIndex(-1);
-                    router.push(linkFor(s.session.sessionId));
+                    router.push(linkFor(s.session));
                   }}
                   className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${
                     idx === searchSelectedIndex ? "bg-blue-50" : "hover:bg-gray-50"
@@ -786,7 +787,7 @@ export function SessionTable({
               paginatedSessions.map((session) => (
               <tr
                 key={session.sessionId}
-                onClick={() => { trackEvent("session_opened", { sessionId: session.sessionId, status: session.status ?? "" }); router.push(linkFor(session.sessionId)); }}
+                onClick={() => { trackEvent("session_opened", { sessionId: session.sessionId, status: session.status ?? "" }); router.push(linkFor(session)); }}
                 className="hover:bg-gray-50 cursor-pointer transition-colors"
               >
                 {activeColumns.map((col) => (
