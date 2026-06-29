@@ -414,8 +414,12 @@ public class TenantTemplateEntity : ITableEntity
     /// <summary>UPN of the GlobalAdmin who created the template (meta row only).</summary>
     public string CreatedBy { get; set; } = string.Empty;
 
-    /// <summary>When the template was created (meta row only).</summary>
-    public DateTime CreatedDate { get; set; }
+    /// <summary>
+    /// When the template was created (meta row only). NULLABLE on purpose: membership rows leave it unset, and
+    /// Azure Table Storage rejects a default(DateTime) (0001-01-01) — below the Edm.DateTime minimum of 1601 —
+    /// which would make every membership-row write throw. A null DateTime? is simply omitted (valid).
+    /// </summary>
+    public DateTime? CreatedDate { get; set; }
 
     /// <summary>The managed tenant ID (lowercase) — denormalized copy of RowKey on membership rows; empty on meta.</summary>
     public string TenantId { get; set; } = string.Empty;

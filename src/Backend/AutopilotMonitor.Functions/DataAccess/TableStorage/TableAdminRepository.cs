@@ -828,7 +828,7 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             {
                 template.Name = entity.Name;
                 template.CreatedBy = entity.CreatedBy;
-                template.CreatedAt = entity.CreatedDate;
+                template.CreatedAt = entity.CreatedDate ?? default;
                 return true;
             }
 
