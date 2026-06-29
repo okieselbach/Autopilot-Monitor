@@ -72,6 +72,32 @@ public class DelegatedAdminService
             tenantRoles[row.TenantId] = role;
         }
 
+        // Template-derived tenants: a UPN assigned to a Tenant Template inherits read scope to every
+        // tenant in that template. This is the MSP convenience — assign the UPN once, manage the tenant
+        // set on the template. Same fail-closed + stronger-role-wins merge as direct grants; a tenant
+        // present both directly and via a template keeps the stronger role. Membership changes converge
+        // within the cache TTL (no separate per-template cache by design).
+        var templateAssignments = await _adminRepo.GetTemplateAssignmentsForUpnAsync(upn);
+        foreach (var assignment in templateAssignments)
+        {
+            if (!assignment.IsEnabled)
+                continue;
+
+            var role = NormalizeRole(assignment.Role, upn, $"template:{assignment.TemplateId}");
+            if (role == null)
+                continue;
+
+            var templateTenants = await _adminRepo.GetTemplateTenantsAsync(assignment.TemplateId);
+            foreach (var tenantId in templateTenants)
+            {
+                if (string.IsNullOrWhiteSpace(tenantId))
+                    continue;
+                if (tenantRoles.TryGetValue(tenantId, out var existing) && IsStronger(existing, role))
+                    continue;
+                tenantRoles[tenantId] = role;
+            }
+        }
+
         var scope = new DelegatedScope(tenantRoles);
         _cache.Set(cacheKey, scope, _cacheDuration);
         return scope;
@@ -141,7 +167,139 @@ public class DelegatedAdminService
     public Task<List<DelegatedAdminEntry>> GetAssigneesForTenantAsync(string tenantId)
         => _adminRepo.GetDelegatedAssigneesAsync(tenantId.ToLowerInvariant());
 
+    // --- Tenant Templates (app-internal tenant bundles) ---
+    //
+    // ALL template mutations go through the service (never the repo directly) so the delegated-scope
+    // cache is invalidated in lockstep — otherwise a removed tenant / unassigned UPN keeps stale auth
+    // scope until TTL expiry. As with direct grants, Invalidate clears only THIS instance's cache; other
+    // scaled-out instances self-heal within the short TTL (see _cacheDuration). Mutations that change the
+    // tenant SET of a template (add/remove tenant, delete) invalidate EVERY current assignee.
+    //
+    // templateId is normalized to lowercase at this boundary so the opaque key is case-insensitive for any
+    // (e.g. hand-crafted external) caller. Generated IDs are already lowercase hex GUIDs, so this is lossless.
+
+    /// <summary>Read-through: all templates with tenant members + assignee counts (management UI).</summary>
+    public Task<List<TenantTemplate>> GetAllTemplatesAsync() => _adminRepo.GetAllTenantTemplatesAsync();
+
+    /// <summary>Read-through: one template with its tenant members + assignee count.</summary>
+    public Task<TenantTemplate?> GetTemplateAsync(string templateId) => _adminRepo.GetTenantTemplateAsync(NormalizeTemplateId(templateId));
+
+    /// <summary>Read-through: all UPNs assigned to a template (management UI).</summary>
+    public Task<List<TenantTemplateAssignment>> GetTemplateAssigneesAsync(string templateId)
+        => _adminRepo.GetTemplateAssigneesAsync(NormalizeTemplateId(templateId));
+
+    /// <summary>Creates a template (no scope effect — a fresh template has no assignees).</summary>
+    public Task<string> CreateTemplateAsync(string name, string createdBy)
+        => _adminRepo.CreateTenantTemplateAsync(name, createdBy);
+
+    /// <summary>Renames a template (name only — no scope effect, no invalidation needed).</summary>
+    public Task<bool> RenameTemplateAsync(string templateId, string name)
+        => _adminRepo.RenameTenantTemplateAsync(NormalizeTemplateId(templateId), name);
+
+    /// <summary>Deletes a template and all its assignments; invalidates every (former) assignee's scope.</summary>
+    public async Task<bool> DeleteTemplateAsync(string templateId)
+    {
+        templateId = NormalizeTemplateId(templateId);
+        // Capture assignees BEFORE the cascade delete removes their assignment rows.
+        var assignees = await _adminRepo.GetTemplateAssigneesAsync(templateId);
+        var ok = await _adminRepo.DeleteTenantTemplateAsync(templateId);
+        InvalidateAll(assignees);
+        return ok;
+    }
+
+    /// <summary>
+    /// Adds a tenant to a template; every assignee gains it — invalidate them so it takes effect now.
+    /// Returns false (no-op) if the template does not exist (meta-backed) — prevents a "ghost" template
+    /// being conjured from a lone membership row.
+    /// </summary>
+    public async Task<bool> AddTenantToTemplateAsync(string templateId, string tenantId)
+    {
+        templateId = NormalizeTemplateId(templateId);
+        if (await _adminRepo.GetTenantTemplateAsync(templateId) == null)
+            return false;
+
+        var ok = await _adminRepo.AddTenantToTemplateAsync(templateId, tenantId);
+        await InvalidateTemplateAssigneesAsync(templateId);
+        return ok;
+    }
+
+    /// <summary>
+    /// Removes a tenant from a template (REVOKE flow); invalidate every assignee immediately. Returns false
+    /// (no-op, no invalidation) if the template does not exist or the tenant is not currently a member — so a
+    /// typo cannot return success and write false "access removed" audit rows.
+    /// </summary>
+    public async Task<bool> RemoveTenantFromTemplateAsync(string templateId, string tenantId)
+    {
+        templateId = NormalizeTemplateId(templateId);
+        tenantId = tenantId.ToLowerInvariant();
+        var template = await _adminRepo.GetTenantTemplateAsync(templateId);
+        if (template == null || !template.TenantIds.Contains(tenantId))
+            return false;
+
+        var ok = await _adminRepo.RemoveTenantFromTemplateAsync(templateId, tenantId);
+        await InvalidateTemplateAssigneesAsync(templateId);
+        return ok;
+    }
+
+    /// <summary>
+    /// Assigns a UPN to a template; invalidates that UPN's scope. Returns false (no-op) if the template does
+    /// not exist (meta-backed) — so the service fully owns the existence invariant, independent of any caller
+    /// pre-check, and a delete racing an assign can't leave a dangling assignment row.
+    /// </summary>
+    public async Task<bool> AssignTemplateAsync(string upn, string templateId, string role, bool isEnabled, string assignedBy)
+    {
+        templateId = NormalizeTemplateId(templateId);
+        if (await _adminRepo.GetTenantTemplateAsync(templateId) == null)
+            return false;
+
+        upn = upn.ToLowerInvariant();
+        var ok = await _adminRepo.AssignTemplateAsync(upn, templateId, role, isEnabled, assignedBy);
+        Invalidate(upn);
+        return ok;
+    }
+
+    /// <summary>
+    /// Unassigns a UPN from a template (REVOKE flow); invalidates that UPN's scope immediately. Returns false
+    /// (no-op, no invalidation) if the UPN is not currently assigned to the template — so a mistyped UPN can't
+    /// return success and write false "access removed" audit rows.
+    /// </summary>
+    public async Task<bool> UnassignTemplateAsync(string upn, string templateId)
+    {
+        upn = upn.ToLowerInvariant();
+        templateId = NormalizeTemplateId(templateId);
+
+        var assignments = await _adminRepo.GetTemplateAssignmentsForUpnAsync(upn);
+        var isAssigned = false;
+        foreach (var assignment in assignments)
+        {
+            if (string.Equals(assignment.TemplateId, templateId, StringComparison.Ordinal))
+            {
+                isAssigned = true;
+                break;
+            }
+        }
+        if (!isAssigned)
+            return false;
+
+        var ok = await _adminRepo.UnassignTemplateAsync(upn, templateId);
+        Invalidate(upn);
+        return ok;
+    }
+
+    /// <summary>Invalidates the cached scope of every current assignee of a template.</summary>
+    private async Task InvalidateTemplateAssigneesAsync(string templateId)
+        => InvalidateAll(await _adminRepo.GetTemplateAssigneesAsync(templateId));
+
+    private void InvalidateAll(IEnumerable<TenantTemplateAssignment> assignees)
+    {
+        foreach (var assignee in assignees)
+            Invalidate(assignee.Upn);
+    }
+
     private void Invalidate(string upn) => _cache.Remove($"delegated-scope:{upn.ToLowerInvariant()}");
+
+    /// <summary>Normalizes the opaque templateId to lowercase so the storage key is case-insensitive to callers.</summary>
+    private static string NormalizeTemplateId(string templateId) => (templateId ?? string.Empty).ToLowerInvariant();
 
     /// <summary>Empty/missing role defaults to the least-privileged DelegatedReader; an unrecognized
     /// role is dropped (fail-closed) rather than silently granting access.</summary>
@@ -228,4 +386,69 @@ public class DelegatedAdminEntity : ITableEntity
 
     /// <summary>UPN of the principal who created this assignment (operator GA, or customer tenant admin).</summary>
     public string GrantedBy { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A row in the <see cref="Constants.TableNames.TenantTemplates"/> table. Two row layouts share the
+/// class, discriminated by <see cref="RowKey"/>:
+/// <list type="bullet">
+/// <item>PK = templateId, RK = <see cref="MetaRowKey"/> — template metadata (<see cref="Name"/>, creator).</item>
+/// <item>PK = templateId, RK = tenantId (lowercase) — one membership row per tenant in the template.</item>
+/// </list>
+/// A template is an app-internal named bundle of tenants; a delegated admin assigned to it (see
+/// <see cref="TenantTemplateAssignmentEntity"/>) gains read scope to every tenant member.
+/// </summary>
+public class TenantTemplateEntity : ITableEntity
+{
+    /// <summary>The reserved RowKey of the per-template metadata row. Tenant IDs are GUIDs and never collide with it.</summary>
+    public const string MetaRowKey = "meta";
+
+    public string PartitionKey { get; set; } = string.Empty; // templateId
+    public string RowKey { get; set; } = string.Empty;       // "meta" or tenantId (lowercase)
+    public DateTimeOffset? Timestamp { get; set; }
+    public Azure.ETag ETag { get; set; }
+
+    /// <summary>Display name (meta row only; empty on membership rows).</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>UPN of the GlobalAdmin who created the template (meta row only).</summary>
+    public string CreatedBy { get; set; } = string.Empty;
+
+    /// <summary>When the template was created (meta row only).</summary>
+    public DateTime CreatedDate { get; set; }
+
+    /// <summary>The managed tenant ID (lowercase) — denormalized copy of RowKey on membership rows; empty on meta.</summary>
+    public string TenantId { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A row in the <see cref="Constants.TableNames.TenantTemplateAssignments"/> table: delegated-admin UPN X
+/// is assigned to template T at role <see cref="Role"/>. PK = UPN (lowercase), RK = templateId. Resolving
+/// a UPN's scope point-scans this by PK, then expands each template into its tenant members. Operator-managed
+/// only (no PendingApproval flow); fail-closed — only enabled + recognized-role assignments confer scope.
+/// </summary>
+public class TenantTemplateAssignmentEntity : ITableEntity
+{
+    public string PartitionKey { get; set; } = string.Empty; // UPN (lowercase)
+    public string RowKey { get; set; } = string.Empty;       // templateId
+    public DateTimeOffset? Timestamp { get; set; }
+    public Azure.ETag ETag { get; set; }
+
+    /// <summary>The delegated admin's UPN (lowercase) — denormalized copy of PartitionKey.</summary>
+    public string Upn { get; set; } = string.Empty;
+
+    /// <summary>The template ID — denormalized copy of RowKey.</summary>
+    public string TemplateId { get; set; } = string.Empty;
+
+    /// <summary><see cref="Constants.DelegatedRoles"/>: DelegatedReader (default) or DelegatedAdmin.</summary>
+    public string Role { get; set; } = Constants.DelegatedRoles.DelegatedReader;
+
+    /// <summary>Whether this assignment is currently enabled (soft toggle).</summary>
+    public bool IsEnabled { get; set; } = true;
+
+    /// <summary>UPN of the GlobalAdmin who created this assignment.</summary>
+    public string AssignedBy { get; set; } = string.Empty;
+
+    /// <summary>When this assignment was created.</summary>
+    public DateTime AssignedDate { get; set; }
 }

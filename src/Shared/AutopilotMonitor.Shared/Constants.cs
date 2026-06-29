@@ -776,6 +776,19 @@ namespace AutopilotMonitor.Shared
             // RK=TenantId (lowercase). One row per (admin, managed-tenant) pair.
             public const string DelegatedAdmins = "DelegatedAdmins";
 
+            // Tenant Templates — app-internal named bundles of tenants for delegated admins ("MSP mode").
+            // Two row layouts share this table (RowKey discriminates):
+            //   PK=templateId, RK="meta"     → template metadata (display name, creator).
+            //   PK=templateId, RK=tenantId   → one membership row per tenant in the template (lowercase).
+            // A delegated UPN assigned to a template (see TenantTemplateAssignments) gains read scope to
+            // every tenant in it. Tenant offboarding purges the membership rows (RowKey == tenantId).
+            public const string TenantTemplates = "TenantTemplates";
+
+            // Tenant Template assignments — which delegated-admin UPN is assigned to which template.
+            // PK=UPN (lowercase), RK=templateId. Hot path: GetScopeAsync point-scans by PK to expand the
+            // UPN's templates into the effective tenant set. NOT tenant-id-keyed (offboarding never touches it).
+            public const string TenantTemplateAssignments = "TenantTemplateAssignments";
+
             // Preview gating (temporary — remove after GA)
             public const string PreviewWhitelist = "PreviewWhitelist";
             public const string PreviewConfig    = "PreviewConfig";
@@ -930,6 +943,8 @@ namespace AutopilotMonitor.Shared
                 TenantAdmins,
                 McpUsers,
                 DelegatedAdmins,
+                TenantTemplates,
+                TenantTemplateAssignments,
                 PreviewWhitelist,
                 PreviewConfig,
                 Feedback,

@@ -450,6 +450,18 @@ public static class EndpointAccessPolicyCatalog
         new("DELETE", "global/delegated-admins/{upn}/{tenantId}",         EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("PATCH",  "global/delegated-admins/{upn}/{tenantId}/enable",  EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("PATCH",  "global/delegated-admins/{upn}/{tenantId}/disable", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
+        // Tenant Templates ("MSP mode" tenant bundles) management — list is GlobalReadOrAdmin; all mutations
+        // are GlobalAdminOnly so a delegated caller can never manage templates. Global routes are
+        // TenantScoping.None (the {templateId}/{upn} segments are not tenants; tenants come in the body or are
+        // resolved server-side). The ONE route with a {tenantId} segment uses RouteParam per the fail-closed convention.
+        new("GET",    "global/tenant-templates",                                  EndpointPolicy.GlobalReadOrAdmin),
+        new("POST",   "global/tenant-templates",                                  EndpointPolicy.GlobalAdminOnly),
+        new("PATCH",  "global/tenant-templates/{templateId}",                     EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "global/tenant-templates/{templateId}",                     EndpointPolicy.GlobalAdminOnly),
+        new("POST",   "global/tenant-templates/{templateId}/tenants",            EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "global/tenant-templates/{templateId}/tenants/{tenantId}", EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
+        new("POST",   "global/tenant-templates/{templateId}/assignees",         EndpointPolicy.GlobalAdminOnly),
+        new("DELETE", "global/tenant-templates/{templateId}/assignees/{upn}",   EndpointPolicy.GlobalAdminOnly),
         new("PATCH",  "config/{tenantId}/plan",                            EndpointPolicy.GlobalAdminOnly, TenantScoping.RouteParam),
         new("GET",    "global/config/plan-tiers",                           EndpointPolicy.GlobalReadOrAdmin),
         new("PUT",    "global/config/plan-tiers",                           EndpointPolicy.GlobalAdminOnly),

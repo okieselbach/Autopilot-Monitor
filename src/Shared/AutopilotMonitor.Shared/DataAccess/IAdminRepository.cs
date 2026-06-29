@@ -48,6 +48,29 @@ namespace AutopilotMonitor.Shared.DataAccess
         Task<bool> SetDelegatedAdminEnabledAsync(string upn, string tenantId, bool isEnabled);
         Task<bool> RemoveDelegatedAdminAsync(string upn, string tenantId);
 
+        // --- Tenant Templates (app-internal tenant bundles for delegated admins / "MSP mode") ---
+        /// <summary>Creates a template (meta row) and returns the generated templateId.</summary>
+        Task<string> CreateTenantTemplateAsync(string name, string createdBy);
+        /// <summary>Renames a template (meta row). Returns false if the template does not exist.</summary>
+        Task<bool> RenameTenantTemplateAsync(string templateId, string name);
+        /// <summary>Deletes a template: all rows in its partition (meta + membership) AND every UPN
+        /// assignment referencing it (cross-partition RowKey scan of the assignments table).</summary>
+        Task<bool> DeleteTenantTemplateAsync(string templateId);
+        /// <summary>All templates with their tenant members + assignee counts — for the management UI (not hot path).</summary>
+        Task<List<TenantTemplate>> GetAllTenantTemplatesAsync();
+        Task<TenantTemplate?> GetTenantTemplateAsync(string templateId);
+        Task<bool> AddTenantToTemplateAsync(string templateId, string tenantId);
+        Task<bool> RemoveTenantFromTemplateAsync(string templateId, string tenantId);
+        /// <summary>Tenant IDs (lowercase) in a template, excluding the meta row (HOT PATH — PartitionKey scan).</summary>
+        Task<List<string>> GetTemplateTenantsAsync(string templateId);
+        /// <summary>Creates or replaces a UPN→template assignment.</summary>
+        Task<bool> AssignTemplateAsync(string upn, string templateId, string role, bool isEnabled, string assignedBy);
+        Task<bool> UnassignTemplateAsync(string upn, string templateId);
+        /// <summary>All template assignments for one UPN (HOT PATH — PartitionKey point-scan; scope resolution).</summary>
+        Task<List<TenantTemplateAssignment>> GetTemplateAssignmentsForUpnAsync(string upn);
+        /// <summary>All UPNs assigned to one template (cross-partition RowKey scan — management UI, not hot path).</summary>
+        Task<List<TenantTemplateAssignment>> GetTemplateAssigneesAsync(string templateId);
+
         // --- Tenant Members ---
         Task<List<TenantMember>> GetTenantMembersAsync(string tenantId);
         Task<bool> AddTenantMemberAsync(string tenantId, string upn, string addedBy, string role, bool canManageBootstrapTokens = false);
@@ -86,6 +109,37 @@ namespace AutopilotMonitor.Shared.DataAccess
         public string Source { get; set; } = string.Empty;
         public DateTime GrantedAt { get; set; }
         public string GrantedBy { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// A Tenant Template: an app-internal named bundle of tenants. A delegated admin assigned to the
+    /// template (see <see cref="TenantTemplateAssignment"/>) gains read scope to every tenant in
+    /// <see cref="TenantIds"/>. Adding a tenant to the template grants it to all assignees at once.
+    /// </summary>
+    public class TenantTemplate
+    {
+        public string TemplateId { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string CreatedBy { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        /// <summary>Tenant IDs (lowercase) in this template.</summary>
+        public List<string> TenantIds { get; set; } = new();
+        /// <summary>Number of UPNs assigned to this template (== <see cref="Assignees"/>.Count).</summary>
+        public int AssigneeCount { get; set; }
+        /// <summary>The UPNs assigned to this template (for the management UI).</summary>
+        public List<TenantTemplateAssignment> Assignees { get; set; } = new();
+    }
+
+    /// <summary>One UPN→template assignment. PK=UPN, RK=templateId in storage.</summary>
+    public class TenantTemplateAssignment
+    {
+        public string Upn { get; set; } = string.Empty;
+        public string TemplateId { get; set; } = string.Empty;
+        /// <summary>Constants.DelegatedRoles: "DelegatedReader" (default) or "DelegatedAdmin".</summary>
+        public string Role { get; set; } = string.Empty;
+        public bool IsEnabled { get; set; } = true;
+        public string AssignedBy { get; set; } = string.Empty;
+        public DateTime AssignedAt { get; set; }
     }
 
     public class McpUserEntry

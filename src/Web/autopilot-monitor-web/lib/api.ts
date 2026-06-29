@@ -511,6 +511,24 @@ export const api = {
       `${API_BASE_URL}/api/global/delegated-admins/${encodeURIComponent(upn)}/${encodeURIComponent(tenantId)}/disable`,
   },
 
+  // ── Tenant Templates (MSP mode — named bundles of tenants for delegated admins) ──
+  tenantTemplates: {
+    list: () => `${API_BASE_URL}/api/global/tenant-templates`,
+    create: () => `${API_BASE_URL}/api/global/tenant-templates`,
+    rename: (templateId: string) =>
+      `${API_BASE_URL}/api/global/tenant-templates/${encodeURIComponent(templateId)}`,
+    remove: (templateId: string) =>
+      `${API_BASE_URL}/api/global/tenant-templates/${encodeURIComponent(templateId)}`,
+    addTenant: (templateId: string) =>
+      `${API_BASE_URL}/api/global/tenant-templates/${encodeURIComponent(templateId)}/tenants`,
+    removeTenant: (templateId: string, tenantId: string) =>
+      `${API_BASE_URL}/api/global/tenant-templates/${encodeURIComponent(templateId)}/tenants/${encodeURIComponent(tenantId)}`,
+    assign: (templateId: string) =>
+      `${API_BASE_URL}/api/global/tenant-templates/${encodeURIComponent(templateId)}/assignees`,
+    unassign: (templateId: string, upn: string) =>
+      `${API_BASE_URL}/api/global/tenant-templates/${encodeURIComponent(templateId)}/assignees/${encodeURIComponent(upn)}`,
+  },
+
   // ── MCP Users ─────────────────────────────────────────────────────────────
   mcpUsers: {
     list: () => `${API_BASE_URL}/api/global/mcp-users`,

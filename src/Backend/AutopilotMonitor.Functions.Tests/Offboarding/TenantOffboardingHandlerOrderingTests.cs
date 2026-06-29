@@ -262,6 +262,23 @@ public class TenantOffboardingHandlerOrderingTests
         Assert.Single(harness.FarewellEmail.Calls);
     }
 
+    // ── Offboarding wipe coverage (hygiene: no orphaned cross-tenant grants) ────
+
+    [Fact]
+    public async Task PostDrain_PropertyOnlyWipe_PurgesDelegatedAdminsAndTenantTemplates()
+    {
+        // A delegated admin's grant rows (DelegatedAdmins, RK=tenantId) and a tenant's Tenant Template
+        // membership rows (TenantTemplates, RK=tenantId) both carry a TenantId property, so they must be
+        // purged via the property-only wipe. Otherwise they orphan and can silently re-grant access on
+        // re-onboarding.
+        var harness = Harness.New();
+
+        await harness.Sut.HandleAsync(harness.Envelope());
+
+        Assert.Contains(Constants.TableNames.DelegatedAdmins, harness.SafeWipeProbe.PropertyOnlyWipes);
+        Assert.Contains(Constants.TableNames.TenantTemplates, harness.SafeWipeProbe.PropertyOnlyWipes);
+    }
+
     // ── Harness (copied minimal — only what these tests need) ───────────────────
 
     private sealed class Harness
@@ -406,6 +423,8 @@ public class TenantOffboardingHandlerOrderingTests
     private sealed class CountingSafeWipeService : SafeWipeService
     {
         public int WipeCallCount { get; private set; }
+        /// <summary>Table names passed to the property-only (Variant C) wipe — lets tests assert coverage.</summary>
+        public List<string> PropertyOnlyWipes { get; } = new();
         public CountingSafeWipeService() : base(
             new TableStorageService(Mock.Of<TableServiceClient>(), NullLogger<TableStorageService>.Instance),
             new BlobStorageService(new BlobServiceClient("UseDevelopmentStorage=true"),
@@ -414,7 +433,7 @@ public class TenantOffboardingHandlerOrderingTests
         public override Task<int> WipeByExactPartitionAsync(string t, string i, CancellationToken c = default) { WipeCallCount++; return Task.FromResult(0); }
         public override Task<int> WipeByCompositePartitionRangeAsync(string t, string i, CancellationToken c = default) { WipeCallCount++; return Task.FromResult(0); }
         public override Task<int> WipeByDiscriminatorAndTenantPropertyAsync(string t, string d, string i, CancellationToken c = default) { WipeCallCount++; return Task.FromResult(0); }
-        public override Task<int> WipeByTenantIdPropertyAsync(string t, string i, CancellationToken c = default) { WipeCallCount++; return Task.FromResult(0); }
+        public override Task<int> WipeByTenantIdPropertyAsync(string t, string i, CancellationToken c = default) { WipeCallCount++; PropertyOnlyWipes.Add(t); return Task.FromResult(0); }
         public override Task<int> WipeBlobsByTenantPrefixAsync(string c, string i, CancellationToken ct = default) { WipeCallCount++; return Task.FromResult(0); }
     }
 

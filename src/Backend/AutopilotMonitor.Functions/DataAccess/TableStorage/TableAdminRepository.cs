@@ -17,6 +17,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
         private readonly TableClient _tenantAdminsTableClient;
         private readonly TableClient _mcpUsersTableClient;
         private readonly TableClient _delegatedAdminsTableClient;
+        private readonly TableClient _tenantTemplatesTableClient;
+        private readonly TableClient _tenantTemplateAssignmentsTableClient;
         private readonly ILogger<TableAdminRepository> _logger;
 
         public TableAdminRepository(
@@ -28,6 +30,8 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             _tenantAdminsTableClient = storage.GetTableClient(Constants.TableNames.TenantAdmins);
             _mcpUsersTableClient = storage.GetTableClient(Constants.TableNames.McpUsers);
             _delegatedAdminsTableClient = storage.GetTableClient(Constants.TableNames.DelegatedAdmins);
+            _tenantTemplatesTableClient = storage.GetTableClient(Constants.TableNames.TenantTemplates);
+            _tenantTemplateAssignmentsTableClient = storage.GetTableClient(Constants.TableNames.TenantTemplateAssignments);
         }
 
         // --- Global Admins ---
@@ -423,6 +427,246 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
             return true;
         }
 
+        // --- Tenant Templates (app-internal tenant bundles for delegated admins / "MSP mode") ---
+
+        public async Task<string> CreateTenantTemplateAsync(string name, string createdBy)
+        {
+            var templateId = Guid.NewGuid().ToString("N");
+            var entity = new TenantTemplateEntity
+            {
+                PartitionKey = templateId,
+                RowKey = TenantTemplateEntity.MetaRowKey,
+                Name = name?.Trim() ?? string.Empty,
+                CreatedBy = createdBy?.ToLowerInvariant() ?? string.Empty,
+                CreatedDate = DateTime.UtcNow
+            };
+            // Fresh GUID partition — AddEntity (not Upsert) so a (vanishingly unlikely) collision fails loud.
+            await _tenantTemplatesTableClient.AddEntityAsync(entity);
+            return templateId;
+        }
+
+        public async Task<bool> RenameTenantTemplateAsync(string templateId, string name)
+        {
+            if (string.IsNullOrWhiteSpace(templateId))
+                return false;
+
+            try
+            {
+                var result = await _tenantTemplatesTableClient.GetEntityAsync<TenantTemplateEntity>(
+                    templateId, TenantTemplateEntity.MetaRowKey);
+                var entity = result.Value;
+                if (entity == null) return false;
+
+                entity.Name = name?.Trim() ?? string.Empty;
+                await _tenantTemplatesTableClient.UpdateEntityAsync(entity, ETag.All);
+                return true;
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                return false;
+            }
+        }
+
+        public async Task<bool> DeleteTenantTemplateAsync(string templateId)
+        {
+            if (string.IsNullOrWhiteSpace(templateId))
+                return false;
+
+            // Delete every row in the template's partition (meta + membership rows).
+            // Typed predicate overload builds the OData filter safely (escapes quotes) — no string interpolation.
+            await foreach (var entity in _tenantTemplatesTableClient.QueryAsync<TenantTemplateEntity>(
+                e => e.PartitionKey == templateId))
+            {
+                await DeleteIfPresentAsync(_tenantTemplatesTableClient, entity.PartitionKey, entity.RowKey);
+            }
+
+            // Cascade: remove every UPN assignment to this template (cross-partition RowKey scan).
+            await foreach (var assignment in _tenantTemplateAssignmentsTableClient.QueryAsync<TenantTemplateAssignmentEntity>(
+                e => e.RowKey == templateId))
+            {
+                await DeleteIfPresentAsync(_tenantTemplateAssignmentsTableClient, assignment.PartitionKey, assignment.RowKey);
+            }
+
+            return true;
+        }
+
+        public async Task<List<TenantTemplate>> GetAllTenantTemplatesAsync()
+        {
+            // Full-table scan: the management UI lists every template. Both tables hold only admin-scale
+            // rows (a handful of templates × their tenants/assignees), so this is small and off the hot path.
+            var byId = new Dictionary<string, TenantTemplate>(StringComparer.Ordinal);
+            // A template EXISTS only if its meta row is present. A partition with only membership rows is an
+            // anomaly (e.g. a partial write), NOT a template — never surface it as a blank/name-less template.
+            var metaBacked = new HashSet<string>(StringComparer.Ordinal);
+            await foreach (var entity in _tenantTemplatesTableClient.QueryAsync<TenantTemplateEntity>())
+            {
+                if (ApplyRowToTemplate(byId, entity))
+                    metaBacked.Add(entity.PartitionKey);
+            }
+
+            // Assignees (separate table; management path only).
+            await foreach (var assignment in _tenantTemplateAssignmentsTableClient.QueryAsync<TenantTemplateAssignmentEntity>())
+            {
+                if (byId.TryGetValue(assignment.RowKey, out var template))
+                {
+                    template.Assignees.Add(MapToTemplateAssignment(assignment));
+                    template.AssigneeCount++;
+                }
+            }
+
+            var result = new List<TenantTemplate>();
+            foreach (var template in byId.Values)
+            {
+                if (metaBacked.Contains(template.TemplateId))
+                    result.Add(template);
+            }
+            return result;
+        }
+
+        public async Task<TenantTemplate?> GetTenantTemplateAsync(string templateId)
+        {
+            if (string.IsNullOrWhiteSpace(templateId))
+                return null;
+
+            var byId = new Dictionary<string, TenantTemplate>(StringComparer.Ordinal);
+            var metaBacked = false;
+            await foreach (var entity in _tenantTemplatesTableClient.QueryAsync<TenantTemplateEntity>(
+                e => e.PartitionKey == templateId))
+            {
+                if (ApplyRowToTemplate(byId, entity))
+                    metaBacked = true;
+            }
+
+            // No meta row ⇒ the template does not exist (a stray membership row is not a template).
+            if (!metaBacked || !byId.TryGetValue(templateId, out var template))
+                return null;
+
+            await foreach (var assignment in _tenantTemplateAssignmentsTableClient.QueryAsync<TenantTemplateAssignmentEntity>(
+                e => e.RowKey == templateId))
+            {
+                template.Assignees.Add(MapToTemplateAssignment(assignment));
+                template.AssigneeCount++;
+            }
+
+            return template;
+        }
+
+        public async Task<bool> AddTenantToTemplateAsync(string templateId, string tenantId)
+        {
+            if (string.IsNullOrWhiteSpace(templateId) || string.IsNullOrWhiteSpace(tenantId))
+                return false;
+
+            tenantId = tenantId.ToLowerInvariant();
+            // Defensive: a tenantId must never collide with the reserved meta RowKey (tenant IDs are GUIDs).
+            if (tenantId == TenantTemplateEntity.MetaRowKey)
+                return false;
+
+            var entity = new TenantTemplateEntity
+            {
+                PartitionKey = templateId,
+                RowKey = tenantId,
+                TenantId = tenantId
+            };
+            await _tenantTemplatesTableClient.UpsertEntityAsync(entity);
+            return true;
+        }
+
+        public async Task<bool> RemoveTenantFromTemplateAsync(string templateId, string tenantId)
+        {
+            if (string.IsNullOrWhiteSpace(templateId) || string.IsNullOrWhiteSpace(tenantId))
+                return false;
+
+            tenantId = tenantId.ToLowerInvariant();
+            await DeleteIfPresentAsync(_tenantTemplatesTableClient, templateId, tenantId);
+            return true;
+        }
+
+        public async Task<List<string>> GetTemplateTenantsAsync(string templateId)
+        {
+            var tenants = new List<string>();
+            if (string.IsNullOrWhiteSpace(templateId))
+                return tenants;
+
+            // HOT PATH (scope resolution): PartitionKey scan, skip the meta row. A template only "exists" if
+            // its meta row is present — a partition with only membership rows (partial delete / bad data) must
+            // NOT grant scope. Mirrors the meta-backed invariant in GetTenantTemplateAsync so auth and the
+            // management reads agree on what a template is.
+            var metaBacked = false;
+            await foreach (var entity in _tenantTemplatesTableClient.QueryAsync<TenantTemplateEntity>(
+                e => e.PartitionKey == templateId))
+            {
+                if (entity.RowKey == TenantTemplateEntity.MetaRowKey)
+                    metaBacked = true;
+                else
+                    tenants.Add(entity.RowKey);
+            }
+            return metaBacked ? tenants : new List<string>();
+        }
+
+        public async Task<bool> AssignTemplateAsync(string upn, string templateId, string role, bool isEnabled, string assignedBy)
+        {
+            if (string.IsNullOrWhiteSpace(upn) || string.IsNullOrWhiteSpace(templateId))
+                return false;
+
+            upn = upn.ToLowerInvariant();
+            assignedBy = assignedBy?.ToLowerInvariant() ?? string.Empty;
+
+            var entity = new TenantTemplateAssignmentEntity
+            {
+                PartitionKey = upn,
+                RowKey = templateId,
+                Upn = upn,
+                TemplateId = templateId,
+                Role = role,
+                IsEnabled = isEnabled,
+                AssignedBy = assignedBy,
+                AssignedDate = DateTime.UtcNow
+            };
+            await _tenantTemplateAssignmentsTableClient.UpsertEntityAsync(entity);
+            return true;
+        }
+
+        public async Task<bool> UnassignTemplateAsync(string upn, string templateId)
+        {
+            if (string.IsNullOrWhiteSpace(upn) || string.IsNullOrWhiteSpace(templateId))
+                return false;
+
+            upn = upn.ToLowerInvariant();
+            await DeleteIfPresentAsync(_tenantTemplateAssignmentsTableClient, upn, templateId);
+            return true;
+        }
+
+        public async Task<List<TenantTemplateAssignment>> GetTemplateAssignmentsForUpnAsync(string upn)
+        {
+            var entries = new List<TenantTemplateAssignment>();
+            if (string.IsNullOrWhiteSpace(upn))
+                return entries;
+
+            var normalizedUpn = upn.ToLowerInvariant();
+            // HOT PATH (scope resolution): PartitionKey point-scan.
+            await foreach (var entity in _tenantTemplateAssignmentsTableClient.QueryAsync<TenantTemplateAssignmentEntity>(
+                e => e.PartitionKey == normalizedUpn))
+            {
+                entries.Add(MapToTemplateAssignment(entity));
+            }
+            return entries;
+        }
+
+        public async Task<List<TenantTemplateAssignment>> GetTemplateAssigneesAsync(string templateId)
+        {
+            var entries = new List<TenantTemplateAssignment>();
+            if (string.IsNullOrWhiteSpace(templateId))
+                return entries;
+
+            // Cross-partition scan on RowKey — admin-UI path, not the hot auth path.
+            await foreach (var entity in _tenantTemplateAssignmentsTableClient.QueryAsync<TenantTemplateAssignmentEntity>(
+                e => e.RowKey == templateId))
+            {
+                entries.Add(MapToTemplateAssignment(entity));
+            }
+            return entries;
+        }
+
         // --- Tenant Members ---
 
         public async Task<List<TenantMember>> GetTenantMembersAsync(string tenantId)
@@ -566,6 +810,56 @@ namespace AutopilotMonitor.Functions.DataAccess.TableStorage
                 GrantedAt = entity.GrantedDate,
                 GrantedBy = entity.GrantedBy
             };
+        }
+
+        /// <summary>
+        /// Folds a TenantTemplates row (meta or membership) into the accumulating DTO for its partition.
+        /// Returns true if the row was the meta row (proof the template exists).
+        /// </summary>
+        private static bool ApplyRowToTemplate(Dictionary<string, TenantTemplate> byId, TenantTemplateEntity entity)
+        {
+            if (!byId.TryGetValue(entity.PartitionKey, out var template))
+            {
+                template = new TenantTemplate { TemplateId = entity.PartitionKey };
+                byId[entity.PartitionKey] = template;
+            }
+
+            if (entity.RowKey == TenantTemplateEntity.MetaRowKey)
+            {
+                template.Name = entity.Name;
+                template.CreatedBy = entity.CreatedBy;
+                template.CreatedAt = entity.CreatedDate;
+                return true;
+            }
+
+            template.TenantIds.Add(entity.RowKey);
+            return false;
+        }
+
+        private static TenantTemplateAssignment MapToTemplateAssignment(TenantTemplateAssignmentEntity entity)
+        {
+            return new TenantTemplateAssignment
+            {
+                Upn = entity.Upn,
+                TemplateId = entity.TemplateId,
+                Role = entity.Role,
+                IsEnabled = entity.IsEnabled,
+                AssignedBy = entity.AssignedBy,
+                AssignedAt = entity.AssignedDate
+            };
+        }
+
+        /// <summary>Deletes a row, tolerating a concurrent delete (404) so cascade/cleanup stays idempotent.</summary>
+        private static async Task DeleteIfPresentAsync(TableClient client, string partitionKey, string rowKey)
+        {
+            try
+            {
+                await client.DeleteEntityAsync(partitionKey, rowKey, ETag.All);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 404)
+            {
+                // Already gone — idempotent.
+            }
         }
 
         private static TenantMember MapToTenantMember(TenantAdminEntity entity)

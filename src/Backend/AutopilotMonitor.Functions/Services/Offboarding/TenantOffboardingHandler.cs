@@ -109,6 +109,16 @@ namespace AutopilotMonitor.Functions.Services.Offboarding
         private static readonly string[] PropertyOnlyTables =
         {
             Constants.TableNames.UserUsageLog,
+            // Delegated-admin ("MSP mode") grants targeting this tenant. PK=admin-UPN, RK=tenantId, but
+            // the rows carry a denormalized TenantId property, so the property-only wipe purges every
+            // admin's grant to the offboarded tenant. Previously NOT wiped → orphaned cross-tenant grants
+            // survived offboarding and could silently re-grant access on re-onboarding.
+            Constants.TableNames.DelegatedAdmins,
+            // Tenant Template membership rows for this tenant (PK=templateId, RK=tenantId, TenantId property
+            // set). Meta rows (RowKey="meta", empty TenantId) never match the tenant GUID, so the template
+            // itself and its other tenants survive. The assignments table is per-UPN (no TenantId) and is
+            // intentionally NOT wiped here.
+            Constants.TableNames.TenantTemplates,
         };
 
         // PR3.B plan §3 — Customs rules tables: archive each row to
