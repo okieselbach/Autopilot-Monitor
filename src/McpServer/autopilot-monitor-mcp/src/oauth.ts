@@ -33,18 +33,18 @@ const CLIENT_SECRET = process.env.AUTOPILOT_ENTRA_CLIENT_SECRET ?? '';
 const AUTHORITY = process.env.AUTOPILOT_ENTRA_AUTHORITY ?? 'https://login.microsoftonline.com/organizations';
 const SCOPES = `api://${CLIENT_ID}/access_as_user openid profile offline_access`;
 
-/**
- * In-memory store for dynamically registered OAuth clients (RFC 7591).
- * Clients re-register after a server restart — this is fine because the MCP
- * server acts as an OAuth proxy and the real credentials live in Entra ID.
- *
- * TODO(oauth-map-ttl): TTL/LRU eviction is intentionally NOT enabled. With a
- * stateless scale-to-zero Container App, an evicted client_id forces the user
- * back through Claude Code's manual `/mcp` reconnect flow (no auto-recovery).
- * The hard size cap (MAX_REGISTERED_CLIENTS) bounds memory; revisit TTL once
- * the reconnect UX is debugged or the registry moves to persistent storage.
- */
-const registeredClients = new Map<string, { name: string; redirectUris: string[] }>();
+// Dynamic client registration (RFC 7591) is STATELESS: instead of a
+// server-side Map, the issued client_id is itself an HMAC-signed token that
+// encodes the client's registered redirect_uris (see signClientId below).
+//
+// Why: the Container App is stateless with scale-to-zero and may run multiple
+// replicas. An in-memory registry was wiped on every cold start and never
+// shared across replicas, so a client_id minted by /oauth/register read as
+// "unknown" at /oauth/authorize once the container slept or a sibling replica
+// served the request — surfacing as "invalid_client". A self-describing signed
+// client_id needs no shared storage: any replica holding the same signing key
+// can verify it and recover the registered redirect_uris. This also removes
+// the unbounded-memory concern that the old hard size cap guarded against.
 
 // ---- State signing (HMAC) -------------------------------------------------
 //
@@ -122,34 +122,76 @@ export function verifyState(state: string, nowSeconds: number = Math.floor(Date.
   return parsed;
 }
 
-/**
- * Hard cap on the dynamic-client registry. At ~300 bytes per entry this caps
- * memory at ~3 MB worst case — well below the 0.5 GiB container budget. Real
- * usage adds one entry per Claude-Code-session × server-URL, lifetime; even a
- * busy deployment stays in the low thousands.
- */
-export const MAX_REGISTERED_CLIENTS = 10_000;
 export const MAX_REDIRECT_URIS_PER_CLIENT = 10;
 export const MAX_REDIRECT_URI_LENGTH = 1024;
 export const MAX_CLIENT_NAME_LENGTH = 256;
 
+// ---- Client-id signing (HMAC) ---------------------------------------------
+//
+// The dynamic-registration client_id is a self-describing signed token rather
+// than a lookup key into server-side storage. It carries the client's
+// registered redirect_uris so /oauth/authorize and /oauth/callback can enforce
+// the exact-match check without any shared registry — making the whole OAuth
+// proxy stateless and multi-replica safe.
+//
+// The signing key is DERIVED from OAuthStateSigningKey via a labelled HMAC so
+// it is domain-separated from the proxy-state key: a `state` token can never be
+// replayed as a `client_id` (or vice versa) even though both use the same root
+// secret. Deriving means one secret to manage; the `typ` discriminator inside
+// each payload is a second, independent guard against cross-use.
+const OAUTH_CLIENT_ID_KEY: Buffer = crypto
+  .createHmac('sha256', OAUTH_STATE_SIGNING_KEY)
+  .update('autopilot-mcp/oauth-client-id/v1')
+  .digest();
+
+interface ClientIdPayload {
+  typ: 'client';
+  redirectUris: string[];
+  name: string;
+  iat: number; // unix seconds — issued-at, for observability; not expired
+}
+
 /**
- * Test-only handle on the registry. Lets unit tests verify cap behavior
- * without spinning up the full Express stack. Production code never imports
- * this — it only ever touches the closure inside createOAuthRouter().
+ * Mints a stateless client_id: `base64url(json).hmac`. Survives restarts and is
+ * verifiable on any replica holding the same root secret. A public-client
+ * client_id is not a credential (token_endpoint_auth_method=none) — it only
+ * asserts which already-host-allowlisted redirect_uris were registered — so it
+ * carries no expiry, matching RFC 7591's client_secret_expires_at=0 semantics.
  */
-export const _registryForTest = {
-  size: () => registeredClients.size,
-  fill: (count: number) => {
-    for (let i = 0; i < count; i++) {
-      registeredClients.set(`__test_${i}_${crypto.randomUUID()}`, {
-        name: '__test',
-        redirectUris: ['http://localhost:1/cb'],
-      });
-    }
-  },
-  clear: () => registeredClients.clear(),
-};
+export function signClientId(redirectUris: string[], name: string): string {
+  const payload: ClientIdPayload = {
+    typ: 'client',
+    redirectUris,
+    name,
+    iat: Math.floor(Date.now() / 1000),
+  };
+  const body = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+  const sig = crypto.createHmac('sha256', OAUTH_CLIENT_ID_KEY).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+/** Verifies a signed client_id and returns its payload, or null if forged/malformed. */
+export function verifyClientId(clientId: string | undefined | null): ClientIdPayload | null {
+  if (!clientId) return null;
+  const parts = clientId.split('.');
+  if (parts.length !== 2) return null;
+  const [body, sig] = parts;
+
+  const expected = crypto.createHmac('sha256', OAUTH_CLIENT_ID_KEY).update(body).digest('base64url');
+  const sigBuf = Buffer.from(sig, 'utf-8');
+  const expBuf = Buffer.from(expected, 'utf-8');
+  if (sigBuf.length !== expBuf.length) return null;
+  if (!crypto.timingSafeEqual(sigBuf, expBuf)) return null;
+
+  let parsed: ClientIdPayload;
+  try {
+    parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8')) as ClientIdPayload;
+  } catch {
+    return null;
+  }
+  if (parsed.typ !== 'client' || !Array.isArray(parsed.redirectUris)) return null;
+  return parsed;
+}
 
 /**
  * Strict allowlist of host patterns acceptable for OAuth redirect_uri.
@@ -304,26 +346,14 @@ export function createOAuthRouter(): Router {
 
   // --- Dynamic Client Registration (RFC 7591) ---
   router.post('/oauth/register', (req, res) => {
-    // Hard memory ceiling — refuse new registrations once the registry is at
-    // capacity. The endpoint is unauthenticated per RFC 7591, so without this
-    // a flood would push the 0.5 GiB container into OOM.
-    if (registeredClients.size >= MAX_REGISTERED_CLIENTS) {
-      console.error(
-        `[oauth/register] Registry at cap (${MAX_REGISTERED_CLIENTS}) — rejecting new registration`,
-      );
-      res.status(503).json({
-        error: 'temporarily_unavailable',
-        error_description: 'Registration capacity reached, please retry later',
-      });
-      return;
-    }
-
     const { client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method } = req.body ?? {};
 
     // Field-level bounds — backstop the route-level body-size limit. The
     // parser caps total body bytes; these caps stop a single registration
     // from carrying e.g. a thousand redirect_uris that all individually
-    // pass the URI allowlist.
+    // pass the URI allowlist. They also bound the size of the signed client_id
+    // token (which embeds redirect_uris) so a crafted registration cannot mint
+    // an arbitrarily long client_id.
     if (typeof client_name === 'string' && client_name.length > MAX_CLIENT_NAME_LENGTH) {
       res.status(400).json({
         error: 'invalid_client_metadata',
@@ -369,13 +399,12 @@ export function createOAuthRouter(): Router {
       return;
     }
 
-    const clientId = crypto.randomUUID();
-    registeredClients.set(clientId, {
-      name: client_name ?? 'unknown',
-      redirectUris: uris,
-    });
+    // Stateless: the client_id is a signed token embedding the redirect_uris,
+    // not a key into a server-side map. No storage, no memory cap, verifiable
+    // on any replica (see signClientId).
+    const clientId = signClientId(uris, client_name ?? 'unknown');
 
-    console.error(`[oauth/register] Registered dynamic client ${clientId} (${client_name ?? 'unknown'})`);
+    console.error(`[oauth/register] Registered dynamic client (${client_name ?? 'unknown'}), ${uris.length} redirect_uri(s)`);
 
     res.status(201).json({
       client_id: clientId,
@@ -441,24 +470,22 @@ export function createOAuthRouter(): Router {
       return;
     }
     if (client_id) {
-      const registered = registeredClients.get(client_id);
+      // The client_id is a self-describing signed token (see signClientId), so
+      // this verifies statelessly — no registry lookup, correct across cold
+      // starts and replicas. A forged/malformed token fails closed with
+      // invalid_client; a valid one must still carry the exact redirect_uri.
+      const registered = verifyClientId(client_id);
       if (!registered) {
-        // Stateless scale-to-zero / multi-replica: the in-memory registry may
-        // have been wiped (cold start) or live on a different replica since
-        // /oauth/register ran, so a client_id that was just issued can read as
-        // "unknown" here. The redirect_uri host allowlist (checked above) plus
-        // mandatory PKCE are the real gate, so fall back to them rather than
-        // dead-ending the user's flow — same cold-start tolerance the
-        // /oauth/callback handler already applies. Hard-failing here is what
-        // produced "invalid_client — register via /oauth/register first" for
-        // browser-opened authorize URLs after the container had slept.
-        console.warn(
-          `[oauth/authorize] Unknown client_id ${client_id} (registry cold-start / other replica?) — ` +
-          'proceeding on host-allowlist gate only',
-        );
-      } else if (!registered.redirectUris.includes(redirect_uri)) {
+        console.error('[oauth/authorize] client_id failed signature verification');
+        res.status(400).json({
+          error: 'invalid_client',
+          error_description: 'client_id is invalid — register via /oauth/register first',
+        });
+        return;
+      }
+      if (!registered.redirectUris.includes(redirect_uri)) {
         console.error(
-          `[oauth/authorize] redirect_uri not registered for client ${client_id}: ${redirect_uri}`,
+          `[oauth/authorize] redirect_uri not registered for this client_id: ${redirect_uri}`,
         );
         res.status(400).json({
           error: 'invalid_request',
@@ -522,10 +549,8 @@ export function createOAuthRouter(): Router {
     const clientId = decoded.clientId;
 
     // Re-validate the redirectUri at callback time too. Belt-and-suspenders:
-    // /oauth/authorize already gated the URI, but the state value transits
-    // the user-agent and could in principle be replayed against a server
-    // whose registeredClients map was wiped (cold start) — re-running the
-    // host allowlist + registry check here closes that gap.
+    // /oauth/authorize already gated the URI, but the state value transits the
+    // user-agent — re-running the host allowlist here closes any replay gap.
     if (!isAllowedRedirectUri(redirectUri)) {
       console.error(`[oauth/callback] Rejected redirectUri from state (host not in allowlist): ${redirectUri}`);
       res.status(400).json({
@@ -535,13 +560,13 @@ export function createOAuthRouter(): Router {
       return;
     }
     if (clientId) {
-      const registered = registeredClients.get(clientId);
-      // Cold-start may have wiped the registry — fall back to host allowlist
-      // alone (already validated above) rather than fail the user's flow.
-      if (registered && !registered.redirectUris.includes(redirectUri)) {
-        console.error(
-          `[oauth/callback] redirectUri not registered for client ${clientId}: ${redirectUri}`,
-        );
+      // Stateless verify (no registry) — correct across cold starts/replicas.
+      // The redirectUri is already pinned inside the HMAC-verified state, so
+      // this only adds defense-in-depth: a valid client_id must still list the
+      // redirectUri. A forged client_id fails closed.
+      const registered = verifyClientId(clientId);
+      if (!registered || !registered.redirectUris.includes(redirectUri)) {
+        console.error(`[oauth/callback] client_id invalid or redirectUri not registered: ${redirectUri}`);
         res.status(400).json({
           error: 'invalid_request',
           error_description: 'redirect_uri does not match any URI registered for this client_id',

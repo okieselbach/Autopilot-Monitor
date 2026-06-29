@@ -29,7 +29,6 @@ const {
   parseAllowedHosts,
   signState,
   verifyState,
-  MAX_REGISTERED_CLIENTS,
   MAX_REDIRECT_URIS_PER_CLIENT,
   MAX_REDIRECT_URI_LENGTH,
   MAX_CLIENT_NAME_LENGTH,
@@ -325,13 +324,9 @@ describe('F1 — access-guard cache key includes token hash', () => {
 });
 
 describe('F2 — /oauth/register defense constants', () => {
-  it('exposes a hard cap that bounds memory at ~3 MB worst case', () => {
-    // 0.5 GiB container budget × ~300 bytes/entry → 10k is two orders of
-    // magnitude below the OOM cliff and well above realistic peak.
-    expect(MAX_REGISTERED_CLIENTS).toBeGreaterThanOrEqual(1_000);
-    expect(MAX_REGISTERED_CLIENTS).toBeLessThanOrEqual(100_000);
-  });
-
+  // The client registry is now stateless (signed client_id, no server-side
+  // Map), so there is no MAX_REGISTERED_CLIENTS memory cap to assert — the
+  // field-level bounds below are what backstop the signed-token size.
   it('caps redirect_uris per client (RFC 7591 typically lists 1-3)', () => {
     expect(MAX_REDIRECT_URIS_PER_CLIENT).toBeGreaterThanOrEqual(2);
     expect(MAX_REDIRECT_URIS_PER_CLIENT).toBeLessThanOrEqual(50);

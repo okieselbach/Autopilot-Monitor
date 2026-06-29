@@ -11,14 +11,14 @@
  * would call Entra ID (the /oauth/authorize success case yields a 302 we read
  * with redirect:'manual'; the token error case returns before fetch).
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 // createOAuthRouter() throws at import unless the Entra client id is present.
 process.env.AUTOPILOT_ENTRA_CLIENT_ID ??= '00000000-0000-0000-0000-000000000000';
-const { createOAuthRouter, _registryForTest, MAX_REGISTERED_CLIENTS, MAX_REDIRECT_URIS_PER_CLIENT, MAX_REDIRECT_URI_LENGTH, MAX_CLIENT_NAME_LENGTH } =
+const { createOAuthRouter, signClientId, verifyClientId, MAX_REDIRECT_URIS_PER_CLIENT, MAX_REDIRECT_URI_LENGTH, MAX_CLIENT_NAME_LENGTH } =
   await import('../oauth.js');
 
 let server: Server;
@@ -38,11 +38,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-});
-
-afterEach(() => {
-  // Reset the registry between tests (the cap test fills it to capacity).
-  _registryForTest.clear();
 });
 
 async function register(body: unknown) {
@@ -117,15 +112,39 @@ describe('/oauth/register — dynamic client registration (RFC 7591)', () => {
     expect(json.error).toBe('invalid_client_metadata');
   });
 
-  it('returns 503 once the registry is at its hard cap', async () => {
-    _registryForTest.fill(MAX_REGISTERED_CLIENTS);
-    expect(_registryForTest.size()).toBeGreaterThanOrEqual(MAX_REGISTERED_CLIENTS);
-    const { status, json } = await register({
-      client_name: 'overflow',
-      redirect_uris: ['http://localhost:1/cb'],
-    });
-    expect(status).toBe(503);
-    expect(json.error).toBe('temporarily_unavailable');
+  it('returns a stateless signed client_id that verifies back to its redirect_uris', async () => {
+    const uris = ['http://127.0.0.1:33418/', 'https://vscode.dev/redirect'];
+    const { json } = await register({ client_name: 'Visual Studio Code', redirect_uris: uris });
+    const clientId = json.client_id as string;
+    // Format is `base64url(payload).hmac` — not an opaque UUID.
+    expect(clientId).toContain('.');
+    const verified = verifyClientId(clientId);
+    expect(verified).not.toBeNull();
+    expect(verified?.redirectUris).toEqual(uris);
+    expect(verified?.typ).toBe('client');
+  });
+});
+
+describe('signClientId / verifyClientId — stateless client registry', () => {
+  it('round-trips redirect_uris through a signed token', () => {
+    const token = signClientId(['http://127.0.0.1:1/cb'], 'x');
+    expect(verifyClientId(token)?.redirectUris).toEqual(['http://127.0.0.1:1/cb']);
+  });
+
+  it('rejects a tampered payload (signature no longer matches)', () => {
+    const token = signClientId(['http://127.0.0.1:1/cb'], 'x');
+    const [, sig] = token.split('.');
+    const forgedBody = Buffer.from(
+      JSON.stringify({ typ: 'client', redirectUris: ['http://127.0.0.1:6666/'], name: 'evil', iat: 0 }),
+      'utf-8',
+    ).toString('base64url');
+    expect(verifyClientId(`${forgedBody}.${sig}`)).toBeNull();
+  });
+
+  it('rejects a random / opaque client_id (no valid signature)', () => {
+    expect(verifyClientId('00000000-dead-beef-0000-000000000000')).toBeNull();
+    expect(verifyClientId('not.a.token')).toBeNull();
+    expect(verifyClientId('')).toBeNull();
   });
 });
 
@@ -159,23 +178,35 @@ describe('/oauth/authorize — PKCE S256 enforcement', () => {
     expect(res.status).toBe(400);
   });
 
-  it('tolerates an unknown client_id (registry cold-start) and still redirects to Entra', async () => {
-    // Stateless scale-to-zero / multi-replica wipes the in-memory registry, so
-    // a client_id minted by /oauth/register can read as unknown at /authorize.
-    // The host allowlist + PKCE are the real gate; the flow must proceed, not
-    // dead-end with invalid_client.
+  it('rejects a forged / unsigned client_id with invalid_client (fail closed)', async () => {
+    // A signed client_id is verifiable on any replica, so an unverifiable one
+    // is genuinely bogus — fail closed rather than fall back to a weaker gate.
     const res = await authorize({
       client_id: '00000000-dead-beef-0000-000000000000',
       redirect_uri: 'http://127.0.0.1:33418/',
       code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
       code_challenge_method: 'S256',
     });
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location') ?? '').toContain('login.microsoftonline.com');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Record<string, unknown>).error).toBe('invalid_client');
   });
 
-  it('redirects a valid S256 request to the Entra authorize endpoint', async () => {
+  it('rejects a valid client_id whose registered list omits the redirect_uri', async () => {
+    const clientId = signClientId(['http://127.0.0.1:33418/'], 'vscode');
     const res = await authorize({
+      client_id: clientId,
+      redirect_uri: 'http://127.0.0.1:9999/', // loopback (allowlisted) but not registered to this client
+      code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+      code_challenge_method: 'S256',
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Record<string, unknown>).error).toBe('invalid_request');
+  });
+
+  it('redirects a valid S256 request (signed client_id, matching redirect_uri) to Entra', async () => {
+    const clientId = signClientId(['http://localhost:54321/cb'], 'cc');
+    const res = await authorize({
+      client_id: clientId,
       redirect_uri: 'http://localhost:54321/cb',
       code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
       code_challenge_method: 'S256',
