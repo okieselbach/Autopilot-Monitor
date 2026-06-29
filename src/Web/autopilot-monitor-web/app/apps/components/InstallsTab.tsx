@@ -202,11 +202,7 @@ export default function InstallsTab({ scope, timeRange }: InstallsTabProps) {
   function openApp(appName: string) {
     const days = rangeToDays(timeRange);
     const params = new URLSearchParams({ days: String(days) });
-    // In Global Admin mode, propagate scope: aggregated → ?global=1; specific tenant → +tenantId.
-    if (isGlobalAdmin) {
-      params.set("global", "1");
-      if (selectedTenantId) params.set("tenantId", selectedTenantId);
-    }
+    // Tenant scope is carried in sessionStorage (see useAggregatedAdminScope), so no scope params needed.
     router.push(`/apps/${encodeURIComponent(appName)}?${params.toString()}`);
   }
 

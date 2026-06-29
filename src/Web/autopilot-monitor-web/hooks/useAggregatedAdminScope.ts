@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTenant } from "@/contexts/TenantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminMode } from "@/hooks/useAdminMode";
 import { useTenantList, type TenantInfo } from "@/hooks/useTenantList";
+import { readTenantScope, writeTenantScope } from "@/utils/tenantScopeStorage";
 
 export interface AggregatedAdminScope {
   /**
@@ -52,17 +53,16 @@ export interface AggregatedAdminScope {
  * a delegated ("MSP") admin gets the SAME pages but bounded to its managed subset and ALWAYS on a concrete
  * tenant (no all-tenants aggregate — the backend never serves a no-tenantId aggregate to delegated here).
  *
- * @param opts.urlGlobal  seed from `?global=1` — when set, honor the URL's tenant scope on init (GA only).
- * @param opts.urlTenantId seed from `?tenantId=` — the specific tenant to select ("" = aggregated, GA only).
+ * @param opts.urlTenantId seed from `?tenantId=` — a specific tenant to deep-link to (GA only). When present
+ *   on first init it wins over the tab-persisted selection and is itself persisted for the rest of the tab.
  * @param opts.defaultAggregated when set, a GA/Reader defaults to the aggregated "All tenants" view ("")
- *   instead of their own tenant. A `?global=1` URL seed still wins on first init. No effect for a delegated
- *   caller (never aggregated) or a regular user. Used by the audit page, which starts cross-tenant.
+ *   instead of their own tenant — used only when there is no `?tenantId=` deep-link and no persisted
+ *   selection. No effect for a delegated caller (never aggregated) or a regular user. Used by the audit page.
  *
  * Pair with `<TenantScopeSelector scope={scope} allowAggregated />` and
  * `<GlobalAdminBanner show={scope.isGlobalAdmin} delegated={scope.isDelegatedScope} subtitle={globalAdminSubtitle(scope)} />`.
  */
 export function useAggregatedAdminScope(opts?: {
-  urlGlobal?: boolean;
   urlTenantId?: string;
   defaultAggregated?: boolean;
 }): AggregatedAdminScope {
@@ -89,40 +89,60 @@ export function useAggregatedAdminScope(opts?: {
     [allTenants, isDelegatedScope, delegatedAllow]
   );
 
-  const [selectedTenantId, setSelectedTenantId] = useState<string>("");
+  const [selectedTenantId, setSelectedRaw] = useState<string>("");
   const [scopeInitialized, setScopeInitialized] = useState(false);
 
-  const urlGlobal = opts?.urlGlobal;
   const urlTenantId = opts?.urlTenantId;
   const defaultAggregated = opts?.defaultAggregated ?? false;
 
+  // Persist ONLY on an explicit user action (the selector's onChange). The auto-defaults below use
+  // setSelectedRaw so a GA's aggregated ("") intent is never clobbered by a transient auto-resolve.
+  const setSelectedTenantId = useCallback((id: string) => {
+    setSelectedRaw(id);
+    writeTenantScope(id);
+  }, []);
+
   const [prevIsGlobalAdmin, setPrevIsGlobalAdmin] = useState(isGlobalAdmin);
+
+  // GA/Reader seed precedence: a first-init ?tenantId= deep-link wins, else the tab-persisted selection
+  // ("" = aggregated is valid for a GA), else the page default (own tenant, or "" when defaultAggregated).
+  const computeGaSeed = (firstInit: boolean): string => {
+    if (firstInit && urlTenantId) return urlTenantId;
+    const stored = readTenantScope();
+    if (stored !== null) return stored;
+    return defaultAggregated ? "" : tenantId;
+  };
 
   // Default the selection (done DURING RENDER — React's "adjust state when an input changes" escape hatch;
   // it converges, so no committed render keyed on scopeKey observes a transient wrong scope).
   if (isDelegatedScope) {
-    // Delegated: no aggregate. Default to the first managed tenant once the (scoped) list arrives, and
-    // re-default if the current selection ever falls outside the managed set. Never empty.
+    // Delegated: no aggregate. Seed from the persisted managed tenant (if still managed) or the first
+    // managed tenant once the (scoped) list arrives; re-default if the selection falls outside the set.
     if (tenants.length > 0 && (!selectedTenantId || !tenants.some((t) => t.tenantId === selectedTenantId))) {
-      setSelectedTenantId(tenants[0].tenantId);
+      const stored = readTenantScope();
+      const storedManaged = stored && tenants.some((t) => t.tenantId === stored) ? stored : null;
+      setSelectedRaw(storedManaged ?? tenants[0].tenantId);
       if (!scopeInitialized) setScopeInitialized(true);
       if (prevIsGlobalAdmin !== isGlobalAdmin) setPrevIsGlobalAdmin(isGlobalAdmin);
     }
   } else if (tenantId && (!scopeInitialized || prevIsGlobalAdmin !== isGlobalAdmin)) {
-    // GA/Reader (or a non-global user): default to own tenant — unless a ?global=1 URL seed (first init only)
-    // or the page's defaultAggregated opt selects the cross-tenant aggregate ("") instead.
+    // GA/Reader (or a non-global user): seed from deep-link / persisted selection / page default. This also
+    // re-runs when GA mode is toggled, so re-entering GA mode restores the previously persisted tenant.
     const firstInit = !scopeInitialized;
     setPrevIsGlobalAdmin(isGlobalAdmin);
     setScopeInitialized(true);
-    setSelectedTenantId(
-      isGlobalAdmin
-        ? firstInit && urlGlobal
-          ? urlTenantId ?? ""
-          : defaultAggregated
-            ? ""
-            : tenantId
-        : ""
-    );
+    setSelectedRaw(isGlobalAdmin ? computeGaSeed(firstInit) : "");
+    // A first-init deep-link expresses explicit intent — persist it so the rest of the tab follows.
+    if (isGlobalAdmin && firstInit && urlTenantId) writeTenantScope(urlTenantId);
+  } else if (
+    // Stale-selection guard (GA): a persisted tenant no longer present in the list falls back to the GA's
+    // own tenant. "" (aggregated) is exempt via the truthiness check. Local only — never clobbers storage.
+    isGlobalAdmin &&
+    selectedTenantId &&
+    tenants.length > 0 &&
+    !tenants.some((t) => t.tenantId === selectedTenantId)
+  ) {
+    setSelectedRaw(tenantId);
   }
 
   const selectedTenantName = useMemo(

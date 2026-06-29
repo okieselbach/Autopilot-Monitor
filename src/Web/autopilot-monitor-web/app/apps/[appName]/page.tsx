@@ -174,9 +174,8 @@ export default function AppDetailPage() {
     return d === 7 || d === 30 || d === 90 ? d : 30;
   })();
 
-  // Initial global-admin scope from URL: ?global=1[&tenantId=...]
-  // We mirror this into selectedTenantId; "" means aggregated across all tenants.
-  const urlGlobal = searchParams?.get("global") === "1";
+  // Optional deep-link seed: ?tenantId=<guid> points the view at a specific tenant on first init.
+  // The selection otherwise comes from the tab-persisted scope (sessionStorage, via useAggregatedAdminScope).
   const urlTenantId = searchParams?.get("tenantId") ?? "";
 
   const [days, setDays] = useState<7 | 30 | 90>(initialDays as 7 | 30 | 90);
@@ -193,14 +192,14 @@ export default function AppDetailPage() {
   const { getAccessToken } = useAuth();
   const { addNotification } = useNotifications();
 
-  // Global admin tenant scope (aggregated-capable), seeded from the URL (?global=1[&tenantId=]):
-  // the one-shot init honors the URL scope, else defaults to the GA's own tenant.
-  const scope = useAggregatedAdminScope({ urlGlobal, urlTenantId });
+  // Global admin tenant scope (aggregated-capable), seeded from the persisted tab scope or a ?tenantId=
+  // deep-link; falls back to the GA's own tenant.
+  const scope = useAggregatedAdminScope({ urlTenantId });
   const { isGlobalAdmin, selectedTenantId, tenants, scopeInitialized, scopeKey } = scope;
 
-  // Detail-page endpoint rule: use the /global/ endpoint when the URL flagged global scope,
-  // when viewing a tenant other than the user's own, or when the own tenant isn't resolved yet.
-  const useGlobalEndpoint = Boolean(isGlobalAdmin && (urlGlobal || selectedTenantId !== tenantId || !tenantId));
+  // Detail-page endpoint rule: use the /global/ endpoint when viewing a tenant other than the user's own
+  // (including the aggregated "" view), or when the own tenant isn't resolved yet.
+  const useGlobalEndpoint = Boolean(isGlobalAdmin && (selectedTenantId !== tenantId || !tenantId));
 
   // Build a tid → friendly name lookup once for the Tenant column.
   const tenantLookup = useMemo(() => {
@@ -366,14 +365,8 @@ export default function AppDetailPage() {
           <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
             <button
               onClick={() => {
-                // Preserve global scope when navigating back to the list
-                const params = new URLSearchParams();
-                if (isGlobalAdmin) {
-                  params.set("global", "1");
-                  if (selectedTenantId) params.set("tenantId", selectedTenantId);
-                }
-                const qs = params.toString();
-                router.push(`/apps${qs ? `?${qs}` : ""}`);
+                // Tenant scope is carried in sessionStorage, so the list restores it on its own.
+                router.push("/apps");
               }}
               className="text-sm text-blue-600 hover:underline mb-2 inline-flex items-center"
             >

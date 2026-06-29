@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTenant } from "@/contexts/TenantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminMode } from "@/hooks/useAdminMode";
 import { useTenantList, type TenantInfo } from "@/hooks/useTenantList";
+import { readTenantScope, writeTenantScope } from "@/utils/tenantScopeStorage";
 
 export type { TenantInfo };
 
@@ -60,19 +61,36 @@ export function useGlobalAdminScope(): GlobalAdminScope {
     [allTenants, isDelegatedScope, delegatedAllow]
   );
 
-  const [selectedTenantId, setSelectedTenantId] = useState<string>("");
+  const [selectedTenantId, setSelectedRaw] = useState<string>("");
 
-  // GA/Reader: default the selection to the user's own tenant (never empty in this variant).
+  // Persist ONLY on an explicit user action (the selector's onChange). The auto-defaults below use
+  // setSelectedRaw so they never write back — in particular a GA's persisted aggregated ("") intent
+  // is left untouched here (this override-only variant has no aggregate) so aggregated pages still honor it.
+  const setSelectedTenantId = useCallback((id: string) => {
+    setSelectedRaw(id);
+    writeTenantScope(id);
+  }, []);
+
+  // GA/Reader: seed the selection from the tab-persisted choice, else the user's own tenant (never empty
+  // in this variant). A persisted aggregated "" resolves locally to the own tenant without clearing storage.
   useEffect(() => {
-    if (!isDelegatedScope && tenantId && !selectedTenantId) {
-      setSelectedTenantId(tenantId);
-    }
+    if (isDelegatedScope || !tenantId || selectedTenantId) return;
+    const stored = readTenantScope();
+    setSelectedRaw(stored ? stored : tenantId);
   }, [isDelegatedScope, tenantId, selectedTenantId]);
 
-  // Delegated: default to the first managed tenant once the scoped list arrives; re-default if the current
-  // selection falls outside the managed set. Done during render (converging escape hatch).
+  // Delegated: seed from the persisted managed tenant (if still managed) or the first managed tenant once
+  // the scoped list arrives; re-default if the selection falls outside the managed set. Render-time (converges).
   if (isDelegatedScope && tenants.length > 0 && (!selectedTenantId || !tenants.some((t) => t.tenantId === selectedTenantId))) {
-    setSelectedTenantId(tenants[0].tenantId);
+    const stored = readTenantScope();
+    const storedManaged = stored && tenants.some((t) => t.tenantId === stored) ? stored : null;
+    setSelectedRaw(storedManaged ?? tenants[0].tenantId);
+  }
+
+  // Stale-selection guard (GA): a persisted tenant no longer present in the list falls back to the own
+  // tenant. Local only — never clobbers storage.
+  if (!isDelegatedScope && isGlobalAdmin && selectedTenantId && tenants.length > 0 && !tenants.some((t) => t.tenantId === selectedTenantId)) {
+    setSelectedRaw(tenantId);
   }
 
   const isGlobalOverride = Boolean(
