@@ -48,6 +48,15 @@ describe('event-type catalog drift vs C# Constants.EventTypes', () => {
 
   itOrSkip('catalog + internal exactly equals the canonical C# event types', () => {
     const canonical = canonicalEventTypes(readFileSync(constantsPath!, 'utf8'));
+    // Plausibility floor: if the C# extraction heuristic ever silently breaks
+    // (class layout change, regex miss) `canonical` could collapse to a tiny/
+    // empty set and the equality below would pass vacuously or compare against
+    // noise. The catalog has dozens of types, so anything under 40 means the
+    // parse — not the catalog — is wrong. Fail loudly here instead.
+    expect(
+      canonical.size,
+      'Parsed too few event types from Constants.cs — the extraction heuristic is likely broken, not the catalog',
+    ).toBeGreaterThan(40);
     const ours = new Set(ALL_EVENT_TYPES);
 
     const missingInTs = [...canonical].filter((t) => !ours.has(t)).sort();

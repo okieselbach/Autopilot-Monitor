@@ -71,6 +71,21 @@ ENV RULES_DIR=/app/rules
 ENV SEARCH_INDEX_PATH=/app/search-index/search-index.json
 EXPOSE 8080
 
+# Drop root: run as the unprivileged `node` user the base image ships (uid 1000).
+# An internet-exposed ingress should not execute as uid 0 — an RCE in the OAuth
+# proxy or a tool handler would otherwise own the container. Defence-in-depth.
+#
+# Everything the server READS (dist/, rules/, search-index/, node_modules) is
+# COPY'd world-readable, so no chown is needed for those. The ONLY runtime write
+# path is /app/.hf-cache: the prebaked path reads the model, but the documented
+# boot fallback (missing/corrupt cache, or a PREBAKE_MODEL=0 image) downloads it
+# at runtime and must be able to write — chown just that dir so the fallback (and
+# any cache-lock writes during a normal load) keep working as non-root. A
+# recursive chown of all of /app is avoided on purpose: it would duplicate the
+# heavy node_modules/.hf-cache trees into a new layer.
+RUN chown -R node:node /app/.hf-cache
+USER node
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:8080/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 

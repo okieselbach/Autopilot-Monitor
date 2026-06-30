@@ -1,11 +1,21 @@
 /**
- * Unit tests for the tool catalog ordering.
+ * Unit tests for the tool catalog: ordering AND the exact per-role surface.
  *
  * MCP clients render tools in the exact order the server lists them, and the SDK
  * lists them in registration order. registerTools() sorts the catalog after all
  * modules have registered so the surface is stable and grouped by verb prefix
- * (get_* / list_* / query_* / search_*). These tests lock that in — they need no
- * backend token (registerTools only wires handlers, it never calls the API).
+ * (get_* / list_* / query_* / search_*). The ordering tests lock that in.
+ *
+ * The "role catalog snapshot" block is a fail-closed privilege-leak guard: it
+ * pins the EXACT tool-name set each role sees, derived from one master set
+ * (Global Admin) minus named difference lists — the same discipline as the
+ * backend EndpointAccessPolicyCatalog. A new tool added with the wrong (or a
+ * copy-pasted) role guard cannot ship silently: it either breaks the GA master
+ * assertion (forcing a conscious placement decision in the same PR) or lands in
+ * the wrong derived set and breaks that role's assertion.
+ *
+ * All of this needs no backend token — registerTools only wires handlers, it
+ * never calls the API.
  */
 import { describe, it, expect } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -45,70 +55,107 @@ describe('tool catalog ordering', () => {
     expect(lastIndexOfPrefix('list_')).toBeLessThan(firstIndexOfPrefix('query_'));
     expect(lastIndexOfPrefix('query_')).toBeLessThan(firstIndexOfPrefix('search_'));
   });
+});
 
-  it('hides Global-Admin-only tools from a tenant user', () => {
-    const gaNames = registeredToolNames(true);
-    const tenantNames = registeredToolNames(false);
-    expect(tenantNames.length).toBeLessThan(gaNames.length);
-    // list_tenants is GA-only — it must not leak into the tenant catalog.
-    expect(gaNames).toContain('list_tenants');
-    expect(tenantNames).not.toContain('list_tenants');
+describe('role catalog snapshot — privilege-leak guard', () => {
+  // ── The master set: every tool a real Global Admin (ga + strictGa) sees. ──
+  // This is the source of truth. A new tool MUST be added here, or the GA test
+  // fails — that failure is the deliberate prompt to decide its role placement.
+  const GA_FULL = [
+    'get_api_usage',
+    'get_app_install_metrics',
+    'get_audit_logs',
+    'get_geographic_metrics',
+    'get_geographic_sessions',
+    'get_ime_version_history',
+    'get_metrics',
+    'get_ops_events',
+    'get_platform_metrics',
+    'get_resource',
+    'get_rule_stats',
+    'get_session',
+    'get_session_diagnostics',
+    'get_session_events',
+    'get_session_summary',
+    'get_software_inventory',
+    'get_usage_metrics',
+    'get_vulnerability_summary',
+    'list_blocked_devices',
+    'list_session_reports',
+    'list_tables',
+    'list_tenants',
+    'query_backend_logs',
+    'query_raw_events',
+    'query_raw_sessions',
+    'query_table',
+    'search_events',
+    'search_knowledge',
+    'search_sessions',
+    'search_sessions_by_cve',
+    'search_sessions_by_event',
+  ];
+
+  // ── Named difference lists (each a deliberate role-boundary decision). ──
+  // Secret-bearing raw tools: their backend endpoints stay GlobalAdminOnly, so a
+  // read-only Global Reader must NOT see them (they can dump tables the Reader's
+  // config redaction would otherwise hide). strictGa gate.
+  const RAW_GA_STRICT = ['list_tables', 'query_backend_logs', 'query_table'];
+
+  // Platform-only tools: a non-platform caller (tenant or delegated) gets no
+  // cross-fleet aggregate surface at all. Superset of RAW_GA_STRICT (those are
+  // also platform-only) plus the curated cross-tenant aggregates.
+  const PLATFORM_ONLY = [
+    'get_api_usage',
+    'get_ops_events',
+    'get_platform_metrics',
+    'list_blocked_devices',
+    'list_session_reports',
+    'list_tables',
+    'list_tenants',
+    'query_backend_logs',
+    'query_table',
+  ];
+
+  // The only delta between a plain tenant user and a delegated (MSP) caller: the
+  // global (non-tenant) IME-version archive is hidden — everything else a tenant
+  // user sees is tenant-boundable and stays.
+  const DELEGATED_HIDDEN = ['get_ime_version_history'];
+
+  const without = (set: string[], remove: string[]) => set.filter((n) => !remove.includes(n));
+
+  it('Global Admin sees exactly the master set', () => {
+    expect(registeredToolNames(true, true)).toEqual(GA_FULL);
   });
 
-  it('gives a delegated (MSP) caller the tenant-boundable subset only — no platform-only tools', () => {
-    // A delegated caller has NO platform scope (ga=false) but a managed tenant set (delegated=true).
-    const delegatedNames = registeredToolNames(false, false, true);
+  it('Global Reader = GA minus the secret-bearing raw tools (strictGa split)', () => {
+    expect(registeredToolNames(true, false)).toEqual(without(GA_FULL, RAW_GA_STRICT));
+  });
 
-    // Every platform-only tool MUST be hidden (no aggregate / cross-fleet surface).
-    const platformOnly = [
-      'list_tenants', 'get_api_usage', 'get_platform_metrics', 'get_ops_events',
-      'list_session_reports', 'list_tables', 'query_table', 'query_backend_logs',
-      'list_blocked_devices', 'get_ime_version_history',
-    ];
-    for (const t of platformOnly) {
-      expect(delegatedNames).not.toContain(t);
+  it('tenant user = GA minus all platform-only tools', () => {
+    expect(registeredToolNames(false, false, false)).toEqual(without(GA_FULL, PLATFORM_ONLY));
+  });
+
+  it('delegated (MSP) caller = tenant user minus the global IME archive', () => {
+    const tenant = without(GA_FULL, PLATFORM_ONLY);
+    expect(registeredToolNames(false, false, true)).toEqual(without(tenant, DELEGATED_HIDDEN));
+  });
+
+  // ── Consistency of the difference lists themselves (catch stale entries). ──
+  it('every difference-list entry is a real GA tool', () => {
+    for (const [label, list] of [
+      ['RAW_GA_STRICT', RAW_GA_STRICT],
+      ['PLATFORM_ONLY', PLATFORM_ONLY],
+      ['DELEGATED_HIDDEN', DELEGATED_HIDDEN],
+    ] as const) {
+      const stale = list.filter((n) => !GA_FULL.includes(n));
+      expect(stale, `${label} lists tools not present in the GA master set`).toEqual([]);
     }
-
-    // The tenant-boundable cross-tenant tools (routed to /api/global/*?tenantId=) ARE present…
-    for (const t of ['search_sessions', 'get_session_summary', 'get_metrics', 'get_audit_logs',
-                     'query_raw_sessions', 'get_vulnerability_summary', 'get_software_inventory']) {
-      expect(delegatedNames).toContain(t);
-    }
-    // …and so are the platform-agnostic in-memory tools.
-    expect(delegatedNames).toContain('search_knowledge');
-    expect(delegatedNames).toContain('get_resource');
   });
 
-  it('delegated catalog is the tenant-user catalog MINUS the global IME archive', () => {
-    // The only catalog difference between a plain tenant user and a delegated caller is that the
-    // global (non-tenant) get_ime_version_history archive is hidden for delegated — everything else a
-    // tenant user sees is tenant-boundable and stays. Pins the exact delta so a future tool lands on
-    // the right side of the split deliberately.
-    const tenantNames = registeredToolNames(false, false, false);
-    const delegatedNames = registeredToolNames(false, false, true);
-    expect(tenantNames).toContain('get_ime_version_history');
-    expect(delegatedNames).not.toContain('get_ime_version_history');
-    expect(delegatedNames).toEqual(tenantNames.filter((n) => n !== 'get_ime_version_history'));
-  });
-
-  it('a delegated catalog stays alphabetically sorted', () => {
-    const names = registeredToolNames(false, false, true);
-    expect(names.length).toBeGreaterThan(0);
-    expect(names).toEqual([...names].sort());
-  });
-
-  it('gives a Global Reader the platform read tools but NOT the secret-bearing raw tools', () => {
-    // A Global Reader has platform scope (ga=true) but is not a real Global Admin (strictGa=false).
-    const readerNames = registeredToolNames(true, false);
-    const gaNames = registeredToolNames(true, true);
-
-    // Curated cross-tenant read tools are present for the reader…
-    expect(readerNames).toContain('list_tenants');
-    expect(readerNames).toContain('get_api_usage');
-    // …but the raw secret-bearing tools are GA-strict only.
-    for (const raw of ['query_table', 'list_tables', 'query_backend_logs']) {
-      expect(gaNames).toContain(raw);
-      expect(readerNames).not.toContain(raw);
-    }
+  it('the secret-bearing raw tools are a subset of the platform-only tools', () => {
+    // A raw GA-strict tool is by definition also platform-only; this documents
+    // (and enforces) that the Reader split never re-exposes a tenant-hidden tool.
+    const leaked = RAW_GA_STRICT.filter((n) => !PLATFORM_ONLY.includes(n));
+    expect(leaked, 'a raw GA-strict tool is not also marked platform-only').toEqual([]);
   });
 });
