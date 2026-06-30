@@ -116,6 +116,16 @@ async function checkAccess(upn: string, token: string, clientIp: string): Promis
   const cacheKey = buildCacheKey(upn, token);
   const cached = accessCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
+    // A cached DENY is cheap to serve but still costs request processing — and
+    // deny verdicts ARE cached, so without this an attacker could repeat one
+    // forged/denied token and farm unlimited cached 403s for the whole 5-min TTL
+    // while never tripping the pre-auth limiter (it only ran on the miss path).
+    // Count cached denials against the per-source-IP budget too, returning 429
+    // once it is exhausted. Cached ALLOWs stay free, so a legitimate user never
+    // burns the pre-auth budget on their cached fast-path.
+    if (!cached.allowed && isPreAuthRateLimited(clientIp)) {
+      return { allowed: false, reason: 'Pre-auth rate limit exceeded', isGlobalAdmin: false, isGlobalReader: false, infraError: false, rateLimited: true };
+    }
     return {
       allowed: cached.allowed,
       reason: cached.reason,
