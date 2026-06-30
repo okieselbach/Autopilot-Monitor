@@ -104,14 +104,19 @@ namespace AutopilotMonitor.Functions.Services
             return days;
         }
 
-        private async Task<PlatformUsageMetrics> ComputeUsageMetricsInternalAsync(int days)
+        internal async Task<PlatformUsageMetrics> ComputeUsageMetricsInternalAsync(int days)
         {
             // Query sessions over the requested window (days). Today/7d/30d sub-aggregates remain
             // meaningful only when they fit inside the window; clients can read WindowDays to know
             // the actual scope. "Total" counters use PlatformStats (cumulative, tracked separately).
-            var allSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-days), DateTime.UtcNow.AddDays(1));
-
+            // One UtcNow snapshot for the whole computation: the session window lower bound and the
+            // AppInstall cutoff (below) MUST share an identical windowStart. A fresh UtcNow for the
+            // app query would sit milliseconds later and could drop a boundary session's app rows
+            // (undercounting AvgAppsPerSession / TotalUniqueApps). Pinned by UsageMetricsWindowConsistencyTests.
             var now = DateTime.UtcNow;
+            var windowStart = now.AddDays(-days);
+            var allSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(windowStart, now.AddDays(1));
+
             var today = now.Date;
             var last7Days = now.AddDays(-7);
             var last30Days = now.AddDays(-30);
@@ -217,11 +222,11 @@ namespace AutopilotMonitor.Functions.Services
             };
 
             // App & Script Metrics
-            // Bound the AppInstall scan to the same window as the sessions above — relevantApps is
-            // filtered to sessionIdSet anyway, and an app installs during its session so its StartedAt
-            // is >= the session's. Without sinceUtc this dematerialized the entire AppInstallSummaries
-            // table on every cache miss just to discard everything outside the window.
-            var allAppSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync(DateTime.UtcNow.AddDays(-days));
+            // Reuse windowStart (NOT a fresh UtcNow) so the AppInstall lower bound is identical to the
+            // session window's — see the snapshot note above. relevantApps is filtered to sessionIdSet
+            // anyway, and an app installs during its session (StartedAt >= the session's), so bounding
+            // here only drops rows already outside the window instead of scanning the whole table.
+            var allAppSummaries = await _metricsRepo.GetAllAppInstallSummariesAsync(windowStart);
             var sessionIdSet = new HashSet<string>(allSessions.Select(s => s.SessionId));
             var relevantApps = allAppSummaries.Where(a => sessionIdSet.Contains(a.SessionId)).ToList();
             var appsPerSessionList = relevantApps.GroupBy(a => a.SessionId).Select(g => g.Count()).ToList();
@@ -268,12 +273,15 @@ namespace AutopilotMonitor.Functions.Services
             };
         }
 
-        private async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsInternalAsync(string tenantId, int days)
+        internal async Task<PlatformUsageMetrics> ComputeTenantUsageMetricsInternalAsync(string tenantId, int days)
         {
-            // Query sessions for specific tenant over the requested window.
-            var tenantSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(DateTime.UtcNow.AddDays(-days), DateTime.UtcNow.AddDays(1), tenantId);
-
+            // Query sessions for specific tenant over the requested window. One UtcNow snapshot so the
+            // session window lower bound and the AppInstall cutoff (below) share an identical
+            // windowStart — see ComputeUsageMetricsInternalAsync for why this must not drift.
             var now = DateTime.UtcNow;
+            var windowStart = now.AddDays(-days);
+            var tenantSessions = await _maintenanceRepo.GetSessionsByDateRangeAsync(windowStart, now.AddDays(1), tenantId);
+
             var today = now.Date;
             var last7Days = now.AddDays(-7);
             var last30Days = now.AddDays(-30);
@@ -370,8 +378,8 @@ namespace AutopilotMonitor.Functions.Services
             };
 
             // App & Script Metrics
-            // Bound to the window (see ComputeUsageMetricsInternalAsync) — joined to tenantSessionIdSet below.
-            var tenantAppSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId, DateTime.UtcNow.AddDays(-days));
+            // Reuse windowStart (identical to the session window lower bound) — joined to tenantSessionIdSet below.
+            var tenantAppSummaries = await _metricsRepo.GetAppInstallSummariesByTenantAsync(tenantId, windowStart);
             var tenantSessionIdSet = new HashSet<string>(tenantSessions.Select(s => s.SessionId));
             var relevantTenantApps = tenantAppSummaries.Where(a => tenantSessionIdSet.Contains(a.SessionId)).ToList();
             var tenantAppsPerSession = relevantTenantApps.GroupBy(a => a.SessionId).Select(g => g.Count()).ToList();
