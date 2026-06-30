@@ -293,7 +293,9 @@ namespace AutopilotMonitor.Functions.Services
         /// The key difference from the primary-table mapping: SessionId comes from a stored property
         /// instead of RowKey (which contains the inverted-tick key in the index).
         /// </summary>
-        private SessionSummary MapIndexEntityToSessionSummary(TableEntity entity)
+        // internal (not private) so SessionStatsProjectionEquivalenceTests can pin that a row
+        // carrying only SessionStatsProjection maps to the same stat-relevant fields as a full row.
+        internal SessionSummary MapIndexEntityToSessionSummary(TableEntity entity)
             => MapToSessionSummary(entity, entity.GetString("SessionId") ?? ExtractSessionIdFromIndexRowKey(entity.RowKey));
 
         // ===== SESSION MANAGEMENT METHODS =====
@@ -788,7 +790,7 @@ namespace AutopilotMonitor.Functions.Services
         /// <see cref="GetSessionsPageAsync(string, int?, int, string?)"/> (single page).
         /// </summary>
         private async Task<(List<SessionSummary> Sessions, bool HasMore, string? NextCursor)> FetchSessionsPageInternalAsync(
-            string tenantId, int maxResults, string? cursor, int? days)
+            string tenantId, int maxResults, string? cursor, int? days, IEnumerable<string>? select = null)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
 
@@ -817,9 +819,12 @@ namespace AutopilotMonitor.Functions.Services
                 // mechanics are independent of the date window so a tenant with more
                 // than `maxResults` matching sessions remains fully reachable across
                 // multiple calls (was: silently capped at 10k pre-fix).
+                // select == null → full mirror row (every existing caller). The stats drain passes a
+                // narrow projection so it doesn't materialize the ~40-column row just to tally statuses.
                 var query = indexTableClient.QueryAsync<TableEntity>(
                     filter: filter,
-                    maxPerPage: Math.Min(maxResults + 1, 1000)
+                    maxPerPage: Math.Min(maxResults + 1, 1000),
+                    select: select
                 );
 
                 var sessions = new List<SessionSummary>();
@@ -961,12 +966,39 @@ namespace AutopilotMonitor.Functions.Services
         /// Computed server-side so the cards don't depend on whatever the client has
         /// paginated into memory.
         /// </summary>
+        // Columns AggregateSessionStats (and the ComputeEffectiveDuration it relies on for Succeeded
+        // sessions) actually reads, plus PartitionKey/RowKey/SessionId for the TenantId map + page
+        // cursor. Everything else on the ~40-column SessionsIndex mirror (FailureSnapshotJson, Os*,
+        // Geo*, PendingActionsJson, …) is never consumed by the tally, so the stats drain skips it.
+        // Crucially IsPreProvisioned/ResumedAt are omitted on purpose: they only feed the WhiteGlove
+        // Part-2 duration branch, which is gated on status==InProgress, and the stats never read
+        // DurationSeconds for InProgress sessions — so dropping them cannot change any reported value.
+        // Equivalence is pinned by SessionStatsProjectionEquivalenceTests. Non-projected columns map
+        // to null/default via the Safe*/`?? ` getters in MapToSessionSummary — no missing-column throw.
+        // internal so the equivalence test derives its simulated projected row from this exact set
+        // (any future column drop here is automatically reflected in the test's faithfulness).
+        internal static readonly string[] SessionStatsProjection =
+            { "PartitionKey", "RowKey", "SessionId", "Status", "StartedAt", "CompletedAt", "DurationSeconds" };
+
         public async Task<SessionStats> GetSessionStatsAsync(string tenantId, int days)
         {
             SecurityValidator.EnsureValidGuid(tenantId, nameof(tenantId));
             if (days < 1) throw new ArgumentOutOfRangeException(nameof(days));
 
-            var sessions = await GetSessionsAsync(tenantId, days);
+            // Stats are a pure status/duration tally, so drain the window with a projected
+            // SessionsIndex scan instead of GetSessionsAsync's full-row materialization. Same
+            // cursor/HasMore/fallback mechanics as the list drain (via FetchSessionsPageInternalAsync),
+            // just a narrower column set — the returned partial summaries never leave this method.
+            var sessions = new List<SessionSummary>();
+            string? cursor = null;
+            do
+            {
+                var page = await FetchSessionsPageInternalAsync(
+                    tenantId, maxResults: 1000, cursor: cursor, days: days, select: SessionStatsProjection);
+                sessions.AddRange(page.Sessions);
+                cursor = page.HasMore ? page.NextCursor : null;
+            } while (!string.IsNullOrEmpty(cursor));
+
             return AggregateSessionStats(sessions, days);
         }
 
