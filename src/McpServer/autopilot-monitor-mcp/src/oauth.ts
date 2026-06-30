@@ -18,6 +18,7 @@
  */
 import { Router } from 'express';
 import crypto from 'node:crypto';
+import { getPublicBaseUrl } from './config.js';
 
 const CLIENT_ID: string = (() => {
   const v = process.env.AUTOPILOT_ENTRA_CLIENT_ID;
@@ -340,19 +341,6 @@ export function redirectUriMatches(registered: string[], requested: string): boo
   const target = canonicalizeRedirectUri(requested);
   if (target === null) return false;
   return registered.some((r) => canonicalizeRedirectUri(r) === target);
-}
-
-/**
- * Derives the public base URL of this MCP server.
- * In production: from X-Forwarded-Host / X-Forwarded-Proto (set by Container Apps ingress).
- * Fallback: MCP_PUBLIC_URL env var or localhost.
- */
-function getPublicBaseUrl(req: import('express').Request): string {
-  if (process.env.MCP_PUBLIC_URL) return process.env.MCP_PUBLIC_URL;
-
-  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-  const host = (req.headers['x-forwarded-host'] as string) ?? req.headers.host;
-  return `${proto}://${host}`;
 }
 
 export function createOAuthRouter(): Router {

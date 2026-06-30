@@ -294,7 +294,12 @@ describe('L3 — error-handler 5xx body redaction', () => {
 // 2026-05-08 security review fixes
 // ---------------------------------------------------------------------------
 
-const { buildCacheKey } = await import('../access-guard.js');
+// Pin a small pre-auth budget BEFORE access-guard loads (it reads the env at
+// module init) so the throttle tests are cheap and limit-independent.
+const PRE_AUTH_TEST_LIMIT = 5;
+process.env.MCP_PRE_AUTH_RATE_LIMIT_PER_MINUTE = String(PRE_AUTH_TEST_LIMIT);
+const { buildCacheKey, boundedSet, isPreAuthRateLimited } = await import('../access-guard.js');
+const { parsePositiveInt, getPublicBaseUrl } = await import('../config.js');
 
 describe('F1 — access-guard cache key includes token hash', () => {
   it('produces stable keys for the same (upn, token) pair', () => {
@@ -473,6 +478,111 @@ describe('list_tenants — extractTenantList keep-list projection', () => {
     expect(result).toHaveLength(4);
     expect(result[0]).toEqual({});
     expect(result[3].tenantId).toBe('contoso-tenant-id');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-06-30 security review fixes (M1 / M2 / M3)
+// ---------------------------------------------------------------------------
+
+describe('M1 — parsePositiveInt env guard (rate-limit NaN bug)', () => {
+  it('returns the fallback for an undefined env var', () => {
+    expect(parsePositiveInt(undefined, 60)).toBe(60);
+  });
+
+  it('parses a valid positive integer', () => {
+    expect(parsePositiveInt('120', 60)).toBe(120);
+  });
+
+  it('returns the fallback for non-numeric input (would be NaN — disables limiter)', () => {
+    // The actual bug: a bare parseInt('abc') is NaN, and `count >= NaN` is
+    // always false, silently disabling the rate limiter.
+    expect(parsePositiveInt('abc', 60)).toBe(60);
+    expect(parsePositiveInt('', 60)).toBe(60);
+  });
+
+  it('returns the fallback for zero and negative values', () => {
+    expect(parsePositiveInt('0', 60)).toBe(60);
+    expect(parsePositiveInt('-5', 60)).toBe(60);
+  });
+});
+
+describe('M1 — boundedSet size cap (accessCache memory bound)', () => {
+  it('evicts the oldest entry once the cap is reached', () => {
+    const m = new Map<string, number>();
+    boundedSet(m, 'a', 1, 2);
+    boundedSet(m, 'b', 2, 2);
+    boundedSet(m, 'c', 3, 2); // over cap → evict 'a' (oldest)
+    expect(m.size).toBe(2);
+    expect(m.has('a')).toBe(false);
+    expect(m.has('b')).toBe(true);
+    expect(m.has('c')).toBe(true);
+  });
+
+  it('updates an existing key in place without evicting or growing', () => {
+    const m = new Map<string, number>();
+    boundedSet(m, 'a', 1, 2);
+    boundedSet(m, 'b', 2, 2);
+    boundedSet(m, 'a', 99, 2); // re-set existing key — must not evict 'b'
+    expect(m.size).toBe(2);
+    expect(m.get('a')).toBe(99);
+    expect(m.has('b')).toBe(true);
+  });
+
+  it('stays bounded under a flood far exceeding the cap', () => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < 1000; i++) boundedSet(m, `k${i}`, i, 10);
+    expect(m.size).toBe(10);
+    // Only the most recent 10 keys survive.
+    expect(m.has('k999')).toBe(true);
+    expect(m.has('k989')).toBe(false);
+  });
+});
+
+describe('M1 — isPreAuthRateLimited (per-IP pre-auth throttle)', () => {
+  // Budget pinned to PRE_AUTH_TEST_LIMIT above. Use a unique IP per test so the
+  // module-level bucket map does not leak across cases.
+  let ipSeed = 0;
+  const uniqueIp = () => `203.0.113.${ipSeed++}`;
+
+  it('allows requests up to the budget, then throttles', () => {
+    const ip = uniqueIp();
+    let throttledAt = -1;
+    for (let i = 0; i < PRE_AUTH_TEST_LIMIT + 5; i++) {
+      if (isPreAuthRateLimited(ip)) { throttledAt = i; break; }
+    }
+    // The (limit+1)th call is the first to exceed the budget.
+    expect(throttledAt).toBe(PRE_AUTH_TEST_LIMIT);
+  });
+
+  it('tracks distinct IPs independently', () => {
+    const a = uniqueIp();
+    const b = uniqueIp();
+    // Burn a's budget; b must be unaffected.
+    for (let i = 0; i < PRE_AUTH_TEST_LIMIT; i++) isPreAuthRateLimited(a);
+    expect(isPreAuthRateLimited(a)).toBe(true);
+    expect(isPreAuthRateLimited(b)).toBe(false);
+  });
+});
+
+describe('M3 — getPublicBaseUrl forwarded-header fallback (no MCP_PUBLIC_URL pin)', () => {
+  // This file is imported with MCP_PUBLIC_URL unset and NODE_ENV != production,
+  // so the config module captured no pin and getPublicBaseUrl derives from
+  // forwarded headers. The pin-wins path is covered in config-public-url.test.ts.
+  it('prefers X-Forwarded-Host / X-Forwarded-Proto', () => {
+    const req = {
+      headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'mcp.example.com', host: 'internal:8080' },
+      protocol: 'http',
+    } as unknown as Parameters<typeof getPublicBaseUrl>[0];
+    expect(getPublicBaseUrl(req)).toBe('https://mcp.example.com');
+  });
+
+  it('falls back to req.protocol + Host when no forwarded headers', () => {
+    const req = {
+      headers: { host: 'localhost:8080' },
+      protocol: 'http',
+    } as unknown as Parameters<typeof getPublicBaseUrl>[0];
+    expect(getPublicBaseUrl(req)).toBe('http://localhost:8080');
   });
 });
 

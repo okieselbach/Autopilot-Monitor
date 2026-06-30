@@ -11,20 +11,42 @@ import type { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
 import { extractTokenClaims, isTokenExpired } from './auth.js';
 import { runWithCaller } from './client.js';
-import { API_BASE_URL } from './config.js';
+import { API_BASE_URL, getPublicBaseUrl, parsePositiveInt } from './config.js';
 
 const BASE_URL = API_BASE_URL;
 
-/**
- * Derives the public base URL for the WWW-Authenticate header.
- */
-function getPublicBaseUrl(req: Request): string {
-  if (process.env.MCP_PUBLIC_URL) return process.env.MCP_PUBLIC_URL;
-  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-  const host = (req.headers['x-forwarded-host'] as string) ?? req.headers.host;
-  return `${proto}://${host}`;
-}
-const RATE_LIMIT = parseInt(process.env.MCP_RATE_LIMIT_PER_MINUTE ?? '60', 10);
+// Per-UPN request budget (sliding 60s window), applied AFTER a token is
+// validated. parsePositiveInt guards against a non-numeric override: a bare
+// parseInt would yield NaN, and `count >= NaN` is always false — silently
+// disabling the limiter.
+const RATE_LIMIT = parsePositiveInt(process.env.MCP_RATE_LIMIT_PER_MINUTE, 60);
+
+// Per-source-IP budget for UNvalidated requests (sliding 60s window), applied
+// only on the cache-MISS path that would call the backend. Bounds forged- /
+// distinct-token floods at the source without ever touching a victim's per-UPN
+// budget (different key space). It counts ONLY cache misses — a legitimate user
+// misses at most ~once per token per 5-min TTL (~0.2/min), and a NAT'd org of N
+// active users ~N/5 per min — so the default 120 (= 2× the per-UPN rate) clears
+// even a ~600-user shared-IP org while capping flood amplification to ~2 backend
+// calls/sec/IP. NOTE: this is per-replica; with maxReplicas=1 it is effectively
+// global, but if the app is ever scaled out the effective per-IP ceiling becomes
+// 120×replicas (a shared store would be needed for a true global cap). Tune via
+// MCP_PRE_AUTH_RATE_LIMIT_PER_MINUTE; raise it (or allowlist the egress IP) only
+// if a very large shared-IP org reports false 429s.
+const PRE_AUTH_RATE_LIMIT = parsePositiveInt(process.env.MCP_PRE_AUTH_RATE_LIMIT_PER_MINUTE, 120);
+
+// Hard ceiling on access-cache cardinality. The key is UPN+tokenHash, so a flood
+// of distinct (valid-signature) tokens would otherwise grow the map unbounded
+// between the 5-min reaper passes — a memory-exhaustion vector on the 0.5 GiB
+// container. Oldest entries are evicted on write once the cap is hit.
+const MAX_ACCESS_CACHE_ENTRIES = parsePositiveInt(process.env.MCP_ACCESS_CACHE_MAX_ENTRIES, 10_000);
+
+// Timeout for the backend access-check fetch. Without it a hung/cold backend
+// stalls the path EVERY request must traverse. Generous enough to survive a
+// cold Functions backend (→ no false 403s), bounded so an unresponsive backend
+// cannot pile up held requests.
+const ACCESS_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.MCP_ACCESS_CHECK_TIMEOUT_MS, 15_000);
+
 const ACCESS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // --- Access check cache ---
@@ -65,6 +87,10 @@ interface AccessCheckResult {
   // only the former should be surfaced to the user as "you are not enabled —
   // ask to be whitelisted"; an infra error is not the user's fault.
   infraError: boolean;
+  // Set when the per-source-IP pre-auth budget was exhausted on a cache-miss:
+  // the middleware maps this to 429 (not 403), since it is throttling, not a
+  // verdict. Never set on a cache hit (a hit consumes no pre-auth budget).
+  rateLimited?: boolean;
 }
 
 export function buildCacheKey(upn: string, token: string): string {
@@ -72,7 +98,21 @@ export function buildCacheKey(upn: string, token: string): string {
   return `${upn}:${h}`;
 }
 
-async function checkAccess(upn: string, token: string): Promise<AccessCheckResult> {
+/**
+ * Insert into a size-bounded Map, evicting the oldest entry (insertion order)
+ * when the cap is reached. Keeps memory bounded under a distinct-key flood.
+ * Exported for unit testing. Re-inserting an existing key updates in place
+ * without growing the map (the size check is skipped when the key already exists).
+ */
+export function boundedSet<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
+  if (!map.has(key) && map.size >= cap) {
+    const oldest = map.keys().next().value as K | undefined;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  map.set(key, value);
+}
+
+async function checkAccess(upn: string, token: string, clientIp: string): Promise<AccessCheckResult> {
   const cacheKey = buildCacheKey(upn, token);
   const cached = accessCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) {
@@ -89,9 +129,19 @@ async function checkAccess(upn: string, token: string): Promise<AccessCheckResul
     };
   }
 
+  // Cache miss → this request is about to hit the backend. Bound the cost per
+  // source IP so a forged-/distinct-token flood cannot drive unbounded backend
+  // calls (the JWT signature is not verified here, so anyone can mint a
+  // well-formed token). Keyed on IP, not UPN, so it never burns a victim's
+  // per-UPN budget.
+  if (isPreAuthRateLimited(clientIp)) {
+    return { allowed: false, reason: 'Pre-auth rate limit exceeded', isGlobalAdmin: false, isGlobalReader: false, infraError: false, rateLimited: true };
+  }
+
   try {
     const res = await fetch(`${BASE_URL}/api/auth/mcp`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(ACCESS_CHECK_TIMEOUT_MS),
     });
 
     const text = await res.text();
@@ -133,7 +183,8 @@ async function checkAccess(upn: string, token: string): Promise<AccessCheckResul
     // Cache only the persisted fields (infraError is request-derived, always
     // false for a cached verdict — see the cache-hit path above). The delegated
     // scope MUST be cached too, or the 5-min-cached follow-up loses it.
-    accessCache.set(cacheKey, {
+    // boundedSet caps the map so a distinct-token flood cannot exhaust memory.
+    boundedSet(accessCache, cacheKey, {
       allowed: result.allowed,
       reason: result.reason,
       isGlobalAdmin: result.isGlobalAdmin,
@@ -141,7 +192,7 @@ async function checkAccess(upn: string, token: string): Promise<AccessCheckResul
       delegatedTenantIds: result.delegatedTenantIds,
       delegatedRole: result.delegatedRole,
       expiresAt: Date.now() + ACCESS_CACHE_TTL_MS,
-    });
+    }, MAX_ACCESS_CACHE_ENTRIES);
     return result;
   } catch (err) {
     console.error(`[access-guard] Backend check failed for ${upn}:`, err);
@@ -156,44 +207,100 @@ interface RateEntry {
   timestamps: number[];
 }
 
+// Post-validation, per-UPN budget.
 const rateBuckets = new Map<string, RateEntry>();
+// Pre-validation, per-source-IP budget (cache-miss path only). Separate key
+// space from rateBuckets so throttling unvalidated floods never affects a
+// validated user's per-UPN budget.
+const preAuthBuckets = new Map<string, RateEntry>();
 
-// Cleanup stale entries every 5 minutes. Both maps share this interval —
-// rateBuckets evicts empty windows, accessCache evicts expired entries
-// (the cache key now includes a token hash, so cardinality is one entry per
+/** Drop timestamps outside the 60s window from a bucket map; delete empty buckets. */
+function pruneBuckets(buckets: Map<string, RateEntry>, cutoff: number): void {
+  for (const [key, entry] of buckets) {
+    entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
+    if (entry.timestamps.length === 0) buckets.delete(key);
+  }
+}
+
+// Cleanup stale entries every 5 minutes. All three maps share this interval —
+// the rate buckets evict empty windows, accessCache evicts expired entries
+// (the cache key includes a token hash, so cardinality is one entry per
 // user×token-rotation; without proactive eviction the map would only shrink
-// when a key is re-fetched).
+// when a key is re-fetched or the size cap evicts it).
 setInterval(() => {
   const now = Date.now();
   const cutoff = now - 60_000;
-  for (const [key, entry] of rateBuckets) {
-    entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
-    if (entry.timestamps.length === 0) rateBuckets.delete(key);
-  }
+  pruneBuckets(rateBuckets, cutoff);
+  pruneBuckets(preAuthBuckets, cutoff);
   for (const [key, entry] of accessCache) {
     if (entry.expiresAt <= now) accessCache.delete(key);
   }
 }, 5 * 60_000);
 
-function isRateLimited(upn: string): boolean {
+/**
+ * Sliding-window check against a bucket map. Returns true when the key has
+ * already used its full budget in the last 60s; otherwise records the hit.
+ */
+function isWindowExceeded(buckets: Map<string, RateEntry>, key: string, limit: number): boolean {
   const now = Date.now();
   const windowStart = now - 60_000;
 
-  let entry = rateBuckets.get(upn);
+  let entry = buckets.get(key);
   if (!entry) {
     entry = { timestamps: [] };
-    rateBuckets.set(upn, entry);
+    buckets.set(key, entry);
   }
-
-  // Remove timestamps outside the window
   entry.timestamps = entry.timestamps.filter((t) => t > windowStart);
 
-  if (entry.timestamps.length >= RATE_LIMIT) {
-    return true;
-  }
-
+  if (entry.timestamps.length >= limit) return true;
   entry.timestamps.push(now);
   return false;
+}
+
+/**
+ * Per-source-IP throttle for UNvalidated, cache-missing requests. Exported for
+ * unit testing. 'unknown' (no resolvable IP) shares a single bucket — acceptable
+ * since the limit is generous and this is a backstop, not the primary gate.
+ */
+export function isPreAuthRateLimited(clientIp: string): boolean {
+  return isWindowExceeded(preAuthBuckets, clientIp, PRE_AUTH_RATE_LIMIT);
+}
+
+/**
+ * Best-effort client IP for the pre-auth throttle. With `app.set('trust proxy', 1)`
+ * (index.ts) and the single Container Apps Envoy ingress hop, req.ip is the real
+ * client address and is not spoofable by prepending X-Forwarded-For entries.
+ * Falls back to the socket address, then 'unknown'.
+ */
+function getClientIp(req: Request): string {
+  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+}
+
+function isRateLimited(upn: string): boolean {
+  return isWindowExceeded(rateBuckets, upn, RATE_LIMIT);
+}
+
+/**
+ * Emit a 429 with the conventional Retry-After header, a structured + greppable
+ * log line, and an actionable message. `kind` distinguishes the per-source-IP
+ * pre-auth throttle from the per-UPN throttle so a Log Analytics alert can break
+ * the two out and so an unexpected false-positive surfaces to the user (who is
+ * told to contact the administrator).
+ */
+function respondRateLimited(res: Response, kind: 'pre-auth' | 'upn', key: string, rpcMethod: string): void {
+  console.error(`[mcp-auth] 429 kind=${kind} key=${key} method=${rpcMethod}`);
+  res.setHeader('Retry-After', '60');
+  res.status(429).json({
+    error: 'Rate limit exceeded',
+    retryAfterSeconds: 60,
+    message:
+      kind === 'pre-auth'
+        ? 'Too many requests from your network in a short window. Wait ~60s and retry. If this keeps ' +
+          'happening unexpectedly, you may be sharing an IP via a corporate proxy/NAT — contact the MCP ' +
+          'server administrator.'
+        : 'You are sending requests faster than the per-user limit. Wait ~60s and retry. If this keeps ' +
+          'happening unexpectedly, contact the MCP server administrator.',
+  });
 }
 
 // --- Express middleware ---
@@ -237,19 +344,25 @@ export function accessGuard(req: Request, res: Response, next: NextFunction): vo
   }
 
   const upn = claims.upn.toLowerCase();
+  const clientIp = getClientIp(req);
 
-  // Access check (async — calls backend, cached). Must run BEFORE rate-limit
-  // accounting: the JWT signature is not verified here (only the backend has
-  // JWKS access), so an attacker can forge an unsigned token with a victim's
-  // UPN. If rate-limit incremented before validation, those forgeries would
-  // burn the victim's per-minute budget and 429 their legitimate calls.
-  // checkAccess delegates signature verification to the backend; both
-  // allow- and deny-decisions are cached for 5 min keyed on UPN+tokenHash,
-  // so a forged token cannot piggyback on a legitimate user's cached
-  // `allowed: true`, and forged-token floods cost one backend call per
-  // distinct token.
-  checkAccess(upn, token)
+  // Access check (async — calls backend, cached). Must run BEFORE the per-UPN
+  // rate-limit accounting: the JWT signature is not verified here (only the
+  // backend has JWKS access), so an attacker can forge an unsigned token with a
+  // victim's UPN. If the per-UPN limiter incremented before validation, those
+  // forgeries would burn the victim's per-minute budget and 429 their
+  // legitimate calls. checkAccess delegates signature verification to the
+  // backend; both allow- and deny-decisions are cached for 5 min keyed on
+  // UPN+tokenHash, so a forged token cannot piggyback on a legitimate user's
+  // cached `allowed: true`. On a cache MISS, checkAccess additionally applies a
+  // per-source-IP throttle (keyed on clientIp, not UPN) so a distinct-token
+  // flood cannot drive unbounded backend calls.
+  checkAccess(upn, token, clientIp)
     .then((result) => {
+      if (result.rateLimited) {
+        respondRateLimited(res, 'pre-auth', clientIp, rpcMethod);
+        return;
+      }
       if (!result.allowed) {
         if (result.infraError) {
           // Backend could not reach a verdict (unreachable / malformed). Fail
@@ -279,7 +392,7 @@ export function accessGuard(req: Request, res: Response, next: NextFunction): vo
       // else's UPN was already rejected above; only a real, allow-listed
       // user reaches this counter.
       if (isRateLimited(upn)) {
-        res.status(429).json({ error: 'Rate limit exceeded', retryAfterSeconds: 60 });
+        respondRateLimited(res, 'upn', upn, rpcMethod);
         return;
       }
 
