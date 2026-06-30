@@ -124,28 +124,28 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             }
         }
 
-        private void OnDebounceElapsed(object state)
+        private async void OnDebounceElapsed(object state)
         {
             if (_disposed) return;
 
-            Task.Run(() =>
+            // async void: the timer callback returns to the pool the moment ProcessNetworkChangeAsync
+            // hits its first await (the stabilization delay), instead of parking a pool thread for the
+            // ~5-13s of Task.Delay + connectivity HTTP probes via sync-over-async .Wait().
+            try
             {
-                try
-                {
-                    ProcessNetworkChange();
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warning($"NetworkChangeDetector: error processing network change: {ex.Message}");
-                }
-            });
+                await ProcessNetworkChangeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"NetworkChangeDetector: error processing network change: {ex.Message}");
+            }
         }
 
         // -------------------------------------------------------------------
         // Core logic
         // -------------------------------------------------------------------
 
-        private void ProcessNetworkChange()
+        private async Task ProcessNetworkChangeAsync()
         {
             if (_disposed) return;
 
@@ -210,10 +210,10 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Telemetry.Periodic
             // Wait for new connection to stabilize, then check MDM endpoint connectivity
             try
             {
-                Task.Delay(ConnectivityCheckDelayMs).Wait();
+                await Task.Delay(ConnectivityCheckDelayMs).ConfigureAwait(false);
                 if (!_disposed)
                 {
-                    RunConnectivityChecksAsync().Wait();
+                    await RunConnectivityChecksAsync().ConfigureAwait(false);
                 }
             }
             catch (Exception ex)

@@ -226,20 +226,32 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
         private void ProcessRecord(EventRecord record, string shortName, string channelName, bool isBackfill)
         {
+            // Classify BEFORE formatting. record.FormatDescription() loads the provider's
+            // message-resource DLL (the expensive part), and the Autopilot channel watcher has
+            // no EventID filter, so harmless-ID bursts (session 8bc1180f: ~689 EventID-100
+            // records/minute) would otherwise pay full formatting cost only to be discarded by
+            // the rollup gate. Skip formatting entirely for rollup-suppressed records.
+            var verdict = Classify(record.Id, record.Level, shortName,
+                out var eventType, out var severity, out var harmlessDowngraded, out var occurrenceCount);
+            if (verdict == EventVerdict.Suppress)
+            {
+                return;
+            }
+
             string description = null;
             try { description = record.FormatDescription(); }
             catch { /* some events lack formatting resources */ }
 
-            ProcessEvent(
-                eventId: record.Id,
-                level: record.Level,
-                levelDisplayName: record.LevelDisplayName,
-                providerName: record.ProviderName,
-                timeCreatedUtc: record.TimeCreated?.ToUniversalTime(),
-                formattedDescription: description,
-                shortName: shortName,
-                channelName: channelName,
-                isBackfill: isBackfill);
+            var timeCreatedUtc = record.TimeCreated?.ToUniversalTime();
+            if (verdict == EventVerdict.WhiteGlove)
+            {
+                HandleWhiteGloveStart(record.Id, record.Level, timeCreatedUtc, description, isBackfill);
+                return;
+            }
+
+            EmitClassified(record.Id, record.Level, record.LevelDisplayName, record.ProviderName,
+                timeCreatedUtc, description, shortName, channelName, isBackfill,
+                eventType, severity, harmlessDowngraded, occurrenceCount);
         }
 
         /// <summary>
@@ -257,15 +269,52 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             string channelName,
             bool isBackfill)
         {
-            if (eventId == EventId_WhiteGloveStart && shortName == "ManagementService")
+            var verdict = Classify(eventId, level, shortName,
+                out var eventType, out var severity, out var harmlessDowngraded, out var occurrenceCount);
+            if (verdict == EventVerdict.WhiteGlove)
             {
                 HandleWhiteGloveStart(eventId, level, timeCreatedUtc, formattedDescription, isBackfill);
                 return;
             }
+            if (verdict == EventVerdict.Suppress)
+            {
+                return;
+            }
+
+            EmitClassified(eventId, level, levelDisplayName, providerName, timeCreatedUtc,
+                formattedDescription, shortName, channelName, isBackfill,
+                eventType, severity, harmlessDowngraded, occurrenceCount);
+        }
+
+        private enum EventVerdict { Emit, Suppress, WhiteGlove }
+
+        /// <summary>
+        /// Cheap classification + rollup accounting from the EventID/level/channel alone — never
+        /// touches the formatted description, so the EventRecord path can decide to skip the
+        /// expensive <see cref="EventRecord.FormatDescription"/> for records that will be
+        /// rollup-suppressed. MUST be called exactly once per record: it mutates the harmless
+        /// occurrence counter.
+        /// </summary>
+        private EventVerdict Classify(
+            int eventId,
+            int? level,
+            string shortName,
+            out string eventType,
+            out EventSeverity severity,
+            out bool harmlessDowngraded,
+            out int occurrenceCount)
+        {
+            eventType = null;
+            severity = EventSeverity.Info;
+            harmlessDowngraded = false;
+            occurrenceCount = 0;
+
+            if (eventId == EventId_WhiteGloveStart && shortName == "ManagementService")
+            {
+                return EventVerdict.WhiteGlove;
+            }
 
             var effectiveLevel = level ?? 4;
-            string eventType;
-            EventSeverity severity;
             switch (effectiveLevel)
             {
                 case 1:
@@ -291,8 +340,7 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             // 1005, 1010 "Autopilot.dll WIL hardwareinfo.cpp HRESULT 0x80070002" — no real
             // enrollment impact). Events stay visible in the timeline (Debug severity) for
             // troubleshooting.
-            var harmlessDowngraded = (effectiveLevel == 2 || effectiveLevel == 3) && _harmlessEventIds.Contains(eventId);
-            var occurrenceCount = 0;
+            harmlessDowngraded = (effectiveLevel == 2 || effectiveLevel == 3) && _harmlessEventIds.Contains(eventId);
             if (harmlessDowngraded)
             {
                 eventType = Constants.EventTypes.ModernDeploymentLog;
@@ -309,10 +357,29 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
                 if (occurrenceCount > HarmlessRollupIndividualLimit
                     && occurrenceCount % HarmlessRollupEmitEvery != 0)
                 {
-                    return; // suppressed — counted toward the next rollup emission
+                    return EventVerdict.Suppress; // counted toward the next rollup emission
                 }
             }
 
+            return EventVerdict.Emit;
+        }
+
+        private void EmitClassified(
+            int eventId,
+            int? level,
+            string levelDisplayName,
+            string providerName,
+            DateTime? timeCreatedUtc,
+            string formattedDescription,
+            string shortName,
+            string channelName,
+            bool isBackfill,
+            string eventType,
+            EventSeverity severity,
+            bool harmlessDowngraded,
+            int occurrenceCount)
+        {
+            var effectiveLevel = level ?? 4;
             var description = string.IsNullOrEmpty(formattedDescription)
                 ? $"Event ID {eventId} (no formatted description)"
                 : formattedDescription;

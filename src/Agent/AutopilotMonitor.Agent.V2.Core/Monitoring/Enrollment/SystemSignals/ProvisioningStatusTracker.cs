@@ -406,8 +406,14 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
 
                             changedCount++;
                             bool isNew = !_lastProvisioningJson.ContainsKey(categoryName);
-                            _logger.Trace($"CheckProvisioningStatus: {categoryName} — {(isNew ? "NEW" : "CHANGED")} (json length={jsonValue.Length})");
-                            _logger.Trace($"CheckProvisioningStatus: {categoryName} — raw JSON: {jsonValue}");
+                            // Guard: the raw-JSON interpolation is materialized regardless of log
+                            // level (Trace() only drops the string after it is built), and this runs
+                            // per changed category every poll — skip the alloc when Trace is off.
+                            if (_logger.LogLevel >= AgentLogLevel.Trace)
+                            {
+                                _logger.Trace($"CheckProvisioningStatus: {categoryName} — {(isNew ? "NEW" : "CHANGED")} (json length={jsonValue.Length})");
+                                _logger.Trace($"CheckProvisioningStatus: {categoryName} — raw JSON: {jsonValue}");
+                            }
 
                             _lastProvisioningJson[categoryName] = jsonValue;
                             // TryFireProvisioningFailure (inside ProcessCategoryStatus) arms the
