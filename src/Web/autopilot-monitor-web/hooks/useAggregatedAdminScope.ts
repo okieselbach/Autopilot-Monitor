@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAdminMode } from "@/hooks/useAdminMode";
 import { useTenantList, type TenantInfo } from "@/hooks/useTenantList";
 import { readTenantScope, writeTenantScope } from "@/utils/tenantScopeStorage";
+import { resolveDelegatedSeed, resolveGaSeed } from "@/hooks/aggregatedAdminScopeSeed";
 
 export interface AggregatedAdminScope {
   /**
@@ -106,12 +107,14 @@ export function useAggregatedAdminScope(opts?: {
 
   // GA/Reader seed precedence: a first-init ?tenantId= deep-link wins, else the tab-persisted selection
   // ("" = aggregated is valid for a GA), else the page default (own tenant, or "" when defaultAggregated).
-  const computeGaSeed = (firstInit: boolean): string => {
-    if (firstInit && urlTenantId) return urlTenantId;
-    const stored = readTenantScope();
-    if (stored !== null) return stored;
-    return defaultAggregated ? "" : tenantId;
-  };
+  const computeGaSeed = (firstInit: boolean): string =>
+    resolveGaSeed({
+      firstInit,
+      urlTenantId,
+      storedScope: readTenantScope(),
+      ownTenantId: tenantId,
+      defaultAggregated,
+    });
 
   // Default the selection (done DURING RENDER — React's "adjust state when an input changes" escape hatch;
   // it converges, so no committed render keyed on scopeKey observes a transient wrong scope).
@@ -119,9 +122,13 @@ export function useAggregatedAdminScope(opts?: {
     // Delegated: no aggregate. Seed from the persisted managed tenant (if still managed) or the first
     // managed tenant once the (scoped) list arrives; re-default if the selection falls outside the set.
     if (tenants.length > 0 && (!selectedTenantId || !tenants.some((t) => t.tenantId === selectedTenantId))) {
-      const stored = readTenantScope();
-      const storedManaged = stored && tenants.some((t) => t.tenantId === stored) ? stored : null;
-      setSelectedRaw(storedManaged ?? tenants[0].tenantId);
+      setSelectedRaw(
+        resolveDelegatedSeed({
+          storedScope: readTenantScope(),
+          managedTenantIds: tenants.map((t) => t.tenantId),
+          firstManagedTenantId: tenants[0].tenantId,
+        })
+      );
       if (!scopeInitialized) setScopeInitialized(true);
       if (prevIsGlobalAdmin !== isGlobalAdmin) setPrevIsGlobalAdmin(isGlobalAdmin);
     }

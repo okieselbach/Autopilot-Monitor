@@ -41,6 +41,15 @@ const PRE_AUTH_RATE_LIMIT = parsePositiveInt(process.env.MCP_PRE_AUTH_RATE_LIMIT
 // container. Oldest entries are evicted on write once the cap is hit.
 const MAX_ACCESS_CACHE_ENTRIES = parsePositiveInt(process.env.MCP_ACCESS_CACHE_MAX_ENTRIES, 10_000);
 
+// Hard ceiling on rate-bucket cardinality (both the per-UPN and per-source-IP maps).
+// A bucket is created per distinct key on first sight and only removed by the 5-min
+// reaper (empty-window prune), so a distinct-key flood — spoof-resistant IPs are hard,
+// but forged UPNs and NAT churn are not — could grow either map unbounded between
+// reaper passes. Same memory-exhaustion vector, same fix as the access cache: evict the
+// oldest bucket on write once the cap is hit. The cap is far above any legitimate
+// per-minute active-key count, so real callers are never evicted mid-window.
+const MAX_RATE_BUCKET_ENTRIES = parsePositiveInt(process.env.MCP_RATE_BUCKET_MAX_ENTRIES, 10_000);
+
 // Timeout for the backend access-check fetch. Without it a hung/cold backend
 // stalls the path EVERY request must traverse. Generous enough to survive a
 // cold Functions backend (→ no false 403s), bounded so an unresponsive backend
@@ -258,7 +267,9 @@ function isWindowExceeded(buckets: Map<string, RateEntry>, key: string, limit: n
   let entry = buckets.get(key);
   if (!entry) {
     entry = { timestamps: [] };
-    buckets.set(key, entry);
+    // boundedSet caps the map so a distinct-key flood cannot grow it unbounded
+    // between the 5-min reaper passes (evicts the oldest bucket at the cap).
+    boundedSet(buckets, key, entry, MAX_RATE_BUCKET_ENTRIES);
   }
   entry.timestamps = entry.timestamps.filter((t) => t > windowStart);
 
@@ -274,6 +285,11 @@ function isWindowExceeded(buckets: Map<string, RateEntry>, key: string, limit: n
  */
 export function isPreAuthRateLimited(clientIp: string): boolean {
   return isWindowExceeded(preAuthBuckets, clientIp, PRE_AUTH_RATE_LIMIT);
+}
+
+/** Current cardinality of the two rate-bucket maps. Exported for unit testing the size cap. */
+export function getRateBucketSizes(): { rate: number; preAuth: number } {
+  return { rate: rateBuckets.size, preAuth: preAuthBuckets.size };
 }
 
 /**

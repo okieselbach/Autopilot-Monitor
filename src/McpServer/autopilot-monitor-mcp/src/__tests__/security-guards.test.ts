@@ -298,7 +298,11 @@ describe('L3 — error-handler 5xx body redaction', () => {
 // module init) so the throttle tests are cheap and limit-independent.
 const PRE_AUTH_TEST_LIMIT = 5;
 process.env.MCP_PRE_AUTH_RATE_LIMIT_PER_MINUTE = String(PRE_AUTH_TEST_LIMIT);
-const { buildCacheKey, boundedSet, isPreAuthRateLimited } = await import('../access-guard.js');
+// Pin a tiny rate-bucket cap (also read at module init) so the size-cap test can flood a
+// handful of distinct keys instead of 10_000. Well above the per-UPN throttle tests' key count.
+const RATE_BUCKET_TEST_CAP = 10;
+process.env.MCP_RATE_BUCKET_MAX_ENTRIES = String(RATE_BUCKET_TEST_CAP);
+const { buildCacheKey, boundedSet, isPreAuthRateLimited, getRateBucketSizes } = await import('../access-guard.js');
 const { parsePositiveInt, getPublicBaseUrl } = await import('../config.js');
 
 describe('F1 — access-guard cache key includes token hash', () => {
@@ -536,6 +540,17 @@ describe('M1 — boundedSet size cap (accessCache memory bound)', () => {
     // Only the most recent 10 keys survive.
     expect(m.has('k999')).toBe(true);
     expect(m.has('k989')).toBe(false);
+  });
+});
+
+describe('M1b — rate-bucket maps stay bounded under a distinct-key flood', () => {
+  // The rate buckets only shrink via the 5-min reaper, so a distinct-key flood
+  // (forged UPNs / NAT churn) must not grow them unbounded between passes.
+  it('caps the pre-auth (per-IP) bucket map at MCP_RATE_BUCKET_MAX_ENTRIES', () => {
+    for (let i = 0; i < RATE_BUCKET_TEST_CAP * 20; i++) {
+      isPreAuthRateLimited(`10.0.${Math.floor(i / 256)}.${i % 256}`);
+    }
+    expect(getRateBucketSizes().preAuth).toBeLessThanOrEqual(RATE_BUCKET_TEST_CAP);
   });
 });
 

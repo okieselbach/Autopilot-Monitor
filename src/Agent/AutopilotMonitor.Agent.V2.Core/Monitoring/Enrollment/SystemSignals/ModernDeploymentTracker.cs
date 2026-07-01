@@ -76,6 +76,18 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
         private readonly Dictionary<int, int> _harmlessOccurrenceCounts = new Dictionary<int, int>();
         private readonly object _harmlessCountLock = new object();
 
+#if DEBUG
+        // Call-once invariant guard for Classify() (see its doc-comment): Classify mutates the
+        // harmless-rollup counter, so a second call for the SAME record would double-count. The
+        // two legitimate callers (ProcessRecord / ProcessEvent) set this permit immediately before
+        // their single Classify call; Classify asserts it is set and consumes it, so a second call
+        // within the same record's processing trips the assert — and a NEW caller that forgets to
+        // set the permit is caught too. [ThreadStatic] keeps it per-processing-thread so the
+        // concurrent EventRecordWritten callbacks (distinct records) never falsely collide.
+        [ThreadStatic]
+        private static bool s_classifyPermitted;
+#endif
+
         public ModernDeploymentTracker(
             string sessionId,
             string tenantId,
@@ -231,6 +243,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             // no EventID filter, so harmless-ID bursts (session 8bc1180f: ~689 EventID-100
             // records/minute) would otherwise pay full formatting cost only to be discarded by
             // the rollup gate. Skip formatting entirely for rollup-suppressed records.
+#if DEBUG
+            s_classifyPermitted = true; // single Classify permit for this record — see Classify().
+#endif
             var verdict = Classify(record.Id, record.Level, shortName,
                 out var eventType, out var severity, out var harmlessDowngraded, out var occurrenceCount);
             if (verdict == EventVerdict.Suppress)
@@ -269,6 +284,9 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             string channelName,
             bool isBackfill)
         {
+#if DEBUG
+            s_classifyPermitted = true; // single Classify permit for this record — see Classify().
+#endif
             var verdict = Classify(eventId, level, shortName,
                 out var eventType, out var severity, out var harmlessDowngraded, out var occurrenceCount);
             if (verdict == EventVerdict.WhiteGlove)
@@ -304,6 +322,17 @@ namespace AutopilotMonitor.Agent.V2.Core.Monitoring.Enrollment.SystemSignals
             out bool harmlessDowngraded,
             out int occurrenceCount)
         {
+#if DEBUG
+            // Enforce the call-once invariant: the caller (ProcessRecord/ProcessEvent) must have
+            // just issued a single permit. Consume it so a second Classify for the same record trips.
+            System.Diagnostics.Debug.Assert(
+                s_classifyPermitted,
+                "ModernDeploymentTracker.Classify() called without a fresh per-record permit — it " +
+                "mutates the harmless-rollup counter and MUST be called exactly once per record " +
+                "(set s_classifyPermitted in ProcessRecord/ProcessEvent immediately before the call).");
+            s_classifyPermitted = false;
+#endif
+
             eventType = null;
             severity = EventSeverity.Info;
             harmlessDowngraded = false;

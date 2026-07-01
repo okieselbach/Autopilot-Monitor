@@ -45,11 +45,37 @@ function getEmbedder(): Promise<FeatureExtractionPipeline> {
   return embedderPromise;
 }
 
+/**
+ * Every embedding this module produces MUST be L2-unit-normalized: cosineSimilarity is a
+ * bare dot product (see below) that silently returns wrong scores for non-unit inputs. We
+ * pass `normalize: true` to the model, but that is an upstream contract we don't control —
+ * a library/model swap could break it. Assert it at creation so a violated assumption fails
+ * loud (one query / one bad build) instead of silently degrading ranking. The tolerance
+ * comfortably covers float32 rounding over 384 dims (~1e-5) while still catching an
+ * un-normalized vector (norm far from 1).
+ */
+const UNIT_NORM_EPSILON = 1e-3;
+
+export function assertUnitNorm(vec: number[], context: string): void {
+  let sumSq = 0;
+  for (let i = 0; i < vec.length; i++) sumSq += vec[i] * vec[i];
+  const norm = Math.sqrt(sumSq);
+  if (Math.abs(norm - 1) > UNIT_NORM_EPSILON) {
+    throw new Error(
+      `[vector-search] ${context}: embedding is not L2-unit-normalized (norm=${norm.toFixed(6)}, ` +
+        `dim=${vec.length}). cosineSimilarity assumes unit vectors (dot product only) and would ` +
+        `otherwise return silently wrong scores.`
+    );
+  }
+}
+
 /** Compute a normalized embedding for a single text. */
 export async function embed(text: string): Promise<number[]> {
   const model = await getEmbedder();
   const output = await model(text, { pooling: 'mean', normalize: true });
-  return Array.from(output.data as Float32Array);
+  const vec = Array.from(output.data as Float32Array);
+  assertUnitNorm(vec, 'embed');
+  return vec;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -109,7 +135,9 @@ export class VectorSearchProvider implements SearchProvider {
       const embeddings = await Promise.all(
         batch.map(async (d) => {
           const out = await model(d.text, { pooling: 'mean', normalize: true });
-          return Array.from(out.data as Float32Array);
+          const vec = Array.from(out.data as Float32Array);
+          assertUnitNorm(vec, `index:${d.id}`);
+          return vec;
         })
       );
       for (let j = 0; j < batch.length; j++) {

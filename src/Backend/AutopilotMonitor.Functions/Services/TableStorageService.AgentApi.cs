@@ -314,6 +314,15 @@ namespace AutopilotMonitor.Functions.Services
         private const int QuickSearchMaxScannedRows = 5000;
 
         /// <summary>
+        /// Columns the typeahead scan projects: the three matched identity fields, Status + StartedAt
+        /// for the result, and RowKey for the SessionId fallback (<see cref="ExtractSessionIdFromIndexRowKey"/>).
+        /// internal so <c>QuickSearchProjectionEquivalenceTests</c> derives its keep-set from this
+        /// array — dropping a column here immediately fails the equivalence test.
+        /// </summary>
+        internal static readonly string[] QuickSearchProjection =
+            { "RowKey", "SessionId", "SerialNumber", "DeviceName", "Status", "StartedAt" };
+
+        /// <summary>
         /// Lightweight typeahead search: matches SessionId, SerialNumber, or DeviceName.
         /// Supports exact contains match (priority) and fuzzy match (edit distance &lt;= 2).
         /// When tenantId is null, searches across all tenants (Global Admin).
@@ -342,14 +351,12 @@ namespace AutopilotMonitor.Functions.Services
             // ExtractSessionIdFromIndexRowKey). Avoids pulling the full ~40-column SessionsIndex
             // mirror for up to QuickSearchMaxScannedRows rows on every keystroke-driven request.
             await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(
-                filter: filter, select: new[] { "RowKey", "SessionId", "SerialNumber", "DeviceName", "Status", "StartedAt" }))
+                filter: filter, select: QuickSearchProjection))
             {
                 if (++scannedRows > QuickSearchMaxScannedRows)
                     break;
 
-                var sessionId = entity.GetString("SessionId") ?? ExtractSessionIdFromIndexRowKey(entity.RowKey);
-                var serial = entity.GetString("SerialNumber") ?? string.Empty;
-                var deviceName = entity.GetString("DeviceName") ?? string.Empty;
+                var (sessionId, serial, deviceName) = ReadQuickSearchIdentity(entity);
 
                 // Phase 1: exact substring match (highest priority)
                 string? matchedField = null;
@@ -387,7 +394,19 @@ namespace AutopilotMonitor.Functions.Services
             return exactResults.Count > limit ? exactResults.GetRange(0, limit) : exactResults;
         }
 
-        private QuickSearchResult BuildQuickSearchResult(
+        /// <summary>
+        /// Resolves the three identity fields a typeahead row matches on, applying the SessionId ->
+        /// RowKey fallback. internal + static so <c>QuickSearchProjectionEquivalenceTests</c> can drive
+        /// the exact production read against a full vs a projected row.
+        /// </summary>
+        internal static (string SessionId, string Serial, string DeviceName) ReadQuickSearchIdentity(TableEntity entity)
+            => (entity.GetString("SessionId") ?? ExtractSessionIdFromIndexRowKey(entity.RowKey),
+                entity.GetString("SerialNumber") ?? string.Empty,
+                entity.GetString("DeviceName") ?? string.Empty);
+
+        // internal (not private) so QuickSearchProjectionEquivalenceTests can pin that a row carrying
+        // only QuickSearchProjection produces the same result (Status/StartedAt) as a full mirror row.
+        internal QuickSearchResult BuildQuickSearchResult(
             TableEntity entity, string sessionId, string serial, string deviceName, string matchedField)
         {
             var statusString = entity.GetString("Status") ?? "InProgress";
@@ -1246,6 +1265,25 @@ namespace AutopilotMonitor.Functions.Services
         /// Returns aggregated session metrics grouped by tenant, filtered to the last <paramref name="days"/> days.
         /// Leverages the SessionsIndex inverted-tick RowKey ordering for an efficient server-side range scan.
         /// </summary>
+        /// <summary>
+        /// Columns the status tally consumes: PartitionKey (grouping) + Status. internal so
+        /// <c>MetricsSummaryProjectionEquivalenceTests</c> derives its keep-set from this array.
+        /// </summary>
+        internal static readonly string[] MetricsSummaryProjection = { "PartitionKey", "Status" };
+
+        /// <summary>
+        /// Tally one SessionsIndex row into its tenant's status buckets. Reads ONLY the two
+        /// projected columns (PartitionKey + Status), so a projected row must produce identical
+        /// buckets to a full mirror row — pinned by <c>MetricsSummaryProjectionEquivalenceTests</c>.
+        /// </summary>
+        internal static void TallyMetricsSummaryRow(Dictionary<string, SessionStatusBuckets> groups, TableEntity entity)
+        {
+            var pk = entity.PartitionKey;
+            var statusStr = entity.GetString("Status") ?? "InProgress";
+            groups.TryGetValue(pk, out var g);
+            groups[pk] = g.Add(statusStr);
+        }
+
         public async Task<List<object>> GetMetricsSummaryAsync(string? tenantId, int days = 30)
         {
             // Clamp to a sane range so callers can't accidentally trigger an unbounded scan.
@@ -1269,12 +1307,9 @@ namespace AutopilotMonitor.Functions.Services
             // ~40-column mirror (incl. the large FailureSnapshotJson), so reading it whole for a
             // status count multiplied transfer ~10-20x for nothing on this cross-partition scan.
             await foreach (var entity in indexTableClient.QueryAsync<TableEntity>(
-                filter: oDataFilter, select: new[] { "PartitionKey", "Status" }))
+                filter: oDataFilter, select: MetricsSummaryProjection))
             {
-                var pk = entity.PartitionKey;
-                var statusStr = entity.GetString("Status") ?? "InProgress";
-                groups.TryGetValue(pk, out var g);
-                groups[pk] = g.Add(statusStr);
+                TallyMetricsSummaryRow(groups, entity);
             }
 
             return groups.Select(kvp => (object)new
