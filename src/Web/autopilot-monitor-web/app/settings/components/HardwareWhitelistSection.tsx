@@ -146,14 +146,15 @@ export default function HardwareWhitelistSection({
               Hardware Whitelist
             </h2>
             <p className="text-sm text-gray-500 mt-1">
-              Restrict which device manufacturers and models can enroll
+              Control which device manufacturers and models the backend accepts
+              monitoring data from
             </p>
           </div>
         </div>
       </div>
       <div className="p-6 space-y-5">
         {/* Info */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
           <p className="text-sm text-blue-900">
             Supports wildcards:{" "}
             <code className="bg-blue-100 px-1 rounded">*</code> = allow all,{" "}
@@ -161,12 +162,20 @@ export default function HardwareWhitelistSection({
             with &quot;Dell&quot;. Each entry is matched individually against
             the device hardware info.
           </p>
+          <p className="text-sm text-blue-900">
+            Devices that do not match this list are rejected at the API — the
+            backend stores no session or telemetry data for them. Autopilot
+            enrollment itself is <span className="font-medium">not</span>{" "}
+            affected. The agent on a rejected device stops monitoring after the
+            first rejected request and automatically removes itself from the
+            device after 48 hours at the latest.
+          </p>
         </div>
 
         {/* Manufacturer Whitelist */}
         <WhitelistEditor
           label="Allowed Manufacturers"
-          description="Manufacturers listed here are allowed to enroll. Use wildcards for partial matches."
+          description="Monitoring data is only accepted from manufacturers listed here. Use wildcards for partial matches."
           placeholder="e.g. Dell*, HP*, Microsoft Corporation"
           items={manufacturers}
           setItems={(items) => setManufacturerWhitelist(joinList(items))}
@@ -175,7 +184,7 @@ export default function HardwareWhitelistSection({
         {/* Model Whitelist */}
         <WhitelistEditor
           label="Allowed Models"
-          description="Models listed here are allowed to enroll. Use wildcards for partial matches."
+          description="Monitoring data is only accepted from device models listed here. Use wildcards for partial matches."
           placeholder="e.g. Latitude*, EliteBook*, Surface*"
           items={models}
           setItems={(items) => setModelWhitelist(joinList(items))}
