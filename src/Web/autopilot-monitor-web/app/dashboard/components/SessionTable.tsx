@@ -930,7 +930,9 @@ function SessionCell({
     case "status":
       return (
         <td className="px-6 py-4 whitespace-nowrap">
-          <div className="flex items-center gap-1.5">
+          {/* Qualifier pills stack BELOW the status badge (flex-col) so extra badges
+              (Hybrid / Self-Deploying / Blocked) never widen the status column. */}
+          <div className="flex flex-col items-start gap-1">
             <SessionStatusBadge status={session.status} failureReason={session.failureReason} adminMarkedAction={session.adminMarkedAction} />
             {session.isHybridJoin && (
               <span
